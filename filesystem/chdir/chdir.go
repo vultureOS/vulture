@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/afero"
 )
@@ -26,11 +27,9 @@ func (c *Chdirfs) Chdir(dir string) error {
 	if err != nil {
 		return err
 	}
-
 	if !fi.IsDir() {
 		return errors.New("not a dir")
 	}
-
 	c.dir = name
 	return nil
 }
@@ -39,7 +38,6 @@ func (c *Chdirfs) name(name string) string {
 	if filepath.IsAbs(name) {
 		return name
 	}
-
 	return filepath.Join(c.dir, name)
 }
 
@@ -57,4 +55,36 @@ func (c *Chdirfs) MkdirAll(path string, perm os.FileMode) error {
 
 func (c *Chdirfs) Open(name string) (afero.File, error) {
 	return c.backend.Open(c.name(name))
+}
+
+func (c *Chdirfs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	return c.backend.OpenFile(c.name(name), flag, perm)
+}
+
+func (c *Chdirfs) Remove(name string) error {
+	return c.backend.Remove(c.name(name))
+}
+
+func (c *Chdirfs) RemoveAll(path string) error {
+	return c.backend.RemoveAll(c.name(path))
+}
+
+func (c *Chdirfs) Rename(oldname string, newname string) error {
+	return c.backend.Rename(c.name(oldname), c.name(newname))
+}
+
+func (c *Chdirfs) Stat(name string) (os.FileInfo, error) {
+	return c.backend.Stat(c.name(name))
+}
+
+func (c *Chdirfs) Name() string {
+	return "chdirfs"
+}
+
+func (c *Chdirfs) Chmod(name string, mode os.FileMode) error {
+	return c.backend.Chmod(c.name(name), mode)
+}
+
+func (c *Chdirfs) Chtimes(name string, atime time.Time, mtime time.Time) error {
+	return c.backend.Chtimes(c.name(name), atime, mtime)
 }
