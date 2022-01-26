@@ -2,6 +2,7 @@ package chdir
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/afero"
@@ -40,4 +41,20 @@ func (c *Chdirfs) name(name string) string {
 	}
 
 	return filepath.Join(c.dir, name)
+}
+
+func (c *Chdirfs) Create(name string) (afero.File, error) {
+	return c.backend.Create(c.name(name))
+}
+
+func (c *Chdirfs) Mkdir(name string, perm os.FileMode) error {
+	return c.backend.Mkdir(c.name(name), perm)
+}
+
+func (c *Chdirfs) MkdirAll(path string, perm os.FileMode) error {
+	return c.backend.MkdirAll(c.name(path), perm)
+}
+
+func (c *Chdirfs) Open(name string) (afero.File, error) {
+	return c.backend.Open(c.name(name))
 }
