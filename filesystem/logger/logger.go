@@ -28,9 +28,6 @@ func (l *logger) logf(fmtstr string, args ...interface{}) {
 
 func (l *logger) Create(name string) (afero.File, error) {
 	ret, err := l.backend.Create(name)
-	if err != nil {
-		l.logf("Create error")
-	}
 	l.logf("Create(%s) %v", name, err)
 	return ret, err
 }
@@ -44,21 +41,42 @@ func (l *logger) Mkdir(name string, perm os.FileMode) error {
 func (l *logger) MkdirAll(path string, perm os.FileMode) error {
 	err := l.backend.MkdirAll(path, perm)
 	l.logf("MkdirAll(%s, %s) %v", path, perm, err)
-
 	return err
 }
 
 func (l *logger) Open(name string) (afero.File, error) {
 	ret, err := l.backend.Open(name)
 	l.logf("Open(%s) %v", name, err)
-
 	return ret, err
 }
 
-func (l *logger) OpenFile(name string, flat int, perm os.FileMode) (afero.File, error) {
-	ret, err := l.backend.OpenFile(name, perm)
-	l.logf("Open(%s) %v", name, err)
+func (l *logger) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	ret, err := l.backend.OpenFile(name, flag, perm)
+	l.logf("OpenFile(%s, %x, %s) %v", name, flag, perm, err)
+	return ret, err
+}
 
+func (l *logger) Remove(name string) error {
+	err := l.backend.Remove(name)
+	l.logf("Remove(%s) %v", name, err)
+	return err
+}
+
+func (l *logger) RemoveAll(path string) error {
+	err := l.backend.RemoveAll(path)
+	l.logf("RemoveAll(%s) %v", path, err)
+	return err
+}
+
+func (l *logger) Rename(oldname string, newname string) error {
+	err := l.backend.Rename(oldname, newname)
+	l.logf("Rename(%s, %s) %v", oldname, newname, err)
+	return err
+}
+
+func (l *logger) Stat(name string) (os.FileInfo, error) {
+	ret, err := l.backend.Stat(name)
+	l.logf("Stat(%s) %v", name, err)
 	return ret, err
 }
 
