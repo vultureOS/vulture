@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2022, Krisna Pranav
+ *
+ * SPDX-License-Identifier: GPL-3.0 License
+ */
+
 package chdir
 
 import (
