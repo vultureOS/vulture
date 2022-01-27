@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/afero"
 )
@@ -52,3 +53,27 @@ func (l *logger) Open(name string) (afero.File, error) {
 	l.logf("Open(%s) %v", name, err)
 
 	return ret, err
+}
+
+func (l *logger) OpenFile(name string, flat int, perm os.FileMode) (afero.File, error) {
+	ret, err := l.backend.OpenFile(name, perm)
+	l.logf("Open(%s) %v", name, err)
+
+	return ret, err
+}
+
+func (l *logger) Name() string {
+	return "logger"
+}
+
+func (l *logger) Chmod(name string, mode os.FileMode) error {
+	err := l.backend.Chmod(name, mode)
+	l.logf("Chmod(%s, %s) %v", name, mode, err)
+	return err
+}
+
+func (l *logger) Chtimes(name string, atime time.Time, mtime time.Time) error {
+	err := l.backend.Chtimes(name, atime, mtime)
+	l.logf("Chtimes(%s, %d, %d) %v", name, atime.Unix(), mtime.Unix(), err)
+	return err
+}
