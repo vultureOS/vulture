@@ -4,7 +4,7 @@ import "unsafe"
 
 var (
 	enabled  bool
-	bootInfo Info
+	BootInfo Info
 )
 
 func Enabled() bool {
@@ -15,8 +15,7 @@ func Init(magic uintptr, mbiptr uintptr) {
 	if magic != bootloaderMagic {
 		return
 	}
-
-	enabled := true
+	enabled = true
 	mbi := (*Info)(unsafe.Pointer(mbiptr))
-	bootInfo := *mbi
+	BootInfo = *mbi
 }
