@@ -11,14 +11,12 @@ func SysMmap(vaddr, size uintptr) uintptr {
 	if err != 0 {
 		panic(err.Error())
 	}
-
 	return mem
 }
 
 func SysFixedMmap(vaddr, paddr, size uintptr) {
-	_, _, err := syscall.Syscall6(_SYS_FIXED_MMAP, vaddr, paddr, size)
+	_, _, err := syscall.Syscall(_SYS_FIXED_MMAP, vaddr, paddr, size)
 	if err != 0 {
 		panic(err.Error())
 	}
-
 }
