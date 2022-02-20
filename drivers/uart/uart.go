@@ -48,3 +48,23 @@ func WriteString(s string) (int, error) {
 
 	return len(s), nil
 }
+
+func inr() {
+	if inputCallback == nil {
+		return
+	}
+
+	for {
+		ch := ReadByte()
+		if ch == -1 {
+			break
+		}
+
+		inputCallback(byte(ch))
+	}
+	pic.EOI(_IRQ_COM1)
+}
+
+func OnInput(callback func(byte)) {
+	inputCallback = callback
+}
