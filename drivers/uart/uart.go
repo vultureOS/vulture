@@ -32,3 +32,19 @@ func WriteByte(ch byte) {
 	}
 	sys.Outb(com1, uint8(ch))
 }
+
+func Write(s []byte) (int, error) {
+	for _, c := range s {
+		WriteByte(c)
+	}
+
+	return len(s), nil 
+}
+
+func WriteString(s string) (int, error) {
+	for i := 0; i < len(s); i++ {
+		WriteByte(s[i])
+	}
+
+	return len(s), nil
+}
