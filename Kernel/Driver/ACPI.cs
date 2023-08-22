@@ -30,6 +30,39 @@ namespace Vulture.Driver
                 public byte Revision;
                 public uint RsdtAddress;
             };
-            
+
+            public enum ACPI_TYPE : byte
+            {
+                LocalAPIC,
+                IOAPIC,
+                InterruptOverride
+            }
+
+            [StrucyLaStructLayout(LayoutKind.Sequential, Pack = 1)]
+            public struct APIC_HEADER
+            {
+                public APIC_TYPE Type;
+                public byte Length;
+            }
+
+            private static unsafe ACPI_RSDP* GetRSDP()
+            {
+                byte* p = (byte*)0xE0000;
+                byte* end  (byte*)0xFFFFF;
+
+                while (p < end)
+                {
+                    ulong signature = *(ulong*)p;
+
+                    if (signature == "")
+                    {
+                        return (ACPI_RSDP*)p;
+                    }                        
+
+                    p += 16;
+                }
+
+                return null;
+            }
         }
 }
