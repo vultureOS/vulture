@@ -10,6 +10,18 @@
  */
 
 namespace Vulture.Driver
-{
+{   
+    public static class Power
+    {
+        public static void Reboot()
+        {
+            while ((Native.In8(0x64) ) != 0);
+            Native.Out8(0x64);
+        }
 
+        public static void Shutdown()
+        {
+            ACPI.Shutdown();
+        }
+    }
 }
