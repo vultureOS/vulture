@@ -16,18 +16,27 @@ namespace Vulture.Misc
 {
     public static class Panic
     {
-        public static void Error(string msg, bool skippable = false )
+        public static void Error(string msg,bool skippable = false)
         {
             LocalAPIC.SendAllInterrupt(0xFD);
+
             IDT.Disable();
+            
             Framebuffer.TripleBuffered = false;
-            
+
+            ConsoleColor color = Console.ForegroundColor;
+
+            Console.ForegroundColor = System.ConsoleColor.Red;
             Console.Write("PANIC: ");
-            
+            Console.WriteLine(msg);
+            Console.WriteLine("All CPU Halted Now!");
+
+            Console.ForegroundColor = color;
+
             if (!skippable)
             {
-                FrameBuffer.Update();
-                for (;;);
+                Framebuffer.Update();
+                for (; ; );
             }
         }
     }
