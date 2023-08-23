@@ -1,3 +1,15 @@
+/**
+ * @file RTC.cs
+ * @author Krisna Pranav
+ * @brief RTC
+ * @version 1.0 
+ * @date 2023-08-23
+ *
+ * @copyright Copyright (c) 2022 - 2023 pranaOS Developers, Krisna Pranav
+ *
+ */
+
+
 namespace Vulture
 {
     public static class RTC
@@ -17,9 +29,64 @@ namespace Vulture
             get
             {
                 B = Get(0);
-                return (byte)((B& 0x0F) + ((B/16) * 10));
+                return (byte)((B & 0x0F) + ((B / 16) * 10));
             }
-        }        
-        
+        }
+
+        public static byte Minute
+        {
+            get
+            {
+                B = Get(2);
+                return (byte)((B & 0x0F) + ((B / 16) * 10));
+            }
+        }
+
+        public static byte Hour
+        {
+            get
+            {
+                B = Get(4);
+                return (byte)(((B & 0x0F) + ((B & 0x70) / 16 * 10)) | (B & 0x80));
+            }
+        }
+
+        public static byte Century
+        {
+            get
+            {
+                B = Get(0x32);
+                return (byte)((B & 0x0F) + ((B / 16) * 10));
+            }
+        }
+
+        public static byte Year
+        {
+            get
+            {
+                B = Get(9);
+                return (byte)((B & 0x0F) + ((B / 16) * 10));
+            }
+        }
+
+        public static byte Month
+        {
+            get
+            {
+                B = Get(8);
+                return (byte)((B & 0x0F) + ((B / 16) * 10));
+            }
+        }
+
+        public static byte Day
+        {
+            get
+            {
+                B = Get(7);
+                return (byte)((B & 0x0F) + ((B / 16) * 10));
+            }
+        }
+
+        public static bool BCD { get { return (Get(0x0B) & 0x04) == 0x00; } }
     }
 }
