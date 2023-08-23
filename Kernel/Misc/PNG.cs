@@ -19,12 +19,14 @@ namespace Vulture.Misc
     {
         public enum LodePNGColorType
         {
-            LCT_GREY = 0,
-            LCT_RGB = 1,
-            LCT_PALETTE = 3
+            LCT_GREY = 0, 
+            LCT_RGB = 2, 
+            LCT_PALETTE = 3, 
+            LCT_GREY_ALPHA = 4,
+            LCT_RGBA = 6 
         }
 
-        public PNG(byte[] file, LodePNGColorType type = LodePNGColorType.LCT_RGB, uint bitDept = 8)
+        public PNG(byte[] file,LodePNGColorType type = LodePNGColorType.LCT_RGBA ,uint bitDepth = 8)
         {
             lock (this)
             {
@@ -33,7 +35,7 @@ namespace Vulture.Misc
                     lodepng_decode_memory(out uint* _out, out uint w, out uint h, p, file.Length, type, bitDepth);
 
                     if (_out == null) Panic.Error("lodepng error");
-
+                    
                     RawData = new int[w * h];
 
                     fixed (int* pdata = RawData)
@@ -42,10 +44,15 @@ namespace Vulture.Misc
                         {
                             for (int y = 0; y < h; y++)
                             {
-                                RawData[y * w + x] = (int)((_out[y*w+x]));
+                                RawData[y * w + x] = (int)((_out[y * w + x] & 0xFF000000) | (NETv4.SwapLeftRight(_out[y * w + x] & 0x00FFFFFF)) >> 8);
                             }
                         }
                     }
+
+                    Allocator.Free((System.IntPtr)_out);
+                    Width = (int)w;
+                    Height = (int)h;
+                    Bpp = 4;
                 }
             }
         }
