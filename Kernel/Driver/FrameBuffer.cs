@@ -18,7 +18,7 @@ using System.Windows.Forms;
 
 namespace Vulture
 {
-    public static unsafe class FrameBuffer
+    public static unsafe class Framebuffer
     {
         public static ushort Width;
         public static ushort Height;
@@ -32,13 +32,12 @@ namespace Vulture
 
         static bool _TripleBuffered = false;
 
-        public static bool TripleBuffered
+        public static bool TripleBuffered 
         {
-            get
+            get 
             {
                 return _TripleBuffered;
             }
-
             set 
             {
                 if (Graphics == null) return;
@@ -47,8 +46,7 @@ namespace Vulture
                 Graphics.Clear(0x0);
                 Graphics.VideoMemory = value ? FirstBuffer : VideoMemory;
                 _TripleBuffered = value;
-
-                if (!_TripleBufferedTripleBuffered) 
+                if (!_TripleBuffered)
                 {
                     Console.Clear();
                 }
@@ -59,17 +57,37 @@ namespace Vulture
         {
             if (TripleBuffered)
             {
-                for (int i = 0; i < Width * Height; i++)
+                for(int i = 0; i < Width * Height; i++) 
                 {
-                    if (FirstBuffer[i] != SecondBuffer[i])
+                    if(FirstBuffer[i] != SecondBuffer[i]) 
                     {
                         VideoMemory[i] = FirstBuffer[i];
                     }
                 }
-                Native.Movsd(SecondBuffer, FirstBuffer, (ulong)(Width * Height), ;)
+                Native.Movsd(SecondBuffer, FirstBuffer, (ulong)(Width * Height));
             }
+            if(Graphics != null) Graphics.Update();
+        }
 
-            if (Graphics != null) Graphics.Update();
+        public static void Initialize(ushort XRes, ushort YRes,uint* FB)
+        {
+            Width = XRes;
+            Height = YRes;
+
+            FirstBuffer = (uint*)Allocator.Allocate((ulong)(XRes * YRes * 4));
+            SecondBuffer = (uint*)Allocator.Allocate((ulong)(XRes * YRes * 4));
+
+            Native.Stosd(FirstBuffer, 0, (ulong)(XRes * YRes));
+            Native.Stosd(SecondBuffer, 0, (ulong)(XRes * YRes));
+
+            Control.MousePosition.X = XRes / 2;
+            Control.MousePosition.Y = YRes / 2;
+            
+            Graphics = new Graphics(Width, Height, FB);
+            
+            VideoMemory = FB;
+
+            Console.Clear();
         }
     }
 }
