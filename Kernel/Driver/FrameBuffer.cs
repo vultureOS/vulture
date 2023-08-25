@@ -32,6 +32,32 @@ namespace Vulture
 
         static bool _TripleBuffered = false;
 
-        
+        public static bool TripleBuffered
+        {
+            get
+            {
+                return _TripleBuffered;
+            }
+
+            set 
+            {
+                if (Graphics == null) return;
+                if (_TripleBuffered == value) return;
+
+                Graphics.Clear(0x0);
+                Graphics.VideoMemory = value ? FirstBuffer : VideoMemory;
+                _TripleBuffered = value;
+
+                if (!_TripleBufferedTripleBuffered) 
+                {
+                    Console.Clear();
+                }
+            }
+        }
+
+        public static void Update()
+        {
+            
+        }
     }
 }
