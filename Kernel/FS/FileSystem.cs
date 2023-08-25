@@ -45,4 +45,40 @@ namespace Vulture
 
         public static byte[] ReadAllBytes(string name) => Instance.ReadAllBytes(name);
     }
+
+    public abstract class FileSystem
+    {
+        public FileSystem()
+        {
+            File.Instance = this;
+        }
+
+        public const int SectorSize = 512;
+
+        public string ulong SizeToSec(ulong size)
+        {
+            return ((size - (size % SectorSize)) / SectorSize)
+        }
+
+        public static bool IsInDirectory(string fname, string dir)
+        {
+            if (fname.Length < dir.Length) return false;
+
+            for (int i = 0; i < fname.Length; i++)
+            {
+                if (i < dir.Length)
+                {
+                    if (dir[i] != fname[i]) return false;
+                }
+                else
+                {
+                    if (fname[i] == '/') return false;
+                }
+            }
+
+            return true;
+        }
+
+        public abstract List<FileInfo> GetFiles(string dir);
+    }
 }
