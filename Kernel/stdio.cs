@@ -65,5 +65,18 @@ namespace Vulture
 
             return &file;
         }
+
+        [RuntimeExport("fseek")]
+        public static void fseek(FILE* handle, long offset, SEEK seek)
+        {
+            if (seek == SEEK.SET)
+            {
+                handle->OFFSET = offset;
+            }
+            else
+            {
+                Panic.Error("unkown seek");
+            }
+        }
     }
 }
