@@ -19,5 +19,8 @@ namespace Vulture.FS
         {
             Instance = this;
         }
+
+        public abstract bool Read(ulong sector, uint count, byte* data);
+        public abstract bool Write(ulong sector, uint count, byte* data);
     }
 }
