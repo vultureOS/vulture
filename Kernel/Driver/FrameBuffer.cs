@@ -57,7 +57,19 @@ namespace Vulture
 
         public static void Update()
         {
-            
+            if (TripleBuffered)
+            {
+                for (int i = 0; i < Width * Height; i++)
+                {
+                    if (FirstBuffer[i] != SecondBuffer[i])
+                    {
+                        VideoMemory[i] = FirstBuffer[i];
+                    }
+                }
+                Native.Movsd(SecondBuffer, FirstBuffer, (ulong)(Width * Height), ;)
+            }
+
+            if (Graphics != null) Graphics.Update();
         }
     }
 }
