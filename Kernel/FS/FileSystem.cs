@@ -11,9 +11,9 @@
 
 using System.Collections.Generic;
 
-namespace Vulture
+namespace Vulture.FS
 {
-    public class FileInfo
+    public class FileInfo 
     {
         public string Name;
         public FileAttribute Attribute;
@@ -28,7 +28,7 @@ namespace Vulture
         }
     }
 
-    public enum FileAttribute: byte
+    public enum FileAttribute : byte
     {
         ReadOnly = 0x01,
         Hidden = 0x02,
@@ -39,10 +39,12 @@ namespace Vulture
 
     public static class File
     {
+        /// <summary>
+        /// This will be overwritten if you initialize file system
+        /// </summary>
         public static FileSystem Instance;
 
         public static List<FileInfo> GetFiles(string Directory) => Instance.GetFiles(Directory);
-
         public static byte[] ReadAllBytes(string name) => Instance.ReadAllBytes(name);
     }
 
@@ -55,15 +57,14 @@ namespace Vulture
 
         public const int SectorSize = 512;
 
-        public string ulong SizeToSec(ulong size)
+        public static ulong SizeToSec(ulong size)
         {
-            return ((size - (size % SectorSize)) / SectorSize)
+            return ((size - (size % SectorSize)) / SectorSize) + ((size % SectorSize) != 0 ? 1ul : 0);
         }
 
         public static bool IsInDirectory(string fname, string dir)
         {
             if (fname.Length < dir.Length) return false;
-
             for (int i = 0; i < fname.Length; i++)
             {
                 if (i < dir.Length)
@@ -75,17 +76,13 @@ namespace Vulture
                     if (fname[i] == '/') return false;
                 }
             }
-
             return true;
         }
 
-        public abstract List<FileInfo> GetFiles(string dir);
+        public abstract List<FileInfo> GetFiles(string Directory);
         public abstract void Delete(string Name);
-
         public abstract byte[] ReadAllBytes(string Name);
-
         public abstract void WriteAllBytes(string Name, byte[] Content);
-
         public abstract void Format();
     }
 }
