@@ -43,5 +43,27 @@ namespace Vulture
             CUR,
             END
         }
+
+        [RuntimeExport("fopen")]
+        public  static FILE* fopen(byte* name, byte* mode)
+        {
+            string sname = string.FromASCII((System.IntPtr)name, strings.strlen(name));
+            FILE file = new FILE();
+
+
+            byte[] buffer = file.ReadAllBytes(sname);
+
+            if (buffer == null)
+            {
+                Panic.Error("fopen: file not found");
+            }
+
+            file.DATA = (byte*)Allocator.Allocate((ulong)buffer.Length);
+            file.LENGTH = buffer.Length;
+            buffer.Dispose();
+            sname.Dispose();
+
+            return &file;
+        }
     }
 }
