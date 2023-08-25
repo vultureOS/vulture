@@ -5,7 +5,7 @@
  * @version 1.0
  * @date 2023-08-23
  *
- * @copyright Copyright (c) 2022 - 2023 pranaOS Developers, Krisna Pranav
+ * @copyright Copyright (c) 2022 - 2023 vultureOS Developers, Krisna Pranav
  *
  */
 
