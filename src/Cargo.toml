@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["vulture_kernel", "vulture_syscall", "vulture_proc", "api"]
+
+[profile.release]
+debug = true
