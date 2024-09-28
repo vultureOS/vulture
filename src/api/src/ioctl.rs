@@ -27,3 +27,13 @@ pub const fn ioc(dir: usize, ty: usize, nr: usize, size: usize) -> usize {
         | ((nr) << IOC_NRSHIFT)
         | ((size) << IOC_SIZESHIFT)
 }
+
+#[inline]
+pub const fn io(typ: usize, nr: usize) -> usize {
+    ioc(IOC_NONE, typ, nr, 0)
+}
+
+#[inline]
+pub const fn ior<T>(typ: usize, nr: usize) -> usize {
+    ioc(IOC_READ, typ, nr, core::mem::size_of::<T>())
+}
