@@ -10,6 +10,7 @@
  */
 
 
+// IOC const Values
 pub const IOC_NRBITS: usize = 8;
 pub const IOC_TYPEBITS: usize = 8;
 pub const IOC_SIZEBITS: usize = 14;
@@ -36,4 +37,14 @@ pub const fn io(typ: usize, nr: usize) -> usize {
 #[inline]
 pub const fn ior<T>(typ: usize, nr: usize) -> usize {
     ioc(IOC_READ, typ, nr, core::mem::size_of::<T>())
+}
+
+#[inline]
+pub const fn iow<T>(typ: usize, nr: usize) -> usize {
+    ioc(IOC_WRITE, typ, nr, core::mem::size_of::<T>())
+}
+
+#[inline]
+pub const fn iowr<T>(typ: usize, nr: usize) -> usize {
+    ioc(IOC_READ | IOC_WRITE, typ, nr, core::mem::size_of::<T>())
 }
