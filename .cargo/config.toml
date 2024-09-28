@@ -1,0 +1,2 @@
+[alias]
+vulture = "run --release --manifest-path ./vulture_build/Cargo.toml --"
