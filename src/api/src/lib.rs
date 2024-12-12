@@ -1,14 +1,15 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
+/**
+ * @file lib.rs
+ * @author Krisna Pranav
+ * @brief LIB
+ * @version 3.0
+ * @date 2024-09-28
+ * 
+ * @copyright Copyright (c) 2022-2024 vultureOS Developers, Krisna Pranav
+ * 
+ */
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+ #![no_std]
+ pub mod drm;
+ pub mod ioctl;
+ pub mod pty;
