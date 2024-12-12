@@ -56,3 +56,57 @@ macro_rules! impl_traits {
         )*
     };
 }
+
+pub trait Endian<T>
+where 
+    Self: Into<T> + Copy + Clone + Send + Sync,
+{
+    fn to_be(&self) -> T;
+    fn to_le(&self) -> T;
+    fn from_be(value: T) -> T;
+    fn from_le(value: T) -> T;
+}
+
+#[derive(Default, Debug, Copy, Clone, Eq, Hash, PartialEq)]
+#[repr(transparent)]
+pub struct BigEndian<T: Endian<T>>(T);
+
+impl<T: Endian<T>> BigEndian<T> {
+    #[inline]
+    pub fn new(value: T) -> Self {
+        Self(value.to_be())
+    }
+
+    #[inline]
+    pub fn to_native(self) -> T {
+        T::from_be(self.0)
+    }
+
+    #[inline]
+    pub fn to_bits(self) -> T {
+        self.0
+    }
+}
+
+#[derive(Default, Debug, Copy, Clone, Eq, Hash, PartialEq)]
+#[repr(transparent)]
+pub struct LittleEndian<T: Endian<T>>(T);
+
+impl<T: Endian<T>> LittleEndian<T> {
+    #[inline]
+    pub fn new(value: T) -> Self {
+        Self(value.to_le())
+    }
+
+    #[inline]
+    pub fn to_native(self) -> T {
+        T::from_le(self.0)
+    }
+
+    #[inline]
+    pub fn to_bits(self) -> T {
+        self.0
+    }
+}
+
+impl_traits!(u8, u16, u32, u64, u128, usize);
