@@ -1,27 +1,42 @@
-//! # Filename: main.rs
-//!
-//! ### Description
-//! main entry point of the application
-//!
-//! ### Legal Information
-//! * **Copyright:** (C) 2022-2026 Krisna Pranav
-//! * **License:** GNU General Public License v3.0 (GPL-3.0-or-later)
-//!
-//! This program is free software: you can redistribute it and/or modify
-//! it under the terms of the GNU General Public License as published by
-//! the Free Software Foundation, either version 3 of the License, or
-//! (at your option) any later version.
+//! # vultureOS Entry Point
 //!
 //! SPDX-License-Identifier: GPL-3.0-or-later
 
 #![no_std]
 #![no_main]
 
+extern crate alloc;
 
-use vulture_kernel::Kernel;
+use bootloader::{entry_point, BootInfo};
+use core::panic::PanicInfo;
 
-#[no_mangle]
-pub extern "C" fn _start() -> ! {
-    let mut kernel = Kernel::new();
-    kernel.run();
+entry_point!(kernel_main);
+
+fn kernel_main(boot_info: &'static BootInfo) -> ! {
+    // Immediate raw serial write — no init, no deps, just verify we get here
+    unsafe {
+        // Write "OK\n" to COM1 (0x3F8) — this proves we reached kernel_main
+        x86_64::instructions::port::Port::<u8>::new(0x3F8).write(b'O');
+        x86_64::instructions::port::Port::<u8>::new(0x3F8).write(b'K');
+        x86_64::instructions::port::Port::<u8>::new(0x3F8).write(b'\n');
+    }
+
+    // Now run the full kernel with boot info (needed for heap page mapping)
+    let mut kernel = vulture_kernel::Kernel::new();
+    kernel.run_with_boot_info(boot_info);
+}
+
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    // Try serial output for panic
+    unsafe {
+        let msg = b"\n[PANIC] ";
+        for &byte in msg {
+            x86_64::instructions::port::Port::<u8>::new(0x3F8).write(byte);
+        }
+    }
+    vulture_kernel::serial_println!("{}", info);
+    loop {
+        x86_64::instructions::hlt();
+    }
 }
