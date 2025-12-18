@@ -1,52 +1,74 @@
-//! # Filename: main.rs
+//! # Memory Management Subsystem
 //!
-//! ### Description
-//! memory manager entry point
-//!
-//! ### Legal Information
-//! * **Copyright:** (C) 2022-2026 Krisna Pranav
-//! * **License:** GNU General Public License v3.0 (GPL-3.0-or-later)
-//!
-//! This program is free software: you can redistribute it and/or modify
-//! it under the terms of the GNU General Public License as published by
-//! the Free Software Foundation, either version 3 of the License, or
-//! (at your option) any later version.
+//! Provides physical frame allocation, virtual memory paging, kernel heap,
+//! copy-on-write, and per-process address space management for vulture.
 //!
 //! SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::collections::HashMap;
+#![no_std]
 
-#[derive(Clone)]
-pub struct Page {
-    pub data: Vec<u8>,
-    pub refcount: usize,
-}
+extern crate alloc;
 
+pub mod address_space;
+pub mod cow;
+pub mod frame;
+pub mod heap;
+pub mod paging;
+
+/// The global memory manager
 pub struct MemoryManager {
-    pages: HashMap<u64, Page>,
+    total_memory: u64,
+    used_memory: u64,
+    frame_allocator_initialized: bool,
+    heap_initialized: bool,
 }
 
 impl MemoryManager {
-    pub fn new() -> Self {
+    /// Create a new memory manager
+    pub const fn new() -> Self {
         Self {
-            pages: HashMap::new(),
+            total_memory: 0,
+            used_memory: 0,
+            frame_allocator_initialized: false,
+            heap_initialized: false,
         }
     }
 
+    /// Initialize the full memory subsystem
     pub fn init(&mut self) {
-        println!("MemoryManager initialized (virtual paging)");
+        // Phase 1: Initialize the physical frame allocator
+        frame::init();
+        self.frame_allocator_initialized = true;
+
+        // Phase 2: Initialize kernel heap
+        heap::init();
+        self.heap_initialized = true;
+
+        // Phase 3: Initialize paging
+        paging::init();
+
+        // Report memory stats
+        self.total_memory = frame::total_frames() as u64 * frame::FRAME_SIZE as u64;
+        self.used_memory = frame::used_frames() as u64 * frame::FRAME_SIZE as u64;
     }
 
-    pub fn alloc_page(&mut self, addr: u64) {
-        self.pages.insert(addr, Page { data: vec![0; 4096], refcount: 1 });
+    /// Get total system memory in bytes
+    pub fn total_memory(&self) -> u64 {
+        self.total_memory
     }
 
-    pub fn copy_on_write(&mut self, addr: u64) {
-        if let Some(p) = self.pages.get_mut(&addr) {
-            if p.refcount > 1 {
-                p.refcount -= 1;
-                self.alloc_page(addr + 0x1000);
-            }
-        }
+    /// Get used memory in bytes
+    pub fn used_memory(&self) -> u64 {
+        self.used_memory
+    }
+
+    /// Get free memory in bytes
+    pub fn free_memory(&self) -> u64 {
+        self.total_memory - self.used_memory
+    }
+
+    /// Check if the heap is initialized
+    pub fn heap_ready(&self) -> bool {
+        self.heap_initialized
     }
 }
