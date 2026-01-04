@@ -44,6 +44,8 @@ pub struct Process {
     pub pid: Pid,
     /// Parent process ID
     pub parent_pid: Option<Pid>,
+    /// Child process IDs
+    pub children: Vec<Pid>,
     /// Process name
     pub name: String,
     /// Current state
@@ -54,6 +56,8 @@ pub struct Process {
     pub exit_code: Option<i32>,
     /// CPU time used (in ticks)
     pub cpu_ticks: u64,
+    /// Memory usage (in bytes)
+    pub memory_usage: u64,
     /// Creation timestamp (in kernel ticks)
     pub created_at: u64,
     /// User ID
@@ -93,11 +97,13 @@ impl Process {
         Self {
             pid,
             parent_pid: parent,
+            children: Vec::new(),
             name: String::from(name),
             state: ProcessState::Ready,
             priority: Priority::Normal,
             exit_code: None,
             cpu_ticks: 0,
+            memory_usage: 0,
             created_at: crate::interrupts::get_ticks(),
             uid: 0,
             gid: 0,
@@ -112,11 +118,13 @@ impl Process {
         Self {
             pid: 0,
             parent_pid: None,
+            children: Vec::new(),
             name: String::from("kernel"),
             state: ProcessState::Running,
             priority: Priority::Realtime,
             exit_code: None,
             cpu_ticks: 0,
+            memory_usage: 0,
             created_at: 0,
             uid: 0,
             gid: 0,
