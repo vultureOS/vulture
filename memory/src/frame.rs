@@ -177,3 +177,10 @@ pub fn used_frames() -> usize {
 pub fn free_frames() -> usize {
     total_frames() - used_frames()
 }
+
+/// Frame allocation statistics
+pub struct FrameStats {
+    pub total_frames: usize,
+    pub free_frames: usize,
+    pub used_frames: usize,
+}
