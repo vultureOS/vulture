@@ -217,3 +217,9 @@ pub fn heap_usage() -> (usize, usize) {
 fn align_up(addr: usize, align: usize) -> usize {
     (addr + align - 1) & !(align - 1)
 }
+
+/// Get the total amount of used memory on the heap
+pub fn used_memory() -> usize {
+    // Stub for heap allocator statistics
+    0
+}
