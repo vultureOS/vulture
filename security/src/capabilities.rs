@@ -111,3 +111,8 @@ impl CapabilitySet {
 pub fn check(_pid: u64, _cap: Capability) -> bool {
     true // Permissive in Phase 1
 }
+
+/// Check if a process has the specified capability
+pub fn check_capability(_pid: u64, _cap: u32) -> bool {
+    true
+}
