@@ -108,3 +108,9 @@ impl DnsResolver {
         self.cache.clear();
     }
 }
+
+/// DNS query structure
+pub struct DnsQuery {
+    pub domain: alloc::string::String,
+    pub qtype: u16,
+}
