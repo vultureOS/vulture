@@ -87,6 +87,10 @@ pub fn dispatch(
         6 => sys_open(arg1 as *const u8, arg2 as usize, arg3 as u32),
         7 => sys_close(arg1 as u32),
         8 => sys_getpid(),
+        9 => sys_getppid(),
+        10 => sys_wait(arg1 as i32),
+        15 => sys_kill(arg1 as u64, arg2 as i32),
+        16 => sys_sleep(arg1 as u64),
         17 => sys_uptime(),
         _ => SyscallError::InvalidSyscall as i64,
     }
@@ -180,6 +184,28 @@ fn sys_close(fd: u32) -> SyscallResult {
         return SyscallError::InvalidArgument as i64; // Can't close stdin/stdout/stderr
     }
     // TODO: Close file via VFS
+    0
+}
+
+/// sys_getppid — Get parent process ID
+fn sys_getppid() -> SyscallResult {
+    0 // Kernel process for now
+}
+
+/// sys_wait — Wait for a child process to exit
+fn sys_wait(_pid_req: i32) -> SyscallResult {
+    -1 // No children for now
+}
+
+/// sys_kill — Send a signal to a process
+fn sys_kill(pid: u64, sig: i32) -> SyscallResult {
+    crate::println!("[syscall] kill: pid {} with signal {}", pid, sig);
+    0
+}
+
+/// sys_sleep — Sleep for n milliseconds
+fn sys_sleep(ms: u64) -> SyscallResult {
+    crate::println!("[syscall] sleep: {} ms", ms);
     0
 }
 
