@@ -8,6 +8,11 @@ members = [
     "security",
     "fs-vulturefs",
     "apps-shell",
+    "networking",
+    "services",
+    "graphics",
+    "ui",
+    "pkg",
 ]
 
 [package]
@@ -18,3 +23,5 @@ publish = false
 
 [dependencies]
 vulture-kernel = { path = "kernel" }
+bootloader = { version = "0.9", features = ["map_physical_memory"] }
+x86_64 = "0.15"
