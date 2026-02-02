@@ -3,57 +3,218 @@
 version = 4
 
 [[package]]
-name = "once_cell"
-version = "1.21.3"
+name = "acpi"
+version = "5.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+checksum = "94476c7ef97af4c4d998b3f422c1b01d5211aad57c80ed200baf148d1f1efab6"
+dependencies = [
+ "bit_field",
+ "bitflags",
+ "log",
+]
+
+[[package]]
+name = "bit_field"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e4b40c7323adcfc0a41c4b88143ed58346ff65a288fc144329c5c45e05d70c6"
+
+[[package]]
+name = "bitflags"
+version = "2.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
+
+[[package]]
+name = "bootloader"
+version = "0.9.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13f6a8a495d2f93fe3d6eb3a224f9aa749a63cfd746ed03eb5ddcbd00ade7d8f"
+
+[[package]]
+name = "const_fn"
+version = "0.4.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f8a2ca5ac02d09563609681103aada9e1777d54fc57a5acd7a41404f9c93b6e"
+
+[[package]]
+name = "lazy_static"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+dependencies = [
+ "spin",
+]
+
+[[package]]
+name = "lock_api"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
+dependencies = [
+ "scopeguard",
+]
+
+[[package]]
+name = "log"
+version = "0.4.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
+name = "pic8259"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62d9a86c292b165f757e47e7fd66855def189b2564609bc4203727b27c33db22"
+dependencies = [
+ "x86_64",
+]
+
+[[package]]
+name = "rustversion"
+version = "1.0.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
+
+[[package]]
+name = "scopeguard"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "spin"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
+dependencies = [
+ "lock_api",
+]
+
+[[package]]
+name = "volatile"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "442887c63f2c839b346c192d047a7c87e73d0689c9157b00b53dcc27dd5ea793"
+
+[[package]]
+name = "volatile"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af8ca9a5d4debca0633e697c88269395493cebf2e10db21ca2dbde37c1356452"
 
 [[package]]
 name = "vulture"
 version = "0.1.0"
 dependencies = [
+ "bootloader",
  "vulture-kernel",
+ "x86_64",
 ]
 
 [[package]]
 name = "vulture-boot"
 version = "0.1.0"
-dependencies = [
- "vulture-kernel",
-]
 
 [[package]]
 name = "vulture-fs"
 version = "0.1.0"
+dependencies = [
+ "spin",
+]
+
+[[package]]
+name = "vulture-graphics"
+version = "0.1.0"
+dependencies = [
+ "spin",
+]
 
 [[package]]
 name = "vulture-ipc"
 version = "0.1.0"
 dependencies = [
- "once_cell",
+ "spin",
 ]
 
 [[package]]
 name = "vulture-kernel"
 version = "0.1.0"
 dependencies = [
+ "acpi",
+ "bootloader",
+ "lazy_static",
+ "pic8259",
+ "spin",
+ "volatile 0.6.1",
  "vulture-fs",
  "vulture-ipc",
  "vulture-memory",
+ "vulture-net",
  "vulture-security",
+ "vulture-services",
+ "x86_64",
 ]
 
 [[package]]
 name = "vulture-memory"
 version = "0.1.0"
+dependencies = [
+ "spin",
+]
+
+[[package]]
+name = "vulture-net"
+version = "0.1.0"
+dependencies = [
+ "spin",
+]
+
+[[package]]
+name = "vulture-pkg"
+version = "0.1.0"
+dependencies = [
+ "spin",
+]
 
 [[package]]
 name = "vulture-security"
 version = "0.1.0"
+dependencies = [
+ "spin",
+]
+
+[[package]]
+name = "vulture-services"
+version = "0.1.0"
+dependencies = [
+ "spin",
+]
 
 [[package]]
 name = "vulture-shell"
 version = "0.1.0"
 dependencies = [
  "vulture-fs",
+]
+
+[[package]]
+name = "vulture-ui"
+version = "0.1.0"
+dependencies = [
+ "spin",
+ "vulture-graphics",
+]
+
+[[package]]
+name = "x86_64"
+version = "0.15.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7841fa0098ceb15c567d93d3fae292c49e10a7662b4936d5f6a9728594555ba"
+dependencies = [
+ "bit_field",
+ "bitflags",
+ "const_fn",
+ "rustversion",
+ "volatile 0.4.6",
 ]
