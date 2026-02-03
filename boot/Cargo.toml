@@ -6,6 +6,3 @@ edition = "2021"
 [lib]
 name = "vulture_boot"
 path = "src/lib.rs"
-
-[dependencies]
-vulture-kernel = { path = "../kernel" }
