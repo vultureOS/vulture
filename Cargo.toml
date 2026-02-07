@@ -1,11 +1,20 @@
 [workspace]
+resolver = "2"
 members = [
     "boot",
     "kernel",
     "memory",
     "ipc",
     "security",
-    "fs-pranafs",
+    "fs-vulturefs",
     "apps-shell",
 ]
-resolver = "2"
+
+[package]
+name = "vulture"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+vulture-kernel = { path = "kernel" }

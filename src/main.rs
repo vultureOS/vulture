@@ -1,5 +1,27 @@
-mod panic;
+//! # Filename: main.rs
+//!
+//! ### Description
+//! main entry point of the application
+//!
+//! ### Legal Information
+//! * **Copyright:** (C) 2022-2026 Krisna Pranav
+//! * **License:** GNU General Public License v3.0 (GPL-3.0-or-later)
+//!
+//! This program is free software: you can redistribute it and/or modify
+//! it under the terms of the GNU General Public License as published by
+//! the Free Software Foundation, either version 3 of the License, or
+//! (at your option) any later version.
+//!
+//! SPDX-License-Identifier: GPL-3.0-or-later
 
-fn main() {
-    println!("Hello, world!");
+#![no_std]
+#![no_main]
+
+
+use vulture_kernel::Kernel;
+
+#[no_mangle]
+pub extern "C" fn _start() -> ! {
+    let mut kernel = Kernel::new();
+    kernel.run();
 }

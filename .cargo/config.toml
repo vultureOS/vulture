@@ -1,2 +1,5 @@
+[target.x86_64-vulture]
+runner = "qemu-system-x86_64"
+
 [build]
-target = "x86_64-vulture.json"
+rustflags = []

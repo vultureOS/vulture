@@ -1,6 +1,10 @@
 [package]
-name = "kernel"
+name = "vulture-kernel"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+vulture-memory = { path = "../memory" }
+vulture-ipc = { path = "../ipc" }
+vulture-fs = { path = "../fs-vulturefs" }
+vulture-security = { path = "../security" }

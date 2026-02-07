@@ -1,6 +1,7 @@
 [package]
-name = "apps-shell"
+name = "vulture-shell"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+vulture-fs = { path = "../fs-vulturefs" }
