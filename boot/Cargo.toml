@@ -1,0 +1,7 @@
+[package]
+name = "vulture-boot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vulture-kernel = { path = "../kernel" }

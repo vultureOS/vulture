@@ -1,14 +1,11 @@
-[package]
-name = "vulture"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-x86_64 = "0.14"
-spin = "0.9"
-
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
+[workspace]
+members = [
+    "boot",
+    "kernel",
+    "memory",
+    "ipc",
+    "security",
+    "fs-pranafs",
+    "apps-shell",
+]
+resolver = "2"
