@@ -58,6 +58,11 @@ impl MacPolicy {
         self.add_rule("*", "/Users/*", true, SecurityLevel::User);
         // Deny untrusted access to system
         self.add_rule("*", "/System/*", false, SecurityLevel::Untrusted);
+        // Temporary access for everyone to /tmp
+        self.add_rule("*", "/tmp/*", true, SecurityLevel::Untrusted);
+        // Only system services access /dev and /proc
+        self.add_rule("*", "/dev/*", false, SecurityLevel::User);
+        self.add_rule("*", "/proc/*", false, SecurityLevel::User);
 
         self.enforcing = true;
     }
