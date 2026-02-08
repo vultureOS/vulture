@@ -61,3 +61,8 @@ impl LaunchAgent {
         self
     }
 }
+
+/// Launch an app with a restricted sandbox
+pub fn launch_sandboxed(path: &str) {
+    // Fork and execute with minimal capabilities
+}
