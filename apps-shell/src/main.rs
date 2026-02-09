@@ -1,4 +1,4 @@
-//! # Filename: main.rs
+//! # Filename: lib
 //!
 //! ### Description
 //! Entry point of apps shell
