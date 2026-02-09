@@ -1,4 +1,4 @@
-//! # Filename: main.rs
+//! # Filename: lib
 //!
 //! ### Description
 //! boot loader
@@ -14,23 +14,25 @@
 //!
 //! SPDX-License-Identifier: GPL-3.0-or-later
 
-use vulture_kernel::Kernel;
+#![no_std]
 
-fn main() {
-    println!("🟢 vultureOS Bootloader (simulated)");
-    
-    let memory_map = vec![
-        ("RAM", 0x0000_0000u64, 0x1_0000_0000u64),
-        ("IO",  0xFE00_0000u64, 0x1000_0000u64),
-    ];
+#[repr(C)]
+pub struct MultibootTag {
+    pub type_: u32,
+    pub size: u32,
+}
 
-    println!("Memory Map:");
-    for (t, s, e) in &memory_map {
-        println!("  {}: {:#x} -> {:#x}", t, s, e);
-    }
+#[repr(C)]
+pub struct MemoryMapEntry {
+    pub base: u64,
+    pub len: u64,
+    pub type_: u32,
+    pub reserved: u32,
+}
 
-    println!("➡ Jumping to kernel...\n");
+pub const TAG_TYPE_MMAP: u32 = 6;
 
-    let mut kernel = Kernel::new();
-    kernel.run();
+pub unsafe fn parse_memory_map(_addr: u64) {
+    // Verify boot state and initialize early environment
+    vulture_corekit::init();
 }
