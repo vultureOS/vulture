@@ -6,7 +6,7 @@
   "executables": true,
   "relocation-model": "static",
   "panic-strategy": "abort",
-  "target-pointer-width": "64",
+  "target-pointer-width": 64,
   "features": "+sse2",
   "disable-redzone": true
 }
