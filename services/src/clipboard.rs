@@ -85,3 +85,9 @@ pub fn paste_text() -> Option<String> {
         }
     })
 }
+
+/// Clipboard history entry
+pub struct ClipboardEntry {
+    pub data: alloc::vec::Vec<u8>,
+    pub mime_type: alloc::string::String,
+}
