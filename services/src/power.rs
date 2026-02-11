@@ -80,3 +80,11 @@ impl PowerManager {
         self.state = PowerState::Rebooting;
     }
 }
+
+/// System power states
+pub enum PowerState {
+    Active,
+    Sleep,
+    Hibernate,
+    Off,
+}
