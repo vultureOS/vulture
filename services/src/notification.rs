@@ -93,3 +93,11 @@ pub fn mark_read(id: u64) {
 pub fn clear_all() {
     NOTIFICATIONS.lock().notifications.clear();
 }
+
+/// Notification priorities
+pub enum Priority {
+    Low,
+    Standard,
+    Urgent,
+    Critical,
+}
