@@ -218,3 +218,9 @@ fn sys_getpid() -> SyscallResult {
 fn sys_uptime() -> SyscallResult {
     crate::interrupts::get_ticks() as i64
 }
+
+/// sys_getcwd — Get current working directory
+fn sys_getcwd(buf: *mut u8, len: usize) -> SyscallResult {
+    // Return "/" as root for now
+    0
+}
