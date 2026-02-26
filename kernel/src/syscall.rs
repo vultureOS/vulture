@@ -224,3 +224,9 @@ fn sys_getcwd(buf: *mut u8, len: usize) -> SyscallResult {
     // Return "/" as root for now
     0
 }
+
+/// sys_mkdir — Create a directory
+fn sys_mkdir(path: *const u8, len: usize) -> SyscallResult {
+    // VFS integration pending
+    0
+}
