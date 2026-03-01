@@ -256,3 +256,6 @@ pub fn read_line(buf: &mut [u8]) -> usize {
         }
     }
 }
+
+/// Scancode to ASCII mapping (partial)
+static US_KEYMAP: [u8; 128] = [0; 128];
