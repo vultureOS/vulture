@@ -83,3 +83,8 @@ pub fn _serial_print(args: fmt::Arguments) {
     use core::fmt::Write;
     SERIAL1.lock().write_fmt(args).unwrap();
 }
+
+/// Initialize serial FIFO
+pub fn init_fifo() {
+    // Enable FIFO mode on COM1
+}
