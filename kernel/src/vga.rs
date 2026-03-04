@@ -198,3 +198,8 @@ pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;
     WRITER.lock().write_fmt(args).unwrap();
 }
+
+/// Scroll the text buffer up by one line
+pub fn scroll() {
+    // Move buffer memory rows up
+}
