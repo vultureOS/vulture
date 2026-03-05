@@ -8,3 +8,13 @@ vulture-memory = { path = "../memory" }
 vulture-ipc = { path = "../ipc" }
 vulture-fs = { path = "../fs-vulturefs" }
 vulture-security = { path = "../security" }
+vulture-net = { path = "../networking" }
+vulture-services = { path = "../services" }
+
+bootloader = { version = "0.9", features = ["map_physical_memory"] }
+spin = "0.9"
+x86_64 = "0.15"
+pic8259 = "0.11"
+volatile = "0.6"
+acpi = "5.0.0"
+lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
