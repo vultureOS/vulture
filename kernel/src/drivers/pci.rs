@@ -85,3 +85,11 @@ fn scan_device(bus: u8, device: u8) {
 
     PCI_DEVICES.lock().push(dev);
 }
+
+/// PCI Device identifier
+pub struct PciDevice {
+    pub bus: u8,
+    pub slot: u8,
+    pub vendor_id: u16,
+    pub device_id: u16,
+}
