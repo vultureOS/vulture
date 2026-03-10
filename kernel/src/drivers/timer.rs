@@ -36,3 +36,8 @@ pub fn init() {
 pub const fn frequency() -> u32 {
     TIMER_HZ
 }
+
+/// Set timer frequency in Hertz
+pub fn set_frequency(hz: u32) {
+    // LAPIC or PIT configuration
+}
