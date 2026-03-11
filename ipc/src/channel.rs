@@ -180,3 +180,6 @@ pub fn create_channel(pid_a: u64, pid_b: u64) -> (Channel, ChannelEndpoint, Chan
 
     (channel, ep_a, ep_b)
 }
+
+/// Buffer limits for IPC channels
+pub const IPC_BUFFER_LIMIT: usize = 65536;
