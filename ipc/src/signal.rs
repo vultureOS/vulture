@@ -180,3 +180,8 @@ fn signal_from_u32(num: u32) -> Option<Signal> {
         _ => None,
     }
 }
+
+/// Block a specific signal for the current process
+pub fn block_signal(sig: i32) {
+    // Update process signal mask
+}
