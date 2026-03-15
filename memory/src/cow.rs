@@ -50,14 +50,29 @@ pub fn handle_cow_fault(old_frame: PhysFrame) -> Option<(PhysFrame, PageFlags)> 
             // Allocate a new frame
             let new_frame = frame::alloc_frame()?;
 
-            // In a real implementation, we'd copy 4KiB of data here:
-            // unsafe { core::ptr::copy_nonoverlapping(old_addr, new_addr, FRAME_SIZE) }
+            // Perform the actual copy
+            copy_frame(old_frame, new_frame);
 
             // Decrement reference on old frame
             frame::free_frame(old_frame);
 
             Some((new_frame, PageFlags::user()))
         }
+    }
+}
+
+/// Copy the contents of one physical frame to another
+fn copy_frame(src: PhysFrame, dst: PhysFrame) {
+    let src_addr = src.as_u64();
+    let dst_addr = dst.as_u64();
+    
+    // Safety: Kernel is mapped and has access to all physical memory
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            src_addr as *const u8,
+            dst_addr as *mut u8,
+            4096, // 4KiB frame size
+        );
     }
 }
 
