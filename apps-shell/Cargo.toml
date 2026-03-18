@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 vulture-fs = { path = "../fs-vulturefs" }
+
+# NOTE: This crate builds as a standalone std binary for testing.
+# In the actual OS, the shell runs inside the kernel.
