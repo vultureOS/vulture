@@ -1,28 +1,11 @@
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
+# Build output
+/build/
 
-# Test binary, built with `go test -c`
-*.test
+# Left over from the Rust tree (see the v0.1-rust tag)
+/target/
 
-# Output of the go coverage tool, specifically when used with LiteIDE
-*.out
-
-# Dependency directories (remove the comment below to include it)
-vendor/
-
-# system cache
+# Editors and macOS
 .DS_Store
-
-# ide cache
+.cache/
 .idea/
 .vscode/
-
-src/target/
-
-# Added by cargo
-
-/target
