@@ -1,0 +1,20 @@
+---
+Language: Cpp
+BasedOnStyle: WebKit
+ColumnLimit: 0
+PointerAlignment: Left
+QualifierAlignment: Right
+SpaceAfterTemplateKeyword: false
+SpaceBeforeCpp11BracedList: true
+AlwaysBreakTemplateDeclarations: true
+RequiresClausePosition: WithPreceding
+IndentRequiresClause: false
+NamespaceIndentation: None
+SpaceInEmptyBraces: Block
+FixNamespaceComments: false
+AllowShortFunctionsOnASingleLine: All
+AllowShortBlocksOnASingleLine: Empty
+AllowShortLambdasOnASingleLine: All
+InsertNewlineAtEOF: true
+IncludeBlocks: Preserve
+SortIncludes: CaseSensitive
