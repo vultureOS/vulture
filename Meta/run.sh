@@ -77,6 +77,16 @@ mkdir -p "$state_dir"
 if [ ! -f "$state_dir/efivars.fd" ]; then
     cp "$firmware_dir/edk2-arm-vars.fd" "$state_dir/efivars.fd"
 fi
+vars_file="$state_dir/efivars.fd"
+
+# Headless runs (tests) each get their own directory and copy of the
+# variable store, so several can run at once.
+run_dir=""
+if [ "$headless" -eq 1 ]; then
+    run_dir="$(mktemp -d "$state_dir/run.XXXXXX")"
+    cp "$state_dir/efivars.fd" "$run_dir/efivars.fd"
+    vars_file="$run_dir/efivars.fd"
+fi
 
 args=(
     # acpi=off makes the firmware publish a device tree, which the kernel uses for hardware discovery.
@@ -84,7 +94,7 @@ args=(
     -smp 8
     -m 4G
     -drive "if=pflash,format=raw,unit=0,readonly=on,file=$firmware_dir/edk2-aarch64-code.fd"
-    -drive "if=pflash,format=raw,unit=1,file=$state_dir/efivars.fd"
+    -drive "if=pflash,format=raw,unit=1,file=$vars_file"
     # The EFI System Partition is the staging directory, exposed as a read-only FAT disk.
     -drive "if=none,id=esp,format=raw,readonly=on,file=fat:$esp_dir"
     -device virtio-blk-pci,drive=esp,bootindex=0
@@ -114,14 +124,14 @@ if [ "$headless" -eq 0 ]; then
     exec "$qemu" "${args[@]}" -serial stdio ${extra_args[@]+"${extra_args[@]}"}
 fi
 
-log="$state_dir/serial.log"
+log="$run_dir/serial.log"
 : > "$log"
-qmp_socket="$state_dir/qmp.sock"
+qmp_socket="$run_dir/qmp.sock"
 rm -f "$qmp_socket"
 "$qemu" "${args[@]}" -display none -monitor none -serial "file:$log" -qmp "unix:$qmp_socket,server=on,wait=off" \
     ${extra_args[@]+"${extra_args[@]}"} &
 qemu_pid=$!
-trap 'kill "$qemu_pid" 2>/dev/null || true' EXIT
+trap 'kill "$qemu_pid" 2>/dev/null || true; rm -rf "$run_dir"' EXIT
 
 # True once every expected text is in the log.
 all_found() {
@@ -161,7 +171,6 @@ fi
 
 kill "$qemu_pid" 2>/dev/null || true
 wait "$qemu_pid" 2>/dev/null || true
-trap - EXIT
 
 # Show the console without the firmware's terminal control sequences.
 sed -e $'s/\x1b\\[[0-9;?=]*[A-Za-z]//g' -e $'s/\r//g' "$log"

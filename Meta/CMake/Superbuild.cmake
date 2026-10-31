@@ -100,6 +100,30 @@ add_custom_target(test-kernel
 
 add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel)
 
+# The scheduler soak (M3's "done when"): 1000 threads ping-ponging across
+# every processor for 60 seconds, then all stopped and joined. Not part of
+# check, for its length.
+add_custom_target(test-soak
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+        --boot-args "ktest=scheduler.thousand ktest-seconds=60"
+        --wait-for-exit
+        --timeout 180
+        --expect "ktest: PASS"
+    DEPENDS uefi target
+    USES_TERMINAL
+    VERBATIM)
+
+# Performance numbers: context switches, round trips, thread creation.
+add_custom_target(bench
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+        --boot-args "ktest=bench"
+        --wait-for-exit
+        --timeout 60
+        --expect "ktest: PASS"
+    DEPENDS uefi target
+    USES_TERMINAL
+    VERBATIM)
+
 add_custom_target(run
     COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR}
     DEPENDS uefi target
