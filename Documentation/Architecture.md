@@ -121,14 +121,15 @@ as a stub.
 
 ```
 Meta/          build system (CMake parts, toolchains), run.sh, CI
-Tools/         host C++ tools: mkarchive (M4); ipcc, mkimage, mkvfs, fsck.vfs, imgdiff, generators later
+Tools/         host C++ tools: mkarchive (M4); mkvfs, fsck.vfs, mkimage (M5); ipcc, imgdiff, generators later
 Boot/          VultureBoot UEFI loader: Arch/aarch64 (page tables, handoff), UEFI definitions
 Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page tables, GICv3, timer, PSCI, SMP)
                Console (framebuffer, font, boot screen) · Debug (log, panic, symbols) · Devices/Serial
                Interrupts · Locking · Memory (buddy, physical memory, heap, memory manager)
-               Tasks (Processor, Thread, Scheduler, Process) · Syscalls · FileSystem (boot archive)
+               Tasks (Processor, Thread, Scheduler, Process) · Syscalls · Bus/PCI · Devices (VirtIO, Storage)
+               FileSystem (VFS, vultureFS, FAT, tmpfs, devfs, pipes, boot archive)
                Time (timer queues) · Tests (ktest) · Library (C++ runtime) · Init.cpp
-Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem · LibDeviceTree · LibELF · LibTest
+Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem · LibDeviceTree · LibELF · LibVultureFS · LibTest
                LibCore, LibGfx, LibUI (pranaUI) … later
 Services/      Init (process 1, M4); vlaunchd · logd · PranaWindowServer · Dock …                    (M6+)
 Applications/  Finder · Terminal · TextEdit · Preview · SystemSettings · WidgetGallery …              (M9+)
@@ -208,8 +209,10 @@ macOS-style at the top, real Unix underneath:
   a first touch gets a zeroed page; after `fork` both processes share every
   page, counted per page, and a write to a shared page copies it. User TLB
   entries are tagged with a 16-bit ASID, so switching processes flushes
-  nothing. Programs are static ELF files loaded from the boot archive (the
-  root filesystem until M5); `/sbin/init` is process 1 and adopts orphans.
+  nothing. Programs are static ELF files loaded from the root filesystem;
+  `/sbin/init` is process 1 and adopts orphans. Files can be mapped into
+  memory: a mapping's pages are the file's own cached pages (copied on the
+  first write in a private mapping).
   A fatal signal prints a crash report: the fault, registers and a backtrace
   symbolized from the program's own symbol table.
 - **User memory layout (M4).** Programs at 0x400000, `mmap` from
@@ -223,15 +226,29 @@ macOS-style at the top, real Unix underneath:
   table. Messages carry inline bytes, port rights and out-of-line memory moved
   by page remapping. Request/reply uses direct-handoff scheduling. Pipes, Unix
   sockets, signals, futexes and shared memory sit alongside.
-- **Filesystems.** Vnodes, mount table and path-lookup cache; tmpfs, devfs,
-  FAT32 (for the EFI System Partition), the boot archive, and **vultureFS**:
-  copy-on-write B-trees with checksummed metadata, atomic checkpoints,
-  snapshots, clones, xattrs, POSIX permissions + ACLs, and a container holding
-  System (sealed) and Data volumes. The same code builds for the host as
-  `mkvfs` and `fsck.vfs`.
-- **Drivers (DeviceKit).** IOKit-like C++ driver classes with a registry
-  tree, driver matching, INTx via the device tree's `interrupt-map` first and
-  MSI-X through the GICv3 ITS when available, and DMA buffers.
+- **Filesystems (M5).**
+  - **VFS.** Paths resolve one component at a time across a mount table.
+    Open files are shared by `dup` and `fork`.
+  - **Root: vultureFS.** All metadata lives in one copy-on-write B+tree
+    with CRC-32C-checksummed nodes. Atomic checkpoints alternate between
+    two superblocks, so a crash at any moment leaves the last checkpoint
+    whole; see [vultureFS](VultureFS.md).
+  - **Page cache.** File data is cached in pages, and `read`, `write` and
+    `mmap` share them. A sync thread commits every 5 seconds.
+  - **Other filesystems.** FAT12/16/32 (read-only, for the EFI System
+    Partition at `/Volumes/EFI`); tmpfs at `/tmp`; devfs at `/dev`; pipes.
+    Without a disk, the boot archive is unpacked into a tmpfs root.
+  - **Shared with the host.** The same vultureFS code builds for the host
+    as `mkvfs`, `fsck.vfs` and `mkimage`.
+  - **Later.** Snapshots, clones, xattrs, ACLs and a sealed System volume.
+- **Drivers.**
+  - **PCI (M5).** PCIe through ECAM, with INTx routed via the device
+    tree's `interrupt-map`.
+  - **Disks.** The virtio-pci transport with split virtqueues; virtio-blk
+    and NVMe disks. MBR and GPT partitions appear in `/dev` as `disk0`,
+    `disk0s1`, … as on macOS.
+  - **Later: DeviceKit.** IOKit-like C++ driver classes with a registry
+    tree, driver matching, MSI-X through the GICv3 ITS, and DMA buffers.
 - **Locks.** `SpinLock` is a fair ticket lock that masks interrupts while
   held, so an interrupt handler can never spin on a lock its own processor
   holds. This removes the class of deadlock the Rust kernel had. Taking a

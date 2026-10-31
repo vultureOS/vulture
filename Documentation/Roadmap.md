@@ -16,7 +16,7 @@ See [Architecture](Architecture.md) for the design behind these steps.
 | **M2 Core kernel** | ✅ 2026-10-31 | GICv3, generic timer (tickless), PSCI SMP bring-up and power-off, buddy allocator with per-CPU page caches, slab `kmalloc` with per-CPU magazines, kernel-owned page tables, direct map, MMIO window and guard-paged kernel stacks, IRQ-safe ticket `SpinLock`, per-CPU data (TPIDR_EL1), `ktest` | All 8 vCPUs online; allocator/timer/lock stress `ktest` passes; QEMU exits with a pass marker. Verified by `ninja check` (`test-boot`, `test-kernel`). |
 | **M3 Threads + scheduler** | ✅ 2026-10-31 | Kernel threads with guard-paged stacks, context switch with FP/SIMD, per-CPU run queues with QoS classes, idle-first placement and work stealing, preemption by time slice and by more urgent wakeups, `Mutex`, `Semaphore`, `WaitQueue`, sleep, join; `RefPtr`/`OwnPtr` | 1000 threads ping-pong across 8 CPUs for 60 s with no hang (`ninja test-soak`: 228 million round trips); context-switch benchmark recorded (`ninja bench`: 173 ns) |
 | **M4 Userspace** | ✅ 2026-10-31 | Address spaces (TTBR0 + 16-bit ASIDs), regions and anonymous VMObjects, demand paging, copy-on-write fork, ELF loader, SVC entry, syscall table from one `.def` file, fault-safe user copies (exception table), fork/exec/exit/waitpid, signals with handlers and crash reports, the boot archive (ustar, packed by our `mkarchive`) as the read-only root; LibC v0, LibCxxRT, crt0, `/sbin/init` | `/sbin/init` runs at EL0, forks/execs tests; a user segfault kills only that process and prints a crash report. Verified by `ninja check` (`test-userland`: 14 programs). |
-| **M5 Storage + vultureFS** | Next | VFS, file descriptors, pipes, devfs, tmpfs; PCIe ECAM + virtio core, virtio-blk, NVMe; GPT; FAT32; page cache + `mmap`; vultureFS v1; `Tools/mkvfs`, `fsck.vfs`, `mkimage` | Root on vultureFS persists across reboots; 100 forced kills mid-write always remount clean and pass fsck |
+| **M5 Storage + vultureFS** | ✅ 2026-10-31 | VFS (mount table, path walk across mounts and symbolic links), shared open files, pipes, devfs, tmpfs; PCIe ECAM with INTx routing; virtio-pci transport, virtio-blk and NVMe; MBR and GPT; FAT12/16/32 (read-only, the ESP at `/Volumes/EFI`); a page cache shared by `read`, `write` and `mmap` (private and shared file mappings); **vultureFS v1** (copy-on-write B+tree, CRC-32C metadata, alternating superblocks, crash-safe checkpoints, orphans) as the root; `Tools/mkvfs`, `fsck.vfs`, `mkimage` (GPT + FAT32 ESP + vultureFS) | Root on vultureFS persists across reboots; 100 forced kills mid-write always remount clean and pass fsck. Verified by `ninja check` (`test-persistence`: three boots, each finding what the last committed) and `ninja test-crash` (100 QEMU power cuts at random moments while writing and fsyncing: fsck clean after every cut, every committed file intact) |
 | **M6 Unix userland** | | vlaunchd (JSON plists, on-demand start, restart policy); TTY/PTY + line discipline; text console; **vsh** (pipes, redirects, globs, job control, history, completion, scripts); ~40 CLI tools; users/groups/login; permissions; sysctl; dynamic linker + shared cache; LibCore run loop | Text login, `ls -l /System \| grep Kernel \| wc -l`, Ctrl-Z/`fg`; our POSIX conformance subset passes |
 | **M7 IPC + services** | | Kernel ports with direct handoff; LibIPC + `ipcc` IDL compiler; logd + `log`, notifyd, configd, pasteboard; name lookup via vlaunchd | IPC round trip within budget; `log stream` shows multiple services |
 | **M8 Graphics + PranaWindowServer** | | virtio-gpu 2D + virtio-input; LibGfx (AA path rasterizer, strokes, rounded rects, gradients, blur, transforms, SIMD, tiles); LibText (TrueType/OpenType, glyph atlas, subpixel positioning); LibImage (inflate, PNG, JPEG, `.vicns`); WindowServer (shared-memory surfaces, damage compositing, shadows, vibrancy, input routing, window management, 2x) | 10 client windows with shadows and blur at 60 fps at 2560×1600 while dragging; golden screenshot passes |
@@ -130,3 +130,24 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
     ignored `SIGCHLD` from an adopted orphan interrupted init's `waitpid`.
   - `sigreturn` finds the signal frame through `x19` (callee-saved, so it
     survives the handler) rather than the stack pointer.
+- **M5:**
+  - vultureFS v1 has no journal. Being copy-on-write is enough: nothing
+    the last checkpoint uses is overwritten before the next one commits,
+    which the allocator enforces with two bitmaps (in use now, in use by
+    the last checkpoint).
+  - File data goes to new blocks at write-back. Metadata nodes are given
+    disk locations only when a checkpoint writes them, so a node changed
+    many times between checkpoints is written once.
+  - The crash harness kills QEMU (SIGKILL) mid-write. A simulated disk in
+    the host tests goes further: it loses, reorders and tears unflushed
+    writes. Both must leave a volume that `fsck.vfs` passes and that holds
+    exactly its last committed checkpoint.
+  - Measured under QEMU+HVF with `cache=writeback`, the crash writer
+    commits about 300 iterations a second. Each iteration is two file
+    writes, three fsyncs (each a full checkpoint) and a rename.
+  - Mappings are torn down by the dying process's own thread: ending a
+    file mapping can sleep, and the scheduler's reaper runs with
+    interrupts masked.
+  - Version 1 limits volumes to 28 GiB (224 bitmap blocks named in the
+    superblock). Snapshots, clones, xattrs, ACLs and the sealed System
+    volume come later (M13 seals System).

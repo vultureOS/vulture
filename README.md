@@ -51,6 +51,16 @@ ninja -C build run        # boot in QEMU
 ninja -C build check      # unit tests + headless boot, crash and kernel tests
 ```
 
+- `Meta/run.sh` boots from a persistent vultureFS disk,
+  `build/qemu/disk.img`. Each new build updates the system files on it
+  and leaves your own files. `--fresh-disk` starts it over, and `--nvme`
+  attaches it as NVMe.
+- `ninja -C build image` makes `build/vultureOS.img`, one bootable disk
+  with an EFI System Partition and vultureFS, as a real machine has.
+  `Meta/run.sh --image build/vultureOS.img` boots it.
+- `ninja -C build test-crash` cuts the power 100 times while files are
+  being written. After each cut `fsck.vfs` must pass and nothing committed
+  may be lost.
 - `Meta/run.sh --boot-args -v` boots verbosely.
 - `Meta/run.sh --help` lists the other options, such as software emulation
   (`--tcg`), waiting for a debugger (`--gdb`) and saving a screenshot.
@@ -63,6 +73,7 @@ ninja -C build check      # unit tests + headless boot, crash and kernel tests
 - [Architecture](Documentation/Architecture.md): design, build system, repository layout
 - [Boot Protocol](Documentation/BootProtocol.md): how VultureBoot starts the kernel
 - [System Calls](Documentation/Syscalls.md): the calling convention and the calls
+- [vultureFS](Documentation/VultureFS.md): the filesystem, on disk and in the kernel
 - [Design System](Documentation/DesignSystem.md): the macOS look, and how it is measured and locked
 - [Coding Style](Documentation/CodingStyle.md)
 
