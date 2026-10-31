@@ -13,5 +13,6 @@
 __BEGIN_DECLS
 
 int open(char const* path, int flags, ...);
+int fcntl(int fd, int command, ...);
 
 __END_DECLS

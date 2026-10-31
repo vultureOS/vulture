@@ -138,7 +138,117 @@ off_t lseek(int fd, off_t offset, int origin)
 
 int isatty(int fd)
 {
-    return fd >= 0 && fd <= 2;
+    struct stat information;
+    return fstat(fd, &information) == 0 && S_ISCHR(information.st_mode);
+}
+
+int dup(int fd)
+{
+    return check<int>(call(Syscall::dup, fd));
+}
+
+int dup2(int fd, int new_fd)
+{
+    return check<int>(call(Syscall::dup2, fd, new_fd));
+}
+
+int pipe2(int fds[2], int flags)
+{
+    return check<int>(call(Syscall::pipe, fds, flags));
+}
+
+int pipe(int fds[2])
+{
+    return pipe2(fds, 0);
+}
+
+int fsync(int fd)
+{
+    return check<int>(call(Syscall::fsync, fd));
+}
+
+int ftruncate(int fd, off_t length)
+{
+    return check<int>(call(Syscall::ftruncate, fd, length));
+}
+
+void sync()
+{
+    call(Syscall::sync);
+}
+
+int unlink(char const* path)
+{
+    return check<int>(call(Syscall::unlink, path));
+}
+
+int remove(char const* path)
+{
+    if (unlink(path) == 0)
+        return 0;
+    if (errno == EISDIR)
+        return rmdir(path);
+    return -1;
+}
+
+int rmdir(char const* path)
+{
+    return check<int>(call(Syscall::rmdir, path));
+}
+
+int mkdir(char const* path, mode_t mode)
+{
+    return check<int>(call(Syscall::mkdir, path, mode));
+}
+
+int rename(char const* old_path, char const* new_path)
+{
+    return check<int>(call(Syscall::rename, old_path, new_path));
+}
+
+int chdir(char const* path)
+{
+    return check<int>(call(Syscall::chdir, path));
+}
+
+char* getcwd(char* buffer, size_t size)
+{
+    if (check<long>(call(Syscall::getcwd, buffer, size)) < 0)
+        return nullptr;
+    return buffer;
+}
+
+ssize_t readlink(char const* path, char* buffer, size_t size)
+{
+    return check<ssize_t>(call(Syscall::readlink, path, buffer, size));
+}
+
+int symlink(char const* target, char const* link_path)
+{
+    return check<int>(call(Syscall::symlink, target, link_path));
+}
+
+int access(char const* path, int mode)
+{
+    return check<int>(call(Syscall::access, path, mode));
+}
+
+int fcntl(int fd, int command, ...)
+{
+    va_list arguments;
+    va_start(arguments, command);
+    unsigned long argument = va_arg(arguments, unsigned long);
+    va_end(arguments);
+    return check<int>(call(Syscall::fcntl, fd, command, argument));
+}
+
+int lstat(char const* path, struct stat* result)
+{
+    vulture_stat raw {};
+    if (check<int>(call(Syscall::lstat, path, &raw)) < 0)
+        return -1;
+    to_stat(raw, result);
+    return 0;
 }
 
 int fstat(int fd, struct stat* result)

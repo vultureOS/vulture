@@ -50,5 +50,7 @@ int fileno(FILE*);
 FILE* fopen(char const* path, char const* mode);
 int fclose(FILE*);
 void perror(char const* prefix);
+int rename(char const* old_path, char const* new_path);
+int remove(char const* path);
 
 __END_DECLS

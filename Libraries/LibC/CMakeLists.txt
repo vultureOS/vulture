@@ -9,6 +9,7 @@ add_library(crt0 OBJECT crt0.S)
 
 add_library(LibC STATIC
     ctype.cpp
+    dirent.cpp
     malloc.cpp
     setjmp.S
     signal.cpp

@@ -27,5 +27,7 @@ struct stat {
 
 int fstat(int fd, struct stat*);
 int stat(char const* path, struct stat*);
+int lstat(char const* path, struct stat*);
+int mkdir(char const* path, mode_t mode);
 
 __END_DECLS
