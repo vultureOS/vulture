@@ -8,9 +8,26 @@
 #include <Kernel/FileSystem/FileDescription.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Locking/Mutex.h>
+#include <Kernel/Security/Credentials.h>
 #include <LibBase/Vector.h>
 
 namespace Kernel {
+
+static constexpr int read_access = 4;
+static constexpr int write_access = 2;
+static constexpr int search_access = 1;
+
+// A new file belongs to whoever made it, in the group of its directory if
+// that is set-group-ID (as BSD does), else the maker's.
+static void assign_owner(Inode& created, Inode& directory)
+{
+    auto const* credentials = current_credentials();
+    if (!credentials)
+        return;
+    auto parent = directory.metadata();
+    u32 group = (parent.permissions & 02000) ? parent.gid : credentials->egid;
+    (void)created.set_owner(credentials->euid, group);
+}
 
 static Atomic<u32> s_next_file_system_id { 1 };
 
@@ -141,8 +158,11 @@ ErrorOr<ResolvedPath> VirtualFileSystem::resolve(StringView path, StringView cwd
             continue;
         }
         auto& directory = steps.last().inode;
-        if (!directory->is_directory())
+        auto directory_metadata = directory->metadata();
+        if (directory_metadata.type != InodeType::Directory)
             return Error::from_errno(ENOTDIR);
+        // Going through a directory takes search (execute) permission.
+        TRY(check_access(directory_metadata, search_access));
         auto child = cross_mount(TRY(directory->lookup(name)));
 
         if (child->metadata().type == InodeType::SymbolicLink && (!is_last || follow_last_link)) {
@@ -195,7 +215,9 @@ ErrorOr<NonnullRefPtr<FileDescription>> VirtualFileSystem::open(StringView path,
         if (resolved.error().code() != ENOENT || !(flags & O_CREAT))
             return resolved.release_error();
         auto parent = TRY(resolve_parent(path, cwd));
+        TRY(check_access(parent.directory->metadata(), write_access | search_access));
         auto inode = TRY(parent.directory->create_child(parent.name.view(), InodeType::File, permissions & 07777, {}));
+        assign_owner(*inode, *parent.directory);
         return FileDescription::create(inode, flags);
     }
     if ((flags & O_CREAT) && (flags & O_EXCL))
@@ -208,6 +230,12 @@ ErrorOr<NonnullRefPtr<FileDescription>> VirtualFileSystem::open(StringView path,
         return Error::from_errno(EISDIR);
     if ((flags & O_ACCMODE) != O_RDONLY && inode->file_system().is_read_only() && metadata.type == InodeType::File)
         return Error::from_errno(EROFS);
+    int wanted = 0;
+    if ((flags & O_ACCMODE) != O_WRONLY)
+        wanted |= read_access;
+    if ((flags & O_ACCMODE) != O_RDONLY || (flags & O_TRUNC))
+        wanted |= write_access;
+    TRY(check_access(metadata, wanted));
     if ((flags & O_TRUNC) && (flags & O_ACCMODE) != O_RDONLY && metadata.type == InodeType::File)
         TRY(inode->truncate(0));
     return FileDescription::create(TRY(inode->open_inode(flags)), flags);
@@ -218,7 +246,9 @@ ErrorOr<void> VirtualFileSystem::mkdir(StringView path, StringView cwd, u32 perm
     auto parent = TRY(resolve_parent(path, cwd));
     if (!parent.directory->lookup(parent.name.view()).is_error())
         return Error::from_errno(EEXIST);
-    (void)TRY(parent.directory->create_child(parent.name.view(), InodeType::Directory, permissions & 07777, {}));
+    TRY(check_access(parent.directory->metadata(), write_access | search_access));
+    auto directory = TRY(parent.directory->create_child(parent.name.view(), InodeType::Directory, permissions & 07777, {}));
+    assign_owner(*directory, *parent.directory);
     return {};
 }
 
@@ -226,8 +256,10 @@ ErrorOr<void> VirtualFileSystem::unlink(StringView path, StringView cwd)
 {
     auto parent = TRY(resolve_parent(path, cwd));
     auto inode = TRY(parent.directory->lookup(parent.name.view()));
-    if (inode->is_directory())
+    auto metadata = inode->metadata();
+    if (metadata.type == InodeType::Directory)
         return Error::from_errno(EISDIR);
+    TRY(check_removal(parent.directory->metadata(), metadata));
     return parent.directory->remove_child(parent.name.view());
 }
 
@@ -241,6 +273,7 @@ ErrorOr<void> VirtualFileSystem::rmdir(StringView path, StringView cwd)
         return Error::from_errno(EBUSY); // A mount point.
     if (!TRY(inode->is_empty_directory()))
         return Error::from_errno(ENOTEMPTY);
+    TRY(check_removal(parent.directory->metadata(), inode->metadata()));
     return parent.directory->remove_child(parent.name.view());
 }
 
@@ -249,8 +282,12 @@ ErrorOr<void> VirtualFileSystem::rename(StringView old_path, StringView new_path
     auto old_parent = TRY(resolve_parent(old_path, cwd));
     auto new_parent = TRY(resolve_parent(new_path, cwd));
     if (&old_parent.directory->file_system() != &new_parent.directory->file_system())
-        return Error::from_errno(18); // EXDEV
+        return Error::from_errno(EXDEV);
     auto moving = TRY(old_parent.directory->lookup(old_parent.name.view()));
+    TRY(check_removal(old_parent.directory->metadata(), moving->metadata()));
+    TRY(check_access(new_parent.directory->metadata(), write_access | search_access));
+    if (auto existing = new_parent.directory->lookup(new_parent.name.view()); !existing.is_error())
+        TRY(check_removal(new_parent.directory->metadata(), existing.value()->metadata()));
     // A directory cannot move inside itself.
     if (moving->is_directory()) {
         auto moving_path = TRY(resolve(old_path, cwd, false));
@@ -266,8 +303,24 @@ ErrorOr<void> VirtualFileSystem::symlink(StringView target, StringView link_path
     auto parent = TRY(resolve_parent(link_path, cwd));
     if (!parent.directory->lookup(parent.name.view()).is_error())
         return Error::from_errno(EEXIST);
-    (void)TRY(parent.directory->create_child(parent.name.view(), InodeType::SymbolicLink, 0777, target));
+    TRY(check_access(parent.directory->metadata(), write_access | search_access));
+    auto link = TRY(parent.directory->create_child(parent.name.view(), InodeType::SymbolicLink, 0777, target));
+    assign_owner(*link, *parent.directory);
     return {};
+}
+
+ErrorOr<void> VirtualFileSystem::link(StringView existing_path, StringView new_path, StringView cwd)
+{
+    auto existing = TRY(resolve(existing_path, cwd, false));
+    if (existing.inode->is_directory())
+        return Error::from_errno(EPERM);
+    auto parent = TRY(resolve_parent(new_path, cwd));
+    if (&parent.directory->file_system() != &existing.inode->file_system())
+        return Error::from_errno(EXDEV);
+    if (!parent.directory->lookup(parent.name.view()).is_error())
+        return Error::from_errno(EEXIST);
+    TRY(check_access(parent.directory->metadata(), write_access | search_access));
+    return parent.directory->add_child(parent.name.view(), *existing.inode);
 }
 
 ErrorOr<void> VirtualFileSystem::sync_all()

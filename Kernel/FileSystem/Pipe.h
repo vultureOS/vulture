@@ -31,6 +31,11 @@ public:
     void detach(bool writer);
 
     [[nodiscard]] size_t buffered() const { return m_used.load(); }
+    // For poll(): data or end of file to read; room (or no reader) to write.
+    [[nodiscard]] bool can_read() const { return m_used.load() > 0 || m_writers.load() == 0; }
+    [[nodiscard]] bool can_write() const { return m_used.load() < capacity || m_readers.load() == 0; }
+    [[nodiscard]] bool has_writers() const { return m_writers.load() > 0; }
+    [[nodiscard]] bool has_readers() const { return m_readers.load() > 0; }
 
 private:
     Pipe(u8* buffer);

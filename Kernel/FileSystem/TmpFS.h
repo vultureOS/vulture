@@ -54,6 +54,8 @@ public:
     ErrorOr<void> add_child(StringView name, Inode&) override;
     ErrorOr<size_t> read_link(Bytes) override;
     ErrorOr<void> set_permissions(u32) override;
+    ErrorOr<void> set_owner(u32 uid, u32 gid) override;
+    ErrorOr<void> set_times(i64 access_time, i64 modification_time) override;
 
 private:
     friend class TmpFS;

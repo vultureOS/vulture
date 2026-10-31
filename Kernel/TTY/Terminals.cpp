@@ -7,6 +7,7 @@
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Devices/Serial/PL011.h>
+#include <Kernel/FileSystem/Poll.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/UserAccess.h>
 #include <Kernel/TTY/Terminals.h>
@@ -144,6 +145,7 @@ public:
                 return Error::from_errno(EINTR);
         }
         m_writable.wake_all();
+        notify_pollers();
         TRY(buffer.write(0, { chunk, taken }));
         return taken;
     }
@@ -201,8 +203,10 @@ public:
                 }
             }
             done += copied;
-            if (copied > 0)
+            if (copied > 0) {
                 m_readable.wake_all();
+                notify_pollers();
+            }
             if (done < bytes.size()) {
                 if (from_echo)
                     return;

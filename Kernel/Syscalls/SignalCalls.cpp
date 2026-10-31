@@ -16,6 +16,20 @@ static constexpr u64 bit(int signal)
     return 1ull << signal;
 }
 
+// POSIX: root may signal anyone; others only processes whose real or saved
+// user ID matches their real or effective one. SIGCONT may also go to any
+// process in the same session (job control).
+static bool may_signal(Process const& sender, Process const& target, int signal)
+{
+    auto const& from = sender.credentials();
+    auto const& to = target.credentials();
+    if (from.is_superuser())
+        return true;
+    if (from.uid == to.uid || from.uid == to.saved_uid || from.euid == to.uid || from.euid == to.saved_uid)
+        return true;
+    return signal == SIGCONT && sender.sid() == target.sid();
+}
+
 ErrorOr<FlatPtr> Process::sys_kill(TrapFrame&, SyscallArguments const& arguments)
 {
     auto pid = static_cast<ProcessID>(static_cast<i32>(arguments.values[0]));
@@ -27,14 +41,29 @@ ErrorOr<FlatPtr> Process::sys_kill(TrapFrame&, SyscallArguments const& arguments
     info.si_pid = m_pid;
     if (pid == 0 || pid < -1) {
         // 0: our own group; -pgid: that group.
-        TRY(send_signal_to_group(pid == 0 ? pgid() : -pid, signal, info));
+        ProcessID group = pid == 0 ? pgid() : -pid;
+        bool any = false, permitted = false;
+        for (auto& process : all()) {
+            if (process->pgid() != group || process->is_zombie())
+                continue;
+            any = true;
+            if (!may_signal(*this, *process, signal))
+                continue;
+            permitted = true;
+            if (signal != 0)
+                process->send_signal(signal, info);
+        }
+        if (!any)
+            return Error::from_errno(ESRCH);
+        if (!permitted)
+            return Error::from_errno(EPERM);
         return 0;
     }
     if (pid == -1) {
         // Everyone but init (and kernel threads, which have no process).
         bool any = false;
         for (auto& process : all()) {
-            if (process->pid() == 1 || process->is_zombie())
+            if (process->pid() == 1 || process->is_zombie() || !may_signal(*this, *process, signal))
                 continue;
             any = true;
             if (signal != 0)
@@ -48,6 +77,8 @@ ErrorOr<FlatPtr> Process::sys_kill(TrapFrame&, SyscallArguments const& arguments
     if (!target)
         return Error::from_errno(ESRCH);
     // Signal 0 only asks whether the process exists.
+    if (!may_signal(*this, *target, signal))
+        return Error::from_errno(EPERM);
     if (signal == 0 || target->is_zombie())
         return 0;
     target->send_signal(signal, info);

@@ -60,6 +60,8 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
     child->m_pgid.store(pgid());
     child->m_sid.store(sid());
     child->m_controlling_terminal = m_controlling_terminal;
+    child->m_credentials = m_credentials;
+    child->m_umask = m_umask;
     child->m_address_space = TRY(m_address_space->clone_for_fork());
     {
         SpinLockGuard guard(m_files_lock);

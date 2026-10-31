@@ -6,7 +6,9 @@
 
 #pragma once
 
+#include <Kernel/Tasks/Processor.h>
 #include <Kernel/Tasks/Scheduler.h>
+#include <Kernel/Time/Time.h>
 
 namespace Kernel {
 
@@ -60,6 +62,55 @@ public:
         }
         thread.set_blocked_on(nullptr);
         return satisfied;
+    }
+
+    enum class WaitResult : u8 {
+        Satisfied,
+        Interrupted, // By a signal.
+        TimedOut,
+    };
+
+    // wait_until_interruptible() that also gives up at `deadline` (a
+    // Time::now() value).
+    template<typename Condition>
+    [[nodiscard]] WaitResult wait_until_interruptible(Condition condition, u64 deadline)
+    {
+        auto& thread = Thread::current();
+        thread.set_blocked_on(this);
+        Timer timer;
+        timer.context = this;
+        bool armed = false;
+        WaitResult result;
+        for (;;) {
+            auto state = m_lock.lock();
+            if (condition()) {
+                result = WaitResult::Satisfied;
+                m_lock.unlock(state);
+                break;
+            }
+            if (thread.has_pending_signal()) {
+                result = WaitResult::Interrupted;
+                m_lock.unlock(state);
+                break;
+            }
+            if (Time::now() >= deadline) {
+                result = WaitResult::TimedOut;
+                m_lock.unlock(state);
+                break;
+            }
+            if (!armed) {
+                // Wakes everyone here; the others just look again.
+                Processor::current().timer_queue().add(timer, deadline, [](Timer& expired) {
+                    static_cast<WaitQueue*>(expired.context)->wake_all();
+                });
+                armed = true;
+            }
+            Scheduler::block(&m_waiters, &m_lock, state);
+        }
+        if (armed)
+            timer.cancel();
+        thread.set_blocked_on(nullptr);
+        return result;
     }
 
     void wake_one();

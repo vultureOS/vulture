@@ -43,6 +43,27 @@ FileDescription::~FileDescription()
         m_pipe->detach(m_is_pipe_writer);
 }
 
+bool FileDescription::can_read() const
+{
+    if (m_pipe)
+        return m_pipe->can_read();
+    return m_inode && m_inode->can_read();
+}
+
+bool FileDescription::can_write() const
+{
+    if (m_pipe)
+        return m_pipe->can_write();
+    return m_inode && m_inode->can_write();
+}
+
+bool FileDescription::is_hung_up() const
+{
+    if (m_pipe)
+        return m_is_pipe_writer ? !m_pipe->has_readers() : !m_pipe->has_writers();
+    return false;
+}
+
 void FileDescription::set_status_flags(int flags)
 {
     constexpr int changeable = O_APPEND | O_NONBLOCK;

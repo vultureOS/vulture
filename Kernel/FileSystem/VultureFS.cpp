@@ -162,6 +162,8 @@ public:
     ErrorOr<void> add_child(StringView name, Inode&) override;
     ErrorOr<size_t> read_link(Bytes buffer) override;
     ErrorOr<void> set_permissions(u32 permissions) override;
+    ErrorOr<void> set_owner(u32 uid, u32 gid) override;
+    ErrorOr<void> set_times(i64 access_time, i64 modification_time) override;
     ErrorOr<void> sync() override { return fs().sync(); }
     ErrorOr<PhysicalAddress> mapped_page(u64 index) override;
     void add_shared_writer() override;
@@ -696,6 +698,25 @@ ErrorOr<void> VultureFSInode::set_permissions(u32 permissions)
 {
     MutexLocker locker(fs().lock());
     TRY(fs().volume().set_permissions(index(), permissions));
+    fs().refresh(index());
+    return {};
+}
+
+ErrorOr<void> VultureFSInode::set_owner(u32 uid, u32 gid)
+{
+    MutexLocker locker(fs().lock());
+    TRY(fs().volume().set_owner(index(), uid, gid));
+    fs().refresh(index());
+    return {};
+}
+
+ErrorOr<void> VultureFSInode::set_times(i64 access_time, i64 modification_time)
+{
+    MutexLocker locker(fs().lock());
+    m_record.access_time = access_time;
+    m_record.modification_time = modification_time;
+    TRY(fs().volume().set_times(index(), access_time, modification_time));
+    m_times_dirty = false;
     fs().refresh(index());
     return {};
 }

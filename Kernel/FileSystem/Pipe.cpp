@@ -6,6 +6,7 @@
 
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/FileSystem/Pipe.h>
+#include <Kernel/FileSystem/Poll.h>
 #include <Kernel/Memory/Heap.h>
 #include <Kernel/Tasks/Process.h>
 #include <LibBase/New.h>
@@ -45,7 +46,9 @@ void Pipe::detach(bool writer)
     (writer ? m_writers : m_readers).fetch_sub(1);
     // The other side may be waiting for exactly this.
     m_readable.wake_all();
+    notify_pollers();
     m_writable.wake_all();
+    notify_pollers();
 }
 
 ErrorOr<size_t> Pipe::read(IOBuffer const& buffer, size_t count, bool nonblocking)
@@ -68,6 +71,7 @@ ErrorOr<size_t> Pipe::read(IOBuffer const& buffer, size_t count, bool nonblockin
                 }
                 m_used.fetch_sub(total);
                 m_writable.wake_all();
+                notify_pollers();
                 return total;
             }
             if (m_writers.load() == 0)
@@ -112,6 +116,7 @@ ErrorOr<size_t> Pipe::write(IOBuffer const& buffer, size_t count, bool nonblocki
                 m_used.fetch_add(total);
                 written += total;
                 m_readable.wake_all();
+                notify_pollers();
                 continue;
             }
             if (nonblocking)

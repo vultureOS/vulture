@@ -257,6 +257,8 @@ ErrorOr<void> TmpFSInode::remove_child(StringView name)
         return Error::from_errno(ENOENT);
     if (child->inode->m_metadata.type == InodeType::Directory)
         --m_metadata.link_count;
+    else if (child->inode->m_metadata.link_count > 0)
+        --child->inode->m_metadata.link_count;
     m_children.remove_all_matching([&](auto const& candidate) { return candidate.name == name; });
     m_metadata.modification_time = Time::wall_clock_seconds();
     return {};
@@ -265,13 +267,15 @@ ErrorOr<void> TmpFSInode::remove_child(StringView name)
 ErrorOr<void> TmpFSInode::add_child(StringView name, Inode& inode)
 {
     if (&inode.file_system() != &file_system())
-        return Error::from_errno(18); // EXDEV
+        return Error::from_errno(EXDEV);
     MutexLocker locker(tmpfs().lock());
     if (find_child(name))
         return Error::from_errno(EEXIST);
     auto& tmpfs_inode = static_cast<TmpFSInode&>(inode);
+    if (tmpfs_inode.m_metadata.type == InodeType::Directory)
+        return Error::from_errno(EPERM);
     TRY(m_children.try_append(Child { TRY(String::from_view(name)), tmpfs_inode }));
-    tmpfs_inode.m_parent = this;
+    ++tmpfs_inode.m_metadata.link_count;
     return {};
 }
 
@@ -283,6 +287,23 @@ ErrorOr<size_t> TmpFSInode::read_link(Bytes buffer)
     size_t length = min(buffer.size(), m_link_target.length());
     __builtin_memcpy(buffer.data(), m_link_target.characters(), length);
     return length;
+}
+
+ErrorOr<void> TmpFSInode::set_owner(u32 uid, u32 gid)
+{
+    MutexLocker locker(tmpfs().lock());
+    m_metadata.uid = uid;
+    m_metadata.gid = gid;
+    return {};
+}
+
+ErrorOr<void> TmpFSInode::set_times(i64 access_time, i64 modification_time)
+{
+    MutexLocker locker(tmpfs().lock());
+    m_metadata.access_time_ns = access_time;
+    m_metadata.modification_time_ns = modification_time;
+    m_metadata.modification_time = modification_time / 1'000'000'000;
+    return {};
 }
 
 ErrorOr<void> TmpFSInode::set_permissions(u32 permissions)

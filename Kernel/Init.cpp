@@ -27,6 +27,7 @@
 #include <Kernel/Library/CxxRuntime.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
+#include <Kernel/Security/Random.h>
 #include <Kernel/TTY/Terminals.h>
 #include <Kernel/Tasks/Process.h>
 #include <Kernel/Tasks/Processor.h>
@@ -257,7 +258,10 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     make_directory("/tmp"_sv);
     must("devfs"_sv, VirtualFileSystem::mount(move(devices), "/dev"_sv));
     mount_volumes();
-    must("/tmp"_sv, VirtualFileSystem::mount(must("tmpfs"_sv, TmpFS::create()), "/tmp"_sv));
+    auto temporary = must("tmpfs"_sv, TmpFS::create());
+    // Anyone may make files in /tmp; only their owners may remove them.
+    must("/tmp"_sv, temporary->root_inode()->set_permissions(01777));
+    must("/tmp"_sv, VirtualFileSystem::mount(move(temporary), "/tmp"_sv));
     start_sync_thread();
 
     // The boot screen gives way to the text console, /dev/console's screen.
@@ -389,6 +393,7 @@ extern "C" [[noreturn]] void kernel_main(API::BootInfo const* loader_boot_info)
     dmesgln("Kernel: {} KiB image at {:#x}, symbols {}", boot_info.kernel_image.size / KiB, boot_info.kernel_image.base,
         Symbols::is_available() ? "loaded"_sv : "unavailable"_sv);
     dmesgln("Entropy from firmware: {} bytes", boot_info.entropy_size);
+    initialize_random({ boot_info.entropy, min<size_t>(boot_info.entropy_size, sizeof(boot_info.entropy)) });
     show_progress(20);
 
     initialize_memory(boot_info, framebuffer);

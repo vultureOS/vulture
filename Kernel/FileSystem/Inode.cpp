@@ -171,6 +171,16 @@ ErrorOr<PhysicalAddress> Inode::mapped_page(u64)
     return Error::from_errno(ENODEV);
 }
 
+ErrorOr<void> Inode::set_owner(u32, u32)
+{
+    return Error::from_errno(file_system().is_read_only() ? EROFS : ENOTSUP);
+}
+
+ErrorOr<void> Inode::set_times(i64, i64)
+{
+    return Error::from_errno(file_system().is_read_only() ? EROFS : ENOTSUP);
+}
+
 ErrorOr<NonnullRefPtr<Inode>> Inode::open_inode(int)
 {
     return NonnullRefPtr<Inode>(*this);

@@ -6,11 +6,14 @@
 
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/termios.h>
+#include <Kernel/API/POSIX/time.h>
 #include <Kernel/FileSystem/Pipe.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Memory/UserAccess.h>
+#include <Kernel/Security/Credentials.h>
 #include <Kernel/TTY/TTY.h>
 #include <Kernel/Tasks/Process.h>
+#include <Kernel/Time/Time.h>
 
 namespace Kernel {
 
@@ -23,7 +26,7 @@ ErrorOr<FlatPtr> Process::sys_open(TrapFrame&, SyscallArguments const& arguments
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     int flags = as_int(arguments.values[1]);
-    auto description = TRY(VirtualFileSystem::open(path.view(), m_cwd.view(), flags, static_cast<u32>(arguments.values[2])));
+    auto description = TRY(VirtualFileSystem::open(path.view(), m_cwd.view(), flags, static_cast<u32>(arguments.values[2]) & ~m_umask));
     // A session leader without a terminal gets the first one it opens.
     if (auto* tty = description->inode()->as_tty(); tty && !(flags & O_NOCTTY) && sid() == m_pid && !m_controlling_terminal && tty->session() == 0)
         (void)set_controlling_terminal(*tty);
@@ -165,7 +168,7 @@ ErrorOr<FlatPtr> Process::sys_pipe(TrapFrame&, SyscallArguments const& arguments
 ErrorOr<FlatPtr> Process::sys_mkdir(TrapFrame&, SyscallArguments const& arguments)
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
-    TRY(VirtualFileSystem::mkdir(path.view(), m_cwd.view(), static_cast<u32>(arguments.values[1])));
+    TRY(VirtualFileSystem::mkdir(path.view(), m_cwd.view(), static_cast<u32>(arguments.values[1]) & ~m_umask));
     return 0;
 }
 
@@ -204,8 +207,10 @@ ErrorOr<FlatPtr> Process::sys_chdir(TrapFrame&, SyscallArguments const& argument
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), m_cwd.view()));
-    if (!resolved.inode->is_directory())
+    auto metadata = resolved.inode->metadata();
+    if (metadata.type != InodeType::Directory)
         return Error::from_errno(ENOTDIR);
+    TRY(check_access(metadata, X_OK));
     m_cwd = move(resolved.path);
     return 0;
 }
@@ -296,11 +301,136 @@ ErrorOr<FlatPtr> Process::sys_access(TrapFrame&, SyscallArguments const& argumen
     int mode = as_int(arguments.values[1]);
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), m_cwd.view()));
     auto metadata = resolved.inode->metadata();
-    // No users yet (M6): only the permission bits for "anyone" matter.
-    if ((mode & X_OK) && !(metadata.permissions & 0111))
-        return Error::from_errno(EACCES);
+    TRY(check_access(metadata, mode & (R_OK | W_OK | X_OK)));
     if ((mode & W_OK) && resolved.inode->file_system().is_read_only())
         return Error::from_errno(EROFS);
+    return 0;
+}
+
+// --- Ownership, permissions, links and times ---
+
+static ErrorOr<void> change_permissions(Inode& inode, u32 mode)
+{
+    auto metadata = inode.metadata();
+    TRY(check_owner(metadata));
+    // Only a group member (or root) may keep the set-group-ID bit.
+    auto const* credentials = current_credentials();
+    if (credentials && !credentials->is_superuser() && !credentials->in_group(metadata.gid))
+        mode &= ~02000u;
+    return inode.set_permissions(mode & 07777);
+}
+
+static ErrorOr<void> change_owner(Inode& inode, i64 uid, i64 gid)
+{
+    auto metadata = inode.metadata();
+    auto const* credentials = current_credentials();
+    u32 new_uid = uid < 0 ? metadata.uid : static_cast<u32>(uid);
+    u32 new_gid = gid < 0 ? metadata.gid : static_cast<u32>(gid);
+    if (credentials && !credentials->is_superuser()) {
+        // The owner may only change the group, to one of their own.
+        if (new_uid != metadata.uid || credentials->euid != metadata.uid || !credentials->in_group(new_gid))
+            return Error::from_errno(EPERM);
+    }
+    TRY(inode.set_owner(new_uid, new_gid));
+    // A changed owner loses set-ID bits (they would grant someone else's rights).
+    if ((metadata.permissions & 06000) && (new_uid != metadata.uid || new_gid != metadata.gid))
+        (void)inode.set_permissions(metadata.permissions & ~06000u);
+    return {};
+}
+
+ErrorOr<FlatPtr> Process::sys_chmod(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[0]));
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), m_cwd.view()));
+    TRY(change_permissions(*resolved.inode, static_cast<u32>(arguments.values[1])));
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_fchmod(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto description = TRY(file(as_int(arguments.values[0])));
+    if (!description->inode())
+        return Error::from_errno(EINVAL);
+    TRY(change_permissions(*description->inode(), static_cast<u32>(arguments.values[1])));
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_chown(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[0]));
+    bool follow = !(arguments.values[3] & AT_SYMLINK_NOFOLLOW);
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), m_cwd.view(), follow));
+    TRY(change_owner(*resolved.inode, static_cast<i32>(arguments.values[1]), static_cast<i32>(arguments.values[2])));
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_fchown(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto description = TRY(file(as_int(arguments.values[0])));
+    if (!description->inode())
+        return Error::from_errno(EINVAL);
+    TRY(change_owner(*description->inode(), static_cast<i32>(arguments.values[1]), static_cast<i32>(arguments.values[2])));
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_link(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto existing = TRY(copy_path_from_user(arguments.values[0]));
+    auto created = TRY(copy_path_from_user(arguments.values[1]));
+    TRY(VirtualFileSystem::link(existing.view(), created.view(), m_cwd.view()));
+    return 0;
+}
+
+// Two timespecs (access, modification), UTIME_NOW or UTIME_OMIT allowed;
+// no array means both now.
+static ErrorOr<void> change_times(Inode& inode, FlatPtr times_address)
+{
+    auto metadata = inode.metadata();
+    i64 now = static_cast<i64>(Time::wall_clock_nanoseconds());
+    i64 times[2] = { now, now };
+    bool explicit_times = false;
+    if (times_address) {
+        vulture_timespec given[2];
+        TRY(copy_from_user(given, times_address, sizeof(given)));
+        i64 current[2] = { metadata.access_time_ns ? metadata.access_time_ns : metadata.modification_time * 1'000'000'000,
+            metadata.modification_time_ns ? metadata.modification_time_ns : metadata.modification_time * 1'000'000'000 };
+        for (int i = 0; i < 2; ++i) {
+            if (given[i].tv_nsec == UTIME_OMIT) {
+                times[i] = current[i];
+            } else if (given[i].tv_nsec != UTIME_NOW) {
+                if (given[i].tv_nsec < 0 || given[i].tv_nsec >= 1'000'000'000)
+                    return Error::from_errno(EINVAL);
+                times[i] = given[i].tv_sec * 1'000'000'000 + given[i].tv_nsec;
+                explicit_times = true;
+            }
+        }
+    }
+    // Setting times other than now takes ownership; now takes write access.
+    if (explicit_times)
+        TRY(check_owner(metadata));
+    else if (check_owner(metadata).is_error())
+        TRY(check_access(metadata, W_OK));
+    return inode.set_times(times[0], times[1]);
+}
+
+ErrorOr<FlatPtr> Process::sys_utimensat(TrapFrame&, SyscallArguments const& arguments)
+{
+    // Paths are relative to the working directory (AT_FDCWD) only.
+    if (as_int(arguments.values[0]) != AT_FDCWD)
+        return Error::from_errno(ENOTSUP);
+    auto path = TRY(copy_path_from_user(arguments.values[1]));
+    bool follow = !(arguments.values[3] & AT_SYMLINK_NOFOLLOW);
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), m_cwd.view(), follow));
+    TRY(change_times(*resolved.inode, arguments.values[2]));
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_futimens(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto description = TRY(file(as_int(arguments.values[0])));
+    if (!description->inode())
+        return Error::from_errno(EINVAL);
+    TRY(change_times(*description->inode(), arguments.values[1]));
     return 0;
 }
 

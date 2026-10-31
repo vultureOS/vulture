@@ -105,3 +105,11 @@ struct vulture_stat {
     long st_ctime_nanoseconds;
     long st_birthtime_nanoseconds;
 };
+
+// The *at() calls: a directory descriptor, or this for the working directory.
+#define AT_FDCWD -100
+#define AT_SYMLINK_NOFOLLOW 0x100
+
+// utimensat(): leave a time alone, or set it to now.
+#define UTIME_NOW ((1l << 30) - 1l)
+#define UTIME_OMIT ((1l << 30) - 2l)

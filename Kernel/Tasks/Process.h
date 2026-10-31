@@ -12,6 +12,7 @@
 #include <Kernel/Locking/WaitQueue.h>
 #include <Kernel/Memory/AddressSpace.h>
 #include <Kernel/Memory/KernelBuffer.h>
+#include <Kernel/Security/Credentials.h>
 #include <Kernel/Tasks/Thread.h>
 #include <LibBase/OwnPtr.h>
 #include <LibBase/String.h>
@@ -67,6 +68,8 @@ public:
     ErrorOr<void> set_controlling_terminal(TTY&);
     void lose_controlling_terminal();
     [[nodiscard]] bool is_signal_ignored_or_blocked(int signal) const;
+    [[nodiscard]] Credentials const& credentials() const { return m_credentials; }
+    [[nodiscard]] u32 umask() const { return m_umask; }
 
     // Called when the process's thread is gone (its last reference).
     void thread_finished();
@@ -151,6 +154,8 @@ private:
     vulture_siginfo m_signal_info[NSIG] {};
 
     // Job control.
+    Credentials m_credentials;
+    u32 m_umask { 022 };
     RefPtr<TTY> m_controlling_terminal;
     Atomic<ProcessID> m_pgid { 0 };
     Atomic<ProcessID> m_sid { 0 };

@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/FileSystem/Poll.h>
 #include <Kernel/Memory/UserAccess.h>
 #include <Kernel/TTY/TTY.h>
 #include <Kernel/Tasks/Process.h>
@@ -197,6 +198,7 @@ void TTY::receive(u8 c)
         signal_foreground(signal);
     if (wake)
         m_read_wait.wake_all();
+    notify_pollers();
 }
 
 void TTY::signal_foreground(int signal)
@@ -330,6 +332,7 @@ ErrorOr<FlatPtr> TTY::ioctl(FileDescription&, unsigned request, FlatPtr argument
         }
         if (wake)
             m_read_wait.wake_all();
+        notify_pollers();
         return 0;
     }
     case TCFLSH: {
@@ -432,6 +435,7 @@ void TTY::hang_up()
         m_hung_up = true;
     }
     m_read_wait.wake_all();
+    notify_pollers();
     signal_foreground(SIGHUP);
     signal_foreground(SIGCONT);
 }

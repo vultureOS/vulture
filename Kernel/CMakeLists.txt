@@ -42,6 +42,7 @@ add_executable(Kernel
     FileSystem/IOBuffer.cpp
     FileSystem/Inode.cpp
     FileSystem/Pipe.cpp
+    FileSystem/Poll.cpp
     FileSystem/TmpFS.cpp
     FileSystem/VirtualFileSystem.cpp
     FileSystem/VultureFS.cpp
@@ -58,11 +59,15 @@ add_executable(Kernel
     Memory/MemoryManager.cpp
     Memory/PhysicalMemory.cpp
     Memory/UserAccess.cpp
+    Security/Credentials.cpp
+    Security/Random.cpp
     Syscalls/Dispatch.cpp
     Syscalls/FileCalls.cpp
+    Syscalls/IdentityCalls.cpp
     Syscalls/MemoryCalls.cpp
     Syscalls/ProcessCalls.cpp
     Syscalls/SignalCalls.cpp
+    Syscalls/SystemCalls.cpp
     Syscalls/TimeCalls.cpp
     Tasks/Process.cpp
     Tasks/Processor.cpp

@@ -95,6 +95,9 @@ public:
 
     virtual ErrorOr<size_t> read_link(Bytes buffer);
     virtual ErrorOr<void> set_permissions(u32 permissions);
+    virtual ErrorOr<void> set_owner(u32 uid, u32 gid);
+    // Nanoseconds since 1970.
+    virtual ErrorOr<void> set_times(i64 access_time, i64 modification_time);
     virtual ErrorOr<void> sync();
 
     // Memory mapping (mmap): the page holding page `index` of the file,

@@ -30,6 +30,11 @@ public:
     ErrorOr<void> truncate(u64 size);
     ErrorOr<void> sync();
 
+    // For poll().
+    [[nodiscard]] bool can_read() const;
+    [[nodiscard]] bool can_write() const;
+    [[nodiscard]] bool is_hung_up() const;
+
     [[nodiscard]] int flags() const { return m_flags; }
     void set_status_flags(int flags);
     [[nodiscard]] Inode* inode() const { return m_inode.ptr(); }

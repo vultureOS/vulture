@@ -48,6 +48,7 @@ public:
     static ErrorOr<void> rmdir(StringView path, StringView cwd);
     static ErrorOr<void> rename(StringView old_path, StringView new_path, StringView cwd);
     static ErrorOr<void> symlink(StringView target, StringView link_path, StringView cwd);
+    static ErrorOr<void> link(StringView existing_path, StringView new_path, StringView cwd);
     static ErrorOr<void> sync_all();
 
     template<typename Callback>

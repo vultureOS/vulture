@@ -323,8 +323,9 @@ static ErrorOr<FlatPtr> build_initial_stack(Region& stack, Span<StringView const
 static ErrorOr<NonnullRefPtr<KernelBuffer>> read_executable(Inode& inode)
 {
     auto metadata = inode.metadata();
-    if (metadata.type != InodeType::File || !(metadata.permissions & 0111))
+    if (metadata.type != InodeType::File)
         return Error::from_errno(EACCES);
+    TRY(check_access(metadata, 1));
     constexpr u64 largest = 4 * MiB;
     if (metadata.size > largest)
         return Error::from_errno(E2BIG);
@@ -387,6 +388,16 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     old_space.clear();
 
     m_executable = executable;
+    // Set-user-ID and set-group-ID programs run as the file's owner and group.
+    auto program = resolved.inode->metadata();
+    if (program.permissions & 04000) {
+        m_credentials.euid = program.uid;
+        m_credentials.saved_uid = program.uid;
+    }
+    if (program.permissions & 02000) {
+        m_credentials.egid = program.gid;
+        m_credentials.saved_gid = program.gid;
+    }
     auto slash = path.find_last('/');
     set_name(slash.has_value() ? path.substring_view(slash.value() + 1) : path);
     {

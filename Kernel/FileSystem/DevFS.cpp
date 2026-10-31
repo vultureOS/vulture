@@ -7,10 +7,10 @@
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/FileSystem/DevFS.h>
+#include <Kernel/Security/Random.h>
 #include <Kernel/TTY/TTY.h>
 #include <Kernel/Tasks/Process.h>
 #include <Kernel/Time/Time.h>
-#include <LibBase/FastRandom.h>
 #include <LibBase/New.h>
 
 namespace Kernel {
@@ -163,29 +163,26 @@ class RandomDevice final : public Device {
 public:
     RandomDevice()
         : Device(InodeType::CharacterDevice, 0666, device_number(1, 9))
-        , m_random(Time::now() ^ 0x5eed'cafe'f00d'd00dull)
     {
     }
     ErrorOr<size_t> read(u64, size_t count, IOBuffer const& buffer) override
     {
         size_t done = 0;
         while (done < count) {
-            u64 word;
-            {
-                MutexLocker locker(m_lock);
-                word = m_random.next();
-            }
-            size_t chunk = min(count - done, sizeof(word));
-            TRY(buffer.write(done, { reinterpret_cast<u8 const*>(&word), chunk }));
-            done += chunk;
+            u8 chunk[256];
+            size_t length = min(count - done, sizeof(chunk));
+            get_random_bytes({ chunk, length });
+            TRY(buffer.write(done, { chunk, length }));
+            done += length;
         }
         return done;
     }
-    ErrorOr<size_t> write(u64, size_t count, IOBuffer const&) override { return count; }
-
-private:
-    Mutex m_lock;
-    FastRandom m_random;
+    // Writes add to the pool, as on other systems.
+    ErrorOr<size_t> write(u64, size_t count, IOBuffer const&) override
+    {
+        add_entropy(Time::now() ^ count);
+        return count;
+    }
 };
 
 template<typename T>
