@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Arch/InterruptController.h>
 #include <Kernel/Devices/Serial/PL011.h>
+#include <Kernel/Interrupts/InterruptHandlers.h>
 
 namespace Kernel {
 
@@ -12,8 +14,12 @@ namespace Kernel {
 static constexpr size_t data_register = 0x00 / 4;
 static constexpr size_t flag_register = 0x18 / 4;
 static constexpr size_t interrupt_mask_register = 0x38 / 4;
+static constexpr size_t interrupt_clear_register = 0x44 / 4;
 
+static constexpr u32 receive_fifo_empty = 1 << 4;
 static constexpr u32 transmit_fifo_full = 1 << 5;
+// Receive, and receive timeout (a few bytes waiting, no more coming).
+static constexpr u32 receive_interrupts = (1 << 4) | (1 << 6);
 
 void PL011::initialize(FlatPtr registers)
 {
@@ -29,6 +35,28 @@ void PL011::write(char character)
     while (m_registers[flag_register] & transmit_fifo_full) {
     }
     m_registers[data_register] = static_cast<u8>(character);
+}
+
+void PL011::enable_receive_interrupt(u32 interrupt, Receiver receiver, void* context)
+{
+    if (!m_registers)
+        return;
+    m_receiver = receiver;
+    m_receiver_context = context;
+    register_interrupt_handler(interrupt, [](void* serial) { static_cast<PL011*>(serial)->handle_interrupt(); }, this);
+    m_registers[interrupt_clear_register] = 0x7ff;
+    m_registers[interrupt_mask_register] = receive_interrupts;
+    Arch::enable_interrupt(interrupt);
+}
+
+void PL011::handle_interrupt()
+{
+    while (!(m_registers[flag_register] & receive_fifo_empty)) {
+        u8 byte = static_cast<u8>(m_registers[data_register]);
+        if (m_receiver)
+            m_receiver(m_receiver_context, byte);
+    }
+    m_registers[interrupt_clear_register] = receive_interrupts;
 }
 
 PL011& boot_serial()

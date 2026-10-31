@@ -18,6 +18,7 @@
 
 namespace Kernel {
 
+class TTY;
 using ProcessID = i32;
 
 struct SyscallArguments {
@@ -45,6 +46,8 @@ public:
     [[nodiscard]] static Process* current();
     [[nodiscard]] static RefPtr<Process> from_pid(ProcessID);
     [[nodiscard]] static size_t count();
+    // Every process, living or zombie.
+    [[nodiscard]] static Vector<NonnullRefPtr<Process>> all();
 
     ~Process();
 
@@ -53,6 +56,17 @@ public:
     [[nodiscard]] StringView name() const { return { m_name, m_name_length }; }
     [[nodiscard]] AddressSpace* address_space() { return m_address_space.ptr(); }
     [[nodiscard]] bool is_zombie() const { return m_zombie.load(MemoryOrder::Acquire); }
+    // Job control: the process group and session.
+    [[nodiscard]] ProcessID pgid() const { return m_pgid.load(); }
+    [[nodiscard]] ProcessID sid() const { return m_sid.load(); }
+    [[nodiscard]] bool is_stopped() const { return m_stopped.load(); }
+    // The controlling terminal, if the session has one.
+    [[nodiscard]] TTY* controlling_terminal() const { return m_controlling_terminal.ptr(); }
+    // The session leader takes `tty` (which must not belong to another
+    // session) for the session.
+    ErrorOr<void> set_controlling_terminal(TTY&);
+    void lose_controlling_terminal();
+    [[nodiscard]] bool is_signal_ignored_or_blocked(int signal) const;
 
     // Called when the process's thread is gone (its last reference).
     void thread_finished();
@@ -74,6 +88,9 @@ public:
 
     // From any thread: queues `signal` and interrupts sleeps and waits.
     void send_signal(int signal, vulture_siginfo const&);
+    // To every process in the group; ESRCH if there is none.
+    static ErrorOr<void> send_signal_to_group(ProcessID pgid, int signal, vulture_siginfo const&);
+    [[nodiscard]] static bool group_exists_in_session(ProcessID pgid, ProcessID sid);
 
 private:
     friend class Thread;
@@ -89,6 +106,10 @@ private:
     void report_crash(TrapFrame const&, int signal, vulture_siginfo const&);
     void force_signal(int signal, vulture_siginfo const&);
     void child_state_changed();
+    // Job control: stops until SIGCONT (or SIGKILL); resumes a stopped one.
+    void stop(int signal);
+    void continue_running();
+    void notify_parent(int code, int status);
 
     ErrorOr<int> allocate_fd(NonnullRefPtr<FileDescription>, bool close_on_exec, int lowest = 0);
     ErrorOr<NonnullRefPtr<FileDescription>> file(int fd);
@@ -128,6 +149,16 @@ private:
     u64 m_signal_mask { 0 };
     SignalAction m_signal_actions[NSIG];
     vulture_siginfo m_signal_info[NSIG] {};
+
+    // Job control.
+    RefPtr<TTY> m_controlling_terminal;
+    Atomic<ProcessID> m_pgid { 0 };
+    Atomic<ProcessID> m_sid { 0 };
+    Atomic<bool> m_stopped { false };
+    WaitQueue m_continue_wait;
+    // A stop (its signal) or a continue not yet reported by waitpid().
+    Atomic<int> m_unreported_stop { 0 };
+    Atomic<bool> m_unreported_continue { false };
 
     Atomic<bool> m_exiting { false };
     Atomic<bool> m_zombie { false };

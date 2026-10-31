@@ -10,8 +10,9 @@
 
 namespace Kernel {
 
-// Arm PrimeCell UART (PL011), output only. The firmware has already set the
-// line parameters; this driver only writes characters.
+// Arm PrimeCell UART (PL011). The firmware has already set the line
+// parameters. Output is polled; input comes by interrupt once a receiver
+// is attached.
 class PL011 {
 public:
     void initialize(FlatPtr registers);
@@ -23,8 +24,17 @@ public:
 
     void write(char);
 
+    // Calls `receiver(context, byte)` in interrupt context for each byte
+    // that arrives.
+    using Receiver = void (*)(void* context, u8);
+    void enable_receive_interrupt(u32 interrupt, Receiver, void* context);
+
 private:
+    void handle_interrupt();
+
     u32 volatile* m_registers { nullptr };
+    Receiver m_receiver { nullptr };
+    void* m_receiver_context { nullptr };
 };
 
 PL011& boot_serial();

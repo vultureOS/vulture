@@ -14,7 +14,9 @@
 
 namespace Kernel {
 
+class FileDescription;
 class FileSystem;
+class TTY;
 
 using InodeIndex = u64;
 
@@ -36,6 +38,12 @@ struct InodeMetadata {
     u32 gid { 0 };
     u64 size { 0 };
     i64 modification_time { 0 }; // Seconds since 1970.
+    // Nanoseconds since 1970; 0 where a filesystem does not keep them
+    // (then the modification time stands in).
+    i64 access_time_ns { 0 };
+    i64 modification_time_ns { 0 };
+    i64 change_time_ns { 0 };
+    i64 birth_time_ns { 0 };
     u64 device { 0 }; // For device inodes: which device.
     u32 block_size { 4096 };
 
@@ -97,6 +105,15 @@ public:
     // exists its pages may change at any moment.
     virtual void add_shared_writer() { }
     virtual void remove_shared_writer() { }
+
+    // Device files: what open() really opens (/dev/ptmx makes a new
+    // terminal pair and opens its master end).
+    virtual ErrorOr<NonnullRefPtr<Inode>> open_inode(int flags);
+    virtual ErrorOr<FlatPtr> ioctl(FileDescription&, unsigned request, FlatPtr argument);
+    [[nodiscard]] virtual TTY* as_tty() { return nullptr; }
+    // For poll(): whether a read or a write would not block.
+    [[nodiscard]] virtual bool can_read() const { return true; }
+    [[nodiscard]] virtual bool can_write() const { return true; }
 
     // Whether a directory has no entries besides "." and "..".
     [[nodiscard]] ErrorOr<bool> is_empty_directory();

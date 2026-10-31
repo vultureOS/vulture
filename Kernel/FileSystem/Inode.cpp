@@ -50,6 +50,19 @@ vulture_stat InodeMetadata::to_stat(u32 file_system_id) const
     result.st_blocks = static_cast<long long>((size + 511) / 512);
     result.st_mtime_seconds = modification_time;
     result.st_rdev = device;
+    auto split = [&](i64 nanoseconds, long long& seconds, long& remainder) {
+        if (nanoseconds == 0) {
+            seconds = modification_time;
+            remainder = 0;
+            return;
+        }
+        seconds = nanoseconds / 1'000'000'000;
+        remainder = static_cast<long>(nanoseconds % 1'000'000'000);
+    };
+    split(access_time_ns, result.st_atime_seconds, result.st_atime_nanoseconds);
+    split(modification_time_ns, result.st_mtime_seconds, result.st_mtime_nanoseconds);
+    split(change_time_ns, result.st_ctime_seconds, result.st_ctime_nanoseconds);
+    split(birth_time_ns, result.st_birthtime_seconds, result.st_birthtime_nanoseconds);
     return result;
 }
 
@@ -156,6 +169,16 @@ ErrorOr<bool> Inode::is_empty_directory()
 ErrorOr<PhysicalAddress> Inode::mapped_page(u64)
 {
     return Error::from_errno(ENODEV);
+}
+
+ErrorOr<NonnullRefPtr<Inode>> Inode::open_inode(int)
+{
+    return NonnullRefPtr<Inode>(*this);
+}
+
+ErrorOr<FlatPtr> Inode::ioctl(FileDescription&, unsigned, FlatPtr)
+{
+    return Error::from_errno(ENOTTY);
 }
 
 }

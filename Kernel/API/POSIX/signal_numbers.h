@@ -68,10 +68,14 @@ struct vulture_siginfo {
 };
 
 #define SI_USER 0
+#define SI_KERNEL 0x80
 #define SEGV_MAPERR 1
 #define SEGV_ACCERR 2
 #define CLD_EXITED 1
 #define CLD_KILLED 2
+#define CLD_DUMPED 3
+#define CLD_STOPPED 5
+#define CLD_CONTINUED 6
 
 // Pushed on the user stack when a handler runs; sigreturn restores from it.
 // x19 holds its address when the handler is called (the restorer passes it

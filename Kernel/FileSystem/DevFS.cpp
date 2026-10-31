@@ -7,6 +7,8 @@
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/FileSystem/DevFS.h>
+#include <Kernel/TTY/TTY.h>
+#include <Kernel/Tasks/Process.h>
 #include <Kernel/Time/Time.h>
 #include <LibBase/FastRandom.h>
 #include <LibBase/New.h>
@@ -62,6 +64,12 @@ public:
         return m_entries.try_append(Entry { TRY(String::from_view(name)), move(inode) });
     }
 
+    void remove(StringView name)
+    {
+        MutexLocker locker(m_lock);
+        m_entries.remove_all_matching([&](Entry const& entry) { return entry.name == name; });
+    }
+
 private:
     struct Entry {
         String name;
@@ -102,6 +110,11 @@ ErrorOr<void> DevFS::add_device(StringView name, NonnullRefPtr<Inode> inode)
     return m_root->add(name, move(inode));
 }
 
+void DevFS::remove_device(StringView name)
+{
+    m_root->remove(name);
+}
+
 Device::Device(InodeType type, u32 permissions, u64 device_number)
     : Inode(DevFS::the(), DevFS::the().allocate_index())
     , m_type(type)
@@ -121,11 +134,6 @@ InodeMetadata Device::metadata() const
 }
 
 namespace {
-
-constexpr u64 device_number(u32 major, u32 minor)
-{
-    return (static_cast<u64>(major) << 8) | minor;
-}
 
 class NullDevice final : public Device {
 public:
@@ -180,30 +188,6 @@ private:
     FastRandom m_random;
 };
 
-class ConsoleDevice final : public Device {
-public:
-    ConsoleDevice()
-        : Device(InodeType::CharacterDevice, 0620, device_number(5, 1))
-    {
-    }
-    // No keyboard yet (M6): end of file.
-    ErrorOr<size_t> read(u64, size_t, IOBuffer const&) override { return 0; }
-    ErrorOr<size_t> write(u64, size_t count, IOBuffer const& buffer) override
-    {
-        char chunk[256];
-        size_t done = 0;
-        while (done < count) {
-            size_t length = min(count - done, sizeof(chunk));
-            auto result = buffer.read(done, { reinterpret_cast<u8*>(chunk), length });
-            if (result.is_error())
-                return done > 0 ? ErrorOr<size_t>(done) : ErrorOr<size_t>(result.release_error());
-            kernel_log().write_raw({ chunk, length });
-            done += length;
-        }
-        return done;
-    }
-};
-
 template<typename T>
 ErrorOr<void> add(StringView name)
 {
@@ -215,13 +199,29 @@ ErrorOr<void> add(StringView name)
 
 }
 
+// /dev/tty: whatever terminal controls the opening process's session.
+class ControllingTerminalDevice final : public Device {
+public:
+    ControllingTerminalDevice()
+        : Device(InodeType::CharacterDevice, 0666, device_number(5, 0))
+    {
+    }
+    ErrorOr<NonnullRefPtr<Inode>> open_inode(int) override
+    {
+        auto* process = Process::current();
+        if (!process || !process->controlling_terminal())
+            return Error::from_errno(ENXIO);
+        return NonnullRefPtr<Inode>(*static_cast<Inode*>(process->controlling_terminal()));
+    }
+};
+
 ErrorOr<void> create_basic_devices()
 {
     TRY(add<NullDevice>("null"_sv));
     TRY(add<ZeroDevice>("zero"_sv));
     TRY(add<RandomDevice>("random"_sv));
     TRY(add<RandomDevice>("urandom"_sv));
-    TRY(add<ConsoleDevice>("console"_sv));
+    TRY(add<ControllingTerminalDevice>("tty"_sv));
     return {};
 }
 

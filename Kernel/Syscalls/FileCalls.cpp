@@ -5,9 +5,11 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/API/POSIX/termios.h>
 #include <Kernel/FileSystem/Pipe.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Memory/UserAccess.h>
+#include <Kernel/TTY/TTY.h>
 #include <Kernel/Tasks/Process.h>
 
 namespace Kernel {
@@ -22,7 +24,25 @@ ErrorOr<FlatPtr> Process::sys_open(TrapFrame&, SyscallArguments const& arguments
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     int flags = as_int(arguments.values[1]);
     auto description = TRY(VirtualFileSystem::open(path.view(), m_cwd.view(), flags, static_cast<u32>(arguments.values[2])));
+    // A session leader without a terminal gets the first one it opens.
+    if (auto* tty = description->inode()->as_tty(); tty && !(flags & O_NOCTTY) && sid() == m_pid && !m_controlling_terminal && tty->session() == 0)
+        (void)set_controlling_terminal(*tty);
     return static_cast<FlatPtr>(TRY(allocate_fd(move(description), flags & O_CLOEXEC)));
+}
+
+ErrorOr<FlatPtr> Process::sys_ioctl(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto description = TRY(file(as_int(arguments.values[0])));
+    auto request = static_cast<unsigned>(arguments.values[1]);
+    if (request == FIONBIO) {
+        auto non_blocking = TRY(copy_from_user<int>(arguments.values[2]));
+        description->set_status_flags(non_blocking ? (description->flags() | O_NONBLOCK) : (description->flags() & ~O_NONBLOCK));
+        return 0;
+    }
+    auto* inode = description->inode();
+    if (!inode)
+        return Error::from_errno(ENOTTY);
+    return inode->ioctl(*description, request, arguments.values[2]);
 }
 
 ErrorOr<FlatPtr> Process::sys_close(TrapFrame&, SyscallArguments const& arguments)

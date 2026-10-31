@@ -81,7 +81,9 @@ add_executable(Kernel
     Tests/TestTimer.cpp
     Tests/VectorRegisters.S
     Time/Time.cpp
-    Time/TimerQueue.cpp)
+    Time/TimerQueue.cpp
+    TTY/Terminals.cpp
+    TTY/TTY.cpp)
 
 set_target_properties(Kernel PROPERTIES
     OUTPUT_NAME vulture

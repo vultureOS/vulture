@@ -97,4 +97,11 @@ struct vulture_stat {
     long long st_blocks;
     long long st_mtime_seconds;
     unsigned long long st_rdev;
+    long long st_atime_seconds;
+    long long st_ctime_seconds;
+    long long st_birthtime_seconds;
+    long st_atime_nanoseconds;
+    long st_mtime_nanoseconds;
+    long st_ctime_nanoseconds;
+    long st_birthtime_nanoseconds;
 };

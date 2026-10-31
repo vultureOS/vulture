@@ -22,17 +22,34 @@ ErrorOr<FlatPtr> Process::sys_kill(TrapFrame&, SyscallArguments const& arguments
     int signal = static_cast<int>(arguments.values[1]);
     if (signal < 0 || signal >= NSIG)
         return Error::from_errno(EINVAL);
-    if (pid <= 0)
-        return Error::from_errno(ENOSYS); // Process groups arrive with job control (M6).
+    vulture_siginfo info {};
+    info.si_code = SI_USER;
+    info.si_pid = m_pid;
+    if (pid == 0 || pid < -1) {
+        // 0: our own group; -pgid: that group.
+        TRY(send_signal_to_group(pid == 0 ? pgid() : -pid, signal, info));
+        return 0;
+    }
+    if (pid == -1) {
+        // Everyone but init (and kernel threads, which have no process).
+        bool any = false;
+        for (auto& process : all()) {
+            if (process->pid() == 1 || process->is_zombie())
+                continue;
+            any = true;
+            if (signal != 0)
+                process->send_signal(signal, info);
+        }
+        if (!any)
+            return Error::from_errno(ESRCH);
+        return 0;
+    }
     auto target = from_pid(pid);
     if (!target)
         return Error::from_errno(ESRCH);
     // Signal 0 only asks whether the process exists.
     if (signal == 0 || target->is_zombie())
         return 0;
-    vulture_siginfo info {};
-    info.si_code = SI_USER;
-    info.si_pid = m_pid;
     target->send_signal(signal, info);
     return 0;
 }

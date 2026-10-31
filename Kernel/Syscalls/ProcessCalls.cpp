@@ -12,6 +12,7 @@
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Memory/Heap.h>
 #include <Kernel/Memory/UserAccess.h>
+#include <Kernel/TTY/TTY.h>
 #include <Kernel/Tasks/Process.h>
 #include <LibBase/New.h>
 
@@ -56,6 +57,9 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
     child->set_name(name());
     child->m_executable = m_executable;
     child->m_cwd = m_cwd;
+    child->m_pgid.store(pgid());
+    child->m_sid.store(sid());
+    child->m_controlling_terminal = m_controlling_terminal;
     child->m_address_space = TRY(m_address_space->clone_for_fork());
     {
         SpinLockGuard guard(m_files_lock);
@@ -147,24 +151,48 @@ ErrorOr<FlatPtr> Process::sys_waitpid(TrapFrame&, SyscallArguments const& argume
     auto pid = static_cast<ProcessID>(static_cast<i32>(arguments.values[0]));
     FlatPtr status_address = arguments.values[1];
     int options = static_cast<int>(arguments.values[2]);
-    if (pid == 0 || pid < -1)
+    if (options & ~(WNOHANG | WUNTRACED | WCONTINUED))
         return Error::from_errno(EINVAL);
+    // -1: any child; 0: any in our group; < -1: any in group -pid.
+    auto matches = [&](Process const& child) {
+        if (pid == -1)
+            return true;
+        if (pid == 0)
+            return child.pgid() == pgid();
+        if (pid < 0)
+            return child.pgid() == -pid;
+        return child.pid() == pid;
+    };
 
     for (;;) {
         // Read before looking, so a change after the look is not missed.
         u64 events = m_child_events.load(MemoryOrder::Acquire);
         RefPtr<Process> reaped;
+        ProcessID changed_pid = 0;
+        int changed_status = 0;
         bool has_matching_child = false;
         {
             SpinLockGuard guard(process_tree_lock());
             for (auto& child : m_children) {
-                if (pid != -1 && child.pid() != pid)
+                if (!matches(child))
                     continue;
                 has_matching_child = true;
                 if (child.is_zombie()) {
                     reaped = child;
                     m_children.remove(child);
                     child.unregister_from_table();
+                    break;
+                }
+                if (options & WUNTRACED) {
+                    if (int signal = child.m_unreported_stop.exchange(0)) {
+                        changed_pid = child.pid();
+                        changed_status = VULTURE_W_STOPPED(signal);
+                        break;
+                    }
+                }
+                if ((options & WCONTINUED) && child.m_unreported_continue.exchange(false)) {
+                    changed_pid = child.pid();
+                    changed_status = VULTURE_W_CONTINUED;
                     break;
                 }
             }
@@ -178,6 +206,11 @@ ErrorOr<FlatPtr> Process::sys_waitpid(TrapFrame&, SyscallArguments const& argume
                 TRY(copy_to_user(status_address, status));
             return static_cast<FlatPtr>(reaped_pid);
         }
+        if (changed_pid) {
+            if (status_address)
+                TRY(copy_to_user(status_address, changed_status));
+            return static_cast<FlatPtr>(changed_pid);
+        }
         if (!has_matching_child)
             return Error::from_errno(ECHILD);
         if (options & WNOHANG)
@@ -188,6 +221,66 @@ ErrorOr<FlatPtr> Process::sys_waitpid(TrapFrame&, SyscallArguments const& argume
             return m_child_events.load(MemoryOrder::Acquire) != events;
         });
     }
+}
+
+ErrorOr<FlatPtr> Process::sys_setpgid(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto pid = static_cast<ProcessID>(static_cast<i32>(arguments.values[0]));
+    auto group = static_cast<ProcessID>(static_cast<i32>(arguments.values[1]));
+    if (group < 0)
+        return Error::from_errno(EINVAL);
+    RefPtr<Process> target = this;
+    if (pid != 0 && pid != m_pid) {
+        // Only a child of ours.
+        target = from_pid(pid);
+        if (!target || target->parent_pid() != m_pid)
+            return Error::from_errno(ESRCH);
+        if (target->sid() != sid())
+            return Error::from_errno(EPERM);
+    }
+    if (group == 0)
+        group = target->pid();
+    // A session leader stays where it is.
+    if (target->sid() == target->pid())
+        return Error::from_errno(EPERM);
+    // A new group named after the process, or one that exists in this session.
+    if (group != target->pid() && !group_exists_in_session(group, sid()))
+        return Error::from_errno(EPERM);
+    target->m_pgid.store(group);
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_getpgid(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto pid = static_cast<ProcessID>(static_cast<i32>(arguments.values[0]));
+    if (pid == 0 || pid == m_pid)
+        return static_cast<FlatPtr>(pgid());
+    auto target = from_pid(pid);
+    if (!target)
+        return Error::from_errno(ESRCH);
+    return static_cast<FlatPtr>(target->pgid());
+}
+
+ErrorOr<FlatPtr> Process::sys_setsid(TrapFrame&, SyscallArguments const&)
+{
+    // A group leader cannot: its group would straddle two sessions.
+    if (pgid() == m_pid || group_exists_in_session(m_pid, sid()))
+        return Error::from_errno(EPERM);
+    m_sid.store(m_pid);
+    m_pgid.store(m_pid);
+    lose_controlling_terminal();
+    return static_cast<FlatPtr>(m_pid);
+}
+
+ErrorOr<FlatPtr> Process::sys_getsid(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto pid = static_cast<ProcessID>(static_cast<i32>(arguments.values[0]));
+    if (pid == 0 || pid == m_pid)
+        return static_cast<FlatPtr>(sid());
+    auto target = from_pid(pid);
+    if (!target)
+        return Error::from_errno(ESRCH);
+    return static_cast<FlatPtr>(target->sid());
 }
 
 }

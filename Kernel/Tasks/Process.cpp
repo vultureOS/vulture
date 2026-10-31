@@ -16,6 +16,7 @@
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
 #include <Kernel/Memory/UserAccess.h>
+#include <Kernel/TTY/TTY.h>
 #include <Kernel/Tasks/Process.h>
 #include <Kernel/Tasks/Processor.h>
 #include <Kernel/Tasks/Scheduler.h>
@@ -100,6 +101,17 @@ RefPtr<Process> Process::from_pid(ProcessID pid)
     return nullptr;
 }
 
+Vector<NonnullRefPtr<Process>> Process::all()
+{
+    Vector<NonnullRefPtr<Process>> processes;
+    SpinLockGuard guard(s_tree_lock);
+    for (auto& process : s_processes) {
+        if (processes.try_append(process).is_error())
+            break;
+    }
+    return processes;
+}
+
 size_t Process::count()
 {
     SpinLockGuard guard(s_tree_lock);
@@ -174,6 +186,8 @@ ErrorOr<NonnullRefPtr<Process>> Process::create_init(StringView path, Span<Strin
 {
     VERIFY(!s_init);
     auto process = TRY(create(nullptr));
+    process->m_pgid.store(process->pid());
+    process->m_sid.store(process->pid());
     VERIFY(process->pid() == 1);
     process->set_name("init"_sv);
 
@@ -425,6 +439,7 @@ void Process::terminate(int status)
     for (auto& file : closing)
         file = {};
     m_address_space->remove_all_regions();
+    lose_controlling_terminal();
 
     Process* parent;
     {
@@ -471,11 +486,21 @@ bool Process::has_deliverable_signal() const
 
 static bool is_ignored(SignalAction const& action, int signal);
 
+static constexpr u64 stop_signals = bit(SIGSTOP) | bit(SIGTSTP) | bit(SIGTTIN) | bit(SIGTTOU);
+
 void Process::send_signal(int signal, vulture_siginfo const& info)
 {
     VERIFY(signal > 0 && signal < NSIG);
+    // SIGCONT continues a stopped process even if it is ignored or caught.
+    if (signal == SIGCONT)
+        continue_running();
     {
         SpinLockGuard guard(m_signal_lock);
+        // A stop cancels a pending continue, and a continue pending stops.
+        if (bit(signal) & stop_signals)
+            m_pending_signals.fetch_and(~bit(SIGCONT));
+        if (signal == SIGCONT)
+            m_pending_signals.fetch_and(~stop_signals);
         // An ignored signal is discarded right away: it must not interrupt
         // sleeps or waits (POSIX).
         if (is_ignored(m_signal_actions[signal], signal))
@@ -484,11 +509,118 @@ void Process::send_signal(int signal, vulture_siginfo const& info)
         m_signal_info[signal].si_signo = signal;
         m_pending_signals.fetch_or(bit(signal));
     }
+    if (signal == SIGKILL)
+        m_continue_wait.wake_all();
     if (m_thread) {
         m_thread->interrupt_sleep();
         // A waitpid(), or a wait on a pipe, returns to let the signal through.
         m_thread->interrupt_waits();
     }
+}
+
+ErrorOr<void> Process::send_signal_to_group(ProcessID pgid, int signal, vulture_siginfo const& info)
+{
+    Vector<NonnullRefPtr<Process>> members;
+    {
+        SpinLockGuard guard(s_tree_lock);
+        for (auto& process : s_processes) {
+            if (process.pgid() == pgid && !process.is_zombie())
+                members.append(process);
+        }
+    }
+    if (members.is_empty())
+        return Error::from_errno(ESRCH);
+    if (signal != 0) {
+        for (auto& process : members)
+            process->send_signal(signal, info);
+    }
+    return {};
+}
+
+bool Process::group_exists_in_session(ProcessID pgid, ProcessID sid)
+{
+    SpinLockGuard guard(s_tree_lock);
+    for (auto& process : s_processes) {
+        if (process.pgid() == pgid && process.sid() == sid && !process.is_zombie())
+            return true;
+    }
+    return false;
+}
+
+// Tells the parent (SIGCHLD, and wakes its waitpid) that this process
+// stopped or continued.
+void Process::notify_parent(int code, int status)
+{
+    Process* parent;
+    {
+        SpinLockGuard guard(s_tree_lock);
+        parent = m_parent;
+        if (parent)
+            parent->ref();
+    }
+    if (!parent)
+        return;
+    bool quiet = false;
+    {
+        SpinLockGuard guard(parent->m_signal_lock);
+        quiet = code == CLD_STOPPED && (parent->m_signal_actions[SIGCHLD].flags & SA_NOCLDSTOP);
+    }
+    if (!quiet) {
+        vulture_siginfo info {};
+        info.si_signo = SIGCHLD;
+        info.si_code = code;
+        info.si_pid = m_pid;
+        info.si_status = status;
+        parent->send_signal(SIGCHLD, info);
+    }
+    parent->child_state_changed();
+    parent->unref();
+}
+
+bool Process::is_signal_ignored_or_blocked(int signal) const
+{
+    SpinLockGuard guard(m_signal_lock);
+    return (m_signal_mask & bit(signal)) || m_signal_actions[signal].handler == VULTURE_SIG_IGN;
+}
+
+ErrorOr<void> Process::set_controlling_terminal(TTY& tty)
+{
+    if (m_sid.load() != m_pid || m_controlling_terminal)
+        return Error::from_errno(EPERM);
+    if (tty.session() != 0 && tty.session() != m_pid)
+        return Error::from_errno(EPERM);
+    tty.set_session(m_pid, pgid());
+    m_controlling_terminal = tty;
+    return {};
+}
+
+void Process::lose_controlling_terminal()
+{
+    if (auto tty = move(m_controlling_terminal); tty && m_sid.load() == m_pid)
+        tty->release_session(m_pid);
+}
+
+void Process::continue_running()
+{
+    if (!m_stopped.exchange(false))
+        return;
+    m_unreported_stop.store(0);
+    m_unreported_continue.store(true);
+    m_continue_wait.wake_all();
+    notify_parent(CLD_CONTINUED, SIGCONT);
+}
+
+void Process::stop(int signal)
+{
+    m_unreported_continue.store(false);
+    m_unreported_stop.store(signal);
+    m_stopped.store(true);
+    notify_parent(CLD_STOPPED, signal);
+    // Until SIGCONT (continue_running) or SIGKILL.
+    m_continue_wait.wait_until([&] {
+        return !m_stopped.load() || (m_pending_signals.load() & bit(SIGKILL));
+    });
+    m_stopped.store(false);
 }
 
 void Process::force_signal(int signal, vulture_siginfo const& info)
@@ -507,6 +639,7 @@ enum class DefaultAction : u8 {
     Terminate,
     CrashReport, // Terminate, with a report.
     Ignore,
+    Stop,
 };
 
 static DefaultAction default_action(int signal)
@@ -525,6 +658,11 @@ static DefaultAction default_action(int signal)
     case SIGURG:
     case SIGWINCH:
         return DefaultAction::Ignore;
+    case SIGSTOP:
+    case SIGTSTP:
+    case SIGTTIN:
+    case SIGTTOU:
+        return DefaultAction::Stop;
     default:
         return DefaultAction::Terminate;
     }
@@ -558,6 +696,10 @@ void Process::dispatch_signal(TrapFrame& frame)
         auto what = default_action(signal);
         if (what == DefaultAction::Ignore)
             return;
+        if (what == DefaultAction::Stop) {
+            stop(signal);
+            return;
+        }
         if (what == DefaultAction::CrashReport)
             report_crash(frame, signal, info);
         terminate(VULTURE_W_SIGNALED(signal, what == DefaultAction::CrashReport));

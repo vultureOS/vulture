@@ -210,7 +210,7 @@ ErrorOr<NonnullRefPtr<FileDescription>> VirtualFileSystem::open(StringView path,
         return Error::from_errno(EROFS);
     if ((flags & O_TRUNC) && (flags & O_ACCMODE) != O_RDONLY && metadata.type == InodeType::File)
         TRY(inode->truncate(0));
-    return FileDescription::create(inode, flags);
+    return FileDescription::create(TRY(inode->open_inode(flags)), flags);
 }
 
 ErrorOr<void> VirtualFileSystem::mkdir(StringView path, StringView cwd, u32 permissions)

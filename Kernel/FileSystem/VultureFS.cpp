@@ -322,6 +322,10 @@ InodeMetadata VultureFSInode::metadata_locked() const
     metadata.gid = m_record.gid;
     metadata.size = m_record.size;
     metadata.modification_time = m_record.modification_time / 1'000'000'000;
+    metadata.access_time_ns = m_record.access_time;
+    metadata.modification_time_ns = m_record.modification_time;
+    metadata.change_time_ns = m_record.change_time;
+    metadata.birth_time_ns = m_record.birth_time;
     metadata.block_size = VultureFS::block_size;
     return metadata;
 }

@@ -27,6 +27,7 @@
 #include <Kernel/Library/CxxRuntime.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
+#include <Kernel/TTY/Terminals.h>
 #include <Kernel/Tasks/Process.h>
 #include <Kernel/Tasks/Processor.h>
 #include <Kernel/Tasks/Scheduler.h>
@@ -246,6 +247,7 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     // devfs comes first: disks add themselves to it as they are found.
     auto devices = must("devfs"_sv, DevFS::create());
     must("devices"_sv, create_basic_devices());
+    must("terminals"_sv, create_terminals());
     initialize_storage();
     if (!mount_root_file_system(boot_info)) {
         dmesgln("Userland: no root disk and no boot archive, so no init");
@@ -257,6 +259,14 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     mount_volumes();
     must("/tmp"_sv, VirtualFileSystem::mount(must("tmpfs"_sv, TmpFS::create()), "/tmp"_sv));
     start_sync_thread();
+
+    // The boot screen gives way to the text console, /dev/console's screen.
+    auto& framebuffer = boot_framebuffer();
+    auto& console = boot_text_console();
+    if (framebuffer.is_present() && !console.is_ready()) {
+        console.initialize(framebuffer);
+        kernel_log().attach_console(&console);
+    }
 
     // Boot flags that make init run tests: "utest" the userland tests,
     // "crashtest" and "persisttest" the storage tests.
