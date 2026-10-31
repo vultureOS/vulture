@@ -64,11 +64,21 @@ ExternalProject over the same source tree and adds these targets:
 | `ninja -C build test-host` | Runs host unit tests through CTest |
 | `ninja -C build test-boot` | Boots headless; the kernel must print its memory map and finish booting |
 | `ninja -C build test-panic` | Boots with `fault=data-abort`; the panic report must decode the fault and symbolize the backtrace |
+| `ninja -C build test-kernel` | Boots with `ktest`: the in-kernel tests run on all processors, print `ktest: PASS`, and power the machine off |
 | `ninja -C build check` | All of the above tests |
 
 `Meta/run.sh` also takes `--boot-args` (the kernel command line, for example
 `-v` for a verbose boot) and, with `--headless`, `--screenshot FILE` to save
-the screen as PNG. Kernel code that does not touch hardware (such as
+the screen as PNG and `--wait-for-exit` to require that the guest powers
+itself off.
+
+Kernel command line words:
+
+| Word | Effect |
+|---|---|
+| `-v` | Verbose boot: the kernel log on screen instead of the boot screen |
+| `ktest`, `ktest=PREFIX` | Run the in-kernel tests (those whose `suite.name` starts with PREFIX), then power off |
+| `fault=KIND` | End the boot with a deliberate crash: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (in a timer interrupt) or `processor` (on processor 1) | Kernel code that does not touch hardware (such as
 `Kernel/BootArguments.cpp`) is compiled into host tests too; see
 `Tests/Kernel`.
 
@@ -102,9 +112,10 @@ as a stub.
 Meta/          build system (CMake parts, toolchains), run.sh, CI
 Tools/         host C++ tools: ipcc, mkimage, mkvfs, fsck.vfs, symbolize, imgdiff, generators      (M1+)
 Boot/          VultureBoot UEFI loader: Arch/aarch64 (page tables, handoff), UEFI definitions
-Kernel/        API (BootInfo) · Arch (CPU interface; aarch64: entry, vectors, page table format)
-               Console (framebuffer, font, boot screen) · Debug (log, panic, symbols)
-               Devices/Serial · Library (C++ runtime) · Init.cpp; Memory, Tasks, IPC … land from M2
+Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page tables, GICv3, timer, PSCI, SMP)
+               Console (framebuffer, font, boot screen) · Debug (log, panic, symbols) · Devices/Serial
+               Interrupts · Locking · Memory (buddy, physical memory, heap, memory manager)
+               Tasks (Processor) · Time (timer queues) · Tests (ktest) · Library (C++ runtime) · Init.cpp
 Libraries/     LibBase · LibDeviceTree · LibELF · LibTest; LibC, LibCore, LibGfx, LibUI (pranaUI) … later
 Services/      vlaunchd · logd · PranaWindowServer · AudioServer · Indexer · SystemUI · Dock …        (M6+)
 Applications/  Finder · Terminal · TextEdit · Preview · SystemSettings · WidgetGallery …              (M9+)
@@ -127,15 +138,36 @@ macOS-style at the top, real Unix underneath:
 
 - **Boot.** VultureBoot hands the kernel a versioned `BootInfo`; see [Boot Protocol](BootProtocol.md).
 - **Arch boundary.** Generic kernel code includes only `Kernel/Arch/*.h`
-  (`CPU.h`, `TrapFrame.h`); each architecture implements them in
-  `Kernel/Arch/<arch>/`.
+  (`CPU.h`, `TrapFrame.h`, `PageTable.h`, `MemoryLayout.h`,
+  `InterruptController.h`, `Timer.h`, `Power.h`, `SMP.h`); each architecture
+  implements them in `Kernel/Arch/<arch>/`.
+- **Address space (M2).** The kernel builds its own tables at boot, replacing
+  the loader's, then reclaims the loader's memory. Kernel half on AArch64:
+
+  | Range | Contents |
+  |---|---|
+  | `0xffff'0000'0000'0000` | Direct map of all RAM (128 TiB window), 1 GiB/2 MiB blocks where possible |
+  | `0xffff'8000'0000'0000` | MMIO window: device mappings, an unmapped page after each |
+  | `0xffff'8100'0000'0000` | Kernel stacks: 64 KiB each at the top of a 128 KiB slot; the rest is a guard |
+  | `0xffff'ffff'8000'0000` | Kernel image: code read-execute, constants read-only, data read-write |
+- **Processors (M2).** Every CPU has a `Processor` object, reached through
+  TPIDR_EL1, holding its page cache, heap magazines and timer queue.
+  Secondary processors start through PSCI `CPU_ON` into `secondary_entry`,
+  which turns the MMU on under a temporary identity map. An idle processor
+  sleeps in WFI and runs work handed to it by `Processor::run_on_all`.
+- **Interrupts and time (M2).** GICv3: SGIs are IPIs, PPIs per-processor
+  interrupts, SPIs devices, all at one priority so handlers never nest. Each
+  processor has a deadline-ordered timer queue driving the virtual timer
+  one-shot for the earliest deadline only; there is no periodic tick.
 - **Crash reports (M1).** Every exception lands in `handle_exception`. A
   panic switches the screen to a text console and prints the decoded fault,
   the registers and a backtrace. The backtrace follows frame pointers (kept in
   every function) and is symbolized from the kernel's own ELF file, with C++
   names demangled by LibELF.
-- **Memory.** Buddy page allocator with per-CPU page caches, size-class slab
-  `kmalloc`, VMObjects (anonymous, file-backed, MMIO, shared), demand paging,
+- **Memory.** Buddy page allocator (M2: zones of contiguous RAM, 2 bytes
+  of state per page, free lists inside free memory) with per-CPU page
+  caches; slab `kmalloc` (M2: 16-2048 byte classes in 16 KiB slabs, per-CPU
+  magazines; larger sizes take whole blocks); VMObjects (anonymous, file-backed, MMIO, shared), demand paging,
   copy-on-write `fork`, one page cache shared by `read` and `mmap`, ASIDs,
   guard pages on kernel stacks.
 - **Scheduling.** Processes and threads; per-CPU run queues with work
@@ -158,10 +190,15 @@ macOS-style at the top, real Unix underneath:
 - **Drivers (DeviceKit).** IOKit-like C++ driver classes with a registry
   tree, driver matching, INTx via the device tree's `interrupt-map` first and
   MSI-X through the GICv3 ITS when available, and DMA buffers.
-- **Locks.** Spinlocks taken in interrupt context disable interrupts, by
-  design. This removes the class of deadlock the Rust kernel had.
-- **Debugging.** Serial log, embedded symbol table, symbolized backtraces,
-  `VERIFY`, QEMU's GDB stub (`Meta/run.sh --gdb`), and a `ktest` boot mode.
+- **Locks.** `SpinLock` is a fair ticket lock that masks interrupts while
+  held, so an interrupt handler can never spin on a lock its own processor
+  holds. This removes the class of deadlock the Rust kernel had. Taking a
+  lock twice, or waiting on one for 5 s, panics. Sleeping locks come with
+  threads (M3).
+- **Debugging.** Serial log, embedded symbol table, symbolized backtraces
+  (continuing through exceptions via a frame record in each trap frame),
+  `VERIFY`, QEMU's GDB stub (`Meta/run.sh --gdb`), and the `ktest` boot mode.
+  A panic stops the other processors and bypasses the log lock.
 
 ## What became of the Rust kernel
 

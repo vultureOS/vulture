@@ -79,6 +79,11 @@ Firmware types map as follows:
 
 The map is sorted by address, with adjacent regions of the same type merged.
 
+The kernel copies `BootInfo`, the memory map and the device tree early on,
+switches to page tables of its own, and then hands every `LoaderReclaimable`
+region to its page allocator. Nothing the loader allocated with that type
+may be needed after the handoff.
+
 ### Page tables (4 KiB granule, 48-bit addresses)
 
 | Range | Maps | Attributes |
@@ -147,4 +152,5 @@ it. Addresses are physical unless named otherwise.
 | Argument | Effect |
 |---|---|
 | `-v` | Verbose boot: the kernel log on screen instead of the boot screen |
-| `fault=data-abort`, `fault=trap`, `fault=verify`, `fault=panic` | End the boot with a deliberate failure, to test crash reporting |
+| `ktest`, `ktest=PREFIX` | Run the in-kernel tests (all, or those whose `suite.name` starts with PREFIX), print `ktest: PASS` or `ktest: FAIL`, and power off |
+| `fault=KIND` | End the boot with a deliberate failure, to test crash reporting: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (a panic in a timer interrupt) or `processor` (a panic on processor 1) |

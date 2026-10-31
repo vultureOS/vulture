@@ -13,8 +13,8 @@ See [Architecture](Architecture.md) for the design behind these steps.
 |---|---|---|---|
 | **M0 Clean slate** | ✅ 2026-10-31 | Rust tree archived (tag `v0.1-rust`, branch `legacy/rust`); CMake/Ninja superbuild with host, UEFI and target parts; `Meta/run.sh`; LibBase core (types, `Span`, `Optional`, `ErrorOr`/`TRY`, `StringView`, checked `format`) + LibTest; VultureBoot v0 | QEMU+HVF shows "VultureBoot" on screen and serial; `ninja test-host` passes. Verified by `ninja check`. |
 | **M1 Boot + early kernel** | ✅ 2026-10-31 | VultureBoot loads the kernel ELF (and boot archive, once one exists), the boot-args, framebuffer, memory map and DTB, builds the first page tables and hands over; higher-half kernel; global constructors; framebuffer console (built-in 8x16 font) and boot screen (logo, progress bar); PL011 serial; exception vectors; symbolized, demangled panic backtraces; LibELF and LibDeviceTree | Kernel prints the memory map, draws the boot logo; a deliberate fault shows a symbolized backtrace. Verified by `ninja check` (`test-boot`, `test-panic`). |
-| **M2 Core kernel** | Next | GICv3, generic timer (tickless), PSCI SMP bring-up and power-off, buddy allocator + slab `kmalloc`, kernel-owned page tables and direct map, IRQ-safe `SpinLock` vs sleeping `Mutex`, per-CPU data (TPIDR_EL1), `ktest` | All 8 vCPUs online; allocator/timer/lock stress `ktest` passes; QEMU exits with a pass marker |
-| **M3 Threads + scheduler** | | Threads, kernel stacks, context switch with FP/SIMD, per-CPU queues + work stealing, QoS, wait queues, mutex/semaphore, sleep | 1000 threads ping-pong across 8 CPUs for 60 s with no hang; context-switch benchmark recorded |
+| **M2 Core kernel** | ✅ 2026-10-31 | GICv3, generic timer (tickless), PSCI SMP bring-up and power-off, buddy allocator with per-CPU page caches, slab `kmalloc` with per-CPU magazines, kernel-owned page tables, direct map, MMIO window and guard-paged kernel stacks, IRQ-safe ticket `SpinLock`, per-CPU data (TPIDR_EL1), `ktest` | All 8 vCPUs online; allocator/timer/lock stress `ktest` passes; QEMU exits with a pass marker. Verified by `ninja check` (`test-boot`, `test-kernel`). |
+| **M3 Threads + scheduler** | Next | Threads, kernel stacks, context switch with FP/SIMD, per-CPU queues + work stealing, QoS, wait queues, mutex/semaphore, sleep | 1000 threads ping-pong across 8 CPUs for 60 s with no hang; context-switch benchmark recorded |
 | **M4 Userspace** | | Address spaces (TTBR0+ASID), regions/VMObjects, demand paging, CoW, ELF loader, SVC entry, generated syscall table, fault-safe user copies, fork/exec/exit/wait, signals, boot archive as root; LibC v0, LibCxxRT, crt0 | `/sbin/init` runs at EL0, forks/execs tests; a user segfault kills only that process and prints a crash report |
 | **M5 Storage + vultureFS** | | VFS, file descriptors, pipes, devfs, tmpfs; PCIe ECAM + virtio core, virtio-blk, NVMe; GPT; FAT32; page cache + `mmap`; vultureFS v1; `Tools/mkvfs`, `fsck.vfs`, `mkimage` | Root on vultureFS persists across reboots; 100 forced kills mid-write always remount clean and pass fsck |
 | **M6 Unix userland** | | vlaunchd (JSON plists, on-demand start, restart policy); TTY/PTY + line discipline; text console; **vsh** (pipes, redirects, globs, job control, history, completion, scripts); ~40 CLI tools; users/groups/login; permissions; sysctl; dynamic linker + shared cache; LibCore run loop | Text login, `ls -l /System \| grep Kernel \| wc -l`, Ctrl-Z/`fg`; our POSIX conformance subset passes |
@@ -80,3 +80,20 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
     virtualization.
   - Under HVF the CPU reports Apple as implementer but hides the part number.
   - From handoff to "boot complete" takes about 12 ms.
+- **M2:**
+  - The sleeping `Mutex` moved to M3: sleeping needs threads and wait
+    queues, which arrive there. M2 has the IRQ-safe `SpinLock`.
+  - From handoff to "boot complete", with all 8 processors online, takes
+    about 25 ms; starting the 7 secondary processors takes under 1 ms.
+  - Waking an idle processor (in WFI) with an IPI costs 20-35 µs under HVF:
+    the host has to wake the vCPU thread. One `run_on_all` round to 7 idle
+    processors takes 130-260 µs. M3's scheduler should spin briefly before
+    WFI and avoid IPIs on hot paths.
+  - The buddy allocator keeps its free lists inside free memory. Under a
+    hypervisor, the first write to a guest page makes the host commit it, so
+    allocating all of memory once (the `exhaust_and_recover` test) commits
+    all of the guest's RAM on the host until QEMU exits, and takes ~1.7 s.
+  - The GIC's distributor needs affinity routing enabled before its groups;
+    with QEMU's GICv3 (single security state) `GICD_CTLR.DS` reads as 1.
+  - A tickless kernel cannot wait with a bare WFI: with no periodic tick,
+    nothing may ever wake it. Every timed wait arms its own timer.

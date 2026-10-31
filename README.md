@@ -5,14 +5,18 @@ Everything inside it is built from scratch in this repository: bootloader,
 kernel, C library, graphics, fonts rasterizer, UI framework, window server,
 desktop and apps.
 
-**Status:** milestone M1 is done.
+**Status:** milestone M2 is done.
 
 - VultureBoot, our own UEFI loader, loads the kernel on AArch64 and hands it
   the machine: memory map, framebuffer, device tree and serial port.
 - The kernel boots to a macOS-style boot screen, or a verbose log with `-v`.
-- Crashes produce a symbolized backtrace.
+- It runs on its own page tables with buddy and slab allocators, takes
+  interrupts through the GICv3, keeps time without a periodic tick, and
+  brings all 8 processors online.
+- Crashes produce a symbolized backtrace; booting with `ktest` runs the
+  in-kernel test suite.
 
-Next is M2, the core kernel. See the [Roadmap](Documentation/Roadmap.md).
+Next is M3, threads and the scheduler. See the [Roadmap](Documentation/Roadmap.md).
 
 ## Requirements
 
@@ -29,7 +33,7 @@ brew install llvm@22 lld@22 cmake ninja qemu
 cmake -G Ninja -S . -B build
 ninja -C build            # build everything
 ninja -C build run        # boot in QEMU
-ninja -C build check      # unit tests + headless boot and crash tests
+ninja -C build check      # unit tests + headless boot, crash and kernel tests
 ```
 
 - `Meta/run.sh --boot-args -v` boots verbosely.
