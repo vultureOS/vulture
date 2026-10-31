@@ -101,6 +101,10 @@ Optional<Symbol> Image::find_symbol(u64 address) const
         u8 type = elf64_st_type(symbol.st_info);
         if ((type != STT_FUNC && type != STT_NOTYPE) || symbol.st_name == 0 || symbol.st_value > address)
             continue;
+        // "$x" and "$d" mark where code and data start (AArch64 mapping
+        // symbols); they are not names worth reporting.
+        if (symbol_name(symbol).starts_with("$"_sv))
+            continue;
         if (type == STT_FUNC && address - symbol.st_value < symbol.st_size) {
             containing = &symbol;
             break;
