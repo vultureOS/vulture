@@ -1,0 +1,40 @@
+/*
+ * Copyright (c) 2022-2026, Krisna Pranav
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+/*
+ * The system call table, defined once. The kernel builds its dispatcher and
+ * LibSystem its numbers from this list: SYSCALL(name, argument count).
+ * Numbers are positions in the list, so only ever append.
+ *
+ * Calling convention (AArch64): SVC #0 with the number in x8 and arguments
+ * in x0-x5; the result comes back in x0, a negative errno on failure.
+ */
+
+SYSCALL(exit, 1)
+SYSCALL(write, 3)
+SYSCALL(read, 3)
+SYSCALL(open, 3)
+SYSCALL(close, 1)
+SYSCALL(lseek, 3)
+SYSCALL(fstat, 2)
+SYSCALL(getpid, 0)
+SYSCALL(getppid, 0)
+SYSCALL(gettid, 0)
+SYSCALL(fork, 0)
+SYSCALL(execve, 3)
+SYSCALL(waitpid, 3)
+SYSCALL(kill, 2)
+SYSCALL(sigaction, 3)
+SYSCALL(sigprocmask, 3)
+SYSCALL(sigreturn, 0)
+SYSCALL(mmap, 6)
+SYSCALL(munmap, 2)
+SYSCALL(mprotect, 3)
+SYSCALL(sched_yield, 0)
+SYSCALL(clock_gettime, 2)
+SYSCALL(nanosleep, 2)
+SYSCALL(power_off, 0)
+SYSCALL(stat, 2)
