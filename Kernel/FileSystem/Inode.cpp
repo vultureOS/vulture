@@ -153,4 +153,9 @@ ErrorOr<bool> Inode::is_empty_directory()
     return counter.empty;
 }
 
+ErrorOr<PhysicalAddress> Inode::mapped_page(u64)
+{
+    return Error::from_errno(ENODEV);
+}
+
 }

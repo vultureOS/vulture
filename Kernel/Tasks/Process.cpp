@@ -424,6 +424,7 @@ void Process::terminate(int status)
     }
     for (auto& file : closing)
         file = {};
+    m_address_space->remove_all_regions();
 
     Process* parent;
     {

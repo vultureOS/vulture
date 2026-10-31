@@ -109,6 +109,15 @@ ErrorOr<PhysicalAddress> TmpFSInode::page_at(u64 offset, bool allocate)
     return m_pages[index];
 }
 
+ErrorOr<PhysicalAddress> TmpFSInode::mapped_page(u64 index)
+{
+    if (m_metadata.type != InodeType::File)
+        return Error::from_errno(ENODEV);
+    MutexLocker locker(tmpfs().lock());
+    // tmpfs pages are the file: a mapping shares them as they are.
+    return page_at(index * page_size, true);
+}
+
 ErrorOr<size_t> TmpFSInode::read(u64 offset, size_t count, IOBuffer const& buffer)
 {
     if (m_metadata.type == InodeType::Directory)

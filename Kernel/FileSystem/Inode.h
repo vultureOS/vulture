@@ -8,6 +8,7 @@
 
 #include <Kernel/API/POSIX/files.h>
 #include <Kernel/FileSystem/IOBuffer.h>
+#include <Kernel/Memory/PhysicalAddress.h>
 #include <LibBase/RefPtr.h>
 #include <LibBase/StringView.h>
 
@@ -87,6 +88,15 @@ public:
     virtual ErrorOr<size_t> read_link(Bytes buffer);
     virtual ErrorOr<void> set_permissions(u32 permissions);
     virtual ErrorOr<void> sync();
+
+    // Memory mapping (mmap): the page holding page `index` of the file,
+    // with a reference for the caller. Mappings of a file share these
+    // pages with read() and write().
+    virtual ErrorOr<PhysicalAddress> mapped_page(u64 index);
+    // A shared, writable mapping of the file begins or ends; while one
+    // exists its pages may change at any moment.
+    virtual void add_shared_writer() { }
+    virtual void remove_shared_writer() { }
 
     // Whether a directory has no entries besides "." and "..".
     [[nodiscard]] ErrorOr<bool> is_empty_directory();

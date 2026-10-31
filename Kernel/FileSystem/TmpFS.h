@@ -47,6 +47,7 @@ public:
     ErrorOr<size_t> write(u64 offset, size_t count, IOBuffer const&) override;
     ErrorOr<void> truncate(u64 size) override;
     ErrorOr<NonnullRefPtr<Inode>> lookup(StringView name) override;
+    ErrorOr<PhysicalAddress> mapped_page(u64 index) override;
     ErrorOr<void> traverse(DirectoryVisitor&) override;
     ErrorOr<NonnullRefPtr<Inode>> create_child(StringView name, InodeType, u32 permissions, StringView link_target) override;
     ErrorOr<void> remove_child(StringView name) override;

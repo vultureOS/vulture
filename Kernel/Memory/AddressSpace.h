@@ -14,11 +14,16 @@
 
 namespace Kernel {
 
+class Inode;
+
 // A contiguous, page-aligned range of a process's memory with one
 // protection (PROT_* bits), backed by part of an AnonymousVMObject.
 class Region {
 public:
     Region(FlatPtr base, size_t size, int protection, StringView name, NonnullRefPtr<AnonymousVMObject>, size_t object_first_page);
+    ~Region();
+    Region(Region const&) = delete;
+    Region& operator=(Region const&) = delete;
 
     [[nodiscard]] FlatPtr base() const { return m_base; }
     [[nodiscard]] size_t size() const { return m_size; }
@@ -30,6 +35,14 @@ public:
     // The object page behind a page of this region.
     [[nodiscard]] size_t object_index(FlatPtr address) const { return m_object_first_page + (address - m_base) / page_size; }
 
+    // A file mapping takes its pages from the file: object page i is file
+    // page i + delta. Shared ones write to the file's own pages; private
+    // ones copy a page on its first write.
+    void set_file(Inode&, i64 page_delta, bool shared, bool writer);
+    [[nodiscard]] Inode* file() const { return m_file.ptr(); }
+    [[nodiscard]] bool is_shared() const { return m_shared; }
+    [[nodiscard]] u64 file_page(size_t object_index) const { return static_cast<u64>(static_cast<i64>(object_index) + m_file_page_delta); }
+
 private:
     friend class AddressSpace;
 
@@ -40,6 +53,10 @@ private:
     size_t m_name_length { 0 };
     NonnullRefPtr<AnonymousVMObject> m_object;
     size_t m_object_first_page;
+    RefPtr<Inode> m_file;
+    i64 m_file_page_delta { 0 };
+    bool m_shared { false };
+    bool m_writer { false }; // Counted with the file as a shared writer.
     IntrusiveListNode m_list_node;
 };
 
@@ -66,7 +83,14 @@ public:
     // what was there); otherwise `address` is a hint and 0 means anywhere.
     // Writable and executable at once is refused (W^X).
     ErrorOr<Region*> map_anonymous(FlatPtr address, size_t size, int protection, StringView name, bool fixed);
+    // Maps part of a file, from `offset` (page-aligned). `writer`: shared,
+    // and the file was opened for writing.
+    ErrorOr<Region*> map_file(FlatPtr address, size_t size, int protection, bool fixed, Inode&, u64 offset, bool shared, bool writer);
     ErrorOr<void> unmap(FlatPtr address, size_t size);
+    // Unmaps everything. For a dying process, from its own thread: ending
+    // a file mapping may sleep, which the scheduler's reaper (where the
+    // rest of the address space goes) must not.
+    void remove_all_regions();
     ErrorOr<void> protect(FlatPtr address, size_t size, int protection);
 
     PageFaultResult handle_fault(FlatPtr address, AccessKind);
@@ -92,6 +116,7 @@ private:
     AddressSpace(Arch::PageTable, u16 asid);
 
     ErrorOr<FlatPtr> find_free_range(FlatPtr hint, size_t size) const;
+    ErrorOr<Region*> create_region(FlatPtr address, size_t size, int protection, StringView name, bool fixed);
     // Removes [start, end) of `region` from the page table and releases
     // the pages behind it.
     void release_range(Region&, FlatPtr start, FlatPtr end);

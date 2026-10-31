@@ -7,6 +7,7 @@
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/memory.h>
 #include <Kernel/Arch/MemoryLayout.h>
+#include <Kernel/FileSystem/Inode.h>
 #include <Kernel/Memory/AddressSpace.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
@@ -25,6 +26,22 @@ Region::Region(FlatPtr base, size_t size, int protection, StringView name, Nonnu
 {
     m_name_length = min(name.length(), sizeof(m_name));
     __builtin_memcpy(m_name, name.characters_without_null_termination(), m_name_length);
+}
+
+Region::~Region()
+{
+    if (m_writer)
+        m_file->remove_shared_writer();
+}
+
+void Region::set_file(Inode& file, i64 page_delta, bool shared, bool writer)
+{
+    m_file = file;
+    m_file_page_delta = page_delta;
+    m_shared = shared;
+    m_writer = writer;
+    if (writer)
+        file.add_shared_writer();
 }
 
 static bool is_page_aligned(FlatPtr value)
@@ -129,10 +146,25 @@ ErrorOr<FlatPtr> AddressSpace::find_free_range(FlatPtr hint, size_t size) const
 
 ErrorOr<Region*> AddressSpace::map_anonymous(FlatPtr address, size_t size, int protection, StringView name, bool fixed)
 {
+    MutexLocker locker(m_lock);
+    return create_region(address, size, protection, name, fixed);
+}
+
+ErrorOr<Region*> AddressSpace::map_file(FlatPtr address, size_t size, int protection, bool fixed, Inode& file, u64 offset, bool shared, bool writer)
+{
+    if (offset % page_size != 0)
+        return Error::from_errno(EINVAL);
+    MutexLocker locker(m_lock);
+    auto* region = TRY(create_region(address, size, protection, shared ? "shared file"_sv : "file"_sv, fixed));
+    region->set_file(file, static_cast<i64>(offset / page_size), shared, writer);
+    return region;
+}
+
+ErrorOr<Region*> AddressSpace::create_region(FlatPtr address, size_t size, int protection, StringView name, bool fixed)
+{
     size = align_up<size_t>(size, page_size);
     if ((protection & PROT_WRITE) && (protection & PROT_EXEC))
         return Error::from_errno(EACCES);
-    MutexLocker locker(m_lock);
     if (fixed) {
         if (!is_valid_user_range(address, size))
             return Error::from_errno(EINVAL);
@@ -170,6 +202,8 @@ ErrorOr<void> AddressSpace::split_around(FlatPtr address, size_t size)
             auto* tail = new (Base::nothrow) Region(boundary, region->end() - boundary, region->protection(), region->name(), region->m_object, region->object_index(boundary));
             if (!tail)
                 return Error::from_errno(ENOMEM);
+            if (region->m_file)
+                tail->set_file(*region->m_file, region->m_file_page_delta, region->m_shared, region->m_writer);
             region->m_size = boundary - region->base();
             insert_sorted(*tail);
         }
@@ -204,6 +238,15 @@ ErrorOr<void> AddressSpace::unmap(FlatPtr address, size_t size)
     return {};
 }
 
+void AddressSpace::remove_all_regions()
+{
+    MutexLocker locker(m_lock);
+    while (auto* region = m_regions.take_first()) {
+        release_range(*region, region->base(), region->end());
+        delete region;
+    }
+}
+
 ErrorOr<void> AddressSpace::protect(FlatPtr address, size_t size, int protection)
 {
     size = align_up<size_t>(size, page_size);
@@ -230,7 +273,7 @@ ErrorOr<void> AddressSpace::protect(FlatPtr address, size_t size, int protection
                 (void)m_page_table.unmap_user_page(page);
                 continue;
             }
-            bool exclusive = physical_memory().user_page_references(physical) == 1;
+            bool exclusive = region.is_shared() || physical_memory().user_page_references(physical) == 1;
             if (!m_page_table.protect_user_page(page, protection_for(protection, exclusive)))
                 continue;
         }
@@ -256,7 +299,15 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
     auto& object = region->object();
     auto physical = object.page(index);
 
-    if (!physical.get()) {
+    if (!physical.get() && region->file()) {
+        // First touch of a file mapping: the file's page, shared with its
+        // cache (a private mapping copies it on the first write, below).
+        auto page = region->file()->mapped_page(region->file_page(index));
+        if (page.is_error())
+            return PageFaultResult::OutOfMemory;
+        object.set_page(index, page.value());
+        physical = page.value();
+    } else if (!physical.get()) {
         // First touch: a fresh zeroed page.
         auto page = physical_memory().allocate_user_page();
         if (page.is_error())
@@ -267,7 +318,7 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
         return PageFaultResult::Resolved;
     }
 
-    bool exclusive = physical_memory().user_page_references(physical) == 1;
+    bool exclusive = region->is_shared() || physical_memory().user_page_references(physical) == 1;
     if (access == AccessKind::Write && !exclusive) {
         // Copy on write: this address space gets a page of its own.
         auto copy = physical_memory().allocate_user_page();
@@ -293,8 +344,11 @@ ErrorOr<NonnullOwnPtr<AddressSpace>> AddressSpace::clone_for_fork()
         if (!copy)
             return Error::from_errno(ENOMEM);
         child->m_regions.append(*copy);
-        // Now shared: our writable pages must fault on the next write.
-        if (region.protection() & PROT_WRITE) {
+        if (region.m_file)
+            copy->set_file(*region.m_file, region.m_file_page_delta + static_cast<i64>(region.object_index(region.base())), region.m_shared, region.m_writer);
+        // Now shared: our writable pages must fault on the next write
+        // (but a shared mapping writes the same pages in both).
+        if ((region.protection() & PROT_WRITE) && !region.is_shared()) {
             for (FlatPtr page = region.base(); page < region.end(); page += page_size) {
                 if (region.object().page(region.object_index(page)).get())
                     m_page_table.protect_user_page(page, protection_for(region.protection(), false));
