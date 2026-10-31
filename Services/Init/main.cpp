@@ -38,6 +38,9 @@ Test const s_tests[] = {
     { "/usr/tests/bad-pointers", 0, 0 },
     { "/usr/tests/signals", 0, 0 },
     { "/usr/tests/files", 0, 0 },
+    { "/usr/tests/filesystem", 0, 0 },
+    { "/usr/tests/pipes", 0, 0 },
+    { "/usr/tests/devices", 0, 0 },
     { "/usr/tests/time", 0, 0 },
     { "/usr/tests/many-processes", 0, 0 },
     // A crash must kill only the crashing process.

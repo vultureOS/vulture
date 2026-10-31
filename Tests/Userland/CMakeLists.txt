@@ -9,15 +9,18 @@ set(tests
     abort
     bad-pointers
     copy-on-write
+    devices
     exec
     exec-target
     files
+    filesystem
     fork
     hello
     libc
     malloc
     many-processes
     memory
+    pipes
     segfault
     signals
     time)

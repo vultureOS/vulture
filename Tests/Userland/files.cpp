@@ -38,7 +38,8 @@ int main()
     CHECK(read(fd, buffer, 1) == -1 && errno == EBADF);
 
     CHECK(open("/etc/nonexistent", O_RDONLY) == -1 && errno == ENOENT);
-    CHECK(open("/etc/motd", O_WRONLY) == -1 && errno == EROFS);
+    CHECK(open("/etc", O_WRONLY) == -1 && errno == EISDIR);
+    CHECK(open("/etc/motd", O_RDONLY | O_DIRECTORY) == -1 && errno == ENOTDIR);
 
     CHECK(stat("/sbin/init", &information) == 0);
     CHECK(S_ISREG(information.st_mode) && (information.st_mode & 0111));
