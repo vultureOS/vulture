@@ -16,6 +16,8 @@
 #   --expect TEXT       with --headless: TEXT must appear on the console
 #                       (repeatable; succeeds once all have appeared)
 #   --timeout SECONDS   with --headless: give up after SECONDS (default: 60)
+#   --wait-for-exit     with --headless: keep running until the guest powers
+#                       off by itself; fail if it has not by the timeout
 #   --screenshot FILE   with --headless: save the screen as PNG once the
 #                       expected text has appeared (or at the timeout)
 
@@ -29,6 +31,7 @@ gdb=0
 headless=0
 expectations=()
 timeout_seconds=60
+wait_for_exit=0
 screenshot=""
 extra_args=()
 
@@ -41,9 +44,10 @@ while [ $# -gt 0 ]; do
         --headless) headless=1; shift ;;
         --expect) expectations+=("$2"); shift 2 ;;
         --timeout) timeout_seconds="$2"; shift 2 ;;
+        --wait-for-exit) wait_for_exit=1; shift ;;
         --screenshot) screenshot="$2"; shift 2 ;;
         --) shift; extra_args=("$@"); break ;;
-        -h|--help) sed -n '8,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '8,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "run.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -129,8 +133,13 @@ all_found() {
 }
 
 deadline=$((SECONDS + timeout_seconds))
-while kill -0 "$qemu_pid" 2>/dev/null; do
-    if [ ${#expectations[@]} -gt 0 ] && all_found; then
+exited_by_itself=0
+while true; do
+    if ! kill -0 "$qemu_pid" 2>/dev/null; then
+        exited_by_itself=1
+        break
+    fi
+    if [ "$wait_for_exit" -eq 0 ] && [ ${#expectations[@]} -gt 0 ] && all_found; then
         break
     fi
     if [ "$SECONDS" -ge "$deadline" ]; then
@@ -157,10 +166,18 @@ trap - EXIT
 # Show the console without the firmware's terminal control sequences.
 sed -e $'s/\x1b\\[[0-9;?=]*[A-Za-z]//g' -e $'s/\r//g' "$log"
 
-if [ ${#expectations[@]} -eq 0 ]; then
-    exit 0
-fi
 status=0
+if [ "$wait_for_exit" -eq 1 ]; then
+    if [ "$exited_by_itself" -eq 1 ]; then
+        echo "run.sh: the guest powered off"
+    else
+        echo "run.sh: the guest did not power off" >&2
+        status=1
+    fi
+fi
+if [ ${#expectations[@]} -eq 0 ]; then
+    exit "$status"
+fi
 for text in "${expectations[@]}"; do
     if grep -qF -- "$text" "$log"; then
         echo "run.sh: found \"$text\""

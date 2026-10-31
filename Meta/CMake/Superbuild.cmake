@@ -69,6 +69,7 @@ add_custom_target(test-host
 add_custom_target(test-boot
     COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
         --expect "Memory map"
+        --expect "8 of 8 processors online"
         --expect "vultureKernel: boot complete"
     DEPENDS uefi target
     USES_TERMINAL
@@ -85,7 +86,19 @@ add_custom_target(test-panic
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-host test-boot test-panic)
+# The in-kernel tests ("ktest"): allocators, locks, timers and processors
+# under stress on all 8 virtual CPUs. The guest powers itself off afterwards.
+add_custom_target(test-kernel
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+        --boot-args "ktest"
+        --wait-for-exit
+        --timeout 120
+        --expect "ktest: PASS"
+    DEPENDS uefi target test-panic
+    USES_TERMINAL
+    VERBATIM)
+
+add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel)
 
 add_custom_target(run
     COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR}
