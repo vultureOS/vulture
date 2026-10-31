@@ -5,7 +5,7 @@ Everything inside it is built from scratch in this repository: bootloader,
 kernel, C library, graphics, fonts rasterizer, UI framework, window server,
 desktop and apps.
 
-**Status:** milestone M3 is done.
+**Status:** milestone M4 is done.
 
 - VultureBoot, our own UEFI loader, loads the kernel on AArch64 and hands it
   the machine: memory map, framebuffer, device tree and serial port.
@@ -15,10 +15,14 @@ desktop and apps.
   brings all 8 processors online.
 - Threads are scheduled preemptively over all processors by QoS class, with
   work stealing, sleeping locks and a 173 ns context switch.
+- Programs run in user mode with their own address spaces: `/sbin/init`
+  starts from the boot archive, and processes fork (copy-on-write), exec,
+  wait and handle signals through our own C library. A crashing program is
+  killed alone, with a symbolized crash report.
 - Crashes produce a symbolized backtrace; booting with `ktest` runs the
   in-kernel test suite.
 
-Next is M4, userspace. See the [Roadmap](Documentation/Roadmap.md).
+Next is M5, storage and vultureFS. See the [Roadmap](Documentation/Roadmap.md).
 
 ## Requirements
 
@@ -58,6 +62,7 @@ ninja -C build check      # unit tests + headless boot, crash and kernel tests
 - [Roadmap](Documentation/Roadmap.md): milestones, performance budgets, risks
 - [Architecture](Documentation/Architecture.md): design, build system, repository layout
 - [Boot Protocol](Documentation/BootProtocol.md): how VultureBoot starts the kernel
+- [System Calls](Documentation/Syscalls.md): the calling convention and the calls
 - [Design System](Documentation/DesignSystem.md): the macOS look, and how it is measured and locked
 - [Coding Style](Documentation/CodingStyle.md)
 

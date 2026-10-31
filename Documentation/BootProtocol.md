@@ -32,7 +32,7 @@ the kernel's side of the handoff.
 |---|---|---|
 | `\EFI\BOOT\BOOTAA64.EFI` | VultureBoot | yes |
 | `\System\Library\Kernels\vulture` | The kernel: ELF64, AArch64, `ET_EXEC`, linked for the upper half | yes |
-| `\System\Library\Kernels\vulture.bootarchive` | Boot archive (initial root filesystem, from M4) | no |
+| `\System\Library\Kernels\vulture.bootarchive` | Boot archive: the root filesystem as a ustar file, mounted read-only at `/` | no (without it, no userland starts) |
 | `\System\Library\Kernels\boot-args` | Kernel command line as plain text, like macOS's `boot-args` | no |
 
 `Meta/run.sh --boot-args "..."` writes the `boot-args` file.
@@ -154,4 +154,5 @@ it. Addresses are physical unless named otherwise.
 | `-v` | Verbose boot: the kernel log on screen instead of the boot screen |
 | `ktest`, `ktest=PREFIX` | Run the in-kernel tests (all, or those whose `suite.name` starts with PREFIX), print `ktest: PASS` or `ktest: FAIL`, and power off |
 | `ktest-seconds=N` | How long soak tests run, in seconds (default 2) |
+| `utest` | Start `/sbin/init --test`: run the userland tests, then power off |
 | `fault=KIND` | End the boot with a deliberate failure, to test crash reporting: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (a panic in a timer interrupt) or `processor` (a panic on processor 1) |

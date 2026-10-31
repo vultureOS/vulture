@@ -51,7 +51,11 @@ The tree builds in three **parts**, each with its own toolchain file in
 |---|---|---|
 | `host` | `host.cmake`, macOS clang | Unit tests and host tools, built with ASan and UBSan |
 | `uefi` | `vulture-uefi-aarch64.cmake`, `aarch64-w64-windows-gnu` + lld-link | `BOOTAA64.EFI` (PE32+) installed into `build/esp/EFI/BOOT/` |
-| `target` | `vulture-aarch64.cmake`, `aarch64-unknown-none-elf` + ld.lld | Everything that runs inside vultureOS |
+| `target` | `vulture-aarch64.cmake`, `aarch64-unknown-none-elf` + ld.lld | The kernel, installed into `build/esp/System/Library/Kernels/` |
+| `userland` | `vulture-aarch64.cmake` with user flags | LibC, LibCxxRT, programs and tests, installed into the root filesystem staging tree `build/root/` |
+
+After the parts, `boot-archive` packs `build/root/` with the host tool
+`mkarchive` into `build/esp/System/Library/Kernels/vulture.bootarchive`.
 
 The top-level `CMakeLists.txt` configured without `VULTURE_PART` is the
 **superbuild** (`Meta/CMake/Superbuild.cmake`). It runs each part as an
@@ -65,6 +69,7 @@ ExternalProject over the same source tree and adds these targets:
 | `ninja -C build test-boot` | Boots headless; the kernel must print its memory map and finish booting |
 | `ninja -C build test-panic` | Boots with `fault=data-abort`; the panic report must decode the fault and symbolize the backtrace |
 | `ninja -C build test-kernel` | Boots with `ktest`: the in-kernel tests run on all processors, print `ktest: PASS`, and power the machine off |
+| `ninja -C build test-userland` | Boots with `utest`: `/sbin/init --test` runs the programs in `/usr/tests`, prints `userland: PASS`, and powers off |
 | `ninja -C build check` | All of the above tests |
 | `ninja -C build test-soak` | 1000 threads ping-ponging for 60 s (not part of `check`) |
 | `ninja -C build bench` | Boots with `ktest=bench` and prints the measurements |
@@ -83,6 +88,7 @@ Kernel command line words:
 | `-v` | Verbose boot: the kernel log on screen instead of the boot screen |
 | `ktest`, `ktest=PREFIX` | Run the in-kernel tests (those whose `suite.name` starts with PREFIX), then power off |
 | `ktest-seconds=N` | How long soak tests run (default 2) |
+| `utest` | Start `/sbin/init --test`, which runs the userland tests and powers off |
 | `fault=KIND` | End the boot with a deliberate crash: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (in a timer interrupt) or `processor` (on processor 1) | Kernel code that does not touch hardware (such as
 `Kernel/BootArguments.cpp`) is compiled into host tests too; see
 `Tests/Kernel`.
@@ -115,14 +121,16 @@ as a stub.
 
 ```
 Meta/          build system (CMake parts, toolchains), run.sh, CI
-Tools/         host C++ tools: ipcc, mkimage, mkvfs, fsck.vfs, symbolize, imgdiff, generators      (M1+)
+Tools/         host C++ tools: mkarchive (M4); ipcc, mkimage, mkvfs, fsck.vfs, imgdiff, generators later
 Boot/          VultureBoot UEFI loader: Arch/aarch64 (page tables, handoff), UEFI definitions
 Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page tables, GICv3, timer, PSCI, SMP)
                Console (framebuffer, font, boot screen) · Debug (log, panic, symbols) · Devices/Serial
                Interrupts · Locking · Memory (buddy, physical memory, heap, memory manager)
-               Tasks (Processor, Thread, Scheduler) · Time (timer queues) · Tests (ktest) · Library (C++ runtime) · Init.cpp
-Libraries/     LibBase · LibDeviceTree · LibELF · LibTest; LibC, LibCore, LibGfx, LibUI (pranaUI) … later
-Services/      vlaunchd · logd · PranaWindowServer · AudioServer · Indexer · SystemUI · Dock …        (M6+)
+               Tasks (Processor, Thread, Scheduler, Process) · Syscalls · FileSystem (boot archive)
+               Time (timer queues) · Tests (ktest) · Library (C++ runtime) · Init.cpp
+Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem · LibDeviceTree · LibELF · LibTest
+               LibCore, LibGfx, LibUI (pranaUI) … later
+Services/      Init (process 1, M4); vlaunchd · logd · PranaWindowServer · Dock …                    (M6+)
 Applications/  Finder · Terminal · TextEdit · Preview · SystemSettings · WidgetGallery …              (M9+)
 Utilities/     vsh and command-line tools                                                             (M6+)
 Base/          root filesystem skeleton, themes, fonts, icons, wallpapers, sounds                    (M5+)
@@ -194,9 +202,23 @@ macOS-style at the top, real Unix underneath:
   blocks, yields or exits, and on return from an interrupt that asked for
   one (a slice ended, or a more urgent thread woke). Later: boosts for input
   and the window server, coalescing for background work.
-- **Syscalls.** `SVC #0`, negative-errno returns, ELF64 binaries. POSIX calls
-  plus port calls are defined once in `Kernel/API/Syscalls.def` and generated
-  for both the kernel and LibSystem.
+- **Processes (M4).** A process has an address space, open files, signal
+  state and one thread (several in M6). Its address space is a list of
+  regions over anonymous VMObjects, mapped lazily by the page fault handler:
+  a first touch gets a zeroed page; after `fork` both processes share every
+  page, counted per page, and a write to a shared page copies it. User TLB
+  entries are tagged with a 16-bit ASID, so switching processes flushes
+  nothing. Programs are static ELF files loaded from the boot archive (the
+  root filesystem until M5); `/sbin/init` is process 1 and adopts orphans.
+  A fatal signal prints a crash report: the fault, registers and a backtrace
+  symbolized from the program's own symbol table.
+- **User memory layout (M4).** Programs at 0x400000, `mmap` from
+  0x0000'1000'0000'0000 upwards, the stack (8 MiB) below
+  0x0000'8000'0000'0000, nothing below 0x10000 (null pointers fault).
+- **Syscalls.** `SVC #0`, negative-errno returns, ELF64 binaries. Defined
+  once in `Kernel/API/Syscalls.def`, from which the kernel's dispatcher and
+  LibSystem's numbers come; see [System Calls](Syscalls.md). Port calls join
+  in M7.
 - **IPC.** Mach-style ports with send/receive rights in a per-task handle
   table. Messages carry inline bytes, port rights and out-of-line memory moved
   by page remapping. Request/reply uses direct-handoff scheduling. Pipes, Unix
