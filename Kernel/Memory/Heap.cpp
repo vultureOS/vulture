@@ -304,6 +304,26 @@ void* operator new[](size_t size)
     return operator new(size);
 }
 
+void* operator new(size_t size, Base::NoThrowTag) noexcept
+{
+    return kmalloc(size);
+}
+
+void* operator new[](size_t size, Base::NoThrowTag) noexcept
+{
+    return kmalloc(size);
+}
+
+void operator delete(void* pointer, Base::NoThrowTag) noexcept
+{
+    kfree(pointer);
+}
+
+void operator delete[](void* pointer, Base::NoThrowTag) noexcept
+{
+    kfree(pointer);
+}
+
 void operator delete(void* pointer) noexcept
 {
     kfree(pointer);
