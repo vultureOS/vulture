@@ -43,6 +43,7 @@ Test const s_tests[] = {
     { "/usr/tests/devices", 0, 0 },
     { "/usr/tests/time", 0, 0 },
     { "/usr/tests/volumes", 0, 0 },
+    { "/usr/tests/mapped-files", 0, 0 },
     { "/usr/tests/many-processes", 0, 0 },
     // A crash must kill only the crashing process.
     { "/usr/tests/segfault", 0, SIGSEGV },
@@ -106,6 +107,28 @@ int run_tests()
     return failed == 0 ? 0 : 1;
 }
 
+// The storage tests (Meta/storage-test.sh): runs the crash writer, which
+// writes until the power is cut (or, with --once, a little).
+int run_storage_test(bool once)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        char* argv[] = { const_cast<char*>("/usr/tests/crash-writer"), const_cast<char*>(once ? "--once" : nullptr), nullptr };
+        execv(argv[0], argv);
+        fprintf(stderr, "init: cannot run %s: %s\n", argv[0], strerror(errno));
+        _exit(127);
+    }
+    int status = 0;
+    while (pid > 0 && waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+    }
+    char how[64];
+    describe(status, how, sizeof(how));
+    printf("init: crash-writer %s\n", how);
+    fflush(stdout);
+    vulture_power_off();
+    return 0;
+}
+
 void print_file(char const* path)
 {
     int fd = open(path, O_RDONLY);
@@ -127,6 +150,10 @@ int main(int argc, char** argv)
 
     if (argc > 1 && strcmp(argv[1], "--test") == 0)
         return run_tests();
+    if (argc > 1 && strcmp(argv[1], "--crash-test") == 0)
+        return run_storage_test(false);
+    if (argc > 1 && strcmp(argv[1], "--persist-test") == 0)
+        return run_storage_test(true);
 
     // Reap whatever the kernel hands over; sleep while there is nothing.
     for (;;) {

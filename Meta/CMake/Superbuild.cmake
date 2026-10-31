@@ -85,7 +85,7 @@ add_custom_target(test-boot
         --expect "8 of 8 processors online"
         --expect "vultureKernel: boot complete"
         --expect "init: vultureOS userland is up (process 1)"
-    DEPENDS uefi target boot-archive
+    DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
 
@@ -96,7 +96,7 @@ add_custom_target(test-panic
         --expect "KERNEL PANIC: Data abort (write) at 0x0000000000000010: translation fault, level 0"
         --expect "Kernel::trigger_deliberate_fault"
         --expect "System halted."
-    DEPENDS uefi target boot-archive test-boot
+    DEPENDS host uefi target boot-archive test-boot
     USES_TERMINAL
     VERBATIM)
 
@@ -108,7 +108,7 @@ add_custom_target(test-kernel
         --wait-for-exit
         --timeout 120
         --expect "ktest: PASS"
-    DEPENDS uefi target boot-archive test-panic
+    DEPENDS host uefi target boot-archive test-panic
     USES_TERMINAL
     VERBATIM)
 
@@ -121,11 +121,28 @@ add_custom_target(test-userland
         --wait-for-exit
         --timeout 120
         --expect "userland: PASS"
-    DEPENDS uefi target boot-archive test-kernel
+    DEPENDS host uefi target boot-archive test-kernel
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland)
+# Storage: files written by one boot are there for the next; vultureFS
+# checked with fsck.vfs after each.
+add_custom_target(test-persistence
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/storage-test.sh --build-dir ${CMAKE_BINARY_DIR} persistence
+    DEPENDS host uefi target boot-archive test-userland
+    USES_TERMINAL
+    VERBATIM)
+
+add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-persistence)
+
+# M5's "done when": 100 power cuts at random moments while writing; each
+# must leave a disk that passes fsck and remounts with every committed
+# file intact. Not part of check, for its length.
+add_custom_target(test-crash
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/storage-test.sh --build-dir ${CMAKE_BINARY_DIR} crash 100
+    DEPENDS host uefi target boot-archive
+    USES_TERMINAL
+    VERBATIM)
 
 # The scheduler soak (M3's "done when"): 1000 threads ping-ponging across
 # every processor for 60 seconds, then all stopped and joined. Not part of
@@ -136,7 +153,7 @@ add_custom_target(test-soak
         --wait-for-exit
         --timeout 180
         --expect "ktest: PASS"
-    DEPENDS uefi target boot-archive
+    DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
 
@@ -147,12 +164,12 @@ add_custom_target(bench
         --wait-for-exit
         --timeout 60
         --expect "ktest: PASS"
-    DEPENDS uefi target boot-archive
+    DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
 
 add_custom_target(run
     COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR}
-    DEPENDS uefi target boot-archive
+    DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)

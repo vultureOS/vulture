@@ -19,12 +19,15 @@ set(tests
     libc
     malloc
     many-processes
+    mapped-files
     memory
     pipes
     segfault
     signals
     time
-    volumes)
+    volumes
+    # Not in init's test list: the storage crash and persistence tests run it.
+    crash-writer)
 
 foreach(test IN LISTS tests)
     vulture_add_program(test-${test} SOURCES ${test}.cpp DESTINATION usr/tests)
