@@ -17,7 +17,8 @@ add_library(LibC STATIC
     stdio.cpp
     stdlib.cpp
     string.cpp
-    syscalls.cpp)
+    syscalls.cpp
+    termios.cpp)
 
 # The C library implements the functions the compiler would otherwise turn
 # its loops into calls to.

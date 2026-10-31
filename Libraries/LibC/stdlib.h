@@ -39,6 +39,13 @@ int abs(int);
 long labs(long);
 long long llabs(long long);
 
+// Pseudo-terminals.
+int posix_openpt(int flags);
+int grantpt(int fd);
+int unlockpt(int fd);
+char* ptsname(int fd);
+int ptsname_r(int fd, char* buffer, size_t size);
+
 void qsort(void* base, size_t count, size_t size, int (*compare)(void const*, void const*));
 int rand(void);
 void srand(unsigned seed);

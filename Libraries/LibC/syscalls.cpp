@@ -48,7 +48,11 @@ static void to_stat(vulture_stat const& source, struct stat* destination)
     destination->st_size = source.st_size;
     destination->st_blksize = source.st_blksize;
     destination->st_blocks = source.st_blocks;
-    destination->st_mtime = source.st_mtime_seconds;
+    destination->st_rdev = source.st_rdev;
+    destination->st_atim = { source.st_atime_seconds, source.st_atime_nanoseconds };
+    destination->st_mtim = { source.st_mtime_seconds, source.st_mtime_nanoseconds };
+    destination->st_ctim = { source.st_ctime_seconds, source.st_ctime_nanoseconds };
+    destination->st_birthtimespec = { source.st_birthtime_seconds, source.st_birthtime_nanoseconds };
 }
 
 extern "C" {
@@ -134,12 +138,6 @@ int close(int fd)
 off_t lseek(int fd, off_t offset, int origin)
 {
     return check<off_t>(call(Syscall::lseek, fd, offset, origin));
-}
-
-int isatty(int fd)
-{
-    struct stat information;
-    return fstat(fd, &information) == 0 && S_ISCHR(information.st_mode);
 }
 
 int dup(int fd)

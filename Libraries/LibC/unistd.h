@@ -24,6 +24,17 @@ pid_t getpid(void);
 pid_t getppid(void);
 pid_t gettid(void);
 
+// Job control.
+pid_t setsid(void);
+pid_t getsid(pid_t);
+int setpgid(pid_t, pid_t group);
+pid_t getpgid(pid_t);
+pid_t getpgrp(void);
+pid_t tcgetpgrp(int fd);
+int tcsetpgrp(int fd, pid_t group);
+char* ttyname(int fd);
+int ttyname_r(int fd, char* buffer, size_t size);
+
 ssize_t read(int fd, void* buffer, size_t count);
 ssize_t write(int fd, void const* buffer, size_t count);
 int close(int fd);
