@@ -17,10 +17,11 @@ static constexpr u64 nanoseconds_per_second = 1'000'000'000;
 ErrorOr<FlatPtr> Process::sys_clock_gettime(TrapFrame&, SyscallArguments const& arguments)
 {
     int clock = static_cast<int>(arguments.values[0]);
-    // No real-time clock driver yet (M5): wall time counts from boot.
     if (clock != CLOCK_MONOTONIC && clock != CLOCK_REALTIME)
         return Error::from_errno(EINVAL);
-    u64 now = Time::nanoseconds_from_ticks(Time::now());
+    // Real time comes from the real-time clock read at boot (counting from
+    // 1970), monotonic time from boot.
+    u64 now = clock == CLOCK_REALTIME ? Time::wall_clock_nanoseconds() : Time::nanoseconds_from_ticks(Time::now());
     vulture_timespec value { static_cast<long long>(now / nanoseconds_per_second), static_cast<long>(now % nanoseconds_per_second) };
     TRY(copy_to_user(arguments.values[1], value));
     return 0;

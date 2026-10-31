@@ -154,6 +154,13 @@ private:
     vulture_siginfo m_signal_info[NSIG] {};
 
     // Job control.
+    // sigsuspend(): the mask to restore once its signal has been handled.
+    Optional<u64> m_mask_after_suspend;
+    WaitQueue m_suspend_wait;
+    // alarm(): SIGALRM when it fires.
+    Timer m_alarm_timer;
+    u64 m_alarm_deadline { 0 };
+
     Credentials m_credentials;
     u32 m_umask { 022 };
     RefPtr<TTY> m_controlling_terminal;

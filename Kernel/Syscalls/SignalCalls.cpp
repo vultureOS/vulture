@@ -5,9 +5,12 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/Arch/CPU.h>
 #include <Kernel/Arch/UserContext.h>
 #include <Kernel/Memory/UserAccess.h>
 #include <Kernel/Tasks/Process.h>
+#include <Kernel/Tasks/Processor.h>
+#include <Kernel/Time/Time.h>
 
 namespace Kernel {
 
@@ -161,6 +164,54 @@ ErrorOr<FlatPtr> Process::sys_sigreturn(TrapFrame& frame, SyscallArguments const
     }
     // The dispatcher stores this in x0: give back the restored x0.
     return Arch::syscall_argument(frame, 0);
+}
+
+ErrorOr<FlatPtr> Process::sys_sigsuspend(TrapFrame&, SyscallArguments const& arguments)
+{
+    u64 mask = TRY(copy_from_user<u64>(arguments.values[0]));
+    {
+        SpinLockGuard guard(m_signal_lock);
+        m_mask_after_suspend = m_signal_mask;
+        m_signal_mask = mask & ~(bit(SIGKILL) | bit(SIGSTOP));
+    }
+    // Until a signal arrives that the new mask lets through; it is handled
+    // on the way out, and sigsuspend() returns EINTR.
+    (void)m_suspend_wait.wait_until_interruptible([] { return false; });
+    if (!has_deliverable_signal()) {
+        SpinLockGuard guard(m_signal_lock);
+        if (m_mask_after_suspend.has_value())
+            m_signal_mask = m_mask_after_suspend.release_value();
+    }
+    return Error::from_errno(EINTR);
+}
+
+ErrorOr<FlatPtr> Process::sys_sigpending(TrapFrame&, SyscallArguments const& arguments)
+{
+    u64 pending = m_pending_signals.load() & m_signal_mask;
+    TRY(copy_to_user(arguments.values[0], pending));
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_alarm(TrapFrame&, SyscallArguments const& arguments)
+{
+    u64 seconds = arguments.values[0];
+    u64 now = Time::now();
+    // What was left of the previous alarm, rounded up.
+    u64 remaining = 0;
+    if (m_alarm_timer.cancel() && m_alarm_deadline > now)
+        remaining = (Time::microseconds_from_ticks(m_alarm_deadline - now) + 999'999) / 1'000'000;
+    m_alarm_deadline = 0;
+    if (seconds > 0) {
+        m_alarm_deadline = now + Time::ticks_from_microseconds(seconds * 1'000'000);
+        m_alarm_timer.context = this;
+        InterruptDisabler disabler;
+        Processor::current().timer_queue().add(m_alarm_timer, m_alarm_deadline, [](Timer& timer) {
+            vulture_siginfo info {};
+            info.si_code = SI_KERNEL;
+            static_cast<Process*>(timer.context)->send_signal(SIGALRM, info);
+        });
+    }
+    return remaining;
 }
 
 }

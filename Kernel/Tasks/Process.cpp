@@ -451,6 +451,7 @@ void Process::terminate(int status)
         file = {};
     m_address_space->remove_all_regions();
     lose_controlling_terminal();
+    m_alarm_timer.cancel();
 
     Process* parent;
     {
@@ -522,6 +523,7 @@ void Process::send_signal(int signal, vulture_siginfo const& info)
     }
     if (signal == SIGKILL)
         m_continue_wait.wake_all();
+    m_suspend_wait.wake_all();
     if (m_thread) {
         m_thread->interrupt_sleep();
         // A waitpid(), or a wait on a pipe, returns to let the signal through.
@@ -718,7 +720,8 @@ void Process::dispatch_signal(TrapFrame& frame)
     if (action.handler == VULTURE_SIG_IGN)
         return;
 
-    u64 saved_mask = m_signal_mask;
+    // After sigsuspend(), the handler's return restores the mask from before it.
+    u64 saved_mask = m_mask_after_suspend.has_value() ? m_mask_after_suspend.release_value() : m_signal_mask;
     if (Arch::push_signal_frame(frame, signal, info, saved_mask, action.handler, action.restorer).is_error()) {
         // No room for the frame (the stack is gone or bad): fatal.
         report_crash(frame, SIGSEGV, info);
