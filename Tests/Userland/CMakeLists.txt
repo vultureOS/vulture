@@ -24,6 +24,7 @@ set(tests
     pipes
     segfault
     signals
+    terminals
     time
     volumes
     # Not in init's test list: the storage crash and persistence tests run it.
