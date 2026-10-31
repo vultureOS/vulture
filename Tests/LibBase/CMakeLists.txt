@@ -12,6 +12,7 @@ add_executable(TestLibBase
     TestFormat.cpp
     TestIntrusiveList.cpp
     TestOptional.cpp
+    TestSmartPointers.cpp
     TestSpan.cpp
     TestStringView.cpp)
 

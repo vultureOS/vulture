@@ -5,6 +5,7 @@
  */
 
 #include <LibBase/Assertions.h>
+#include <LibBase/New.h>
 #include <LibTest/TestCase.h>
 
 // Host tests are built without system headers or the C++ standard library.
@@ -65,6 +66,26 @@ void operator delete[](void* pointer) noexcept
 }
 
 void operator delete[](void* pointer, size_t) noexcept
+{
+    free(pointer);
+}
+
+void* operator new(size_t size, Base::NoThrowTag) noexcept
+{
+    return malloc(size ? size : 1);
+}
+
+void* operator new[](size_t size, Base::NoThrowTag) noexcept
+{
+    return malloc(size ? size : 1);
+}
+
+void operator delete(void* pointer, Base::NoThrowTag) noexcept
+{
+    free(pointer);
+}
+
+void operator delete[](void* pointer, Base::NoThrowTag) noexcept
 {
     free(pointer);
 }
