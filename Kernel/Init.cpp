@@ -19,6 +19,8 @@
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
 #include <Kernel/Tasks/Processor.h>
+#include <Kernel/Tasks/Scheduler.h>
+#include <Kernel/Tasks/Thread.h>
 #include <Kernel/Tests/KernelTest.h>
 #include <Kernel/Time/Time.h>
 #include <LibDeviceTree/FlattenedDeviceTree.h>
@@ -277,6 +279,9 @@ extern "C" [[noreturn]] void kernel_main(API::BootInfo const* loader_boot_info)
     FixedStringBuilder<64> power;
     Arch::describe_power_management(power);
     dmesgln("Power management: {}", power.view());
+    // From here on, this code is the "boot" thread.
+    Scheduler::initialize();
+    dmesgln("Scheduler: {} QoS classes, {} ms time slices, idle processors take work", qos_class_count, Scheduler::time_slice_microseconds / 1000);
     show_progress(60);
 
     u64 smp_start = Time::now();
@@ -285,13 +290,18 @@ extern "C" [[noreturn]] void kernel_main(API::BootInfo const* loader_boot_info)
         Time::microseconds_from_ticks(Time::now() - smp_start));
     show_progress(80);
 
-    if (arguments.has_flag("ktest"_sv) || arguments.value("ktest"_sv).has_value())
-        Tests::run(arguments.value("ktest"_sv).value_or(""_sv));
+    if (arguments.has_flag("ktest"_sv) || arguments.value("ktest"_sv).has_value()) {
+        u64 seconds = 2;
+        if (auto text = arguments.value("ktest-seconds"_sv); text.has_value())
+            seconds = text->to_number<u64>().value_or(seconds);
+        Tests::run(arguments.value("ktest"_sv).value_or(""_sv), seconds);
+    }
 
     if (auto fault = arguments.value("fault"_sv); fault.has_value())
         trigger_deliberate_fault(fault.value());
 
     show_progress(100);
     dmesgln("vultureKernel: boot complete");
-    Processor::current().idle_loop();
+    // The processors idle until there is work.
+    Thread::exit();
 }

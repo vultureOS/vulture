@@ -11,6 +11,7 @@
 #include <Kernel/Debug/Panic.h>
 #include <Kernel/Debug/Symbols.h>
 #include <Kernel/Tasks/Processor.h>
+#include <Kernel/Tasks/Thread.h>
 
 extern "C" u8 boot_stack_bottom[];
 extern "C" u8 boot_stack_top[];
@@ -37,6 +38,10 @@ static bool is_valid_frame_pointer(FlatPtr frame_pointer)
     if (Arch::current_processor_pointer()) {
         bottom = Processor::current().stack_bottom();
         top = Processor::current().stack_top();
+        if (auto* thread = Processor::current().current_thread()) {
+            bottom = thread->stack().bottom;
+            top = thread->stack().top;
+        }
     }
     return frame_pointer % 16 == 0 && frame_pointer >= bottom && frame_pointer + sizeof(Arch::StackFrame) <= top;
 }
@@ -104,7 +109,11 @@ void panic(StringView reason, TrapFrame const* frame)
 
     FixedStringBuilder<160> cpu;
     Arch::describe_cpu(cpu);
-    if (Arch::current_processor_pointer())
+    if (Arch::current_processor_pointer() && Processor::current().current_thread()) {
+        auto& thread = *Processor::current().current_thread();
+        dmesgln("Processor {}: {}", Processor::current().id(), cpu.view());
+        dmesgln("Thread {} \"{}\"", thread.id(), thread.name());
+    } else if (Arch::current_processor_pointer())
         dmesgln("Processor {}: {}", Processor::current().id(), cpu.view());
     else
         dmesgln("CPU: {}", cpu.view());

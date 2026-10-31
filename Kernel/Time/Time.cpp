@@ -7,6 +7,7 @@
 #include <Kernel/Arch/Timer.h>
 #include <Kernel/Interrupts/InterruptHandlers.h>
 #include <Kernel/Tasks/Processor.h>
+#include <Kernel/Tasks/Scheduler.h>
 #include <Kernel/Time/Time.h>
 
 namespace Kernel::Time {
@@ -56,7 +57,11 @@ u64 nanoseconds_from_ticks(u64 ticks)
 void wait_until(u64 deadline)
 {
     VERIFY(Arch::are_interrupts_enabled());
-    // There is no periodic tick, so arm a timer to end the wait.
+    if (Scheduler::is_running()) {
+        Thread::sleep_until(deadline);
+        return;
+    }
+    // Before threads exist: wait right here. There is no periodic tick, so arm a timer to end the wait.
     Timer wakeup;
     auto& queue = Processor::current().timer_queue();
     queue.add(wakeup, deadline, [](Timer&) { });

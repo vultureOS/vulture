@@ -30,8 +30,9 @@ void initialize_on_this_processor();
 [[nodiscard]] inline u64 ticks_from_milliseconds(u64 milliseconds) { return ticks_from_nanoseconds(milliseconds * 1'000'000); }
 [[nodiscard]] inline u64 microseconds_from_ticks(u64 ticks) { return nanoseconds_from_ticks(ticks) / 1000; }
 
-// Sleeps until the counter reaches `deadline`, waking for interrupts in
-// between. Interrupts must be enabled.
+// Sleeps until the counter reaches `deadline`: the current thread sleeps
+// (before the scheduler starts, the processor waits). Interrupts must be
+// enabled.
 void wait_until(u64 deadline);
 
 }
