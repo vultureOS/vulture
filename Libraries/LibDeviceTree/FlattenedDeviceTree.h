@@ -26,6 +26,7 @@ struct Property {
     // `count` big-endian 32-bit cells starting at cell `index`, combined
     // into one number. Fails if out of range or more than two cells.
     [[nodiscard]] Optional<u64> read_cells(size_t index, size_t count) const;
+    [[nodiscard]] size_t cell_count() const { return value.size() / 4; }
 };
 
 struct Node {
@@ -73,6 +74,12 @@ public:
 
     // The first node whose "compatible" list contains `compatible`.
     [[nodiscard]] Optional<Node> find_compatible_node(StringView compatible) const;
+
+    // The node another refers to by "phandle" (in interrupt-parent etc.).
+    [[nodiscard]] Optional<Node> find_node_by_phandle(u32 phandle) const;
+
+    // A u32 property such as "#address-cells", or `fallback` if absent.
+    [[nodiscard]] u32 u32_property(Node const&, StringView name, u32 fallback) const;
 
     // Entry `index` of the node's "reg" property.
     [[nodiscard]] Optional<Region> reg(Node const&, size_t index) const;

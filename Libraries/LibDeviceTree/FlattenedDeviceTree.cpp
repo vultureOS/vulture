@@ -281,6 +281,30 @@ Optional<Node> FlattenedDeviceTree::find_compatible_node(StringView compatible) 
     return found;
 }
 
+Optional<Node> FlattenedDeviceTree::find_node_by_phandle(u32 phandle) const
+{
+    Optional<Node> found;
+    auto result = for_each_node([&](Node const& node) {
+        auto property = find_property(node, "phandle"_sv);
+        if (property.has_value() && property->as_u32() == phandle) {
+            found = node;
+            return IterationDecision::Break;
+        }
+        return IterationDecision::Continue;
+    });
+    if (result.is_error())
+        return {};
+    return found;
+}
+
+u32 FlattenedDeviceTree::u32_property(Node const& node, StringView name, u32 fallback) const
+{
+    auto property = find_property(node, name);
+    if (!property.has_value())
+        return fallback;
+    return property->as_u32().value_or(fallback);
+}
+
 Optional<Region> FlattenedDeviceTree::reg(Node const& node, size_t index) const
 {
     auto property = find_property(node, "reg"_sv);

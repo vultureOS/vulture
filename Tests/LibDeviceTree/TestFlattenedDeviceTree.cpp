@@ -138,6 +138,8 @@ ReadonlyBytes build_virt_like_tree(Builder& builder)
     builder.begin_node("uart@1000"_sv);
     builder.property_string("compatible"_sv, "ns16550a"_sv);
     builder.property_cells("reg"_sv, 0x1000, 0x100, 0x2000, 0x100);
+    builder.property_cells("phandle"_sv, 0x8001);
+    builder.property_cells("#interrupt-cells"_sv, 3);
     builder.end_node();
     builder.end_node();
 
@@ -219,4 +221,17 @@ TEST_CASE(rejects_malformed_blobs)
     auto partial = unterminated.finish();
     auto tree = MUST(DeviceTree::FlattenedDeviceTree::parse(partial));
     EXPECT(tree.for_each_node([](auto const&) { return DeviceTree::IterationDecision::Continue; }).is_error());
+}
+
+TEST_CASE(finds_nodes_by_phandle_and_reads_u32_properties)
+{
+    static Builder builder;
+    builder = {};
+    auto tree = MUST(DeviceTree::FlattenedDeviceTree::parse(build_virt_like_tree(builder)));
+    auto node = tree.find_node_by_phandle(0x8001);
+    EXPECT(node.has_value());
+    EXPECT(node->name == "uart@1000"_sv);
+    EXPECT_EQ(tree.u32_property(node.value(), "#interrupt-cells"_sv, 0), 3u);
+    EXPECT_EQ(tree.u32_property(node.value(), "#missing"_sv, 7), 7u);
+    EXPECT(!tree.find_node_by_phandle(0x1234).has_value());
 }
