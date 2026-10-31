@@ -17,6 +17,7 @@ set(tests
     fork
     hello
     libc
+    libc-more
     malloc
     many-processes
     mapped-files

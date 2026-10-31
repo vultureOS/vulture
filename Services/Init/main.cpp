@@ -30,6 +30,7 @@ struct Test {
 Test const s_tests[] = {
     { "/usr/tests/hello", 0, 0 },
     { "/usr/tests/libc", 0, 0 },
+    { "/usr/tests/libc-more", 0, 0 },
     { "/usr/tests/malloc", 0, 0 },
     { "/usr/tests/fork", 0, 0 },
     { "/usr/tests/copy-on-write", 0, 0 },
