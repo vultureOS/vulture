@@ -17,11 +17,12 @@ namespace Kernel {
 
 // Interrupts processors send each other.
 enum class IPI : u8 {
-    Wakeup, // Look for new work.
+    Wakeup, // New work was queued for you.
+    Call, // Run the calls queued for you (call_on_all).
     Stop, // Halt (a panic is in progress).
 };
 
-constexpr u8 ipi_count = 2;
+constexpr u8 ipi_count = 3;
 
 }
 

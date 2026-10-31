@@ -9,6 +9,7 @@
 #include <Kernel/Arch/CPU.h>
 #include <Kernel/Memory/Heap.h>
 #include <Kernel/Memory/PhysicalMemory.h>
+#include <Kernel/Tasks/RunQueue.h>
 #include <Kernel/Time/TimerQueue.h>
 #include <LibBase/Atomic.h>
 
@@ -22,7 +23,7 @@ enum class IPI : u8;
 
 using ProcessorFunction = void (*)(void* argument);
 
-// A request for another processor to run a function, from run_on_all().
+// A request for another processor to run a function, from call_on_all().
 struct ProcessorCall {
     ProcessorFunction function { nullptr };
     void* argument { nullptr };
@@ -33,7 +34,8 @@ struct ProcessorCall {
 // Everything that belongs to one CPU. The current processor's object is
 // always at hand through Processor::current() (the arch keeps a pointer in
 // a CPU register), so per-CPU caches and queues need no locks: code only
-// touches its own processor's, with interrupts masked.
+// touches its own processor's, with interrupts masked. (With interrupts
+// enabled, a thread may move to another processor at any moment.)
 class Processor {
 public:
     static constexpr u32 max_count = 64;
@@ -47,15 +49,21 @@ public:
     // is online (or gives up on it).
     static void start_secondary_processors(DeviceTree::FlattenedDeviceTree const&);
 
-    // Processors that are up and taking work, and how many the device tree lists.
+    // Processors that are up and taking work, how many the device tree
+    // lists, and how many have a Processor object (valid ids).
     [[nodiscard]] static u32 online_count() { return s_online_count.load(MemoryOrder::Acquire); }
     [[nodiscard]] static u32 listed_count() { return s_listed_count; }
+    [[nodiscard]] static u32 count() { return s_processor_count.load(MemoryOrder::Acquire); }
     [[nodiscard]] static Processor& with_id(u32 id);
 
-    // Runs function(argument) on every online processor at once, this one
-    // included, and returns when all have finished. Other processors run it
-    // from their idle loop, with interrupts enabled. Must be called with
-    // interrupts enabled, from the boot processor.
+    // Runs function(argument) on every online processor at once, in
+    // interrupt context (interrupts masked), and returns when all are done.
+    // For short work on per-processor state. Call with interrupts enabled.
+    static void call_on_all(ProcessorFunction, void* argument);
+
+    // Runs function(argument) in a thread pinned to each online processor
+    // and returns when all have finished. The function may block. Panics if
+    // the threads cannot be created.
     static void run_on_all(ProcessorFunction, void* argument);
 
     // Halts every other processor. For panics: does not wait for them.
@@ -78,27 +86,31 @@ public:
     }
     void leave_interrupt() { --m_interrupt_depth; }
     [[nodiscard]] u64 interrupt_count() const { return m_interrupt_count; }
+    [[nodiscard]] u64 context_switch_count() const { return m_context_switches; }
 
     [[nodiscard]] PhysicalPageCache& page_cache() { return m_page_cache; }
     [[nodiscard]] HeapProcessorCache& heap_cache() { return m_heap_cache; }
     [[nodiscard]] TimerQueue& timer_queue() { return m_timer_queue; }
+    [[nodiscard]] RunQueue& run_queue() { return m_run_queue; }
 
-    // Finishes bringing up the current processor: its part of the interrupt
-    // controller, and its timer.
+    // Null before the scheduler starts.
+    [[nodiscard]] Thread* current_thread() const { return m_current_thread; }
+    [[nodiscard]] Thread* idle_thread() const { return m_idle_thread; }
+
+    // Finishes bringing up the current processor: floating point, its part
+    // of the interrupt controller, and its timer.
     void initialize_this_processor();
 
-    // Waits for interrupts and runs work other processors hand over.
-    [[noreturn]] void idle_loop();
-
 private:
+    friend class Scheduler;
     friend void secondary_processor_main(void*);
 
     void initialize(u32 id, u64 hardware_id, FlatPtr stack_bottom, FlatPtr stack_top);
     void enqueue_call(ProcessorCall&);
-    // Runs queued calls; returns false if there were none.
-    bool run_pending_calls();
+    void run_pending_calls();
 
     static Processor* s_processors[max_count];
+    static Atomic<u32> s_processor_count;
     static Atomic<u32> s_online_count;
     static u32 s_listed_count;
 
@@ -112,6 +124,18 @@ private:
     u64 m_interrupt_count { 0 };
 
     Atomic<ProcessorCall*> m_pending_calls { nullptr };
+
+    // Scheduling. Only this processor writes these, with interrupts masked;
+    // the atomics are read by others as hints.
+    Thread* m_current_thread { nullptr };
+    Thread* m_idle_thread { nullptr };
+    Thread* m_switching_from { nullptr };
+    RunQueue m_run_queue;
+    Timer m_time_slice;
+    bool m_need_reschedule { false };
+    Atomic<u8> m_running_rank { 0 };
+    Atomic<bool> m_time_slice_armed { false };
+    u64 m_context_switches { 0 };
 
     PhysicalPageCache m_page_cache;
     HeapProcessorCache m_heap_cache;

@@ -27,6 +27,9 @@ public:
     // Returns the interrupt state to hand back to unlock().
     [[nodiscard]] Arch::InterruptState lock();
     void unlock(Arch::InterruptState);
+    // Releases the lock but leaves interrupts masked, for code that must
+    // not be interrupted next (such as switching threads).
+    void unlock_keeping_interrupts_masked() { unlock(Arch::disable_interrupts()); }
 
     [[nodiscard]] bool is_locked() const { return m_owner.load(MemoryOrder::Relaxed) != 0; }
     [[nodiscard]] bool is_locked_by_current_processor() const { return m_owner.load(MemoryOrder::Relaxed) == owner_token(); }
