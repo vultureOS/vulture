@@ -5,3 +5,4 @@
 #
 
 add_subdirectory(LibBase)
+add_subdirectory(LibELF)
