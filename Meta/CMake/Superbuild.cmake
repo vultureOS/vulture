@@ -46,7 +46,9 @@ function(vulture_add_part part)
 endfunction()
 
 vulture_add_part(host TOOLCHAIN host)
-vulture_add_part(target TOOLCHAIN vulture-aarch64)
+# Both install into the EFI System Partition staging tree: the loader in
+# EFI/BOOT, the kernel in System/Library/Kernels.
+vulture_add_part(target TOOLCHAIN vulture-aarch64 INSTALL_DIR ${VULTURE_ESP_DIR})
 vulture_add_part(uefi TOOLCHAIN vulture-uefi-aarch64 INSTALL_DIR ${VULTURE_ESP_DIR})
 
 # One compile database for the whole tree, for clangd and other editors.
@@ -61,16 +63,32 @@ add_custom_target(compile-commands ALL
 add_custom_target(test-host
     COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR}/host --output-on-failure
     DEPENDS host
-    USES_TERMINAL)
+    USES_TERMINAL
+    VERBATIM)
 
 add_custom_target(test-boot
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless --expect "VultureBoot: ready"
-    DEPENDS uefi
-    USES_TERMINAL)
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+        --expect "Memory map"
+        --expect "vultureKernel: boot complete"
+    DEPENDS uefi target
+    USES_TERMINAL
+    VERBATIM)
 
-add_custom_target(check DEPENDS test-host test-boot)
+# A deliberate fault must produce a symbolized, demangled backtrace.
+add_custom_target(test-panic
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+        --boot-args "fault=data-abort"
+        --expect "KERNEL PANIC: Data abort (write) at 0x0000000000000010: translation fault, level 0"
+        --expect "Kernel::trigger_deliberate_fault"
+        --expect "System halted."
+    DEPENDS uefi target test-boot
+    USES_TERMINAL
+    VERBATIM)
+
+add_custom_target(check DEPENDS test-host test-boot test-panic)
 
 add_custom_target(run
     COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR}
     DEPENDS uefi target
-    USES_TERMINAL)
+    USES_TERMINAL
+    VERBATIM)

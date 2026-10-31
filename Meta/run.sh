@@ -8,34 +8,42 @@
 #
 #   Meta/run.sh [options] [-- extra QEMU arguments]
 #
-#   --build-dir DIR    build directory (default: <repo>/build)
-#   --tcg              software emulation instead of Apple Hypervisor (HVF)
-#   --gdb              wait for a debugger on localhost:1234
-#   --headless         no window; the serial console is captured and printed
-#   --expect TEXT      with --headless: succeed once TEXT appears on the console
-#   --timeout SECONDS  with --headless: give up after SECONDS (default: 60)
+#   --build-dir DIR     build directory (default: <repo>/build)
+#   --boot-args TEXT    kernel command line, e.g. "-v" for a verbose boot
+#   --tcg               software emulation instead of Apple Hypervisor (HVF)
+#   --gdb               wait for a debugger on localhost:1234
+#   --headless          no window; the serial console is captured and printed
+#   --expect TEXT       with --headless: TEXT must appear on the console
+#                       (repeatable; succeeds once all have appeared)
+#   --timeout SECONDS   with --headless: give up after SECONDS (default: 60)
+#   --screenshot FILE   with --headless: save the screen as PNG once the
+#                       expected text has appeared (or at the timeout)
 
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="$root_dir/build"
+boot_args=""
 accelerator="hvf"
 gdb=0
 headless=0
-expect=""
+expectations=()
 timeout_seconds=60
+screenshot=""
 extra_args=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --build-dir) build_dir="$2"; shift 2 ;;
+        --boot-args) boot_args="$2"; shift 2 ;;
         --tcg) accelerator="tcg"; shift ;;
         --gdb) gdb=1; shift ;;
         --headless) headless=1; shift ;;
-        --expect) expect="$2"; shift 2 ;;
+        --expect) expectations+=("$2"); shift 2 ;;
         --timeout) timeout_seconds="$2"; shift 2 ;;
+        --screenshot) screenshot="$2"; shift 2 ;;
         --) shift; extra_args=("$@"); break ;;
-        -h|--help) sed -n '8,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '8,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "run.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -44,10 +52,20 @@ qemu="${QEMU:-qemu-system-aarch64}"
 firmware_dir="${VULTURE_FIRMWARE_DIR:-/opt/homebrew/share/qemu}"
 esp_dir="$build_dir/esp"
 state_dir="$build_dir/qemu"
+kernels_dir="$esp_dir/System/Library/Kernels"
 
-if [ ! -f "$esp_dir/EFI/BOOT/BOOTAA64.EFI" ]; then
-    echo "run.sh: no boot loader at $esp_dir/EFI/BOOT/BOOTAA64.EFI; build first with: ninja -C $build_dir" >&2
-    exit 1
+for required in "$esp_dir/EFI/BOOT/BOOTAA64.EFI" "$kernels_dir/vulture"; do
+    if [ ! -f "$required" ]; then
+        echo "run.sh: $required is missing; build first with: ninja -C $build_dir" >&2
+        exit 1
+    fi
+done
+
+# VultureBoot passes the contents of boot-args to the kernel as its command line.
+if [ -n "$boot_args" ]; then
+    printf '%s\n' "$boot_args" > "$kernels_dir/boot-args"
+else
+    rm -f "$kernels_dir/boot-args"
 fi
 
 # The firmware keeps its settings (boot order etc.) in a writable variable store.
@@ -69,6 +87,8 @@ args=(
     # ramfb gives the firmware a linear framebuffer for the boot console; virtio-gpu
     # only offers blit operations until vultureOS has its own driver (M8).
     -device ramfb
+    # Lets the firmware hand the kernel some entropy.
+    -device virtio-rng-pci
     -device qemu-xhci
     -device usb-kbd
     -device usb-tablet
@@ -92,15 +112,25 @@ fi
 
 log="$state_dir/serial.log"
 : > "$log"
-"$qemu" "${args[@]}" -display none -monitor none -serial "file:$log" ${extra_args[@]+"${extra_args[@]}"} &
+qmp_socket="$state_dir/qmp.sock"
+rm -f "$qmp_socket"
+"$qemu" "${args[@]}" -display none -monitor none -serial "file:$log" -qmp "unix:$qmp_socket,server=on,wait=off" \
+    ${extra_args[@]+"${extra_args[@]}"} &
 qemu_pid=$!
 trap 'kill "$qemu_pid" 2>/dev/null || true' EXIT
 
-found=0
+# True once every expected text is in the log.
+all_found() {
+    local text
+    for text in ${expectations[@]+"${expectations[@]}"}; do
+        grep -qF -- "$text" "$log" || return 1
+    done
+    return 0
+}
+
 deadline=$((SECONDS + timeout_seconds))
 while kill -0 "$qemu_pid" 2>/dev/null; do
-    if [ -n "$expect" ] && grep -qF -- "$expect" "$log"; then
-        found=1
+    if [ ${#expectations[@]} -gt 0 ] && all_found; then
         break
     fi
     if [ "$SECONDS" -ge "$deadline" ]; then
@@ -110,24 +140,38 @@ while kill -0 "$qemu_pid" 2>/dev/null; do
     sleep 0.2
 done
 
+if [ -n "$screenshot" ] && kill -0 "$qemu_pid" 2>/dev/null; then
+    case "$screenshot" in
+        /*) ;;
+        *) screenshot="$PWD/$screenshot" ;;
+    esac
+    # QEMU's machine protocol: negotiate capabilities, then dump the screen.
+    printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s","format":"png"}}\n' "$screenshot" |
+        nc -U -w 2 "$qmp_socket" > /dev/null || echo "run.sh: screenshot failed" >&2
+fi
+
 kill "$qemu_pid" 2>/dev/null || true
 wait "$qemu_pid" 2>/dev/null || true
 trap - EXIT
 
-# QEMU may have exited on its own just after printing the marker.
-if [ -n "$expect" ] && [ "$found" -eq 0 ] && grep -qF -- "$expect" "$log"; then
-    found=1
-fi
-
 # Show the console without the firmware's terminal control sequences.
 sed -e $'s/\x1b\\[[0-9;?=]*[A-Za-z]//g' -e $'s/\r//g' "$log"
 
-if [ -z "$expect" ]; then
+if [ ${#expectations[@]} -eq 0 ]; then
     exit 0
 fi
-if [ "$found" -eq 1 ]; then
-    echo "run.sh: PASS (found \"$expect\")"
-    exit 0
+status=0
+for text in "${expectations[@]}"; do
+    if grep -qF -- "$text" "$log"; then
+        echo "run.sh: found \"$text\""
+    else
+        echo "run.sh: MISSING \"$text\"" >&2
+        status=1
+    fi
+done
+if [ "$status" -eq 0 ]; then
+    echo "run.sh: PASS"
+else
+    echo "run.sh: FAIL" >&2
 fi
-echo "run.sh: FAIL (\"$expect\" not found)" >&2
-exit 1
+exit "$status"
