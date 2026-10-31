@@ -5,4 +5,5 @@
 #
 
 add_subdirectory(LibBase)
+add_subdirectory(LibDeviceTree)
 add_subdirectory(LibELF)
