@@ -17,9 +17,11 @@ find Boot Kernel Libraries Tests -name '*.cpp' -o -name '*.h' | xargs /opt/homeb
 - Report failures with `ErrorOr<T>`. Propagate with `TRY(...)`, and use
   `MUST(...)` only where failure is a bug.
 - Check invariants with `VERIFY(...)`. It stays on in every build.
-- No raw owning `new`/`delete` outside LibBase and kernel bring-up code.
-  Smart pointers arrive with threads in M3, the first objects with shared
-  ownership.
+- Own heap objects through smart pointers: `NonnullOwnPtr`/`OwnPtr` for sole
+  ownership, `RefCounted` with `NonnullRefPtr`/`RefPtr` for shared. Create
+  them with `try_make<T>()` / `try_make_ref_counted<T>()`, which fail with an
+  error instead of crashing when memory runs out. Raw `new`/`delete` only in
+  LibBase and kernel bring-up code.
 - Prefer concepts and `requires` to SFINAE.
 - No floating point in the kernel (`-mgeneral-regs-only`).
 

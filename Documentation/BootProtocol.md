@@ -153,4 +153,5 @@ it. Addresses are physical unless named otherwise.
 |---|---|
 | `-v` | Verbose boot: the kernel log on screen instead of the boot screen |
 | `ktest`, `ktest=PREFIX` | Run the in-kernel tests (all, or those whose `suite.name` starts with PREFIX), print `ktest: PASS` or `ktest: FAIL`, and power off |
+| `ktest-seconds=N` | How long soak tests run, in seconds (default 2) |
 | `fault=KIND` | End the boot with a deliberate failure, to test crash reporting: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (a panic in a timer interrupt) or `processor` (a panic on processor 1) |

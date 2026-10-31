@@ -14,8 +14,8 @@ See [Architecture](Architecture.md) for the design behind these steps.
 | **M0 Clean slate** | ✅ 2026-10-31 | Rust tree archived (tag `v0.1-rust`, branch `legacy/rust`); CMake/Ninja superbuild with host, UEFI and target parts; `Meta/run.sh`; LibBase core (types, `Span`, `Optional`, `ErrorOr`/`TRY`, `StringView`, checked `format`) + LibTest; VultureBoot v0 | QEMU+HVF shows "VultureBoot" on screen and serial; `ninja test-host` passes. Verified by `ninja check`. |
 | **M1 Boot + early kernel** | ✅ 2026-10-31 | VultureBoot loads the kernel ELF (and boot archive, once one exists), the boot-args, framebuffer, memory map and DTB, builds the first page tables and hands over; higher-half kernel; global constructors; framebuffer console (built-in 8x16 font) and boot screen (logo, progress bar); PL011 serial; exception vectors; symbolized, demangled panic backtraces; LibELF and LibDeviceTree | Kernel prints the memory map, draws the boot logo; a deliberate fault shows a symbolized backtrace. Verified by `ninja check` (`test-boot`, `test-panic`). |
 | **M2 Core kernel** | ✅ 2026-10-31 | GICv3, generic timer (tickless), PSCI SMP bring-up and power-off, buddy allocator with per-CPU page caches, slab `kmalloc` with per-CPU magazines, kernel-owned page tables, direct map, MMIO window and guard-paged kernel stacks, IRQ-safe ticket `SpinLock`, per-CPU data (TPIDR_EL1), `ktest` | All 8 vCPUs online; allocator/timer/lock stress `ktest` passes; QEMU exits with a pass marker. Verified by `ninja check` (`test-boot`, `test-kernel`). |
-| **M3 Threads + scheduler** | Next | Threads, kernel stacks, context switch with FP/SIMD, per-CPU queues + work stealing, QoS, wait queues, mutex/semaphore, sleep | 1000 threads ping-pong across 8 CPUs for 60 s with no hang; context-switch benchmark recorded |
-| **M4 Userspace** | | Address spaces (TTBR0+ASID), regions/VMObjects, demand paging, CoW, ELF loader, SVC entry, generated syscall table, fault-safe user copies, fork/exec/exit/wait, signals, boot archive as root; LibC v0, LibCxxRT, crt0 | `/sbin/init` runs at EL0, forks/execs tests; a user segfault kills only that process and prints a crash report |
+| **M3 Threads + scheduler** | ✅ 2026-10-31 | Kernel threads with guard-paged stacks, context switch with FP/SIMD, per-CPU run queues with QoS classes, idle-first placement and work stealing, preemption by time slice and by more urgent wakeups, `Mutex`, `Semaphore`, `WaitQueue`, sleep, join; `RefPtr`/`OwnPtr` | 1000 threads ping-pong across 8 CPUs for 60 s with no hang (`ninja test-soak`: 228 million round trips); context-switch benchmark recorded (`ninja bench`: 173 ns) |
+| **M4 Userspace** | Next | Address spaces (TTBR0+ASID), regions/VMObjects, demand paging, CoW, ELF loader, SVC entry, generated syscall table, fault-safe user copies, fork/exec/exit/wait, signals, boot archive as root; LibC v0, LibCxxRT, crt0 | `/sbin/init` runs at EL0, forks/execs tests; a user segfault kills only that process and prints a crash report |
 | **M5 Storage + vultureFS** | | VFS, file descriptors, pipes, devfs, tmpfs; PCIe ECAM + virtio core, virtio-blk, NVMe; GPT; FAT32; page cache + `mmap`; vultureFS v1; `Tools/mkvfs`, `fsck.vfs`, `mkimage` | Root on vultureFS persists across reboots; 100 forced kills mid-write always remount clean and pass fsck |
 | **M6 Unix userland** | | vlaunchd (JSON plists, on-demand start, restart policy); TTY/PTY + line discipline; text console; **vsh** (pipes, redirects, globs, job control, history, completion, scripts); ~40 CLI tools; users/groups/login; permissions; sysctl; dynamic linker + shared cache; LibCore run loop | Text login, `ls -l /System \| grep Kernel \| wc -l`, Ctrl-Z/`fg`; our POSIX conformance subset passes |
 | **M7 IPC + services** | | Kernel ports with direct handoff; LibIPC + `ipcc` IDL compiler; logd + `log`, notifyd, configd, pasteboard; name lookup via vlaunchd | IPC round trip within budget; `log stream` shows multiple services |
@@ -41,15 +41,15 @@ sleep/wake. These come after M14.
 
 Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
 
-| Metric | Target |
-|---|---|
-| Boot, firmware handoff to login window | ≤ 2 s |
-| Null syscall | < 150 ns |
-| Context switch | < 1 µs |
-| IPC round trip | < 3 µs |
-| Window drag at 2560×1600 | 60 fps |
-| Input to photon | ≤ 1 frame |
-| TextEdit cold launch | < 300 ms |
+| Metric | Target | Measured |
+|---|---|---|
+| Boot, firmware handoff to login window | ≤ 2 s | |
+| Null syscall | < 150 ns | |
+| Context switch | < 1 µs | 173 ns (M3, yield between two threads on one processor) |
+| IPC round trip | < 3 µs | |
+| Window drag at 2560×1600 | 60 fps | |
+| Input to photon | ≤ 1 frame | |
+| TextEdit cold launch | < 300 ms | |
 
 ## Risks
 
@@ -97,3 +97,23 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
     with QEMU's GICv3 (single security state) `GICD_CTLR.DS` reads as 1.
   - A tickless kernel cannot wait with a bare WFI: with no periodic tick,
     nothing may ever wake it. Every timed wait arms its own timer.
+- **M3:**
+  - Measured (`ninja bench`): context switch 173 ns; semaphore round trip
+    (two wakeups, two switches) 404 ns on one processor, 24 µs across two
+    (each wakeup wakes an idle vCPU through the host); creating, starting
+    and joining a thread 6.4 µs. A user-interactive thread preempts a
+    background one 8 µs after it is started.
+  - 1000 threads ping-ponging through semaphores manage 3.8 million round
+    trips per second on 8 processors, steadily for 60 s.
+  - Under HVF, a timer on a busy processor fires within ~15 µs, but a
+    processor idling in WFI wakes up to 2-4 ms late: QEMU sleeps the vCPU
+    thread with a host timed wait, which macOS coalesces. Real hardware does
+    not have this. If frame pacing (M8) needs it, idle processors can wake
+    early and spin out the rest.
+  - Rule that keeps switching deadlock-free: a thread is resumed only after
+    its last processor finished saving it. Wakers wait for that (briefly);
+    work stealing skips such threads; no processor ever waits for another in
+    the middle of a switch.
+  - Drains of per-processor caches for exact memory accounting run in
+    interrupt context (`Processor::call_on_all`): doing them in threads
+    would itself allocate and free stacks, changing what is measured.

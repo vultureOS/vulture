@@ -5,7 +5,7 @@ Everything inside it is built from scratch in this repository: bootloader,
 kernel, C library, graphics, fonts rasterizer, UI framework, window server,
 desktop and apps.
 
-**Status:** milestone M2 is done.
+**Status:** milestone M3 is done.
 
 - VultureBoot, our own UEFI loader, loads the kernel on AArch64 and hands it
   the machine: memory map, framebuffer, device tree and serial port.
@@ -13,10 +13,12 @@ desktop and apps.
 - It runs on its own page tables with buddy and slab allocators, takes
   interrupts through the GICv3, keeps time without a periodic tick, and
   brings all 8 processors online.
+- Threads are scheduled preemptively over all processors by QoS class, with
+  work stealing, sleeping locks and a 173 ns context switch.
 - Crashes produce a symbolized backtrace; booting with `ktest` runs the
   in-kernel test suite.
 
-Next is M3, threads and the scheduler. See the [Roadmap](Documentation/Roadmap.md).
+Next is M4, userspace. See the [Roadmap](Documentation/Roadmap.md).
 
 ## Requirements
 

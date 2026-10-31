@@ -66,6 +66,8 @@ ExternalProject over the same source tree and adds these targets:
 | `ninja -C build test-panic` | Boots with `fault=data-abort`; the panic report must decode the fault and symbolize the backtrace |
 | `ninja -C build test-kernel` | Boots with `ktest`: the in-kernel tests run on all processors, print `ktest: PASS`, and power the machine off |
 | `ninja -C build check` | All of the above tests |
+| `ninja -C build test-soak` | 1000 threads ping-ponging for 60 s (not part of `check`) |
+| `ninja -C build bench` | Boots with `ktest=bench` and prints the measurements |
 
 `Meta/build.sh` wraps the configure step and `ninja`, checks that the tools
 are installed, and takes ninja targets as arguments (`--check` adds `check`).
@@ -80,6 +82,7 @@ Kernel command line words:
 |---|---|
 | `-v` | Verbose boot: the kernel log on screen instead of the boot screen |
 | `ktest`, `ktest=PREFIX` | Run the in-kernel tests (those whose `suite.name` starts with PREFIX), then power off |
+| `ktest-seconds=N` | How long soak tests run (default 2) |
 | `fault=KIND` | End the boot with a deliberate crash: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (in a timer interrupt) or `processor` (on processor 1) | Kernel code that does not touch hardware (such as
 `Kernel/BootArguments.cpp`) is compiled into host tests too; see
 `Tests/Kernel`.
@@ -117,7 +120,7 @@ Boot/          VultureBoot UEFI loader: Arch/aarch64 (page tables, handoff), UEF
 Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page tables, GICv3, timer, PSCI, SMP)
                Console (framebuffer, font, boot screen) · Debug (log, panic, symbols) · Devices/Serial
                Interrupts · Locking · Memory (buddy, physical memory, heap, memory manager)
-               Tasks (Processor) · Time (timer queues) · Tests (ktest) · Library (C++ runtime) · Init.cpp
+               Tasks (Processor, Thread, Scheduler) · Time (timer queues) · Tests (ktest) · Library (C++ runtime) · Init.cpp
 Libraries/     LibBase · LibDeviceTree · LibELF · LibTest; LibC, LibCore, LibGfx, LibUI (pranaUI) … later
 Services/      vlaunchd · logd · PranaWindowServer · AudioServer · Indexer · SystemUI · Dock …        (M6+)
 Applications/  Finder · Terminal · TextEdit · Preview · SystemSettings · WidgetGallery …              (M9+)
@@ -153,10 +156,12 @@ macOS-style at the top, real Unix underneath:
   | `0xffff'8100'0000'0000` | Kernel stacks: 64 KiB each at the top of a 128 KiB slot; the rest is a guard |
   | `0xffff'ffff'8000'0000` | Kernel image: code read-execute, constants read-only, data read-write |
 - **Processors (M2).** Every CPU has a `Processor` object, reached through
-  TPIDR_EL1, holding its page cache, heap magazines and timer queue.
-  Secondary processors start through PSCI `CPU_ON` into `secondary_entry`,
-  which turns the MMU on under a temporary identity map. An idle processor
-  sleeps in WFI and runs work handed to it by `Processor::run_on_all`.
+  TPIDR_EL1, holding its page cache, heap magazines, timer queue, run queue
+  and current thread. Secondary processors start through PSCI `CPU_ON` into
+  `secondary_entry`, which turns the MMU on under a temporary identity map.
+  `Processor::call_on_all` runs a short function on every processor in
+  interrupt context (an IPI); `Processor::run_on_all` runs one in a thread
+  pinned to each processor.
 - **Interrupts and time (M2).** GICv3: SGIs are IPIs, PPIs per-processor
   interrupts, SPIs devices, all at one priority so handlers never nest. Each
   processor has a deadline-ordered timer queue driving the virtual timer
@@ -172,10 +177,23 @@ macOS-style at the top, real Unix underneath:
   magazines; larger sizes take whole blocks); VMObjects (anonymous, file-backed, MMIO, shared), demand paging,
   copy-on-write `fork`, one page cache shared by `read` and `mmap`, ASIDs,
   guard pages on kernel stacks.
-- **Scheduling.** Processes and threads; per-CPU run queues with work
-  stealing; QoS classes (UserInteractive > UserInitiated > Default > Utility >
-  Background) with boosts for input and the window server; tickless timers
-  with coalescing for background work.
+- **Threads (M3).** A kernel thread has a 64 KiB guard-paged stack and a
+  saved context: callee-saved registers plus all FP/SIMD registers (saved at
+  every switch, since kernel code never uses them, they hold the user state).
+  Threads are reference counted; the scheduler holds a reference until the
+  thread has exited and the next thread on its processor has freed its
+  stack, after which `join()` returns. The boot code becomes the "boot"
+  thread; every processor has an idle thread.
+- **Scheduling (M3).** Per-CPU run queues with one FIFO per QoS class
+  (UserInteractive > UserInitiated > Default > Utility > Background); the
+  most urgent class always runs first. A woken or new thread goes to an idle
+  processor if any (its last one first), else to its last processor; a
+  processor that runs dry steals from another's queue before idling. Time
+  slices (4 ms) are armed only while other threads wait, so a lone thread
+  runs untimed and the kernel stays tickless. Switches happen when a thread
+  blocks, yields or exits, and on return from an interrupt that asked for
+  one (a slice ended, or a more urgent thread woke). Later: boosts for input
+  and the window server, coalescing for background work.
 - **Syscalls.** `SVC #0`, negative-errno returns, ELF64 binaries. POSIX calls
   plus port calls are defined once in `Kernel/API/Syscalls.def` and generated
   for both the kernel and LibSystem.
@@ -195,8 +213,9 @@ macOS-style at the top, real Unix underneath:
 - **Locks.** `SpinLock` is a fair ticket lock that masks interrupts while
   held, so an interrupt handler can never spin on a lock its own processor
   holds. This removes the class of deadlock the Rust kernel had. Taking a
-  lock twice, or waiting on one for 5 s, panics. Sleeping locks come with
-  threads (M3).
+  lock twice, or waiting on one for 5 s, panics. Threads sleep on `Mutex`
+  (FIFO hand-over to the longest waiter), `Semaphore` and `WaitQueue`
+  (condition checked under its lock, so no wakeup is lost).
 - **Debugging.** Serial log, embedded symbol table, symbolized backtraces
   (continuing through exceptions via a frame record in each trap frame),
   `VERIFY`, QEMU's GDB stub (`Meta/run.sh --gdb`), and the `ktest` boot mode.
