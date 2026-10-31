@@ -42,6 +42,7 @@ Test const s_tests[] = {
     { "/usr/tests/pipes", 0, 0 },
     { "/usr/tests/devices", 0, 0 },
     { "/usr/tests/time", 0, 0 },
+    { "/usr/tests/volumes", 0, 0 },
     { "/usr/tests/many-processes", 0, 0 },
     // A crash must kill only the crashing process.
     { "/usr/tests/segfault", 0, SIGSEGV },

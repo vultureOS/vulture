@@ -23,7 +23,8 @@ set(tests
     pipes
     segfault
     signals
-    time)
+    time
+    volumes)
 
 foreach(test IN LISTS tests)
     vulture_add_program(test-${test} SOURCES ${test}.cpp DESTINATION usr/tests)
