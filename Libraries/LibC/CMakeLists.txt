@@ -10,16 +10,26 @@ add_library(crt0 OBJECT crt0.S)
 add_library(LibC STATIC
     ctype.cpp
     dirent.cpp
+    getopt.cpp
+    glob.cpp
     identity.cpp
+    libgen.cpp
+    locale.cpp
     malloc.cpp
+    pwd.cpp
     setjmp.S
     signal.cpp
     start.cpp
     stdio.cpp
+    scanf.cpp
     stdlib.cpp
+    stdlib_extra.cpp
     string.cpp
+    string_extra.cpp
     syscalls.cpp
-    termios.cpp)
+    termios.cpp
+    time.cpp
+    unistd_extra.cpp)
 
 # The C library implements the functions the compiler would otherwise turn
 # its loops into calls to.

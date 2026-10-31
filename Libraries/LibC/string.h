@@ -9,6 +9,8 @@
 #include <stddef.h>
 #include <sys/cdefs.h>
 
+#include <strings.h>
+
 __BEGIN_DECLS
 
 void* memcpy(void* destination, void const* source, size_t);
@@ -37,6 +39,17 @@ char* strtok(char* string, char const* delimiters);
 char* strdup(char const*);
 char* strndup(char const*, size_t);
 char* strerror(int error);
+int strerror_r(int error, char* buffer, size_t size);
+char* strcasestr(char const* haystack, char const* needle);
+void* memmem(void const* haystack, size_t haystack_length, void const* needle, size_t needle_length);
+void* memrchr(void const*, int value, size_t);
+size_t strlcat(char* destination, char const* source, size_t size);
+char* stpcpy(char* destination, char const* source);
+char* stpncpy(char* destination, char const* source, size_t);
+char* strsep(char** string, char const* delimiters);
+char* strchrnul(char const*, int character);
+int strcoll(char const*, char const*);
+size_t strxfrm(char* destination, char const* source, size_t size);
 char const* strsignal(int signal);
 
 __END_DECLS

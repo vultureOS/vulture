@@ -15,6 +15,10 @@ __BEGIN_DECLS
 
 #define EOF (-1)
 #define BUFSIZ 1024
+#define _IOFBF 0
+#define _IOLBF 1
+#define _IONBF 2
+#define FILENAME_MAX 1024
 
 typedef struct FILE FILE;
 
@@ -48,6 +52,30 @@ int ferror(FILE*);
 int feof(FILE*);
 int fileno(FILE*);
 FILE* fopen(char const* path, char const* mode);
+FILE* fdopen(int fd, char const* mode);
+FILE* popen(char const* command, char const* mode);
+int pclose(FILE*);
+FILE* tmpfile(void);
+int setvbuf(FILE*, char* buffer, int mode, size_t size);
+void setbuf(FILE*, char* buffer);
+void setlinebuf(FILE*);
+int ungetc(int, FILE*);
+void clearerr(FILE*);
+int fseek(FILE*, long offset, int origin);
+int fseeko(FILE*, off_t offset, int origin);
+long ftell(FILE*);
+off_t ftello(FILE*);
+void rewind(FILE*);
+ssize_t getline(char** line, size_t* capacity, FILE*);
+ssize_t getdelim(char** line, size_t* capacity, int delimiter, FILE*);
+int asprintf(char** result, char const* format, ...) __printf_like(2, 3);
+int vasprintf(char** result, char const* format, va_list);
+int scanf(char const* format, ...);
+int fscanf(FILE*, char const* format, ...);
+int sscanf(char const* string, char const* format, ...);
+int vscanf(char const* format, va_list);
+int vfscanf(FILE*, char const* format, va_list);
+int vsscanf(char const* string, char const* format, va_list);
 int fclose(FILE*);
 void perror(char const* prefix);
 int rename(char const* old_path, char const* new_path);

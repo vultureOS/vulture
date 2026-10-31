@@ -1,0 +1,6 @@
+wheel:*:0:root
+daemon:*:1:root
+staff:*:20:root,vulture
+admin:*:80:root,vulture
+everyone:*:12:
+nogroup:*:4294967294:

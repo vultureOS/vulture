@@ -42,5 +42,9 @@ int sigfillset(sigset_t*);
 int sigaddset(sigset_t*, int signal);
 int sigdelset(sigset_t*, int signal);
 int sigismember(sigset_t const*, int signal);
+int sigsuspend(sigset_t const* mask);
+int sigpending(sigset_t* set);
+int killpg(pid_t group, int signal);
+void psignal(int signal, char const* prefix);
 
 __END_DECLS

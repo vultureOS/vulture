@@ -34,6 +34,37 @@ long long strtoll(char const*, char** end, int base);
 unsigned long long strtoull(char const*, char** end, int base);
 
 char* getenv(char const* name);
+int setenv(char const* name, char const* value, int overwrite);
+int unsetenv(char const* name);
+int putenv(char* entry);
+int clearenv(void);
+char* realpath(char const* path, char* resolved);
+int mkstemp(char* template_string);
+int mkstemps(char* template_string, int suffix_length);
+char* mkdtemp(char* template_string);
+int system(char const* command);
+double strtod(char const*, char** end);
+float strtof(char const*, char** end);
+double atof(char const*);
+void* bsearch(void const* key, void const* base, size_t count, size_t size, int (*compare)(void const*, void const*));
+char const* getprogname(void);
+void setprogname(char const* name);
+
+typedef struct {
+    int quot;
+    int rem;
+} div_t;
+typedef struct {
+    long quot;
+    long rem;
+} ldiv_t;
+typedef struct {
+    long long quot;
+    long long rem;
+} lldiv_t;
+div_t div(int, int);
+ldiv_t ldiv(long, long);
+lldiv_t lldiv(long long, long long);
 
 int abs(int);
 long labs(long);

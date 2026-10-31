@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 enum class Buffering {
@@ -29,11 +30,15 @@ struct FILE {
     size_t read_length;
     char write_buffer[BUFSIZ];
     char read_buffer[BUFSIZ];
+    // Opened by fopen/fdopen/popen: in the list flushed at exit.
+    FILE* next;
+    pid_t child; // popen()'s.
 };
 
-static FILE s_stdin { 0, Buffering::Line, false, false, 0, 0, 0, {}, {} };
-static FILE s_stdout { 1, Buffering::Line, false, false, 0, 0, 0, {}, {} };
-static FILE s_stderr { 2, Buffering::None, false, false, 0, 0, 0, {}, {} };
+static FILE s_stdin { 0, Buffering::Line, false, false, 0, 0, 0, {}, {}, nullptr, 0 };
+static FILE s_stdout { 1, Buffering::Line, false, false, 0, 0, 0, {}, {}, nullptr, 0 };
+static FILE s_stderr { 2, Buffering::None, false, false, 0, 0, 0, {}, {}, nullptr, 0 };
+static FILE* s_open_files = nullptr;
 
 extern "C" {
 FILE* stdin = &s_stdin;
@@ -343,6 +348,8 @@ void __stdio_flush_all()
 {
     flush(stdout);
     flush(stderr);
+    for (FILE* file = s_open_files; file; file = file->next)
+        flush(file);
 }
 
 int vsnprintf(char* buffer, size_t size, char const* format_string, va_list arguments)
@@ -566,7 +573,19 @@ FILE* fopen(char const* path, char const* mode)
     }
     file->fd = fd;
     file->buffering = Buffering::Full;
+    file->next = s_open_files;
+    s_open_files = file;
     return file;
+}
+
+static void forget(FILE* file)
+{
+    for (FILE** link = &s_open_files; *link; link = &(*link)->next) {
+        if (*link == file) {
+            *link = file->next;
+            return;
+        }
+    }
 }
 
 int fclose(FILE* file)
@@ -574,9 +593,212 @@ int fclose(FILE* file)
     int result = flush(file);
     if (close(file->fd) < 0)
         result = EOF;
-    if (file != stdin && file != stdout && file != stderr)
+    if (file != stdin && file != stdout && file != stderr) {
+        forget(file);
         free(file);
+    }
     return result;
+}
+
+FILE* fdopen(int fd, char const* mode)
+{
+    (void)mode;
+    auto* file = static_cast<FILE*>(calloc(1, sizeof(FILE)));
+    if (!file) {
+        errno = ENOMEM;
+        return nullptr;
+    }
+    file->fd = fd;
+    file->buffering = isatty(fd) ? Buffering::Line : Buffering::Full;
+    file->next = s_open_files;
+    s_open_files = file;
+    return file;
+}
+
+int setvbuf(FILE* file, char* buffer, int mode, size_t size)
+{
+    (void)buffer;
+    (void)size;
+    flush(file);
+    file->buffering = mode == _IONBF ? Buffering::None : (mode == _IOLBF ? Buffering::Line : Buffering::Full);
+    return 0;
+}
+
+void setbuf(FILE* file, char* buffer)
+{
+    setvbuf(file, buffer, buffer ? _IOFBF : _IONBF, BUFSIZ);
+}
+
+void setlinebuf(FILE* file)
+{
+    setvbuf(file, nullptr, _IOLBF, 0);
+}
+
+int ungetc(int character, FILE* file)
+{
+    if (character == EOF)
+        return EOF;
+    // Back into the read buffer: room at the front, or make some.
+    if (file->read_position > 0) {
+        file->read_buffer[--file->read_position] = static_cast<char>(character);
+    } else {
+        if (file->read_length == BUFSIZ)
+            return EOF;
+        memmove(file->read_buffer + 1, file->read_buffer, file->read_length);
+        file->read_buffer[0] = static_cast<char>(character);
+        ++file->read_length;
+    }
+    file->eof = false;
+    return static_cast<unsigned char>(character);
+}
+
+void clearerr(FILE* file)
+{
+    file->error = false;
+    file->eof = false;
+}
+
+off_t ftello(FILE* file)
+{
+    off_t position = lseek(file->fd, 0, SEEK_CUR);
+    if (position < 0)
+        return -1;
+    return position - static_cast<off_t>(file->read_length - file->read_position) + static_cast<off_t>(file->write_length);
+}
+
+long ftell(FILE* file)
+{
+    return static_cast<long>(ftello(file));
+}
+
+int fseeko(FILE* file, off_t offset, int origin)
+{
+    if (flush(file) == EOF)
+        return -1;
+    if (origin == SEEK_CUR)
+        offset -= static_cast<off_t>(file->read_length - file->read_position);
+    file->read_position = file->read_length = 0;
+    file->eof = false;
+    return lseek(file->fd, offset, origin) < 0 ? -1 : 0;
+}
+
+int fseek(FILE* file, long offset, int origin)
+{
+    return fseeko(file, offset, origin);
+}
+
+void rewind(FILE* file)
+{
+    (void)fseeko(file, 0, SEEK_SET);
+    file->error = false;
+}
+
+ssize_t getdelim(char** line, size_t* capacity, int delimiter, FILE* file)
+{
+    if (!line || !capacity) {
+        errno = EINVAL;
+        return -1;
+    }
+    size_t length = 0;
+    for (;;) {
+        int character = fgetc(file);
+        if (character == EOF)
+            break;
+        if (length + 2 > *capacity) {
+            size_t grown = *capacity ? *capacity * 2 : 128;
+            auto* bigger = static_cast<char*>(realloc(*line, grown));
+            if (!bigger) {
+                errno = ENOMEM;
+                return -1;
+            }
+            *line = bigger;
+            *capacity = grown;
+        }
+        (*line)[length++] = static_cast<char>(character);
+        if (character == delimiter)
+            break;
+    }
+    if (length == 0)
+        return -1;
+    (*line)[length] = '\0';
+    return static_cast<ssize_t>(length);
+}
+
+ssize_t getline(char** line, size_t* capacity, FILE* file)
+{
+    return getdelim(line, capacity, '\n', file);
+}
+
+FILE* tmpfile(void)
+{
+    char path[] = "/tmp/tmpfile.XXXXXX";
+    int fd = mkstemp(path);
+    if (fd < 0)
+        return nullptr;
+    unlink(path);
+    return fdopen(fd, "w+");
+}
+
+// Runs `command` with /bin/sh, reading its output ("r") or writing its
+// input ("w").
+FILE* popen(char const* command, char const* mode)
+{
+    bool reading = mode[0] == 'r';
+    int fds[2];
+    if (pipe2(fds, O_CLOEXEC) < 0)
+        return nullptr;
+    pid_t child = fork();
+    if (child < 0) {
+        close(fds[0]);
+        close(fds[1]);
+        return nullptr;
+    }
+    if (child == 0) {
+        dup2(reading ? fds[1] : fds[0], reading ? 1 : 0);
+        char* argv[] = { const_cast<char*>("sh"), const_cast<char*>("-c"), const_cast<char*>(command), nullptr };
+        execv("/bin/sh", argv);
+        _exit(127);
+    }
+    close(reading ? fds[1] : fds[0]);
+    FILE* file = fdopen(reading ? fds[0] : fds[1], mode);
+    if (file)
+        file->child = child;
+    return file;
+}
+
+int pclose(FILE* file)
+{
+    pid_t child = file->child;
+    fclose(file);
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0) {
+        if (errno != EINTR)
+            return -1;
+    }
+    return status;
+}
+
+int vasprintf(char** result, char const* format, va_list arguments)
+{
+    va_list copy;
+    va_copy(copy, arguments);
+    int length = vsnprintf(nullptr, 0, format, copy);
+    va_end(copy);
+    if (length < 0)
+        return -1;
+    *result = static_cast<char*>(malloc(static_cast<size_t>(length) + 1));
+    if (!*result)
+        return -1;
+    return vsnprintf(*result, static_cast<size_t>(length) + 1, format, arguments);
+}
+
+int asprintf(char** result, char const* format, ...)
+{
+    va_list arguments;
+    va_start(arguments, format);
+    int length = vasprintf(result, format, arguments);
+    va_end(arguments);
+    return length;
 }
 
 void perror(char const* prefix)

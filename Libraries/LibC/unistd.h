@@ -18,6 +18,10 @@ pid_t fork(void);
 int execve(char const* path, char* const argv[], char* const envp[]);
 int execv(char const* path, char* const argv[]);
 int execvp(char const* file, char* const argv[]);
+int execvpe(char const* file, char* const argv[], char* const envp[]);
+int execl(char const* path, char const* argument, ...);
+int execlp(char const* file, char const* argument, ...);
+int execle(char const* path, char const* argument, ...);
 __noreturn void _exit(int status);
 
 pid_t getpid(void);
@@ -75,6 +79,45 @@ int symlink(char const* target, char const* link_path);
 int access(char const* path, int mode);
 
 unsigned sleep(unsigned seconds);
+unsigned alarm(unsigned seconds);
+int pause(void);
+int daemon(int stay_in_directory, int keep_output);
+char* getlogin(void);
+int getlogin_r(char* buffer, size_t size);
+char* getpass(char const* prompt);
+int getpagesize(void);
+
+// getopt() (see getopt.h for getopt_long).
+extern char* optarg;
+extern int optind;
+extern int opterr;
+extern int optopt;
+int getopt(int argc, char* const argv[], char const* options);
+
+#define _SC_ARG_MAX 0
+#define _SC_CHILD_MAX 1
+#define _SC_CLK_TCK 2
+#define _SC_OPEN_MAX 4
+#define _SC_PAGESIZE 30
+#define _SC_PAGE_SIZE _SC_PAGESIZE
+#define _SC_NPROCESSORS_CONF 83
+#define _SC_NPROCESSORS_ONLN 84
+#define _SC_PHYS_PAGES 85
+#define _SC_LINE_MAX 43
+#define _SC_HOST_NAME_MAX 180
+#define _SC_LOGIN_NAME_MAX 71
+long sysconf(int name);
+
+#define _PC_LINK_MAX 0
+#define _PC_NAME_MAX 3
+#define _PC_PATH_MAX 4
+#define _PC_PIPE_BUF 5
+long pathconf(char const* path, int name);
+long fpathconf(int fd, int name);
+
+#define STDIN_FILENO 0
+#define STDOUT_FILENO 1
+#define STDERR_FILENO 2
 int usleep(useconds_t microseconds);
 
 __END_DECLS

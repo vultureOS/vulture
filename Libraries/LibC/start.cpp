@@ -55,6 +55,8 @@ extern "C" [[noreturn]] void __libc_start(unsigned long* stack)
     int argc = static_cast<int>(stack[0]);
     char** argv = reinterpret_cast<char**>(stack + 1);
     environ = argv + argc + 1;
+    if (argc > 0 && argv[0])
+        setprogname(argv[0]);
 
     if (__init_array_start) {
         for (auto* constructor = __init_array_start; constructor != __init_array_end; ++constructor)
