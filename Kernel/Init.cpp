@@ -20,6 +20,7 @@
 #include <Kernel/Devices/Storage/BlockDevice.h>
 #include <Kernel/FileSystem/BootArchive.h>
 #include <Kernel/FileSystem/DevFS.h>
+#include <Kernel/FileSystem/FATFS.h>
 #include <Kernel/FileSystem/TmpFS.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Library/CxxRuntime.h>
@@ -171,6 +172,33 @@ static void make_directory(StringView path)
         must("making a mount point"_sv, move(result));
 }
 
+// Mounts every FAT volume found on the disks under /Volumes, the way macOS
+// shows them: the EFI System Partition (the one holding an EFI directory)
+// as /Volumes/EFI, others by device name.
+static void mount_volumes()
+{
+    bool made_volumes = false;
+    for (auto& device : BlockDevice::all()) {
+        auto file_system = create_fat_file_system(*device);
+        if (file_system.is_error())
+            continue;
+        if (!made_volumes) {
+            make_directory("/Volumes"_sv);
+            made_volumes = true;
+        }
+        bool is_efi = !file_system.value()->root_inode()->lookup("EFI"_sv).is_error();
+        StringBuilder path;
+        path.append("/Volumes/"_sv);
+        path.append(is_efi ? "EFI"_sv : device->name());
+        make_directory(path.view());
+        if (auto result = VirtualFileSystem::mount(file_system.release_value(), path.view()); result.is_error()) {
+            dmesgln("Volumes: can't mount {} at {}: {}", device->name(), path.view(), result.error());
+            continue;
+        }
+        dmesgln("Volumes: {} (FAT) at {}", device->name(), path.view());
+    }
+}
+
 // Builds the file tree: a tmpfs root filled from the boot archive, devfs
 // at /dev and a fresh tmpfs at /tmp. Then starts /sbin/init as process 1.
 static void start_userland(API::BootInfo const& boot_info, BootArguments const& arguments)
@@ -189,6 +217,7 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     must("devfs"_sv, VirtualFileSystem::mount(must("devfs"_sv, DevFS::create()), "/dev"_sv));
     must("devices"_sv, create_basic_devices());
     initialize_storage();
+    mount_volumes();
     must("/tmp"_sv, VirtualFileSystem::mount(must("tmpfs"_sv, TmpFS::create()), "/tmp"_sv));
 
     // "utest" runs the userland tests.

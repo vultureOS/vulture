@@ -35,6 +35,7 @@ add_executable(Kernel
     Devices/VirtIO/VirtIO.cpp
     FileSystem/BootArchive.cpp
     FileSystem/DevFS.cpp
+    FileSystem/FATFS.cpp
     FileSystem/FileDescription.cpp
     FileSystem/IOBuffer.cpp
     FileSystem/Inode.cpp
