@@ -21,6 +21,7 @@ set(tests
     many-processes
     mapped-files
     memory
+    permissions
     pipes
     segfault
     signals

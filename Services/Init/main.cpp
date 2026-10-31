@@ -45,6 +45,7 @@ Test const s_tests[] = {
     { "/usr/tests/volumes", 0, 0 },
     { "/usr/tests/mapped-files", 0, 0 },
     { "/usr/tests/terminals", 0, 0 },
+    { "/usr/tests/permissions", 0, 0 },
     { "/usr/tests/many-processes", 0, 0 },
     // A crash must kill only the crashing process.
     { "/usr/tests/segfault", 0, SIGSEGV },
