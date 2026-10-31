@@ -8,6 +8,14 @@
 
 #include <Kernel/API/BootInfo.h>
 
+// User space (TTBR0, 48-bit), per process:
+//
+//   0x0000'0000'0001'0000  lowest mappable address (below: null pointer guard)
+//   0x0000'0000'0040'0000  programs are linked here
+//   0x0000'1000'0000'0000  mmap() places mappings from here upwards
+//   0x0000'7fff'ff80'0000  the main thread's stack (8 MiB, grows down)
+//   0x0001'0000'0000'0000  end of user space
+//
 // The kernel half of the address space (TTBR1, 48-bit):
 //
 //   0xffff'0000'0000'0000  direct map of physical RAM        128 TiB
@@ -33,6 +41,12 @@ constexpr u64 kernel_stack_size = 64 * KiB;
 constexpr size_t kernel_stack_slots = 4096;
 
 constexpr FlatPtr kernel_image_base = 0xffff'ffff'8000'0000;
+
+constexpr FlatPtr user_space_start = 0x0000'0000'0001'0000;
+constexpr FlatPtr user_space_end = 0x0001'0000'0000'0000;
+constexpr FlatPtr user_mmap_base = 0x0000'1000'0000'0000;
+constexpr FlatPtr user_stack_top = 0x0000'8000'0000'0000;
+constexpr u64 user_stack_size = 8 * MiB;
 
 static_assert(direct_map_base + direct_map_size <= mmio_base);
 static_assert(mmio_base + mmio_size <= kernel_stacks_base);

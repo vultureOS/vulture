@@ -39,6 +39,12 @@ inline void enable_interrupts()
     asm volatile("msr daifclr, #2" ::: "memory");
 }
 
+// Masks IRQs when the previous state does not matter.
+inline void mask_interrupts()
+{
+    asm volatile("msr daifset, #2" ::: "memory");
+}
+
 [[nodiscard]] inline bool are_interrupts_enabled()
 {
     return !(READ_SYSTEM_REGISTER(daif) & daif_irq_masked);

@@ -99,14 +99,19 @@ void PhysicalMemoryManager::initialize(Span<API::MemoryRegion const> memory_map)
         if (base >= end)
             continue;
         size_t pages = (end - base) / page_size;
-        u64 metadata_size = align_up<u64>(BuddyAllocator::metadata_size(pages), page_size);
+        // The buddy allocator's two bytes per page, then a reference count.
+        u64 buddy_size = BuddyAllocator::metadata_size(pages);
+        u64 metadata_size = align_up<u64>(buddy_size + pages * sizeof(u16), page_size);
         auto metadata = usable.take(metadata_size);
         if (!metadata.has_value()) {
             dmesgln("Physical memory: no room for the bookkeeping of zone {:#x}-{:#x}", base, end - 1);
             continue;
         }
+        u8* bookkeeping = direct_map_pointer(PhysicalAddress(metadata.value()));
+        __builtin_memset(bookkeeping + buddy_size, 0, pages * sizeof(u16));
+        m_reference_counts[m_zone_count] = reinterpret_cast<u16*>(bookkeeping + buddy_size);
         auto& zone = m_zones[m_zone_count++];
-        zone.initialize(PhysicalAddress(base), pages, Bytes(direct_map_pointer(PhysicalAddress(metadata.value())), metadata_size), API::direct_map_base);
+        zone.initialize(PhysicalAddress(base), pages, Bytes(bookkeeping, buddy_size), API::direct_map_base);
     }
 
     for (size_t i = 0; i < usable.count; ++i) {
@@ -241,6 +246,41 @@ void PhysicalMemoryManager::drain_processor_cache()
     InterruptDisabler disabler;
     auto& cache = Processor::current().page_cache();
     flush_cache(cache, cache.count);
+}
+
+u16* PhysicalMemoryManager::reference_count(PhysicalAddress address) const
+{
+    for (size_t i = 0; i < m_zone_count; ++i) {
+        if (m_zones[i].contains(address))
+            return &m_reference_counts[i][(address.get() - m_zones[i].base().get()) / page_size];
+    }
+    VERIFY_NOT_REACHED();
+}
+
+ErrorOr<PhysicalAddress> PhysicalMemoryManager::allocate_user_page()
+{
+    auto page = TRY(allocate_zeroed_page(PageUse::User));
+    __atomic_store_n(reference_count(page), 1, __ATOMIC_RELEASE);
+    return page;
+}
+
+void PhysicalMemoryManager::ref_user_page(PhysicalAddress page)
+{
+    u16 previous = __atomic_fetch_add(reference_count(page), 1, __ATOMIC_RELAXED);
+    VERIFY(previous > 0 && previous < 0xffff);
+}
+
+void PhysicalMemoryManager::unref_user_page(PhysicalAddress page)
+{
+    u16 previous = __atomic_fetch_sub(reference_count(page), 1, __ATOMIC_ACQ_REL);
+    VERIFY(previous > 0);
+    if (previous == 1)
+        free_pages(page);
+}
+
+u32 PhysicalMemoryManager::user_page_references(PhysicalAddress page) const
+{
+    return __atomic_load_n(reference_count(page), __ATOMIC_ACQUIRE);
 }
 
 PhysicalMemoryStatistics PhysicalMemoryManager::statistics() const

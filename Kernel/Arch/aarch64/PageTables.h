@@ -41,9 +41,11 @@ constexpr u64 valid = 1ull << 0;
 constexpr u64 table = 1ull << 1; // At levels 0-2: points to a table. At level 3: a page.
 constexpr u64 page = 1ull << 1;
 constexpr u64 attribute_index_shift = 2;
+constexpr u64 user_access = 1ull << 6; // AP[1]: EL0 may access.
 constexpr u64 read_only = 1ull << 7; // AP[2]: no writes at any level.
 constexpr u64 inner_shareable = 3ull << 8;
 constexpr u64 access_flag = 1ull << 10;
+constexpr u64 not_global = 1ull << 11; // Tagged with the ASID (user mappings).
 constexpr u64 privileged_execute_never = 1ull << 53;
 constexpr u64 unprivileged_execute_never = 1ull << 54;
 constexpr u64 address_mask = 0x0000'ffff'ffff'f000;
@@ -72,6 +74,24 @@ constexpr u64 leaf_descriptor(u64 physical_address, MemoryAttribute attribute, A
         entry |= page;
     return entry;
 }
+
+// A level-3 page for user memory (Normal, cacheable): accessible at EL0,
+// tagged with the address space's ASID, never executable by the kernel.
+constexpr u64 user_page_descriptor(u64 physical_address, Access access)
+{
+    using namespace Descriptor;
+    u64 entry = (physical_address & address_mask) | valid | page | access_flag | inner_shareable | not_global | user_access | privileged_execute_never;
+    entry |= static_cast<u64>(MemoryAttribute::Normal) << attribute_index_shift;
+    if (access != Access::ReadWrite)
+        entry |= read_only;
+    if (access != Access::ReadExecute)
+        entry |= unprivileged_execute_never;
+    return entry;
+}
+
+// The kernel half uses 16-bit ASIDs in TTBR0 when the CPU has them.
+constexpr u64 tcr_asid_16_bits = 1ull << 36;
+constexpr u64 tcr_epd0 = 1ull << 7;
 
 constexpr u64 table_descriptor(u64 table_physical_address)
 {

@@ -23,8 +23,8 @@ enum class Protection : u8 {
     ReadExecute,
 };
 
-// A tree of translation tables. Mappings are kernel-only: user access
-// arrives with address spaces (M4).
+// A tree of translation tables: the kernel's (upper half), or a process's
+// user space (lower half), which is mapped one 4 KiB page at a time.
 class PageTable {
 public:
     PageTable() = default;
@@ -41,6 +41,15 @@ public:
     void unmap(FlatPtr virtual_address, size_t size);
 
     [[nodiscard]] Optional<PhysicalAddress> translate(FlatPtr virtual_address) const;
+
+    // User pages. Replacing or changing a mapping flushes the old one from
+    // every processor's TLB first.
+    ErrorOr<void> map_user_page(FlatPtr virtual_address, PhysicalAddress, Protection);
+    // Returns what was mapped, if anything.
+    Optional<PhysicalAddress> unmap_user_page(FlatPtr virtual_address);
+    // Returns false if nothing is mapped there.
+    bool protect_user_page(FlatPtr virtual_address, Protection);
+    [[nodiscard]] Optional<Protection> user_page_protection(FlatPtr virtual_address) const;
 
     // Frees the tables themselves (not the memory they map).
     void destroy();
@@ -63,5 +72,19 @@ private:
 
 // Makes `table` this processor's kernel (upper-half) translation table.
 void activate_kernel_page_table(PageTable const&);
+
+// Address space identifiers (ASIDs) tag user TLB entries, so switching
+// between processes needs no TLB flush.
+ErrorOr<u16> allocate_address_space_id();
+// Flushes the ASID's entries from every processor, then frees it.
+void free_address_space_id(u16);
+
+// Once, on the boot processor: an empty user table for kernel threads, and
+// 16-bit ASIDs if the CPU has them.
+ErrorOr<void> initialize_user_translation();
+
+// Makes `table` (tagged `asid`) this processor's user space; with null,
+// user space is empty (kernel threads).
+void activate_user_page_table(PageTable const*, u16 asid);
 
 }

@@ -1,0 +1,307 @@
+/*
+ * Copyright (c) 2022-2026, Krisna Pranav
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#include <Kernel/API/POSIX/errno.h>
+#include <Kernel/API/POSIX/memory.h>
+#include <Kernel/Arch/MemoryLayout.h>
+#include <Kernel/Memory/AddressSpace.h>
+#include <Kernel/Memory/MemoryManager.h>
+#include <Kernel/Memory/PhysicalMemory.h>
+#include <LibBase/New.h>
+
+namespace Kernel {
+
+using Arch::Protection;
+
+Region::Region(FlatPtr base, size_t size, int protection, StringView name, NonnullRefPtr<AnonymousVMObject> object, size_t object_first_page)
+    : m_base(base)
+    , m_size(size)
+    , m_protection(protection)
+    , m_object(move(object))
+    , m_object_first_page(object_first_page)
+{
+    m_name_length = min(name.length(), sizeof(m_name));
+    __builtin_memcpy(m_name, name.characters_without_null_termination(), m_name_length);
+}
+
+static bool is_page_aligned(FlatPtr value)
+{
+    return value % page_size == 0;
+}
+
+static bool is_valid_user_range(FlatPtr address, size_t size)
+{
+    FlatPtr end;
+    return size > 0 && is_page_aligned(address) && is_page_aligned(size) && !__builtin_add_overflow(address, size, &end)
+        && address >= MemoryLayout::user_space_start && end <= MemoryLayout::user_space_end;
+}
+
+// How a page of a region is mapped. Writable only if the page is not
+// shared: a shared page is mapped read-only and copied on the first write.
+static Protection protection_for(int region_protection, bool may_write)
+{
+    if (region_protection & PROT_EXEC)
+        return Protection::ReadExecute;
+    if ((region_protection & PROT_WRITE) && may_write)
+        return Protection::ReadWrite;
+    return Protection::ReadOnly;
+}
+
+AddressSpace::AddressSpace(Arch::PageTable page_table, u16 asid)
+    : m_page_table(page_table)
+    , m_asid(asid)
+{
+}
+
+ErrorOr<NonnullOwnPtr<AddressSpace>> AddressSpace::create()
+{
+    auto page_table = TRY(Arch::PageTable::create());
+    auto asid = Arch::allocate_address_space_id();
+    if (asid.is_error()) {
+        page_table.destroy();
+        return asid.release_error();
+    }
+    auto* space = new (Base::nothrow) AddressSpace(page_table, asid.value());
+    if (!space) {
+        Arch::free_address_space_id(asid.value());
+        page_table.destroy();
+        return Error::from_errno(ENOMEM);
+    }
+    return adopt_own(*space);
+}
+
+AddressSpace::~AddressSpace()
+{
+    // Nothing runs on this address space any more. Dropping the ASID
+    // flushes its TLB entries everywhere, so the tables can go.
+    Arch::free_address_space_id(m_asid);
+    m_page_table.destroy();
+    while (auto* region = m_regions.take_first())
+        delete region;
+}
+
+void AddressSpace::activate() const
+{
+    Arch::activate_user_page_table(&m_page_table, m_asid);
+}
+
+Region* AddressSpace::find_region(FlatPtr address)
+{
+    for (auto& region : m_regions) {
+        if (region.contains(address))
+            return &region;
+        if (region.base() > address)
+            break;
+    }
+    return nullptr;
+}
+
+void AddressSpace::insert_sorted(Region& region)
+{
+    for (auto& existing : m_regions) {
+        if (existing.base() > region.base()) {
+            m_regions.insert_before(region, existing);
+            return;
+        }
+    }
+    m_regions.append(region);
+}
+
+ErrorOr<FlatPtr> AddressSpace::find_free_range(FlatPtr hint, size_t size) const
+{
+    FlatPtr candidate = max(hint, MemoryLayout::user_mmap_base);
+    // Keep clear of the stack area at the top.
+    FlatPtr limit = MemoryLayout::user_stack_top - MemoryLayout::user_stack_size - page_size;
+    for (auto& region : m_regions) {
+        if (region.end() <= candidate)
+            continue;
+        if (region.base() >= candidate + size)
+            break;
+        candidate = region.end();
+    }
+    if (candidate + size > limit || candidate + size < candidate)
+        return Error::from_errno(ENOMEM);
+    return candidate;
+}
+
+ErrorOr<Region*> AddressSpace::map_anonymous(FlatPtr address, size_t size, int protection, StringView name, bool fixed)
+{
+    size = align_up<size_t>(size, page_size);
+    if ((protection & PROT_WRITE) && (protection & PROT_EXEC))
+        return Error::from_errno(EACCES);
+    MutexLocker locker(m_lock);
+    if (fixed) {
+        if (!is_valid_user_range(address, size))
+            return Error::from_errno(EINVAL);
+        // Whatever was there goes.
+        TRY(split_around(address, size));
+        for (auto* region = m_regions.first(); region;) {
+            auto* next = m_regions.next(*region);
+            if (region->base() >= address && region->end() <= address + size) {
+                release_range(*region, region->base(), region->end());
+                m_regions.remove(*region);
+                delete region;
+            }
+            region = next;
+        }
+    } else {
+        if (size == 0)
+            return Error::from_errno(EINVAL);
+        address = TRY(find_free_range(is_page_aligned(address) ? address : 0, size));
+    }
+    auto object = TRY(AnonymousVMObject::create(size / page_size));
+    auto* region = new (Base::nothrow) Region(address, size, protection, name, move(object), 0);
+    if (!region)
+        return Error::from_errno(ENOMEM);
+    insert_sorted(*region);
+    return region;
+}
+
+// Splits regions so that none straddles `address` or `address + size`.
+ErrorOr<void> AddressSpace::split_around(FlatPtr address, size_t size)
+{
+    FlatPtr const boundaries[] = { address, address + size };
+    for (FlatPtr boundary : boundaries) {
+        auto* region = find_region(boundary);
+        if (region && region->base() != boundary) {
+            auto* tail = new (Base::nothrow) Region(boundary, region->end() - boundary, region->protection(), region->name(), region->m_object, region->object_index(boundary));
+            if (!tail)
+                return Error::from_errno(ENOMEM);
+            region->m_size = boundary - region->base();
+            insert_sorted(*tail);
+        }
+    }
+    return {};
+}
+
+void AddressSpace::release_range(Region& region, FlatPtr start, FlatPtr end)
+{
+    for (FlatPtr page = start; page < end; page += page_size) {
+        (void)m_page_table.unmap_user_page(page);
+        region.object().release_page(region.object_index(page));
+    }
+}
+
+ErrorOr<void> AddressSpace::unmap(FlatPtr address, size_t size)
+{
+    size = align_up<size_t>(size, page_size);
+    if (!is_valid_user_range(address, size))
+        return Error::from_errno(EINVAL);
+    MutexLocker locker(m_lock);
+    TRY(split_around(address, size));
+    for (auto* region = m_regions.first(); region;) {
+        auto* next = m_regions.next(*region);
+        if (region->base() >= address && region->end() <= address + size) {
+            release_range(*region, region->base(), region->end());
+            m_regions.remove(*region);
+            delete region;
+        }
+        region = next;
+    }
+    return {};
+}
+
+ErrorOr<void> AddressSpace::protect(FlatPtr address, size_t size, int protection)
+{
+    size = align_up<size_t>(size, page_size);
+    if (!is_valid_user_range(address, size))
+        return Error::from_errno(EINVAL);
+    if ((protection & PROT_WRITE) && (protection & PROT_EXEC))
+        return Error::from_errno(EACCES);
+    MutexLocker locker(m_lock);
+    // The whole range must be mapped.
+    for (FlatPtr page = address; page < address + size; page += page_size) {
+        if (!find_region(page))
+            return Error::from_errno(ENOMEM);
+    }
+    TRY(split_around(address, size));
+    for (auto& region : m_regions) {
+        if (region.base() < address || region.end() > address + size)
+            continue;
+        region.m_protection = protection;
+        for (FlatPtr page = region.base(); page < region.end(); page += page_size) {
+            auto physical = region.object().page(region.object_index(page));
+            if (!physical.get())
+                continue;
+            if (protection == PROT_NONE) {
+                (void)m_page_table.unmap_user_page(page);
+                continue;
+            }
+            bool exclusive = physical_memory().user_page_references(physical) == 1;
+            if (!m_page_table.protect_user_page(page, protection_for(protection, exclusive)))
+                continue;
+        }
+    }
+    return {};
+}
+
+PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
+{
+    MutexLocker locker(m_lock);
+    auto* region = find_region(address);
+    if (!region)
+        return PageFaultResult::BadAccess;
+    int protection = region->protection();
+    bool allowed = (access == AccessKind::Read && (protection & (PROT_READ | PROT_WRITE | PROT_EXEC)))
+        || (access == AccessKind::Write && (protection & PROT_WRITE))
+        || (access == AccessKind::Execute && (protection & PROT_EXEC));
+    if (!allowed)
+        return PageFaultResult::BadAccess;
+
+    FlatPtr page_address = align_down<FlatPtr>(address, page_size);
+    size_t index = region->object_index(page_address);
+    auto& object = region->object();
+    auto physical = object.page(index);
+
+    if (!physical.get()) {
+        // First touch: a fresh zeroed page.
+        auto page = physical_memory().allocate_user_page();
+        if (page.is_error())
+            return PageFaultResult::OutOfMemory;
+        object.set_page(index, page.value());
+        if (m_page_table.map_user_page(page_address, page.value(), protection_for(protection, true)).is_error())
+            return PageFaultResult::OutOfMemory;
+        return PageFaultResult::Resolved;
+    }
+
+    bool exclusive = physical_memory().user_page_references(physical) == 1;
+    if (access == AccessKind::Write && !exclusive) {
+        // Copy on write: this address space gets a page of its own.
+        auto copy = physical_memory().allocate_user_page();
+        if (copy.is_error())
+            return PageFaultResult::OutOfMemory;
+        __builtin_memcpy(physical_to_virtual(copy.value()), physical_to_virtual(physical), page_size);
+        object.set_page(index, copy.value());
+        physical = copy.value();
+        exclusive = true;
+    }
+    if (m_page_table.map_user_page(page_address, physical, protection_for(protection, exclusive)).is_error())
+        return PageFaultResult::OutOfMemory;
+    return PageFaultResult::Resolved;
+}
+
+ErrorOr<NonnullOwnPtr<AddressSpace>> AddressSpace::clone_for_fork()
+{
+    auto child = TRY(create());
+    MutexLocker locker(m_lock);
+    for (auto& region : m_regions) {
+        auto object = TRY(region.object().clone_range(region.object_index(region.base()), region.size() / page_size));
+        auto* copy = new (Base::nothrow) Region(region.base(), region.size(), region.protection(), region.name(), move(object), 0);
+        if (!copy)
+            return Error::from_errno(ENOMEM);
+        child->m_regions.append(*copy);
+        // Now shared: our writable pages must fault on the next write.
+        if (region.protection() & PROT_WRITE) {
+            for (FlatPtr page = region.base(); page < region.end(); page += page_size) {
+                if (region.object().page(region.object_index(page)).get())
+                    m_page_table.protect_user_page(page, protection_for(region.protection(), false));
+            }
+        }
+    }
+    return child;
+}
+
+}

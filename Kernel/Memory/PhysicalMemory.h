@@ -23,6 +23,8 @@ enum class PageUse : u8 {
     HeapLarge,
     KernelStack,
     BootData,
+    // Mapped into user space; may be shared copy-on-write (counted).
+    User,
     // Sitting in a processor's page cache, not handed out.
     Cached,
 };
@@ -69,6 +71,14 @@ public:
     // The use of the allocated block that starts at `address`, or Unknown.
     [[nodiscard]] PageUse block_use(PhysicalAddress) const;
 
+    // User pages carry a count of the address spaces sharing them (after
+    // fork, copy-on-write). A new one is zeroed, with a count of 1; the
+    // last unref frees it.
+    [[nodiscard]] ErrorOr<PhysicalAddress> allocate_user_page();
+    void ref_user_page(PhysicalAddress);
+    void unref_user_page(PhysicalAddress);
+    [[nodiscard]] u32 user_page_references(PhysicalAddress) const;
+
     // Returns this processor's cached pages to the zones.
     void drain_processor_cache();
 
@@ -85,12 +95,14 @@ public:
 private:
     [[nodiscard]] BuddyAllocator* zone_containing(PhysicalAddress);
     [[nodiscard]] BuddyAllocator const* zone_containing(PhysicalAddress) const;
+    [[nodiscard]] u16* reference_count(PhysicalAddress) const;
     [[nodiscard]] Optional<PhysicalAddress> allocate_from_zones(unsigned order, PageUse);
     void refill_cache(PhysicalPageCache&);
     void flush_cache(PhysicalPageCache&, u32 count);
 
     mutable SpinLock m_lock;
     BuddyAllocator m_zones[max_zones];
+    u16* m_reference_counts[max_zones] {};
     size_t m_zone_count { 0 };
 };
 
