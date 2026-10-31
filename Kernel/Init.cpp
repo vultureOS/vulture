@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/BootInfo.h>
+#include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Arch/CPU.h>
 #include <Kernel/Arch/InterruptController.h>
 #include <Kernel/Arch/Power.h>
@@ -16,6 +17,9 @@
 #include <Kernel/Debug/Symbols.h>
 #include <Kernel/Devices/Serial/PL011.h>
 #include <Kernel/FileSystem/BootArchive.h>
+#include <Kernel/FileSystem/DevFS.h>
+#include <Kernel/FileSystem/TmpFS.h>
+#include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Library/CxxRuntime.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
@@ -158,16 +162,31 @@ static void initialize_memory(API::BootInfo const& boot_info, Framebuffer& frame
     dmesgln("Memory: kernel page tables use {} KiB", mm.kernel_page_table().table_page_count() * page_size / KiB);
 }
 
-// Mounts the boot archive as / and starts /sbin/init as process 1.
+static void make_directory(StringView path)
+{
+    auto result = VirtualFileSystem::mkdir(path, "/"_sv, 0755);
+    if (result.is_error() && result.error().code() != EEXIST)
+        must("making a mount point"_sv, move(result));
+}
+
+// Builds the file tree: a tmpfs root filled from the boot archive, devfs
+// at /dev and a fresh tmpfs at /tmp. Then starts /sbin/init as process 1.
 static void start_userland(API::BootInfo const& boot_info, BootArguments const& arguments)
 {
+    VirtualFileSystem::mount_root(must("root filesystem"_sv, TmpFS::create()));
     if (boot_info.boot_archive.size == 0) {
         dmesgln("Userland: no boot archive, so no init");
         return;
     }
     ReadonlyBytes archive { physical_to_virtual(PhysicalAddress(boot_info.boot_archive.base)), boot_info.boot_archive.size };
-    must("boot archive"_sv, BootArchive::initialize(archive));
-    dmesgln("Boot archive: {} entries in {} KiB, mounted as /", BootArchive::entry_count(), archive.size() / KiB);
+    auto unpacked = must("unpacking the boot archive"_sv, unpack_boot_archive(archive));
+    dmesgln("Root: tmpfs with {} files ({} KiB) and {} directories from the boot archive", unpacked.files, unpacked.bytes / KiB, unpacked.directories);
+
+    make_directory("/dev"_sv);
+    make_directory("/tmp"_sv);
+    must("devfs"_sv, VirtualFileSystem::mount(must("devfs"_sv, DevFS::create()), "/dev"_sv));
+    must("devices"_sv, create_basic_devices());
+    must("/tmp"_sv, VirtualFileSystem::mount(must("tmpfs"_sv, TmpFS::create()), "/tmp"_sv));
 
     // "utest" runs the userland tests.
     StringView const plain[] = { "/sbin/init"_sv };
@@ -180,6 +199,7 @@ static void initialize_interrupts_and_time(DeviceTree::FlattenedDeviceTree const
 {
     must("interrupt controller"_sv, Arch::initialize_interrupt_controller(tree));
     must("timer"_sv, Time::initialize(tree));
+    Time::initialize_wall_clock(tree);
     Processor::current().initialize_this_processor();
     Arch::enable_interrupts();
 

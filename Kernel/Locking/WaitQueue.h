@@ -35,6 +35,33 @@ public:
         }
     }
 
+    // Like wait_until(), but a signal for the waiting process ends the wait
+    // early. Returns false then.
+    template<typename Condition>
+    [[nodiscard]] bool wait_until_interruptible(Condition condition)
+    {
+        auto& thread = Thread::current();
+        thread.set_blocked_on(this);
+        bool satisfied = false;
+        for (;;) {
+            auto state = m_lock.lock();
+            if (condition()) {
+                satisfied = true;
+                m_lock.unlock(state);
+                break;
+            }
+            // A signal sent after this check finds us on this queue (the
+            // sender takes the queue's lock to wake it).
+            if (thread.has_pending_signal()) {
+                m_lock.unlock(state);
+                break;
+            }
+            Scheduler::block(&m_waiters, &m_lock, state);
+        }
+        thread.set_blocked_on(nullptr);
+        return satisfied;
+    }
+
     void wake_one();
     void wake_all();
 

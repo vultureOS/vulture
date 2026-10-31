@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/Debug/Panic.h>
+#include <Kernel/Locking/WaitQueue.h>
 #include <Kernel/Tasks/Process.h>
 #include <Kernel/Tasks/Processor.h>
 #include <Kernel/Tasks/Scheduler.h>
@@ -199,6 +200,24 @@ Thread::SleepResult Thread::sleep_until(u64 deadline)
     thread.m_sleep_timer.cancel();
     SpinLockGuard guard(thread.m_sleep_lock);
     return exchange(thread.m_sleep_interrupted, false) ? SleepResult::Interrupted : SleepResult::Slept;
+}
+
+void Thread::set_blocked_on(WaitQueue* queue)
+{
+    SpinLockGuard guard(m_blocked_lock);
+    m_blocked_on = queue;
+}
+
+void Thread::interrupt_waits()
+{
+    SpinLockGuard guard(m_blocked_lock);
+    if (m_blocked_on)
+        m_blocked_on->wake_all();
+}
+
+bool Thread::has_pending_signal() const
+{
+    return m_process && m_process->has_deliverable_signal();
 }
 
 void Thread::interrupt_sleep()

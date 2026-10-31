@@ -8,11 +8,13 @@
 
 #include <Kernel/API/POSIX/signal_numbers.h>
 #include <Kernel/Arch/TrapFrame.h>
-#include <Kernel/FileSystem/OpenFile.h>
+#include <Kernel/FileSystem/FileDescription.h>
 #include <Kernel/Locking/WaitQueue.h>
 #include <Kernel/Memory/AddressSpace.h>
+#include <Kernel/Memory/KernelBuffer.h>
 #include <Kernel/Tasks/Thread.h>
 #include <LibBase/OwnPtr.h>
+#include <LibBase/String.h>
 
 namespace Kernel {
 
@@ -88,9 +90,10 @@ private:
     void force_signal(int signal, vulture_siginfo const&);
     void child_state_changed();
 
-    ErrorOr<int> allocate_fd(NonnullRefPtr<OpenFile>);
-    ErrorOr<NonnullRefPtr<OpenFile>> file(int fd);
+    ErrorOr<int> allocate_fd(NonnullRefPtr<FileDescription>, bool close_on_exec, int lowest = 0);
+    ErrorOr<NonnullRefPtr<FileDescription>> file(int fd);
     void set_name(StringView);
+    ErrorOr<String> copy_path_from_user(FlatPtr);
 
     ProcessID m_pid { 0 };
     char m_name[32] {};
@@ -105,11 +108,18 @@ private:
 
     OwnPtr<AddressSpace> m_address_space;
     Thread* m_thread { nullptr };
-    // The program's ELF file (in the boot archive), for crash reports.
-    ReadonlyBytes m_executable;
+    // The program's ELF file, kept for crash reports.
+    RefPtr<KernelBuffer> m_executable;
+    // The canonical working directory.
+    String m_cwd;
+
+    struct FileDescriptor {
+        RefPtr<FileDescription> description;
+        bool close_on_exec { false };
+    };
 
     SpinLock m_files_lock;
-    RefPtr<OpenFile> m_files[max_open_files];
+    FileDescriptor m_files[max_open_files];
 
     // Signals: pending bits may be set by any thread; the rest is touched
     // only by this process's own thread.

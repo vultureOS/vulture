@@ -21,6 +21,9 @@
 #define O_NONBLOCK 0x0800
 #define O_DIRECTORY 0x10000
 #define O_CLOEXEC 0x80000
+#define O_NOFOLLOW 0x20000
+// The kernel's own: open the link itself (for lstat-style lookups).
+#define O_NOFOLLOW_INTERNAL O_NOFOLLOW
 
 #define SEEK_SET 0
 #define SEEK_CUR 1
@@ -41,6 +44,46 @@
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
+#define S_IFBLK 0060000
+#define S_ISBLK(mode) (((mode) & S_IFMT) == S_IFBLK)
+#define S_ISLNK(mode) (((mode) & S_IFMT) == S_IFLNK)
+#define S_ISFIFO(mode) (((mode) & S_IFMT) == S_IFIFO)
+
+// fcntl() commands and descriptor flags.
+#define F_DUPFD 0
+#define F_GETFD 1
+#define F_SETFD 2
+#define F_GETFL 3
+#define F_SETFL 4
+#define FD_CLOEXEC 1
+
+// access() modes.
+#define F_OK 0
+#define X_OK 1
+#define W_OK 2
+#define R_OK 4
+
+// Directory entry types (d_type).
+#define DT_UNKNOWN 0
+#define DT_FIFO 1
+#define DT_CHR 2
+#define DT_DIR 4
+#define DT_BLK 6
+#define DT_REG 8
+#define DT_LNK 10
+
+// One record of getdents(): records are packed back to back, each
+// d_reclen bytes (8-byte aligned), with a NUL-terminated name.
+struct vulture_dirent {
+    unsigned long long d_ino;
+    long long d_off;
+    unsigned short d_reclen;
+    unsigned char d_type;
+    char d_name[];
+};
+
+#define PIPE_BUF 4096
+
 // What fstat() and stat() report, in a fixed 64-bit layout.
 struct vulture_stat {
     unsigned long long st_dev;
@@ -53,4 +96,5 @@ struct vulture_stat {
     long long st_blksize;
     long long st_blocks;
     long long st_mtime_seconds;
+    unsigned long long st_rdev;
 };

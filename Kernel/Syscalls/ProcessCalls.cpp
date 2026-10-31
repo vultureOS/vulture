@@ -52,6 +52,7 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
     auto child = TRY(create(this));
     child->set_name(name());
     child->m_executable = m_executable;
+    child->m_cwd = m_cwd;
     child->m_address_space = TRY(m_address_space->clone_for_fork());
     {
         SpinLockGuard guard(m_files_lock);
@@ -180,8 +181,8 @@ ErrorOr<FlatPtr> Process::sys_waitpid(TrapFrame&, SyscallArguments const& argume
             return 0;
         if (has_deliverable_signal())
             return Error::from_errno(EINTR);
-        m_child_wait.wait_until([&] {
-            return m_child_events.load(MemoryOrder::Acquire) != events || has_deliverable_signal();
+        (void)m_child_wait.wait_until_interruptible([&] {
+            return m_child_events.load(MemoryOrder::Acquire) != events;
         });
     }
 }

@@ -4,66 +4,75 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/API/POSIX/errno.h>
 #include <Kernel/FileSystem/BootArchive.h>
+#include <Kernel/FileSystem/FileDescription.h>
+#include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <LibArchive/Tar.h>
 
 namespace Kernel {
 
-static Optional<Archive::TarReader> s_reader;
-static ReadonlyBytes s_archive;
-static size_t s_entry_count = 0;
-
-ErrorOr<void> BootArchive::initialize(ReadonlyBytes archive)
+// mkdir -p for the directories above `path`.
+static ErrorOr<void> make_parents(StringView path, UnpackedArchive& result)
 {
-    auto reader = TRY(Archive::TarReader::parse(archive));
-    s_entry_count = 0;
-    TRY(reader.for_each_entry([](Archive::TarEntry const&) {
-        ++s_entry_count;
-        return Archive::IterationDecision::Continue;
-    }));
-    s_archive = archive;
-    s_reader = reader;
+    for (size_t i = 1; i < path.length(); ++i) {
+        if (path[i] != '/')
+            continue;
+        auto made = VirtualFileSystem::mkdir(path.substring_view(0, i), "/"_sv, 0755);
+        if (!made.is_error())
+            ++result.directories;
+        else if (made.error().code() != EEXIST)
+            return made.release_error();
+    }
     return {};
 }
 
-bool BootArchive::is_available()
+ErrorOr<UnpackedArchive> unpack_boot_archive(ReadonlyBytes archive)
 {
-    return s_reader.has_value();
-}
+    auto reader = TRY(Archive::TarReader::parse(archive));
+    UnpackedArchive result;
+    Optional<Error> failure;
+    TRY(reader.for_each_entry([&](Archive::TarEntry const& entry) {
+        char path_buffer[VirtualFileSystem::max_path];
+        if (entry.path.is_empty() || entry.path.length() + 2 > sizeof(path_buffer))
+            return Archive::IterationDecision::Continue;
+        path_buffer[0] = '/';
+        __builtin_memcpy(path_buffer + 1, entry.path.characters_without_null_termination(), entry.path.length());
+        StringView path { path_buffer, entry.path.length() + 1 };
 
-size_t BootArchive::entry_count()
-{
-    return s_entry_count;
-}
-
-Optional<BootArchive::Node> BootArchive::lookup(StringView path)
-{
-    if (!s_reader.has_value())
-        return {};
-    auto relative = Archive::TarReader::normalize(path);
-    if (relative.is_empty())
-        return Node { {}, true, 0755, 1 };
-    if (auto entry = s_reader->find(relative); entry.has_value()) {
-        Node node;
-        node.data = entry->data;
-        node.is_directory = entry->type == Archive::TarEntryType::Directory;
-        node.mode = entry->mode & 07777;
-        // The entry's place in the archive is a stable, unique number.
-        node.inode = static_cast<u64>(entry->data.data() - s_archive.data()) / 512 + 2;
-        return node;
-    }
-    // A directory may exist only implicitly, as the prefix of other paths.
-    bool is_prefix = false;
-    (void)s_reader->for_each_entry([&](Archive::TarEntry const& entry) {
-        if (entry.path.length() > relative.length() && entry.path.starts_with(relative) && entry.path[relative.length()] == '/') {
-            is_prefix = true;
+        auto unpacked = [&]() -> ErrorOr<void> {
+            TRY(make_parents(path, result));
+            switch (entry.type) {
+            case Archive::TarEntryType::Directory: {
+                auto made = VirtualFileSystem::mkdir(path, "/"_sv, entry.mode);
+                if (made.is_error() && made.error().code() != EEXIST)
+                    return made.release_error();
+                ++result.directories;
+                return {};
+            }
+            case Archive::TarEntryType::SymbolicLink:
+                return VirtualFileSystem::symlink(entry.link_target, path, "/"_sv);
+            case Archive::TarEntryType::File: {
+                auto file = TRY(VirtualFileSystem::open(path, "/"_sv, O_WRONLY | O_CREAT | O_TRUNC, entry.mode));
+                TRY(file->write(IOBuffer::kernel(const_cast<u8*>(entry.data.data())), entry.data.size()));
+                ++result.files;
+                result.bytes += entry.data.size();
+                return {};
+            }
+            case Archive::TarEntryType::Other:
+                return {};
+            }
+            return {};
+        }();
+        if (unpacked.is_error()) {
+            failure = unpacked.release_error();
             return Archive::IterationDecision::Break;
         }
         return Archive::IterationDecision::Continue;
-    });
-    if (is_prefix)
-        return Node { {}, true, 0755, 0 };
-    return {};
+    }));
+    if (failure.has_value())
+        return failure.release_value();
+    return result;
 }
 
 }

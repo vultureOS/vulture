@@ -1,0 +1,57 @@
+/*
+ * Copyright (c) 2022-2026, Krisna Pranav
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#pragma once
+
+#include <Kernel/FileSystem/FileSystem.h>
+#include <Kernel/Locking/Mutex.h>
+#include <LibBase/String.h>
+#include <LibBase/Vector.h>
+
+namespace Kernel {
+
+class DevFSRoot;
+
+// /dev: one flat directory of device nodes, which drivers add as they find
+// their devices.
+class DevFS final : public FileSystem {
+public:
+    [[nodiscard]] static ErrorOr<NonnullRefPtr<DevFS>> create();
+    [[nodiscard]] static DevFS& the();
+
+    [[nodiscard]] StringView name() const override { return "devfs"_sv; }
+    [[nodiscard]] NonnullRefPtr<Inode> root_inode() override;
+    [[nodiscard]] bool is_read_only() const override { return true; }
+
+    ErrorOr<void> add_device(StringView name, NonnullRefPtr<Inode>);
+    [[nodiscard]] InodeIndex allocate_index() { return m_next_index.fetch_add(1); }
+
+private:
+    DevFS() = default;
+
+    RefPtr<DevFSRoot> m_root;
+    Atomic<InodeIndex> m_next_index { 2 };
+};
+
+// A device node: reads and writes go straight to a driver.
+class Device : public Inode {
+public:
+    [[nodiscard]] InodeMetadata metadata() const override;
+
+protected:
+    Device(InodeType, u32 permissions, u64 device_number);
+
+private:
+    InodeType m_type;
+    u32 m_permissions;
+    u64 m_device_number;
+};
+
+// The memory devices: null, zero, random (pseudo-random, not for keys yet),
+// and the console (the kernel log).
+ErrorOr<void> create_basic_devices();
+
+}

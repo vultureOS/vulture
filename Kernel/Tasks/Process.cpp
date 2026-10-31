@@ -12,7 +12,7 @@
 #include <Kernel/Arch/UserContext.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Debug/Panic.h>
-#include <Kernel/FileSystem/BootArchive.h>
+#include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
 #include <Kernel/Memory/UserAccess.h>
@@ -65,6 +65,7 @@ static constexpr u64 unblockable_signals = bit(SIGKILL) | bit(SIGSTOP);
 Process::Process(ProcessID pid, Process* parent)
     : m_pid(pid)
     , m_parent(parent)
+    , m_cwd(MUST(String::from_view("/"_sv)))
 {
 }
 
@@ -124,26 +125,35 @@ void Process::thread_finished()
     m_address_space.clear();
 }
 
-ErrorOr<int> Process::allocate_fd(NonnullRefPtr<OpenFile> file)
+ErrorOr<int> Process::allocate_fd(NonnullRefPtr<FileDescription> description, bool close_on_exec, int lowest)
 {
     SpinLockGuard guard(m_files_lock);
-    for (size_t fd = 0; fd < max_open_files; ++fd) {
-        if (!m_files[fd]) {
-            m_files[fd] = move(file);
+    for (size_t fd = static_cast<size_t>(lowest); fd < max_open_files; ++fd) {
+        if (!m_files[fd].description) {
+            m_files[fd] = { move(description), close_on_exec };
             return static_cast<int>(fd);
         }
     }
     return Error::from_errno(EMFILE);
 }
 
-ErrorOr<NonnullRefPtr<OpenFile>> Process::file(int fd)
+ErrorOr<NonnullRefPtr<FileDescription>> Process::file(int fd)
 {
     if (fd < 0 || static_cast<size_t>(fd) >= max_open_files)
         return Error::from_errno(EBADF);
     SpinLockGuard guard(m_files_lock);
-    if (!m_files[fd])
+    if (!m_files[fd].description)
         return Error::from_errno(EBADF);
-    return NonnullRefPtr<OpenFile>(*m_files[fd]);
+    return NonnullRefPtr<FileDescription>(*m_files[fd].description);
+}
+
+ErrorOr<String> Process::copy_path_from_user(FlatPtr address)
+{
+    char path[VirtualFileSystem::max_path];
+    auto length = TRY(copy_string_from_user(address, path, sizeof(path)));
+    if (length == 0)
+        return Error::from_errno(ENOENT);
+    return String::from_view({ path, length });
 }
 
 // --- Starting programs ---
@@ -180,8 +190,9 @@ ErrorOr<NonnullRefPtr<Process>> Process::create_init(StringView path, Span<Strin
         used += argument.length();
     }
 
+    auto console = TRY(VirtualFileSystem::open("/dev/console"_sv, "/"_sv, O_RDWR, 0));
     for (size_t fd = 0; fd < 3; ++fd)
-        process->m_files[fd] = TRY(OpenFile::open_console());
+        process->m_files[fd] = { console, false };
 
     auto thread = TRY(Thread::create("init"_sv, [](void* argument) {
         auto* init = static_cast<InitArguments*>(argument);
@@ -293,14 +304,28 @@ static ErrorOr<FlatPtr> build_initial_stack(Region& stack, Span<StringView const
     return sp;
 }
 
+// The whole program file, read into memory: the ELF parser and the crash
+// reporter want it in one piece.
+static ErrorOr<NonnullRefPtr<KernelBuffer>> read_executable(Inode& inode)
+{
+    auto metadata = inode.metadata();
+    if (metadata.type != InodeType::File || !(metadata.permissions & 0111))
+        return Error::from_errno(EACCES);
+    constexpr u64 largest = 4 * MiB;
+    if (metadata.size > largest)
+        return Error::from_errno(E2BIG);
+    auto buffer = TRY(KernelBuffer::create(metadata.size));
+    size_t read = TRY(inode.read(0, metadata.size, IOBuffer::kernel(buffer->bytes().data())));
+    if (read != metadata.size)
+        return Error::from_errno(EIO);
+    return buffer;
+}
+
 ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, Span<StringView const> environment, TrapFrame& frame)
 {
-    auto node = BootArchive::lookup(path);
-    if (!node.has_value())
-        return Error::from_errno(ENOENT);
-    if (node->is_directory || !(node->mode & 0111))
-        return Error::from_errno(EACCES);
-    auto image_or_error = ELF::Image::parse(node->data);
+    auto resolved = TRY(VirtualFileSystem::resolve(path, m_cwd.view()));
+    auto executable = TRY(read_executable(*resolved.inode));
+    auto image_or_error = ELF::Image::parse(executable->bytes());
     if (image_or_error.is_error())
         return Error::from_errno(ENOEXEC);
     auto const& image = image_or_error.value();
@@ -347,7 +372,7 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     // Nothing uses the old one now (this process has one thread).
     old_space.clear();
 
-    m_executable = node->data;
+    m_executable = executable;
     auto slash = path.find_last('/');
     set_name(slash.has_value() ? path.substring_view(slash.value() + 1) : path);
     {
@@ -357,13 +382,16 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
                 action = {};
         }
     }
+    FileDescriptor closing[max_open_files];
     {
         SpinLockGuard guard(m_files_lock);
-        for (auto& file : m_files) {
-            if (file && file->close_on_exec())
-                file.clear();
+        for (size_t fd = 0; fd < max_open_files; ++fd) {
+            if (m_files[fd].description && m_files[fd].close_on_exec)
+                closing[fd] = move(m_files[fd]);
         }
     }
+    for (auto& file : closing)
+        file = {};
     Arch::prepare_user_entry(frame, header.e_entry, stack_pointer);
     return {};
 }
@@ -387,11 +415,15 @@ void Process::terminate(int status)
         format_to(reason, "init exited (status {:#x})", status);
         panic(reason.view());
     }
+    // Closed outside the lock: closing a pipe end wakes the other side.
+    FileDescriptor closing[max_open_files];
     {
         SpinLockGuard guard(m_files_lock);
-        for (auto& file : m_files)
-            file.clear();
+        for (size_t fd = 0; fd < max_open_files; ++fd)
+            closing[fd] = move(m_files[fd]);
     }
+    for (auto& file : closing)
+        file = {};
 
     Process* parent;
     {
@@ -451,10 +483,11 @@ void Process::send_signal(int signal, vulture_siginfo const& info)
         m_signal_info[signal].si_signo = signal;
         m_pending_signals.fetch_or(bit(signal));
     }
-    if (m_thread)
+    if (m_thread) {
         m_thread->interrupt_sleep();
-    // A waitpid() in progress returns to let the signal through.
-    m_child_wait.wake_all();
+        // A waitpid(), or a wait on a pipe, returns to let the signal through.
+        m_thread->interrupt_waits();
+    }
 }
 
 void Process::force_signal(int signal, vulture_siginfo const& info)
@@ -600,8 +633,10 @@ void Process::report_crash(TrapFrame const& frame, int signal, vulture_siginfo c
     kernel_log().write(registers.view());
 
     Optional<ELF::Image> image;
-    if (auto parsed = ELF::Image::parse(m_executable); !parsed.is_error())
-        image = parsed.release_value();
+    if (m_executable) {
+        if (auto parsed = ELF::Image::parse(m_executable->bytes()); !parsed.is_error())
+            image = parsed.release_value();
+    }
     dmesgln("Backtrace:");
     FixedStringBuilder<256> line;
     format_to(line, "  #0  {:#018x}  ", frame.program_counter());

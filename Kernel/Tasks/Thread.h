@@ -19,6 +19,7 @@
 namespace Kernel {
 
 class Process;
+class WaitQueue;
 
 // Quality of service: what a thread's work is for, from least to most
 // urgent. A runnable thread of a higher class always runs before one of a
@@ -81,6 +82,12 @@ public:
     // start a sleep while a signal is pending.)
     void interrupt_sleep();
 
+    // Interruptible waits: the queue a thread waits on, so a signal can
+    // wake it there (see WaitQueue::wait_until_interruptible()).
+    void set_blocked_on(WaitQueue*);
+    void interrupt_waits();
+    [[nodiscard]] bool has_pending_signal() const;
+
     // Makes a created thread runnable.
     void start();
     // Waits until the thread has exited and its stack is freed.
@@ -142,6 +149,10 @@ private:
     IntrusiveList<Thread, &Thread::m_queue_node> m_joiners;
 
     RefPtr<Process> m_process;
+
+    // Guards m_blocked_on, so a waker never uses a queue that is gone.
+    SpinLock m_blocked_lock;
+    WaitQueue* m_blocked_on { nullptr };
 
     // Sleeping: whoever finds m_sleeping set (under the lock) wakes the thread.
     SpinLock m_sleep_lock;

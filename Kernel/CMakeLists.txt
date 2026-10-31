@@ -30,7 +30,13 @@ add_executable(Kernel
     Debug/Symbols.cpp
     Devices/Serial/PL011.cpp
     FileSystem/BootArchive.cpp
-    FileSystem/OpenFile.cpp
+    FileSystem/DevFS.cpp
+    FileSystem/FileDescription.cpp
+    FileSystem/IOBuffer.cpp
+    FileSystem/Inode.cpp
+    FileSystem/Pipe.cpp
+    FileSystem/TmpFS.cpp
+    FileSystem/VirtualFileSystem.cpp
     Init.cpp
     Interrupts/InterruptHandlers.cpp
     Library/CxxRuntime.cpp

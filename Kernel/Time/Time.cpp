@@ -5,16 +5,23 @@
  */
 
 #include <Kernel/Arch/Timer.h>
+#include <Kernel/Arch/aarch64/MMIO.h>
+#include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Interrupts/InterruptHandlers.h>
+#include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Tasks/Processor.h>
 #include <Kernel/Tasks/Scheduler.h>
 #include <Kernel/Time/Time.h>
+#include <LibDeviceTree/FlattenedDeviceTree.h>
 
 namespace Kernel::Time {
 
 static constexpr u64 nanoseconds_per_second = 1'000'000'000;
 
 static u64 s_ticks_per_second = 0;
+// Wall-clock time at counter zero, in nanoseconds since 1970.
+static u64 s_epoch_at_counter_zero = 0;
+static bool s_has_wall_clock = false;
 
 static void handle_timer_interrupt(void*)
 {
@@ -52,6 +59,40 @@ u64 ticks_from_nanoseconds(u64 nanoseconds)
 u64 nanoseconds_from_ticks(u64 ticks)
 {
     return ticks / s_ticks_per_second * nanoseconds_per_second + ticks % s_ticks_per_second * nanoseconds_per_second / s_ticks_per_second;
+}
+
+void initialize_wall_clock(DeviceTree::FlattenedDeviceTree const& device_tree)
+{
+    // The Arm PL031 real-time clock: its data register counts seconds.
+    auto node = device_tree.find_compatible_node("arm,pl031"_sv);
+    if (!node.has_value())
+        return;
+    auto reg = device_tree.reg(node.value(), 0);
+    if (!reg.has_value())
+        return;
+    auto registers = memory_manager().map_mmio(PhysicalAddress(reg->address), reg->size);
+    if (registers.is_error())
+        return;
+    constexpr size_t data_register = 0x00;
+    u64 seconds = AArch64::mmio_read32(registers.value() + data_register);
+    u64 counter_now = nanoseconds_from_ticks(now());
+    s_epoch_at_counter_zero = seconds * nanoseconds_per_second - counter_now;
+    s_has_wall_clock = true;
+}
+
+bool has_wall_clock()
+{
+    return s_has_wall_clock;
+}
+
+u64 wall_clock_nanoseconds()
+{
+    return s_epoch_at_counter_zero + (s_ticks_per_second ? nanoseconds_from_ticks(now()) : 0);
+}
+
+i64 wall_clock_seconds()
+{
+    return static_cast<i64>(wall_clock_nanoseconds() / nanoseconds_per_second);
 }
 
 void wait_until(u64 deadline)

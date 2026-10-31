@@ -7,29 +7,19 @@
 #pragma once
 
 #include <LibBase/Error.h>
-#include <LibBase/Optional.h>
 #include <LibBase/Span.h>
 
 namespace Kernel {
 
-// The boot archive (a ustar file the loader brought in) as the read-only
-// root filesystem, until the VFS arrives (M5). It stays in memory, so file
-// contents are handed out as spans of it.
-class BootArchive {
-public:
-    struct Node {
-        ReadonlyBytes data;
-        bool is_directory { false };
-        u32 mode { 0 }; // Permission bits.
-        u64 inode { 0 };
-    };
-
-    static ErrorOr<void> initialize(ReadonlyBytes archive);
-    [[nodiscard]] static bool is_available();
-    [[nodiscard]] static size_t entry_count();
-
-    // An absolute path ("/sbin/init"; "/" is the root directory).
-    [[nodiscard]] static Optional<Node> lookup(StringView path);
+struct UnpackedArchive {
+    size_t files { 0 };
+    size_t directories { 0 };
+    size_t bytes { 0 };
 };
+
+// Copies the boot archive (a ustar file the loader brought in) into the
+// root filesystem, much like an initramfs: the files land in tmpfs, where
+// they can be changed like any others.
+ErrorOr<UnpackedArchive> unpack_boot_archive(ReadonlyBytes archive);
 
 }
