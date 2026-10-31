@@ -8,13 +8,6 @@
 
 namespace Kernel::Arch {
 
-#define READ_SYSTEM_REGISTER(name)                     \
-    ({                                                 \
-        u64 value_;                                    \
-        asm volatile("mrs %0, " #name : "=r"(value_)); \
-        value_;                                        \
-    })
-
 void halt()
 {
     asm volatile("msr daifset, #0xf");
@@ -32,12 +25,6 @@ void disable_lower_half_translation()
                  "dsb nsh\n"
                  "isb" ::"r"(tcr)
         : "memory");
-}
-
-u64 monotonic_counter()
-{
-    asm volatile("isb");
-    return READ_SYSTEM_REGISTER(cntvct_el0);
 }
 
 u64 monotonic_counter_frequency()

@@ -9,8 +9,15 @@
 #include <Kernel/Arch/TrapFrame.h>
 #include <LibBase/Format.h>
 
+#if defined(__aarch64__)
+#include <Kernel/Arch/aarch64/CPUInlines.h>
+#else
+#error "Unsupported architecture"
+#endif
+
 // What the rest of the kernel may ask of the CPU. Each architecture
-// implements these in Kernel/Arch/<arch>/.
+// implements these in Kernel/Arch/<arch>/; the hot ones (interrupt masking,
+// the counter, the per-CPU pointer) are inline in <arch>/CPUInlines.h.
 
 namespace Kernel::Arch {
 
@@ -21,8 +28,7 @@ namespace Kernel::Arch {
 // null fault instead of hitting the loader's leftover identity mapping.
 void disable_lower_half_translation();
 
-// A free-running counter and its frequency in Hz.
-[[nodiscard]] u64 monotonic_counter();
+// The frequency of monotonic_counter(), in Hz.
 [[nodiscard]] u64 monotonic_counter_frequency();
 
 // "Apple core (part 0x...), EL1" and similar.
