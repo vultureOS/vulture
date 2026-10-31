@@ -67,6 +67,8 @@ ExternalProject over the same source tree and adds these targets:
 | `ninja -C build test-kernel` | Boots with `ktest`: the in-kernel tests run on all processors, print `ktest: PASS`, and power the machine off |
 | `ninja -C build check` | All of the above tests |
 
+`Meta/build.sh` wraps the configure step and `ninja`, checks that the tools
+are installed, and takes ninja targets as arguments (`--check` adds `check`).
 `Meta/run.sh` also takes `--boot-args` (the kernel command line, for example
 `-v` for a verbose boot) and, with `--headless`, `--screenshot FILE` to save
 the screen as PNG and `--wait-for-exit` to require that the guest powers

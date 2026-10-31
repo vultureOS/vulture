@@ -30,6 +30,15 @@ brew install llvm@22 lld@22 cmake ninja qemu
 ## Build and run
 
 ```sh
+Meta/build.sh             # configure (first time) and build everything
+Meta/run.sh               # boot in QEMU
+Meta/build.sh --check     # build, then run every test
+```
+
+`Meta/build.sh --help` lists its options (`--clean`, `-j N`, a build
+directory, ninja targets). The underlying commands, if you prefer them:
+
+```sh
 cmake -G Ninja -S . -B build
 ninja -C build            # build everything
 ninja -C build run        # boot in QEMU
