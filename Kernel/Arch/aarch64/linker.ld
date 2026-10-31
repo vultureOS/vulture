@@ -41,6 +41,14 @@ SECTIONS
         *(.rodata .rodata.*)
     } :rodata
 
+    /* Recovery addresses for faults in user memory access (UserAccess.S). */
+    __ex_table : ALIGN(8)
+    {
+        __ex_table_start = .;
+        KEEP(*(__ex_table))
+        __ex_table_end = .;
+    } :rodata
+
     .init_array :
     {
         __init_array_start = .;

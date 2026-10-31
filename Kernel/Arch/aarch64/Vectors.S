@@ -12,7 +12,7 @@
  * calls handle_exception(frame, entry index).
  */
 
-#define TRAP_FRAME_SIZE 304
+#define TRAP_FRAME_SIZE 320
 
 .macro VECTOR index
     .balign 0x80
@@ -71,19 +71,30 @@ exception_entry:
     str x1, [sp, #272]
     mrs x1, far_el1
     str x1, [sp, #280]
+    mrs x1, sp_el0
+    str x1, [sp, #304]
 
     /*
      * A frame record for the interrupted code, so backtraces taken in a
-     * handler continue into whatever the exception interrupted.
+     * handler continue into whatever the exception interrupted. From user
+     * mode the chain ends here: user frames are not the kernel's to follow.
      */
     ldr x1, [sp, #256]
-    stp x29, x1, [sp, #288]
+    ldr x2, [sp, #264]
+    tst x2, #0xf
+    csel x3, x29, xzr, ne
+    stp x3, x1, [sp, #288]
     add x29, sp, #288
 
     mov x1, x0
     mov x0, sp
     bl handle_exception
 
+/* Restores the trap frame at sp and returns from the exception. */
+.global exception_return
+exception_return:
+    ldr x1, [sp, #304]
+    msr sp_el0, x1
     ldr x1, [sp, #256]
     msr elr_el1, x1
     ldr x1, [sp, #264]
@@ -107,3 +118,16 @@ exception_entry:
     add sp, sp, #TRAP_FRAME_SIZE
     eret
 .size exception_entry, . - exception_entry
+
+/*
+ * void aarch64_return_to_user(TrapFrame* frame): enters user mode through
+ * a trap frame at the top of the current kernel stack, as if returning
+ * from an exception (for new processes and forked children).
+ */
+.global aarch64_return_to_user
+.type aarch64_return_to_user, %function
+aarch64_return_to_user:
+    msr daifset, #0xf
+    mov sp, x0
+    b exception_return
+.size aarch64_return_to_user, . - aarch64_return_to_user
