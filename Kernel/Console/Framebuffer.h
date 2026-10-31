@@ -16,11 +16,15 @@ struct Color {
     u8 blue { 0 };
 };
 
-// The linear framebuffer the firmware set up, reached through the direct
-// map. Drawing is clipped to the screen.
+// The linear framebuffer the firmware set up. Drawing is clipped to the
+// screen.
 class Framebuffer {
 public:
+    // Starts out reached through the loader's direct map.
     void initialize(API::FramebufferInfo const&);
+
+    // Points at a new mapping of the same pixels.
+    void relocate(FlatPtr pixels) { m_base = reinterpret_cast<u8*>(pixels); }
 
     [[nodiscard]] bool is_present() const { return m_base != nullptr; }
     [[nodiscard]] u32 width() const { return m_width; }

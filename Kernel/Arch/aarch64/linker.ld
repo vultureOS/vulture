@@ -37,6 +37,7 @@ SECTIONS
 
     .rodata : ALIGN(4K)
     {
+        __rodata_start = .;
         *(.rodata .rodata.*)
     } :rodata
 
@@ -50,6 +51,7 @@ SECTIONS
 
     .data : ALIGN(4K)
     {
+        __data_start = .;
         *(.data .data.*)
     } :data
 
