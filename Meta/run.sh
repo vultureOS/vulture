@@ -20,6 +20,16 @@
 #                       off by itself; fail if it has not by the timeout
 #   --screenshot FILE   with --headless: save the screen as PNG once the
 #                       expected text has appeared (or at the timeout)
+#   --disk FILE         the root disk (a vultureFS disk image), used in place.
+#                       Default: build/qemu/disk.img, made on first use and
+#                       updated with the system files of each new build;
+#                       with --headless, a new disk for every run
+#   --fresh-disk        make the root disk anew from the build first
+#   --no-disk           no root disk: the root is the boot archive, in memory
+#   --nvme              attach the root disk as NVMe instead of virtio-blk
+#   --kill              with --headless: once the expected text appears, cut
+#                       the power (SIGKILL) instead of shutting QEMU down
+#   --kill-delay SECONDS  with --kill: wait this long first (may be fractional)
 
 set -euo pipefail
 
@@ -33,6 +43,12 @@ expectations=()
 timeout_seconds=60
 wait_for_exit=0
 screenshot=""
+disk=""
+use_disk=1
+fresh_disk=0
+disk_interface="virtio-blk-pci,drive=root"
+kill_power=0
+kill_delay=0
 extra_args=()
 
 while [ $# -gt 0 ]; do
@@ -46,8 +62,14 @@ while [ $# -gt 0 ]; do
         --timeout) timeout_seconds="$2"; shift 2 ;;
         --wait-for-exit) wait_for_exit=1; shift ;;
         --screenshot) screenshot="$2"; shift 2 ;;
+        --disk) disk="$2"; shift 2 ;;
+        --fresh-disk) fresh_disk=1; shift ;;
+        --no-disk) use_disk=0; shift ;;
+        --nvme) disk_interface="nvme,drive=root,serial=VULTURE0001"; shift ;;
+        --kill) kill_power=1; shift ;;
+        --kill-delay) kill_delay="$2"; shift 2 ;;
         --) shift; extra_args=("$@"); break ;;
-        -h|--help) sed -n '8,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '8,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "run.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -88,6 +110,39 @@ if [ "$headless" -eq 1 ]; then
     vars_file="$run_dir/efivars.fd"
 fi
 
+# The root disk: a GPT disk image with a vultureFS partition, made by mkvfs
+# from the boot archive. A disk kept between runs gets the system files of
+# each new build (the user's own files stay), like a system update.
+disk_args=()
+if [ "$use_disk" -eq 1 ]; then
+    mkvfs="$build_dir/host/Tools/vfs/mkvfs"
+    archive="$kernels_dir/vulture.bootarchive"
+    if [ ! -x "$mkvfs" ] || [ ! -f "$archive" ]; then
+        echo "run.sh: $mkvfs or $archive is missing; build first with: ninja -C $build_dir" >&2
+        exit 1
+    fi
+    if [ -z "$disk" ]; then
+        if [ "$headless" -eq 1 ]; then
+            disk="$run_dir/disk.img"
+            fresh_disk=1
+        else
+            disk="$state_dir/disk.img"
+        fi
+    fi
+    if [ "$fresh_disk" -eq 1 ] || [ ! -f "$disk" ]; then
+        rm -f "$disk"
+        "$mkvfs" create "$disk" 2048 "$archive" > /dev/null
+        touch "$disk.updated"
+    elif [ "$archive" -nt "$disk.updated" ]; then
+        "$mkvfs" update "$disk" "$archive" > /dev/null
+        touch "$disk.updated"
+    fi
+    disk_args=(
+        -drive "if=none,id=root,format=raw,file=$disk,cache=writeback"
+        -device "$disk_interface"
+    )
+fi
+
 args=(
     # acpi=off makes the firmware publish a device tree, which the kernel uses for hardware discovery.
     -machine virt,gic-version=3,acpi=off
@@ -98,6 +153,7 @@ args=(
     # The EFI System Partition is the staging directory, exposed as a read-only FAT disk.
     -drive "if=none,id=esp,format=raw,readonly=on,file=fat:$esp_dir"
     -device virtio-blk-pci,drive=esp,bootindex=0
+    ${disk_args[@]+"${disk_args[@]}"}
     # ramfb gives the firmware a linear framebuffer for the boot console; virtio-gpu
     # only offers blit operations until vultureOS has its own driver (M8).
     -device ramfb
@@ -169,6 +225,11 @@ if [ -n "$screenshot" ] && kill -0 "$qemu_pid" 2>/dev/null; then
         nc -U -w 2 "$qmp_socket" > /dev/null || echo "run.sh: screenshot failed" >&2
 fi
 
+if [ "$kill_power" -eq 1 ] && kill -0 "$qemu_pid" 2>/dev/null; then
+    sleep "$kill_delay"
+    # Like pulling the plug: QEMU gets no chance to finish anything.
+    kill -KILL "$qemu_pid" 2>/dev/null || true
+fi
 kill "$qemu_pid" 2>/dev/null || true
 wait "$qemu_pid" 2>/dev/null || true
 
