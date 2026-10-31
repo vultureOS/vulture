@@ -38,3 +38,16 @@ constexpr u32 to_ascii_lowercase(u32 code_point) { return is_ascii_upper_alpha(c
 constexpr u32 to_ascii_uppercase(u32 code_point) { return is_ascii_lower_alpha(code_point) ? code_point - 0x20 : code_point; }
 
 }
+
+using Base::is_ascii;
+using Base::is_ascii_alpha;
+using Base::is_ascii_alphanumeric;
+using Base::is_ascii_digit;
+using Base::is_ascii_hex_digit;
+using Base::is_ascii_lower_alpha;
+using Base::is_ascii_printable;
+using Base::is_ascii_space;
+using Base::is_ascii_upper_alpha;
+using Base::parse_ascii_hex_digit;
+using Base::to_ascii_lowercase;
+using Base::to_ascii_uppercase;
