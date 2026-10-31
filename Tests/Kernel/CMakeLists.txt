@@ -8,7 +8,9 @@
 # tested here directly.
 add_executable(TestKernel
     TestBootArguments.cpp
-    ${VULTURE_SOURCE_ROOT}/Kernel/BootArguments.cpp)
+    TestBuddyAllocator.cpp
+    ${VULTURE_SOURCE_ROOT}/Kernel/BootArguments.cpp
+    ${VULTURE_SOURCE_ROOT}/Kernel/Memory/BuddyAllocator.cpp)
 
 target_link_libraries(TestKernel PRIVATE LibTest LibBase)
 add_test(NAME Kernel COMMAND TestKernel)
