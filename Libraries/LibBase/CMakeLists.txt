@@ -11,4 +11,6 @@ add_library(LibBase STATIC
 if(NOT VULTURE_PART STREQUAL "host")
     add_library(LibBaseFreestanding STATIC
         Freestanding/Memory.cpp)
+    # These are memcpy and friends: never let the compiler call them here.
+    target_compile_options(LibBaseFreestanding PRIVATE -ffreestanding)
 endif()

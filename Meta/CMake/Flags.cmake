@@ -41,6 +41,17 @@ if(VULTURE_PART STREQUAL "host")
     add_link_options(-fsanitize=address,undefined -nostdlib++)
 elseif(VULTURE_PART STREQUAL "uefi")
     vulture_add_cxx_options(-O2 -ffreestanding -fno-stack-protector -mno-stack-arg-probe)
+elseif(VULTURE_PART STREQUAL "userland")
+    # Programs and their libraries, running at EL0. They may use floating
+    # point; frame pointers stay for crash reports.
+    vulture_add_cxx_options(
+        -O2
+        -fno-stack-protector
+        -mno-omit-leaf-frame-pointer
+        -mno-outline-atomics
+        -fno-unwind-tables
+        -fno-asynchronous-unwind-tables)
+    include_directories(BEFORE SYSTEM ${VULTURE_SOURCE_ROOT}/Libraries/LibC)
 elseif(VULTURE_PART STREQUAL "target")
     # The kernel keeps frame pointers in every function, leaves included, so
     # backtraces never skip a frame; it uses no floating point.

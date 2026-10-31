@@ -50,14 +50,27 @@ vulture_add_part(host TOOLCHAIN host)
 # EFI/BOOT, the kernel in System/Library/Kernels.
 vulture_add_part(target TOOLCHAIN vulture-aarch64 INSTALL_DIR ${VULTURE_ESP_DIR})
 vulture_add_part(uefi TOOLCHAIN vulture-uefi-aarch64 INSTALL_DIR ${VULTURE_ESP_DIR})
+# Programs install into the root filesystem staging tree, which is packed
+# into the boot archive the kernel mounts as /.
+set(VULTURE_ROOT_DIR ${CMAKE_BINARY_DIR}/root)
+vulture_add_part(userland TOOLCHAIN vulture-aarch64 INSTALL_DIR ${VULTURE_ROOT_DIR})
+
+add_custom_target(boot-archive ALL
+    COMMAND ${CMAKE_COMMAND}
+        -DTOOL=${CMAKE_BINARY_DIR}/host/Tools/mkarchive/mkarchive
+        -DROOT=${VULTURE_ROOT_DIR}
+        -DOUTPUT=${VULTURE_ESP_DIR}/System/Library/Kernels/vulture.bootarchive
+        -P ${CMAKE_SOURCE_DIR}/Meta/CMake/MakeBootArchive.cmake
+    DEPENDS host userland
+    VERBATIM)
 
 # One compile database for the whole tree, for clangd and other editors.
 add_custom_target(compile-commands ALL
     COMMAND ${CMAKE_COMMAND}
         -DOUTPUT=${CMAKE_BINARY_DIR}/compile_commands.json
-        "-DINPUTS=${CMAKE_BINARY_DIR}/host/compile_commands.json$<SEMICOLON>${CMAKE_BINARY_DIR}/uefi/compile_commands.json$<SEMICOLON>${CMAKE_BINARY_DIR}/target/compile_commands.json"
+        "-DINPUTS=${CMAKE_BINARY_DIR}/host/compile_commands.json$<SEMICOLON>${CMAKE_BINARY_DIR}/uefi/compile_commands.json$<SEMICOLON>${CMAKE_BINARY_DIR}/target/compile_commands.json$<SEMICOLON>${CMAKE_BINARY_DIR}/userland/compile_commands.json"
         -P ${CMAKE_SOURCE_DIR}/Meta/CMake/MergeCompileCommands.cmake
-    DEPENDS host uefi target
+    DEPENDS host uefi target userland
     VERBATIM)
 
 add_custom_target(test-host
@@ -71,7 +84,8 @@ add_custom_target(test-boot
         --expect "Memory map"
         --expect "8 of 8 processors online"
         --expect "vultureKernel: boot complete"
-    DEPENDS uefi target
+        --expect "init: vultureOS userland is up (process 1)"
+    DEPENDS uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
 
@@ -82,7 +96,7 @@ add_custom_target(test-panic
         --expect "KERNEL PANIC: Data abort (write) at 0x0000000000000010: translation fault, level 0"
         --expect "Kernel::trigger_deliberate_fault"
         --expect "System halted."
-    DEPENDS uefi target test-boot
+    DEPENDS uefi target boot-archive test-boot
     USES_TERMINAL
     VERBATIM)
 
@@ -94,11 +108,24 @@ add_custom_target(test-kernel
         --wait-for-exit
         --timeout 120
         --expect "ktest: PASS"
-    DEPENDS uefi target test-panic
+    DEPENDS uefi target boot-archive test-panic
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel)
+# Userland: /sbin/init --test forks and execs the test programs in
+# /usr/tests (fork, copy-on-write, exec, signals, memory, files...), checks
+# how each ended, and powers the machine off.
+add_custom_target(test-userland
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+        --boot-args "utest"
+        --wait-for-exit
+        --timeout 120
+        --expect "userland: PASS"
+    DEPENDS uefi target boot-archive test-kernel
+    USES_TERMINAL
+    VERBATIM)
+
+add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland)
 
 # The scheduler soak (M3's "done when"): 1000 threads ping-ponging across
 # every processor for 60 seconds, then all stopped and joined. Not part of
@@ -109,7 +136,7 @@ add_custom_target(test-soak
         --wait-for-exit
         --timeout 180
         --expect "ktest: PASS"
-    DEPENDS uefi target
+    DEPENDS uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
 
@@ -120,12 +147,12 @@ add_custom_target(bench
         --wait-for-exit
         --timeout 60
         --expect "ktest: PASS"
-    DEPENDS uefi target
+    DEPENDS uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
 
 add_custom_target(run
     COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR}
-    DEPENDS uefi target
+    DEPENDS uefi target boot-archive
     USES_TERMINAL
     VERBATIM)

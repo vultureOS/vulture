@@ -7,7 +7,8 @@
 #
 #   host    tools and unit tests that run on the build machine
 #   uefi    VultureBoot, the UEFI loader (PE32+)
-#   target  everything that runs inside vultureOS (ELF, AArch64)
+#   target    the kernel (ELF, AArch64)
+#   userland  programs and libraries that run in user mode (ELF, AArch64)
 #
 # Configuring this directory without VULTURE_PART sets up the superbuild,
 # which drives every part and provides the run/test targets.
@@ -29,11 +30,13 @@ include(Meta/CMake/Flags.cmake)
 
 if(VULTURE_PART STREQUAL "host")
     enable_testing()
+    add_subdirectory(Libraries/LibArchive)
     add_subdirectory(Libraries/LibBase)
     add_subdirectory(Libraries/LibDeviceTree)
     add_subdirectory(Libraries/LibELF)
     add_subdirectory(Libraries/LibTest)
     add_subdirectory(Tests)
+    add_subdirectory(Tools)
 elseif(VULTURE_PART STREQUAL "uefi")
     add_subdirectory(Libraries/LibBase)
     add_subdirectory(Libraries/LibDeviceTree)
@@ -43,8 +46,19 @@ elseif(VULTURE_PART STREQUAL "target")
     enable_language(ASM)
     add_subdirectory(Libraries/LibBase)
     add_subdirectory(Libraries/LibDeviceTree)
+    add_subdirectory(Libraries/LibArchive)
     add_subdirectory(Libraries/LibELF)
     add_subdirectory(Kernel)
+elseif(VULTURE_PART STREQUAL "userland")
+    enable_language(ASM)
+    include(Meta/CMake/Userland.cmake)
+    add_subdirectory(Libraries/LibBase)
+    add_subdirectory(Libraries/LibC)
+    add_subdirectory(Libraries/LibCxxRT)
+    add_subdirectory(Services)
+    add_subdirectory(Tests/Userland)
+    # The root filesystem skeleton: /etc and friends.
+    install(DIRECTORY Base/ DESTINATION .)
 else()
     message(FATAL_ERROR "Unknown VULTURE_PART '${VULTURE_PART}'")
 endif()
