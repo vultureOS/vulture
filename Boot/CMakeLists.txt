@@ -5,14 +5,19 @@
 #
 
 add_executable(VultureBoot
+    Arch/aarch64/Handoff.cpp
+    Arch/aarch64/PageTableBuilder.cpp
+    BootVolume.cpp
     Console.cpp
+    KernelLoader.cpp
     Main.cpp
+    Memory.cpp
     Support.cpp)
 
 set_target_properties(VultureBoot PROPERTIES
     OUTPUT_NAME ${VULTURE_UEFI_BOOT_NAME}
     SUFFIX ".EFI")
 
-target_link_libraries(VultureBoot PRIVATE LibBase LibBaseFreestanding)
+target_link_libraries(VultureBoot PRIVATE LibDeviceTree LibELF LibBase LibBaseFreestanding)
 
 install(TARGETS VultureBoot RUNTIME DESTINATION EFI/BOOT)

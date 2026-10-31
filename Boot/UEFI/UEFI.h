@@ -196,6 +196,60 @@ struct GraphicsOutputProtocol {
 
 constexpr Guid graphics_output_protocol_guid { 0x9042a9de, 0x23dc, 0x4a38, { 0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a } };
 
+// Files
+
+struct FileProtocol {
+    u64 Revision;
+    Status (*Open)(FileProtocol* self, FileProtocol** new_handle, char16_t const* file_name, u64 open_mode, u64 attributes);
+    Status (*Close)(FileProtocol* self);
+    Status (*Delete)(FileProtocol* self);
+    Status (*Read)(FileProtocol* self, UIntN* buffer_size, void* buffer);
+    Status (*Write)(FileProtocol* self, UIntN* buffer_size, void const* buffer);
+    Status (*GetPosition)(FileProtocol* self, u64* position);
+    Status (*SetPosition)(FileProtocol* self, u64 position);
+    void* GetInfo;
+    void* SetInfo;
+    void* Flush;
+};
+
+constexpr u64 file_mode_read = 1;
+// SetPosition() to this moves to the end of the file.
+constexpr u64 file_position_end = ~u64(0);
+
+struct SimpleFileSystemProtocol {
+    u64 Revision;
+    Status (*OpenVolume)(SimpleFileSystemProtocol* self, FileProtocol** root);
+};
+
+constexpr Guid simple_file_system_protocol_guid { 0x964e5b22, 0x6459, 0x11d2, { 0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b } };
+
+struct LoadedImageProtocol {
+    u32 Revision;
+    Handle ParentHandle;
+    void* SystemTable;
+    Handle DeviceHandle;
+    void* FilePath;
+    void* Reserved;
+    u32 LoadOptionsSize;
+    void* LoadOptions;
+    void* ImageBase;
+    u64 ImageSize;
+    MemoryType ImageCodeType;
+    MemoryType ImageDataType;
+    void* Unload;
+};
+
+constexpr Guid loaded_image_protocol_guid { 0x5b1b31a1, 0x9562, 0x11d2, { 0x8e, 0x3f, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b } };
+
+// Random numbers
+
+struct RngProtocol {
+    Status (*GetInfo)(RngProtocol* self, UIntN* algorithm_list_size, Guid* algorithm_list);
+    Status (*GetRNG)(RngProtocol* self, Guid const* algorithm, UIntN value_length, u8* value);
+};
+
+constexpr Guid rng_protocol_guid { 0x3152bca5, 0xeade, 0x433d, { 0x86, 0x2e, 0xc0, 0x1c, 0xdc, 0x29, 0x1f, 0x44 } };
+
 // Configuration tables
 
 constexpr Guid acpi_20_table_guid { 0x8868e871, 0xe4f1, 0x11d3, { 0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81 } };
@@ -332,5 +386,10 @@ static_assert(__builtin_offsetof(BootServices, ExitBootServices) == 0xe8);
 static_assert(__builtin_offsetof(BootServices, Stall) == 0xf8);
 static_assert(__builtin_offsetof(BootServices, LocateProtocol) == 0x140);
 static_assert(sizeof(BootServices) == 0x178);
+static_assert(__builtin_offsetof(LoadedImageProtocol, DeviceHandle) == 0x18);
+static_assert(__builtin_offsetof(LoadedImageProtocol, ImageBase) == 0x40);
+static_assert(sizeof(LoadedImageProtocol) == 0x60);
+static_assert(__builtin_offsetof(FileProtocol, Read) == 0x20);
+static_assert(__builtin_offsetof(FileProtocol, SetPosition) == 0x38);
 
 }
