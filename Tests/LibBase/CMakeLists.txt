@@ -6,8 +6,11 @@
 
 add_executable(TestLibBase
     TestArray.cpp
+    TestAtomic.cpp
     TestErrorOr.cpp
+    TestFastRandom.cpp
     TestFormat.cpp
+    TestIntrusiveList.cpp
     TestOptional.cpp
     TestSpan.cpp
     TestStringView.cpp)
