@@ -21,6 +21,9 @@ _start:
     msr vbar_el1, x1
     isb
 
+    /* Run on SP_EL1, and start with no per-CPU pointer (see Processor). */
+    msr spsel, #1
+    msr tpidr_el1, xzr
     adrp x1, boot_stack_top
     add x1, x1, :lo12:boot_stack_top
     mov sp, x1
@@ -33,6 +36,57 @@ _start:
 1:  wfi
     b 1b
 .size _start, . - _start
+
+/*
+ * Secondary processors start here, from PSCI CPU_ON: EL1, MMU and caches
+ * off, x0 = physical address of their StartupParameters (see SMP.cpp).
+ * Everything is loaded into registers before the MMU goes on, because
+ * memory reads now bypass the cache.
+ */
+.section .text, "ax"
+.global secondary_entry
+.type secondary_entry, %function
+secondary_entry:
+    msr daifset, #0xf
+    ldp x1, x2, [x0, #0]    /* mair, tcr */
+    ldp x3, x4, [x0, #16]   /* ttbr0 (identity map), ttbr1 (kernel) */
+    ldp x5, x6, [x0, #32]   /* sctlr, vbar */
+    ldp x7, x8, [x0, #48]   /* stack_top, entry */
+    ldr x9, [x0, #64]       /* argument */
+    msr mair_el1, x1
+    msr tcr_el1, x2
+    msr ttbr0_el1, x3
+    msr ttbr1_el1, x4
+    isb
+    tlbi vmalle1
+    dsb nsh
+    isb
+    msr sctlr_el1, x5
+    isb
+    /* Translation is on; continue at the kernel's own address. */
+    ldr x10, =2f
+    br x10
+2:
+    msr vbar_el1, x6
+    msr spsel, #1
+    mov sp, x7
+    msr tpidr_el1, xzr
+    /* Drop the identity map: stop translating lower-half addresses. */
+    mrs x10, tcr_el1
+    orr x10, x10, #(1 << 7)
+    msr tcr_el1, x10
+    isb
+    tlbi vmalle1
+    dsb nsh
+    isb
+    mov x29, xzr
+    mov x30, xzr
+    mov x0, x9
+    blr x8
+3:  wfi
+    b 3b
+.ltorg
+.size secondary_entry, . - secondary_entry
 
 .section .bss.boot_stack, "aw", %nobits
 .balign 16
