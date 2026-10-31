@@ -9,7 +9,8 @@
 #include <Kernel/Debug/KernelLog.h>
 
 // Tests that run inside the booted kernel, on real (virtual) hardware: the
-// allocators, locks, timers and processors. Booting with "ktest" runs them
+// allocators, locks, timers, processors, threads and scheduler. They run in
+// the boot thread, which is pinned to processor 0. Booting with "ktest" runs them
 // all ("ktest=heap" runs those whose name starts with "heap"), reports on
 // the serial console and powers the machine off.
 //
@@ -60,8 +61,11 @@ void expect_equal(char const* file, unsigned line, char const* lhs_text, char co
 }
 
 // Runs the tests whose "suite.name" starts with `filter`, prints a summary
-// ending in "ktest: PASS" or "ktest: FAIL", and powers off.
-[[noreturn]] void run(StringView filter);
+// ending in "ktest: PASS" or "ktest: FAIL", and powers off. Long-running
+// tests (soaks) run for `seconds` ("ktest-seconds=N").
+[[noreturn]] void run(StringView filter, u64 seconds);
+
+[[nodiscard]] u64 soak_seconds();
 
 }
 

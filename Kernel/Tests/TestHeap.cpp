@@ -36,7 +36,7 @@ static bool is_intact(void const* pointer, size_t size)
 
 static void drain_all_heap_caches()
 {
-    Processor::run_on_all([](void*) { heap_drain_processor_cache(); }, nullptr);
+    Processor::call_on_all([](void*) { heap_drain_processor_cache(); }, nullptr);
 }
 
 KERNEL_TEST(heap, every_size_class)

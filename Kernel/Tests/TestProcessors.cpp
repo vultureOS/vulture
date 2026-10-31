@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/Tasks/Processor.h>
+#include <Kernel/Tasks/Thread.h>
 #include <Kernel/Tests/KernelTest.h>
 #include <Kernel/Time/Time.h>
 
@@ -25,11 +26,14 @@ Atomic<u32> s_inconsistent;
 
 static void check_identity(void*)
 {
+    // Pinned, so the processor cannot change under us.
     auto& processor = Processor::current();
     s_seen.fetch_or(1ull << processor.id());
     auto frame = reinterpret_cast<FlatPtr>(__builtin_frame_address(0));
-    bool on_own_stack = frame >= processor.stack_bottom() && frame < processor.stack_top();
-    if (processor.hardware_id() != Arch::processor_hardware_id() || !on_own_stack || !Arch::are_interrupts_enabled())
+    auto const& stack = Thread::current().stack();
+    bool on_own_stack = frame >= stack.bottom && frame < stack.top;
+    bool pinned_here = Thread::current().pinned_processor() == processor.id();
+    if (processor.hardware_id() != Arch::processor_hardware_id() || !on_own_stack || !pinned_here || !Arch::are_interrupts_enabled())
         s_inconsistent.fetch_add(1);
 }
 
@@ -43,14 +47,17 @@ KERNEL_TEST(smp, run_on_all_reaches_every_processor)
     KTEST_EXPECT_EQ(s_inconsistent.load(), 0u);
 }
 
-KERNEL_TEST(smp, ipi_round_trip)
+KERNEL_TEST(smp, call_on_all_round_trip)
 {
+    static Atomic<u32> s_calls;
+    s_calls.store(0);
     constexpr u32 rounds = 1000;
     u64 start = Time::now();
     for (u32 i = 0; i < rounds; ++i)
-        Processor::run_on_all([](void*) { }, nullptr);
+        Processor::call_on_all([](void*) { s_calls.fetch_add(1, MemoryOrder::Relaxed); }, nullptr);
     u64 nanoseconds = Time::nanoseconds_from_ticks(Time::now() - start) / rounds;
-    dmesgln("ktest:   wake {} processors and wait for all: {} ns per round", Processor::online_count() - 1, nanoseconds);
+    KTEST_EXPECT_EQ(s_calls.load(), rounds * Processor::online_count());
+    dmesgln("ktest:   IPI {} processors and wait for all: {} ns per round", Processor::online_count() - 1, nanoseconds);
 }
 
 }

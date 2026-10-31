@@ -15,6 +15,12 @@ namespace Kernel::Tests {
 static TestCase const* s_first;
 static TestCase* s_last;
 static Atomic<u32> s_failures { 0 };
+static u64 s_soak_seconds = 2;
+
+u64 soak_seconds()
+{
+    return s_soak_seconds;
+}
 
 TestCase::TestCase(char const* suite, char const* name, TestFunction function)
     : m_suite(suite)
@@ -41,8 +47,9 @@ void fail(char const* file, unsigned line, StringView message)
     dmesgln("ktest:   {}:{}: {} (processor {})", file, line, message, processor);
 }
 
-void run(StringView filter)
+void run(StringView filter, u64 seconds)
 {
+    s_soak_seconds = seconds;
     // A crash in a test must end the run, not hang it.
     set_power_off_on_panic(true);
     dmesgln("ktest: running kernel tests{}{} on {} processors", filter.is_empty() ? ""_sv : " matching "_sv, filter, Processor::online_count());

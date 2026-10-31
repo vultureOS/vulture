@@ -15,9 +15,10 @@
 namespace Kernel {
 
 // Puts every cached page back into the zones, so free counts are exact.
+// In interrupt context on each processor: threads would churn the caches.
 static void drain_all_page_caches()
 {
-    Processor::run_on_all([](void*) { physical_memory().drain_processor_cache(); }, nullptr);
+    Processor::call_on_all([](void*) { physical_memory().drain_processor_cache(); }, nullptr);
 }
 
 KERNEL_TEST(physical_memory, every_order_is_aligned_and_usable)
