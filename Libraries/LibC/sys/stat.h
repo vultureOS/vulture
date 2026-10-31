@@ -39,5 +39,10 @@ int fstat(int fd, struct stat*);
 int stat(char const* path, struct stat*);
 int lstat(char const* path, struct stat*);
 int mkdir(char const* path, mode_t mode);
+int chmod(char const* path, mode_t mode);
+int fchmod(int fd, mode_t mode);
+mode_t umask(mode_t mask);
+int utimensat(int directory_fd, char const* path, struct timespec const times[2], int flags);
+int futimens(int fd, struct timespec const times[2]);
 
 __END_DECLS

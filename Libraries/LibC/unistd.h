@@ -24,6 +24,24 @@ pid_t getpid(void);
 pid_t getppid(void);
 pid_t gettid(void);
 
+// Users and groups.
+uid_t getuid(void);
+uid_t geteuid(void);
+gid_t getgid(void);
+gid_t getegid(void);
+int setuid(uid_t);
+int setgid(gid_t);
+int seteuid(uid_t);
+int setegid(gid_t);
+int getgroups(int size, gid_t list[]);
+int setgroups(size_t size, gid_t const* list);
+int chown(char const* path, uid_t, gid_t);
+int lchown(char const* path, uid_t, gid_t);
+int fchown(int fd, uid_t, gid_t);
+int link(char const* existing, char const* created);
+int gethostname(char* name, size_t size);
+int sethostname(char const* name, size_t size);
+
 // Job control.
 pid_t setsid(void);
 pid_t getsid(pid_t);
