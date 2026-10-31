@@ -25,6 +25,7 @@
 #define EFAULT 14
 #define EBUSY 16
 #define EEXIST 17
+#define EXDEV 18
 #define ENODEV 19
 #define ENOTDIR 20
 #define EISDIR 21
@@ -36,6 +37,7 @@
 #define ENOSPC 28
 #define ESPIPE 29
 #define EROFS 30
+#define EMLINK 31
 #define EPIPE 32
 #define EDOM 33
 #define ERANGE 34

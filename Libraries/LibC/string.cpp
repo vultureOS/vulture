@@ -228,6 +228,8 @@ char* strerror(int error)
         return const_cast<char*>("Bad address");
     case EEXIST:
         return const_cast<char*>("File exists");
+    case EXDEV:
+        return const_cast<char*>("Cross-device link");
     case ENOTDIR:
         return const_cast<char*>("Not a directory");
     case EISDIR:
@@ -244,6 +246,8 @@ char* strerror(int error)
         return const_cast<char*>("Illegal seek");
     case EROFS:
         return const_cast<char*>("Read-only file system");
+    case EMLINK:
+        return const_cast<char*>("Too many links");
     case EPIPE:
         return const_cast<char*>("Broken pipe");
     case ERANGE:
