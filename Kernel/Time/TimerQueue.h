@@ -6,11 +6,13 @@
 
 #pragma once
 
+#include <Kernel/Locking/SpinLock.h>
 #include <LibBase/IntrusiveList.h>
 
 namespace Kernel {
 
 class Timer;
+class TimerQueue;
 using TimerCallback = void (*)(Timer&);
 
 // A one-shot callback at a point in time (a monotonic_counter() value).
@@ -24,6 +26,11 @@ public:
     [[nodiscard]] bool is_pending() const { return m_list_node.is_in_list(); }
     [[nodiscard]] u64 deadline() const { return m_deadline; }
 
+    // Disarms the timer, from any processor. Returns true if it was still
+    // waiting. Afterwards its callback is neither running nor going to run:
+    // if it is running right now, this waits for it to finish.
+    bool cancel();
+
     void* context { nullptr };
 
 private:
@@ -32,6 +39,8 @@ private:
     IntrusiveListNode m_list_node;
     u64 m_deadline { 0 };
     TimerCallback m_callback { nullptr };
+    // The queue it is armed on (or whose interrupt is running it).
+    Atomic<TimerQueue*> m_queue { nullptr };
 };
 
 // One per processor, ordered by deadline. The hardware timer is armed for
@@ -42,9 +51,6 @@ public:
     // Arms `timer` on the current processor. It must not be pending.
     void add(Timer&, u64 deadline, TimerCallback);
 
-    // Returns false if the timer had already fired or was never armed.
-    bool cancel(Timer&);
-
     // From the timer interrupt: runs every expired timer.
     void handle_interrupt();
 
@@ -52,9 +58,13 @@ public:
     [[nodiscard]] u64 fired_count() const { return m_fired_count; }
 
 private:
+    friend class Timer;
+
     void program_hardware();
 
+    SpinLock m_lock;
     IntrusiveList<Timer, &Timer::m_list_node> m_timers;
+    Atomic<Timer*> m_running { nullptr };
     u64 m_fired_count { 0 };
 };
 

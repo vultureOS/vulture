@@ -146,7 +146,7 @@ void Scheduler::update_time_slice(Processor& processor)
     bool needed = processor.m_current_thread != processor.m_idle_thread && processor.m_run_queue.count() > 0;
     if (!needed) {
         if (slice.is_pending())
-            processor.m_timer_queue.cancel(slice);
+            slice.cancel();
         processor.m_time_slice_armed.store(false, MemoryOrder::Relaxed);
         return;
     }
@@ -204,9 +204,10 @@ void Scheduler::switch_to(Processor& processor, Thread& current, Thread& next)
     processor.m_switching_from = &current;
     processor.m_running_rank.store(&next == processor.m_idle_thread ? 0 : rank(next.qos()), MemoryOrder::Relaxed);
     ++processor.m_context_switches;
+    next.activate_user_space();
     // A fresh slice for the thread coming in.
     if (processor.m_time_slice.is_pending())
-        processor.m_timer_queue.cancel(processor.m_time_slice);
+        processor.m_time_slice.cancel();
     update_time_slice(processor);
 
     Arch::switch_context(current.m_context, next.m_context);

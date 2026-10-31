@@ -73,7 +73,7 @@ void wait_until(u64 deadline)
             Arch::wait_for_interrupt();
         Arch::restore_interrupts(state);
     }
-    queue.cancel(wakeup);
+    wakeup.cancel();
 }
 
 }

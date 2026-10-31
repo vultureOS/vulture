@@ -102,14 +102,14 @@ KERNEL_TEST(timer, cancelled_timers_never_fire)
         queue.add(run.records[i].timer, deadline + i, record_firing);
     }
     for (u32 i = 0; i < count; i += 2)
-        KTEST_EXPECT(queue.cancel(run.records[i].timer));
+        KTEST_EXPECT(run.records[i].timer.cancel());
     KTEST_EXPECT(wait_for_firings(run, count / 2, 200));
     // Give a wrongly kept timer the chance to fire too.
     Time::wait_until(Time::now() + Time::ticks_from_milliseconds(10));
     KTEST_EXPECT_EQ(run.fired_count.load(), count / 2);
     for (u32 i = 0; i < count; ++i)
         KTEST_EXPECT_EQ(run.records[i].fired, i % 2 == 1);
-    KTEST_EXPECT(!queue.cancel(run.records[1].timer));
+    KTEST_EXPECT(!run.records[1].timer.cancel());
 }
 
 static void use_own_timer_queue(void*)
