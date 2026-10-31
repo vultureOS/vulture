@@ -168,6 +168,19 @@ add_custom_target(bench
     USES_TERMINAL
     VERBATIM)
 
+# One bootable disk image with an EFI System Partition and vultureFS, as a
+# real machine would have (Meta/run.sh --image boots it).
+add_custom_target(image
+    COMMAND ${CMAKE_COMMAND}
+        -DTOOL=${CMAKE_BINARY_DIR}/host/Tools/vfs/mkimage
+        -DESP=${VULTURE_ESP_DIR}
+        -DARCHIVE=${VULTURE_ESP_DIR}/System/Library/Kernels/vulture.bootarchive
+        -DOUTPUT=${CMAKE_BINARY_DIR}/vultureOS.img
+        -P ${CMAKE_SOURCE_DIR}/Meta/CMake/MakeDiskImage.cmake
+    DEPENDS host uefi target boot-archive
+    USES_TERMINAL
+    VERBATIM)
+
 add_custom_target(run
     COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR}
     DEPENDS host uefi target boot-archive

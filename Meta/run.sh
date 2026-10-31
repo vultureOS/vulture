@@ -27,6 +27,9 @@
 #   --fresh-disk        make the root disk anew from the build first
 #   --no-disk           no root disk: the root is the boot archive, in memory
 #   --nvme              attach the root disk as NVMe instead of virtio-blk
+#   --image FILE        boot a whole-disk image (ninja image) on its own,
+#                       instead of the build's EFI directory and root disk;
+#                       boot arguments do not apply
 #   --kill              with --headless: once the expected text appears, cut
 #                       the power (SIGKILL) instead of shutting QEMU down
 #   --kill-delay SECONDS  with --kill: wait this long first (may be fractional)
@@ -44,6 +47,7 @@ timeout_seconds=60
 wait_for_exit=0
 screenshot=""
 disk=""
+image=""
 use_disk=1
 fresh_disk=0
 disk_interface="virtio-blk-pci,drive=root"
@@ -66,10 +70,11 @@ while [ $# -gt 0 ]; do
         --fresh-disk) fresh_disk=1; shift ;;
         --no-disk) use_disk=0; shift ;;
         --nvme) disk_interface="nvme,drive=root,serial=VULTURE0001"; shift ;;
+        --image) image="$2"; use_disk=0; shift 2 ;;
         --kill) kill_power=1; shift ;;
         --kill-delay) kill_delay="$2"; shift 2 ;;
         --) shift; extra_args=("$@"); break ;;
-        -h|--help) sed -n '8,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '8,37p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "run.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -143,6 +148,25 @@ if [ "$use_disk" -eq 1 ]; then
     )
 fi
 
+# Either one whole disk (EFI System Partition and vultureFS), or the build's
+# EFI directory as a read-only FAT disk plus the root disk.
+if [ -n "$image" ]; then
+    if [ ! -f "$image" ]; then
+        echo "run.sh: $image is missing; make it with: ninja -C $build_dir image" >&2
+        exit 1
+    fi
+    boot_disk_args=(
+        -drive "if=none,id=image,format=raw,file=$image,cache=writeback"
+        -device "${disk_interface/drive=root/drive=image},bootindex=0"
+    )
+else
+    boot_disk_args=(
+        -drive "if=none,id=esp,format=raw,readonly=on,file=fat:$esp_dir"
+        -device virtio-blk-pci,drive=esp,bootindex=0
+        ${disk_args[@]+"${disk_args[@]}"}
+    )
+fi
+
 args=(
     # acpi=off makes the firmware publish a device tree, which the kernel uses for hardware discovery.
     -machine virt,gic-version=3,acpi=off
@@ -150,10 +174,7 @@ args=(
     -m 4G
     -drive "if=pflash,format=raw,unit=0,readonly=on,file=$firmware_dir/edk2-aarch64-code.fd"
     -drive "if=pflash,format=raw,unit=1,file=$vars_file"
-    # The EFI System Partition is the staging directory, exposed as a read-only FAT disk.
-    -drive "if=none,id=esp,format=raw,readonly=on,file=fat:$esp_dir"
-    -device virtio-blk-pci,drive=esp,bootindex=0
-    ${disk_args[@]+"${disk_args[@]}"}
+    "${boot_disk_args[@]}"
     # ramfb gives the firmware a linear framebuffer for the boot console; virtio-gpu
     # only offers blit operations until vultureOS has its own driver (M8).
     -device ramfb
