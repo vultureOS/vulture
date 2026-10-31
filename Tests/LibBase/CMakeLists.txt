@@ -7,6 +7,7 @@
 add_executable(TestLibBase
     TestArray.cpp
     TestAtomic.cpp
+    TestChecksum.cpp
     TestContainers.cpp
     TestErrorOr.cpp
     TestFastRandom.cpp
