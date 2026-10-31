@@ -50,6 +50,13 @@ void KernelLog::begin_line()
     format_to(*this, "[{:>5}.{:06}] ", seconds, microseconds);
 }
 
+void KernelLog::write_raw(StringView text)
+{
+    auto state = lock();
+    write(text);
+    unlock(state);
+}
+
 Arch::InterruptState KernelLog::lock()
 {
     if (m_panic_mode.load(MemoryOrder::Relaxed))

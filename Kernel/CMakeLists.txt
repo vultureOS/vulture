@@ -17,6 +17,8 @@ add_executable(Kernel
     Arch/aarch64/PageTable.cpp
     Arch/aarch64/SMP.cpp
     Arch/aarch64/ThreadContext.cpp
+    Arch/aarch64/UserAccess.S
+    Arch/aarch64/UserContext.cpp
     Arch/aarch64/Vectors.S
     BootArguments.cpp
     Console/BootScreen.cpp
@@ -27,16 +29,28 @@ add_executable(Kernel
     Debug/Panic.cpp
     Debug/Symbols.cpp
     Devices/Serial/PL011.cpp
+    FileSystem/BootArchive.cpp
+    FileSystem/OpenFile.cpp
     Init.cpp
     Interrupts/InterruptHandlers.cpp
     Library/CxxRuntime.cpp
     Locking/Mutex.cpp
     Locking/SpinLock.cpp
     Locking/WaitQueue.cpp
+    Memory/AddressSpace.cpp
+    Memory/AnonymousVMObject.cpp
     Memory/BuddyAllocator.cpp
     Memory/Heap.cpp
     Memory/MemoryManager.cpp
     Memory/PhysicalMemory.cpp
+    Memory/UserAccess.cpp
+    Syscalls/Dispatch.cpp
+    Syscalls/FileCalls.cpp
+    Syscalls/MemoryCalls.cpp
+    Syscalls/ProcessCalls.cpp
+    Syscalls/SignalCalls.cpp
+    Syscalls/TimeCalls.cpp
+    Tasks/Process.cpp
     Tasks/Processor.cpp
     Tasks/Scheduler.cpp
     Tasks/Thread.cpp
@@ -65,6 +79,6 @@ target_link_options(Kernel PRIVATE
     -Wl,-z,max-page-size=4096
     -Wl,--build-id=none)
 
-target_link_libraries(Kernel PRIVATE LibDeviceTree LibELF LibBase LibBaseFreestanding)
+target_link_libraries(Kernel PRIVATE LibArchive LibDeviceTree LibELF LibBase LibBaseFreestanding)
 
 install(TARGETS Kernel RUNTIME DESTINATION System/Library/Kernels)

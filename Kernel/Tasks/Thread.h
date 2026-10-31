@@ -7,6 +7,7 @@
 #pragma once
 
 #include <Kernel/Arch/ThreadContext.h>
+#include <Kernel/Arch/TrapFrame.h>
 #include <Kernel/Locking/SpinLock.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Time/TimerQueue.h>
@@ -16,6 +17,8 @@
 #include <LibBase/StringView.h>
 
 namespace Kernel {
+
+class Process;
 
 // Quality of service: what a thread's work is for, from least to most
 // urgent. A runnable thread of a higher class always runs before one of a
@@ -67,8 +70,16 @@ public:
     // Gives the processor to another thread of the same or a higher class,
     // if one is runnable.
     static void yield();
-    static void sleep_until(u64 deadline);
-    static void sleep_for_microseconds(u64);
+
+    enum class SleepResult : u8 {
+        Slept,
+        Interrupted, // By interrupt_sleep(), such as for a signal.
+    };
+    static SleepResult sleep_until(u64 deadline);
+    static SleepResult sleep_for_microseconds(u64);
+    // Ends the thread's current sleep early. (A process thread also does not
+    // start a sleep while a signal is pending.)
+    void interrupt_sleep();
 
     // Makes a created thread runnable.
     void start();
@@ -83,6 +94,15 @@ public:
     [[nodiscard]] u32 last_processor() const { return m_last_processor.load(MemoryOrder::Relaxed); }
     [[nodiscard]] KernelStack const& stack() const { return m_stack; }
     [[nodiscard]] u64 switch_count() const { return m_switch_count; }
+
+    // User threads belong to a process (null for kernel threads).
+    [[nodiscard]] Process* process() const { return m_process.ptr(); }
+    void set_process(Process&);
+    // Where the registers of user mode are saved on entry to the kernel:
+    // the top of the thread's kernel stack.
+    [[nodiscard]] TrapFrame& user_trap_frame() const { return *reinterpret_cast<TrapFrame*>(m_stack.top - sizeof(TrapFrame)); }
+    // Switches the current processor to this thread's user space.
+    void activate_user_space() const;
 
     ~Thread();
 
@@ -120,6 +140,13 @@ private:
 
     SpinLock m_exit_lock;
     IntrusiveList<Thread, &Thread::m_queue_node> m_joiners;
+
+    RefPtr<Process> m_process;
+
+    // Sleeping: whoever finds m_sleeping set (under the lock) wakes the thread.
+    SpinLock m_sleep_lock;
+    bool m_sleeping { false };
+    bool m_sleep_interrupted { false };
 
     u64 m_switch_count { 0 };
 

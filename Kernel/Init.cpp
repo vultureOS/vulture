@@ -15,9 +15,11 @@
 #include <Kernel/Debug/Panic.h>
 #include <Kernel/Debug/Symbols.h>
 #include <Kernel/Devices/Serial/PL011.h>
+#include <Kernel/FileSystem/BootArchive.h>
 #include <Kernel/Library/CxxRuntime.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
+#include <Kernel/Tasks/Process.h>
 #include <Kernel/Tasks/Processor.h>
 #include <Kernel/Tasks/Scheduler.h>
 #include <Kernel/Tasks/Thread.h>
@@ -146,6 +148,7 @@ static void initialize_memory(API::BootInfo const& boot_info, Framebuffer& frame
         framebuffer.relocate(pixels);
 
     mm.reclaim_boot_memory();
+    must("user address spaces"_sv, Arch::initialize_user_translation());
     auto statistics = physical_memory().statistics();
     auto free = human_size(statistics.free_pages * page_size);
     auto managed = human_size(statistics.managed_pages * page_size);
@@ -153,6 +156,24 @@ static void initialize_memory(API::BootInfo const& boot_info, Framebuffer& frame
     dmesgln("Memory: {} free of {} in {} zone{}; {} reclaimed from the loader", free.view(), managed.view(), statistics.zone_count,
         statistics.zone_count == 1 ? ""_sv : "s"_sv, reclaimed.view());
     dmesgln("Memory: kernel page tables use {} KiB", mm.kernel_page_table().table_page_count() * page_size / KiB);
+}
+
+// Mounts the boot archive as / and starts /sbin/init as process 1.
+static void start_userland(API::BootInfo const& boot_info, BootArguments const& arguments)
+{
+    if (boot_info.boot_archive.size == 0) {
+        dmesgln("Userland: no boot archive, so no init");
+        return;
+    }
+    ReadonlyBytes archive { physical_to_virtual(PhysicalAddress(boot_info.boot_archive.base)), boot_info.boot_archive.size };
+    must("boot archive"_sv, BootArchive::initialize(archive));
+    dmesgln("Boot archive: {} entries in {} KiB, mounted as /", BootArchive::entry_count(), archive.size() / KiB);
+
+    // "utest" runs the userland tests.
+    StringView const plain[] = { "/sbin/init"_sv };
+    StringView const testing[] = { "/sbin/init"_sv, "--test"_sv };
+    bool test = arguments.has_flag("utest"_sv);
+    (void)must("starting init"_sv, Process::create_init("/sbin/init"_sv, test ? Span<StringView const>(testing) : Span<StringView const>(plain)));
 }
 
 static void initialize_interrupts_and_time(DeviceTree::FlattenedDeviceTree const& tree)
@@ -302,6 +323,7 @@ extern "C" [[noreturn]] void kernel_main(API::BootInfo const* loader_boot_info)
 
     show_progress(100);
     dmesgln("vultureKernel: boot complete");
-    // The processors idle until there is work.
+    start_userland(boot_info, arguments);
+    // From here on, the processors run user programs, or idle.
     Thread::exit();
 }

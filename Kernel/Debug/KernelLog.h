@@ -25,6 +25,8 @@ public:
     void attach_console(TextConsole*);
 
     void write(StringView) override;
+    // Text from programs: as is (no timestamps), under the lock.
+    void write_raw(StringView);
 
     // Starts a line with the time since boot: "[    0.001234] ".
     void begin_line();

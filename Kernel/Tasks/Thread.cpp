@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/Debug/Panic.h>
+#include <Kernel/Tasks/Process.h>
 #include <Kernel/Tasks/Processor.h>
 #include <Kernel/Tasks/Scheduler.h>
 #include <Kernel/Tasks/Thread.h>
@@ -50,6 +51,22 @@ Thread::~Thread()
 {
     VERIFY(state() == State::Dead || state() == State::Created);
     release_stack();
+    if (m_process)
+        m_process->thread_finished();
+}
+
+void Thread::set_process(Process& process)
+{
+    VERIFY(!m_process);
+    m_process = process;
+}
+
+void Thread::activate_user_space() const
+{
+    if (m_process && m_process->address_space())
+        m_process->address_space()->activate();
+    else
+        Arch::activate_user_page_table(nullptr, 0);
 }
 
 void Thread::release_stack()
@@ -84,7 +101,8 @@ ErrorOr<NonnullRefPtr<Thread>> Thread::create(StringView name, ThreadEntry entry
     }
     thread->m_stack = stack;
     thread->m_owns_stack = true;
-    Arch::initialize_thread_context(thread->m_context, stack.top, entry, argument);
+    // The top of the stack is kept for the user trap frame.
+    Arch::initialize_thread_context(thread->m_context, stack.top - sizeof(TrapFrame), entry, argument);
     auto reference = adopt_ref(*thread);
     thread->register_thread();
     return reference;
@@ -148,26 +166,55 @@ void Thread::yield()
     Scheduler::yield();
 }
 
-void Thread::sleep_until(u64 deadline)
+Thread::SleepResult Thread::sleep_until(u64 deadline)
 {
     VERIFY(Arch::are_interrupts_enabled());
-    auto state = Arch::disable_interrupts();
-    if (Time::now() >= deadline) {
-        Arch::restore_interrupts(state);
-        return;
-    }
-    // The timer fires on this processor, once the switch away is complete
-    // (it needs interrupts, which stay masked until then).
     auto& thread = current();
+    auto state = thread.m_sleep_lock.lock();
+    // A signal sent before this point is seen here; one sent after finds
+    // m_sleeping set (both under the lock), so none is missed.
+    if (thread.m_process && thread.m_process->has_deliverable_signal()) {
+        thread.m_sleep_lock.unlock(state);
+        return SleepResult::Interrupted;
+    }
+    if (Time::now() >= deadline) {
+        thread.m_sleep_lock.unlock(state);
+        return SleepResult::Slept;
+    }
+    // The timer fires on this processor once the switch away is complete
+    // (it needs interrupts, which stay masked until then).
+    thread.m_sleeping = true;
     Processor::current().timer_queue().add(thread.m_sleep_timer, deadline, [](Timer& timer) {
-        Scheduler::wake(*static_cast<Thread*>(timer.context));
+        auto& sleeper = *static_cast<Thread*>(timer.context);
+        auto timer_state = sleeper.m_sleep_lock.lock();
+        bool wake = exchange(sleeper.m_sleeping, false);
+        sleeper.m_sleep_lock.unlock(timer_state);
+        if (wake)
+            Scheduler::wake(sleeper);
     });
-    Scheduler::block(nullptr, nullptr, state);
+    Scheduler::block(nullptr, &thread.m_sleep_lock, state);
+
+    // Woken by the timer or interrupted. Make sure the timer is not still
+    // pending, or running, before this thread can go away.
+    thread.m_sleep_timer.cancel();
+    SpinLockGuard guard(thread.m_sleep_lock);
+    return exchange(thread.m_sleep_interrupted, false) ? SleepResult::Interrupted : SleepResult::Slept;
 }
 
-void Thread::sleep_for_microseconds(u64 microseconds)
+void Thread::interrupt_sleep()
 {
-    sleep_until(Time::now() + Time::ticks_from_microseconds(microseconds));
+    auto state = m_sleep_lock.lock();
+    bool wake = exchange(m_sleeping, false);
+    if (wake)
+        m_sleep_interrupted = true;
+    m_sleep_lock.unlock(state);
+    if (wake)
+        Scheduler::wake(*this);
+}
+
+Thread::SleepResult Thread::sleep_for_microseconds(u64 microseconds)
+{
+    return sleep_until(Time::now() + Time::ticks_from_microseconds(microseconds));
 }
 
 }
