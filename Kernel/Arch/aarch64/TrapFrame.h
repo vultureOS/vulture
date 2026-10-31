@@ -19,12 +19,15 @@ struct TrapFrame {
     u64 spsr;
     u64 esr; // Why: the exception class and details.
     u64 far; // The faulting address, for aborts.
+    // A frame record {interrupted x29, elr} that the handler's frame
+    // pointer chain runs through.
+    u64 frame_record[2];
 
     [[nodiscard]] FlatPtr program_counter() const { return elr; }
     [[nodiscard]] FlatPtr frame_pointer() const { return x[29]; }
 };
 
-static_assert(sizeof(TrapFrame) == 288);
+static_assert(sizeof(TrapFrame) == 304);
 static_assert(__builtin_offsetof(TrapFrame, sp) == 248);
 static_assert(__builtin_offsetof(TrapFrame, far) == 280);
 

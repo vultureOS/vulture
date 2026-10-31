@@ -12,7 +12,7 @@
  * calls handle_exception(frame, entry index).
  */
 
-#define TRAP_FRAME_SIZE 288
+#define TRAP_FRAME_SIZE 304
 
 .macro VECTOR index
     .balign 0x80
@@ -71,6 +71,14 @@ exception_entry:
     str x1, [sp, #272]
     mrs x1, far_el1
     str x1, [sp, #280]
+
+    /*
+     * A frame record for the interrupted code, so backtraces taken in a
+     * handler continue into whatever the exception interrupted.
+     */
+    ldr x1, [sp, #256]
+    stp x29, x1, [sp, #288]
+    add x29, sp, #288
 
     mov x1, x0
     mov x0, sp
