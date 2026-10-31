@@ -15,4 +15,8 @@ namespace Kernel {
 // an exception led here) and a symbolized backtrace, on serial and on screen.
 [[noreturn]] void panic(StringView reason, TrapFrame const* = nullptr);
 
+// For unattended runs (kernel tests): power off after reporting a panic
+// instead of halting, so the machine stops and the failure is seen.
+void set_power_off_on_panic(bool);
+
 }

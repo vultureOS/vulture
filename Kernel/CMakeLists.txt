@@ -10,6 +10,11 @@ add_executable(Kernel
     Arch/aarch64/Boot.S
     Arch/aarch64/CPU.cpp
     Arch/aarch64/Exceptions.cpp
+    Arch/aarch64/GICv3.cpp
+    Arch/aarch64/GenericTimer.cpp
+    Arch/aarch64/PSCI.cpp
+    Arch/aarch64/PageTable.cpp
+    Arch/aarch64/SMP.cpp
     Arch/aarch64/Vectors.S
     BootArguments.cpp
     Console/BootScreen.cpp
@@ -21,7 +26,23 @@ add_executable(Kernel
     Debug/Symbols.cpp
     Devices/Serial/PL011.cpp
     Init.cpp
-    Library/CxxRuntime.cpp)
+    Interrupts/InterruptHandlers.cpp
+    Library/CxxRuntime.cpp
+    Locking/SpinLock.cpp
+    Memory/BuddyAllocator.cpp
+    Memory/Heap.cpp
+    Memory/MemoryManager.cpp
+    Memory/PhysicalMemory.cpp
+    Tasks/Processor.cpp
+    Tests/KernelTest.cpp
+    Tests/TestHeap.cpp
+    Tests/TestMemoryManager.cpp
+    Tests/TestPhysicalMemory.cpp
+    Tests/TestProcessors.cpp
+    Tests/TestSpinLock.cpp
+    Tests/TestTimer.cpp
+    Time/Time.cpp
+    Time/TimerQueue.cpp)
 
 set_target_properties(Kernel PROPERTIES
     OUTPUT_NAME vulture

@@ -5,10 +5,12 @@
  */
 
 #include <Kernel/Arch/CPU.h>
+#include <Kernel/Arch/Power.h>
 #include <Kernel/Console/TextConsole.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Debug/Panic.h>
 #include <Kernel/Debug/Symbols.h>
+#include <Kernel/Tasks/Processor.h>
 
 extern "C" u8 boot_stack_bottom[];
 extern "C" u8 boot_stack_top[];
@@ -19,12 +21,23 @@ static constexpr size_t max_backtrace_frames = 32;
 static constexpr Color panic_background { 0x1c, 0x1c, 0x1e };
 static constexpr Color panic_foreground { 0xf2, 0xf2, 0xf7 };
 
-// Frame records live on the stack, 16-byte aligned. Following anything else
-// could fault in the middle of a panic.
+static Atomic<bool> s_power_off_on_panic { false };
+
+void set_power_off_on_panic(bool enabled)
+{
+    s_power_off_on_panic.store(enabled);
+}
+
+// Frame records live on the current processor's stack, 16-byte aligned.
+// Following anything else could fault in the middle of a panic.
 static bool is_valid_frame_pointer(FlatPtr frame_pointer)
 {
     auto bottom = reinterpret_cast<FlatPtr>(boot_stack_bottom);
     auto top = reinterpret_cast<FlatPtr>(boot_stack_top);
+    if (Arch::current_processor_pointer()) {
+        bottom = Processor::current().stack_bottom();
+        top = Processor::current().stack_top();
+    }
     return frame_pointer % 16 == 0 && frame_pointer >= bottom && frame_pointer + sizeof(Arch::StackFrame) <= top;
 }
 
@@ -67,15 +80,23 @@ static void show_panic_console()
 
 void panic(StringView reason, TrapFrame const* frame)
 {
-    static bool s_panicking = false;
-    if (s_panicking) {
-        // A panic while reporting a panic: keep it short and stop.
-        kernel_log().attach_console(nullptr);
-        dmesgln("KERNEL PANIC while panicking: {}", reason);
+    // The first processor to panic reports; the token is its hardware id + 1.
+    static Atomic<u64> s_panicking_processor { 0 };
+    [[maybe_unused]] auto interrupt_state = Arch::disable_interrupts();
+    u64 self = Arch::processor_hardware_id() + 1;
+    u64 expected = 0;
+    if (!s_panicking_processor.compare_exchange_strong(expected, self)) {
+        if (expected == self) {
+            // A panic while reporting a panic: keep it short and stop.
+            kernel_log().attach_console(nullptr);
+            dmesgln("KERNEL PANIC while panicking: {}", reason);
+        }
+        // Another processor is already reporting.
         Arch::halt();
     }
-    s_panicking = true;
 
+    Processor::stop_others();
+    kernel_log().enter_panic_mode();
     show_panic_console();
     dmesgln("vultureOS needs to restart: the kernel ran into a problem it cannot recover from.");
     dmesgln("");
@@ -83,7 +104,10 @@ void panic(StringView reason, TrapFrame const* frame)
 
     FixedStringBuilder<160> cpu;
     Arch::describe_cpu(cpu);
-    dmesgln("CPU: {}", cpu.view());
+    if (Arch::current_processor_pointer())
+        dmesgln("Processor {}: {}", Processor::current().id(), cpu.view());
+    else
+        dmesgln("CPU: {}", cpu.view());
 
     if (frame) {
         FixedStringBuilder<2048> registers;
@@ -97,6 +121,10 @@ void panic(StringView reason, TrapFrame const* frame)
     }
 
     dmesgln("");
+    if (s_power_off_on_panic.load()) {
+        dmesgln("Powering off.");
+        Arch::power_off();
+    }
     dmesgln("System halted.");
     Arch::halt();
 }

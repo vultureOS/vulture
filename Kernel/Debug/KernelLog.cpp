@@ -50,6 +50,22 @@ void KernelLog::begin_line()
     format_to(*this, "[{:>5}.{:06}] ", seconds, microseconds);
 }
 
+Arch::InterruptState KernelLog::lock()
+{
+    if (m_panic_mode.load(MemoryOrder::Relaxed))
+        return Arch::disable_interrupts();
+    return m_lock.lock();
+}
+
+void KernelLog::unlock(Arch::InterruptState state)
+{
+    // Panic mode may have begun while this processor held the lock.
+    if (m_lock.is_locked_by_current_processor())
+        m_lock.unlock(state);
+    else
+        Arch::restore_interrupts(state);
+}
+
 KernelLog& kernel_log()
 {
     static KernelLog log;

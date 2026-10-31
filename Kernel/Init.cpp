@@ -6,6 +6,8 @@
 
 #include <Kernel/API/BootInfo.h>
 #include <Kernel/Arch/CPU.h>
+#include <Kernel/Arch/InterruptController.h>
+#include <Kernel/Arch/Power.h>
 #include <Kernel/BootArguments.h>
 #include <Kernel/Console/BootScreen.h>
 #include <Kernel/Console/TextConsole.h>
@@ -14,7 +16,15 @@
 #include <Kernel/Debug/Symbols.h>
 #include <Kernel/Devices/Serial/PL011.h>
 #include <Kernel/Library/CxxRuntime.h>
+#include <Kernel/Memory/MemoryManager.h>
+#include <Kernel/Memory/PhysicalMemory.h>
+#include <Kernel/Tasks/Processor.h>
+#include <Kernel/Tests/KernelTest.h>
+#include <Kernel/Time/Time.h>
 #include <LibDeviceTree/FlattenedDeviceTree.h>
+
+extern "C" u8 boot_stack_bottom[];
+extern "C" u8 boot_stack_top[];
 
 namespace Kernel {
 
@@ -75,25 +85,85 @@ static void print_memory_map(API::BootInfo const& boot_info)
     dmesgln("Usable memory: {}", usable_text.view());
 }
 
-static void print_machine(API::BootInfo const& boot_info)
+static void print_machine(DeviceTree::FlattenedDeviceTree const& tree)
 {
-    if (boot_info.device_tree.size == 0) {
-        dmesgln("Machine: no device tree");
-        return;
-    }
-    ReadonlyBytes blob { reinterpret_cast<u8 const*>(API::direct_map_base + boot_info.device_tree.base), boot_info.device_tree.size };
-    auto tree = DeviceTree::FlattenedDeviceTree::parse(blob);
-    if (tree.is_error()) {
-        dmesgln("Machine: unreadable device tree ({})", tree.error());
-        return;
-    }
-    auto root = tree.value().find_node_by_path("/"_sv);
+    auto root = tree.find_node_by_path("/"_sv);
     if (!root.has_value())
         return;
-    auto name = tree.value().find_property(root.value(), "model"_sv);
+    auto name = tree.find_property(root.value(), "model"_sv);
     if (!name.has_value())
-        name = tree.value().find_property(root.value(), "compatible"_sv);
-    dmesgln("Machine: {} (device tree, {} KiB)", name.has_value() ? name->as_string() : "unknown"_sv, boot_info.device_tree.size / KiB);
+        name = tree.find_property(root.value(), "compatible"_sv);
+    dmesgln("Machine: {} (device tree, {} KiB)", name.has_value() ? name->as_string() : "unknown"_sv, tree.total_size() / KiB);
+}
+
+template<typename T>
+static T must(StringView what, ErrorOr<T>&& result)
+{
+    if (result.is_error()) [[unlikely]] {
+        FixedStringBuilder<160> reason;
+        format_to(reason, "{}: {}", what, result.error());
+        panic(reason.view());
+    }
+    return result.release_value();
+}
+
+// A framebuffer inside a memory map region (as ramfb's is) is RAM and is
+// mapped cacheable; one outside it is device memory.
+static Arch::MemoryType framebuffer_memory_type(API::BootInfo const& boot_info)
+{
+    auto const* regions = reinterpret_cast<API::MemoryRegion const*>(API::direct_map_base + boot_info.memory_map);
+    u64 address = boot_info.framebuffer.physical_base;
+    for (u64 i = 0; i < boot_info.memory_map_entries; ++i) {
+        if (address >= regions[i].base && address - regions[i].base < regions[i].length && regions[i].type != API::MemoryRegionType::Mmio)
+            return Arch::MemoryType::Normal;
+    }
+    return Arch::MemoryType::NormalUncached;
+}
+
+// Replaces the loader's page tables with the kernel's own and takes over
+// the loader's memory.
+static void initialize_memory(API::BootInfo const& boot_info, Framebuffer& framebuffer)
+{
+    auto& mm = memory_manager();
+    must("memory"_sv, mm.initialize(boot_info));
+
+    // Devices already in use must be mapped in the new tables before the switch.
+    FlatPtr serial_registers = 0;
+    if (boot_info.serial.type == API::SerialType::PL011)
+        serial_registers = must("mapping the serial port"_sv, mm.map_mmio(PhysicalAddress(boot_info.serial.physical_base), page_size));
+    FlatPtr pixels = 0;
+    if (framebuffer.is_present())
+        pixels = must("mapping the framebuffer"_sv, mm.map_mmio(PhysicalAddress(boot_info.framebuffer.physical_base), boot_info.framebuffer.size, framebuffer_memory_type(boot_info)));
+
+    // Nothing may log from the switch until the devices are relocated: their
+    // old addresses vanish with the loader's tables.
+    mm.activate_kernel_page_table();
+    if (serial_registers)
+        boot_serial().relocate(serial_registers);
+    if (pixels)
+        framebuffer.relocate(pixels);
+
+    mm.reclaim_boot_memory();
+    auto statistics = physical_memory().statistics();
+    auto free = human_size(statistics.free_pages * page_size);
+    auto managed = human_size(statistics.managed_pages * page_size);
+    auto reclaimed = human_size(mm.reclaimed_bytes());
+    dmesgln("Memory: {} free of {} in {} zone{}; {} reclaimed from the loader", free.view(), managed.view(), statistics.zone_count,
+        statistics.zone_count == 1 ? ""_sv : "s"_sv, reclaimed.view());
+    dmesgln("Memory: kernel page tables use {} KiB", mm.kernel_page_table().table_page_count() * page_size / KiB);
+}
+
+static void initialize_interrupts_and_time(DeviceTree::FlattenedDeviceTree const& tree)
+{
+    must("interrupt controller"_sv, Arch::initialize_interrupt_controller(tree));
+    must("timer"_sv, Time::initialize(tree));
+    Processor::current().initialize_this_processor();
+    Arch::enable_interrupts();
+
+    FixedStringBuilder<160> description;
+    Arch::describe_interrupt_controller(description);
+    dmesgln("Interrupts: {}", description.view());
+    dmesgln("Timer: {} kHz, tickless", Time::ticks_per_second() / 1000);
 }
 
 // "fault=<kind>" on the command line ends the boot with a deliberate
@@ -110,8 +180,23 @@ static void print_machine(API::BootInfo const& boot_info)
         VERIFY(kind.is_empty());
     } else if (kind == "panic"_sv) {
         panic("deliberate panic"_sv);
+    } else if (kind == "interrupt"_sv) {
+        // A panic in interrupt context: the backtrace must run through the
+        // exception into the code that was interrupted.
+        static Timer timer;
+        Processor::current().timer_queue().add(timer, Time::now() + Time::ticks_from_milliseconds(1), [](Timer&) {
+            panic("deliberate panic in a timer interrupt"_sv);
+        });
+        Time::wait_until(Time::now() + Time::ticks_from_milliseconds(100));
+    } else if (kind == "processor"_sv) {
+        // A panic on a secondary processor, which must stop all the others.
+        Processor::run_on_all([](void*) {
+            if (Processor::current().id() == 1)
+                panic("deliberate panic on processor 1"_sv);
+        },
+            nullptr);
     } else {
-        dmesgln("Unknown fault kind; expected data-abort, trap, verify or panic");
+        dmesgln("Unknown fault kind; expected data-abort, trap, verify, panic, interrupt or processor");
     }
 }
 
@@ -119,29 +204,35 @@ static void print_machine(API::BootInfo const& boot_info)
 
 using namespace Kernel;
 
-extern "C" [[noreturn]] void kernel_main(API::BootInfo const* boot_info)
+// The kernel's copy: the loader's is in memory the kernel reclaims.
+static API::BootInfo s_boot_info;
+
+extern "C" [[noreturn]] void kernel_main(API::BootInfo const* loader_boot_info)
 {
     // Nothing can report a bad handoff yet; stop rather than guess.
-    if (!boot_info || boot_info->magic != API::boot_info_magic || boot_info->version != API::boot_info_version || boot_info->size != sizeof(API::BootInfo))
+    if (!loader_boot_info || loader_boot_info->magic != API::boot_info_magic || loader_boot_info->version != API::boot_info_version || loader_boot_info->size != sizeof(API::BootInfo))
         Arch::halt();
+    __builtin_memcpy(&s_boot_info, loader_boot_info, sizeof(s_boot_info));
+    auto const& boot_info = s_boot_info;
 
     run_global_constructors();
     Arch::disable_lower_half_translation();
+    Processor::initialize_boot_processor(reinterpret_cast<FlatPtr>(boot_stack_bottom), reinterpret_cast<FlatPtr>(boot_stack_top));
 
     auto& log = kernel_log();
     log.initialize();
-    if (boot_info->serial.type == API::SerialType::PL011) {
+    if (boot_info.serial.type == API::SerialType::PL011) {
         auto& serial = boot_serial();
-        serial.initialize(API::direct_map_base + boot_info->serial.physical_base);
+        serial.initialize(API::direct_map_base + boot_info.serial.physical_base);
         log.attach_serial(&serial);
     }
-    Symbols::initialize(boot_info->kernel_file);
+    Symbols::initialize(boot_info.kernel_file);
 
-    BootArguments arguments { StringView(boot_info->command_line) };
+    BootArguments arguments { StringView(boot_info.command_line) };
     bool verbose = arguments.has_flag("-v"_sv);
 
     auto& framebuffer = boot_framebuffer();
-    framebuffer.initialize(boot_info->framebuffer);
+    framebuffer.initialize(boot_info.framebuffer);
     if (framebuffer.is_present()) {
         if (verbose) {
             auto& console = boot_text_console();
@@ -160,27 +251,47 @@ extern "C" [[noreturn]] void kernel_main(API::BootInfo const* boot_info)
     FixedStringBuilder<160> cpu;
     Arch::describe_cpu(cpu);
     dmesgln("CPU: {}", cpu.view());
-    dmesgln("Timer: {} kHz", Arch::monotonic_counter_frequency() / 1000);
     dmesgln("Boot arguments: {}", arguments.text().is_empty() ? "(none)"_sv : arguments.text());
-    print_machine(*boot_info);
-    show_progress(25);
-
-    print_memory_map(*boot_info);
-    show_progress(50);
-
+    print_memory_map(boot_info);
     if (framebuffer.is_present())
-        dmesgln("Framebuffer: {}x{} at {:#x}", framebuffer.width(), framebuffer.height(), boot_info->framebuffer.physical_base);
+        dmesgln("Framebuffer: {}x{} at {:#x}", framebuffer.width(), framebuffer.height(), boot_info.framebuffer.physical_base);
     else
         dmesgln("Framebuffer: none");
-    dmesgln("Kernel: {} KiB image at {:#x}, symbols {}", boot_info->kernel_image.size / KiB, boot_info->kernel_image.base,
+    dmesgln("Kernel: {} KiB image at {:#x}, symbols {}", boot_info.kernel_image.size / KiB, boot_info.kernel_image.base,
         Symbols::is_available() ? "loaded"_sv : "unavailable"_sv);
-    dmesgln("Entropy from firmware: {} bytes", boot_info->entropy_size);
-    show_progress(75);
+    dmesgln("Entropy from firmware: {} bytes", boot_info.entropy_size);
+    show_progress(20);
+
+    initialize_memory(boot_info, framebuffer);
+    show_progress(40);
+
+    auto& mm = memory_manager();
+    if (mm.device_tree().is_empty())
+        panic("no device tree: vultureKernel needs one to find its hardware"_sv);
+    auto tree = must("device tree"_sv, DeviceTree::FlattenedDeviceTree::parse(mm.device_tree()));
+    print_machine(tree);
+
+    initialize_interrupts_and_time(tree);
+    if (auto result = Arch::initialize_power_management(tree); result.is_error())
+        dmesgln("Power management: unavailable ({})", result.error());
+    FixedStringBuilder<64> power;
+    Arch::describe_power_management(power);
+    dmesgln("Power management: {}", power.view());
+    show_progress(60);
+
+    u64 smp_start = Time::now();
+    Processor::start_secondary_processors(tree);
+    dmesgln("SMP: {} of {} processors online in {} us", Processor::online_count(), Processor::listed_count(),
+        Time::microseconds_from_ticks(Time::now() - smp_start));
+    show_progress(80);
+
+    if (arguments.has_flag("ktest"_sv) || arguments.value("ktest"_sv).has_value())
+        Tests::run(arguments.value("ktest"_sv).value_or(""_sv));
 
     if (auto fault = arguments.value("fault"_sv); fault.has_value())
         trigger_deliberate_fault(fault.value());
 
     show_progress(100);
     dmesgln("vultureKernel: boot complete");
-    Arch::halt();
+    Processor::current().idle_loop();
 }
