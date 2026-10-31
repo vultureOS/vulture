@@ -84,9 +84,24 @@ struct Partition {
     u64 sector_count;
 };
 
-// Writes a protective MBR and a GPT (primary and backup) with one
-// vultureFS partition filling the disk, to a new sparse file of `size`
-// bytes.
+struct PartitionSpec {
+    u8 const* type; // 16-byte GPT type GUID.
+    StringView name;
+    u64 first_sector;
+    u64 sector_count;
+};
+
+// The EFI System Partition's GPT type.
+extern u8 const efi_system_partition_type[16];
+
+// The last sector partitions may use on a disk of `size` bytes.
+[[nodiscard]] u64 last_usable_sector(u64 size);
+
+// Makes a sparse file of `size` bytes with a protective MBR and a GPT
+// (primary and backup) listing the partitions.
+ErrorOr<void> write_partition_table(FILE*, u64 size, Span<PartitionSpec const>);
+
+// The same with one vultureFS partition filling the disk.
 ErrorOr<Partition> create_disk_image(FILE*, u64 size, StringView partition_name);
 
 // The vultureFS partition of a GPT disk image, or, if the image is a bare

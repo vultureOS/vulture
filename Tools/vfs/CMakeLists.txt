@@ -5,8 +5,8 @@
 #
 
 # The host side of vultureFS: the same LibVultureFS the kernel mounts.
-add_library(VFSImage STATIC Image.cpp)
-target_link_libraries(VFSImage PUBLIC LibVultureFS LibBase)
+add_library(VFSImage STATIC Image.cpp Populate.cpp)
+target_link_libraries(VFSImage PUBLIC LibArchive LibVultureFS LibBase)
 
 add_executable(mkvfs
     mkvfs.cpp
@@ -17,3 +17,9 @@ add_executable(fsck.vfs
     fsck.cpp
     ${VULTURE_SOURCE_ROOT}/Libraries/LibTest/HostPlatform.cpp)
 target_link_libraries(fsck.vfs PRIVATE VFSImage LibVultureFS LibBase)
+
+add_executable(mkimage
+    mkimage.cpp
+    FAT32.cpp
+    ${VULTURE_SOURCE_ROOT}/Libraries/LibTest/HostPlatform.cpp)
+target_link_libraries(mkimage PRIVATE VFSImage LibArchive LibVultureFS LibBase)

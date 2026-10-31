@@ -148,7 +148,14 @@ static ErrorOr<void> write_at(FILE* file, u64 offset, void const* data, size_t s
     return {};
 }
 
-ErrorOr<Partition> create_disk_image(FILE* file, u64 size, StringView partition_name)
+u8 const efi_system_partition_type[16] = { 0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11, 0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b };
+
+u64 last_usable_sector(u64 size)
+{
+    return size / sector_size - 1 - gpt_entry_sectors - 1;
+}
+
+ErrorOr<void> write_partition_table(FILE* file, u64 size, Span<PartitionSpec const> partitions)
 {
     u64 sectors = size / sector_size;
     if (sectors < partition_start_sector + 2 * gpt_entry_sectors + 1024)
@@ -156,12 +163,7 @@ ErrorOr<Partition> create_disk_image(FILE* file, u64 size, StringView partition_
     // A sparse file: only what is written takes space.
     u8 last = 0;
     TRY(write_at(file, size - 1, &last, 1));
-
     u64 last_lba = sectors - 1;
-    u64 last_usable = last_lba - gpt_entry_sectors - 1;
-    // Whole 4 KiB blocks.
-    u64 partition_sectors = ((last_usable - partition_start_sector + 1) / 8) * 8;
-    Partition partition { partition_start_sector, partition_sectors };
 
     // Protective MBR: one partition of type EE over the whole disk.
     u8 mbr[sector_size] {};
@@ -172,12 +174,19 @@ ErrorOr<Partition> create_disk_image(FILE* file, u64 size, StringView partition_
     TRY(write_at(file, 0, mbr, sizeof(mbr)));
 
     GPTEntry entries[gpt_entry_count] {};
-    __builtin_memcpy(entries[0].type, VultureFS::partition_type, 16);
-    random_bytes(entries[0].unique);
-    entries[0].first_lba = partition.first_sector;
-    entries[0].last_lba = partition.first_sector + partition.sector_count - 1;
-    for (size_t i = 0; i < partition_name.length() && i < 35; ++i)
-        entries[0].name[i] = static_cast<u8>(partition_name[i]);
+    if (partitions.size() > gpt_entry_count)
+        return Error::from_string_literal("too many partitions");
+    for (size_t i = 0; i < partitions.size(); ++i) {
+        auto const& partition = partitions[i];
+        if (partition.first_sector < 2 + gpt_entry_sectors || partition.first_sector + partition.sector_count - 1 > last_usable_sector(size))
+            return Error::from_string_literal("partition outside the disk");
+        __builtin_memcpy(entries[i].type, partition.type, 16);
+        random_bytes(entries[i].unique);
+        entries[i].first_lba = partition.first_sector;
+        entries[i].last_lba = partition.first_sector + partition.sector_count - 1;
+        for (size_t c = 0; c < partition.name.length() && c < 35; ++c)
+            entries[i].name[c] = static_cast<u8>(partition.name[c]);
+    }
     u32 entries_crc = crc32({ reinterpret_cast<u8 const*>(entries), sizeof(entries) });
 
     GPTHeader header {};
@@ -185,7 +194,7 @@ ErrorOr<Partition> create_disk_image(FILE* file, u64 size, StringView partition_
     header.revision = 0x0001'0000;
     header.header_size = sizeof(GPTHeader);
     header.first_usable_lba = 2 + gpt_entry_sectors;
-    header.last_usable_lba = last_usable;
+    header.last_usable_lba = last_usable_sector(size);
     random_bytes(header.disk_guid);
     header.entry_count = gpt_entry_count;
     header.entry_size = gpt_entry_size;
@@ -207,7 +216,18 @@ ErrorOr<Partition> create_disk_image(FILE* file, u64 size, StringView partition_
     };
     TRY(write_header(1, last_lba, 2));
     TRY(write_header(last_lba, 1, last_lba - gpt_entry_sectors));
-    return partition;
+    return {};
+}
+
+ErrorOr<Partition> create_disk_image(FILE* file, u64 size, StringView partition_name)
+{
+    if (size / sector_size < partition_start_sector + 2048)
+        return Error::from_string_literal("disk image too small");
+    // Whole 4 KiB blocks.
+    u64 count = ((last_usable_sector(size) - partition_start_sector + 1) / 8) * 8;
+    PartitionSpec const partitions[] = { { VultureFS::partition_type, partition_name, partition_start_sector, count } };
+    TRY(write_partition_table(file, size, partitions));
+    return Partition { partition_start_sector, count };
 }
 
 ErrorOr<Partition> find_vulturefs_partition(FILE* file)
