@@ -62,8 +62,15 @@ ExternalProject over the same source tree and adds these targets:
 | `ninja -C build` | Builds every part and merges `build/compile_commands.json` for editors |
 | `ninja -C build run` | Boots in QEMU with a window (`Meta/run.sh`) |
 | `ninja -C build test-host` | Runs host unit tests through CTest |
-| `ninja -C build test-boot` | Boots headless and waits for the boot marker on serial |
+| `ninja -C build test-boot` | Boots headless; the kernel must print its memory map and finish booting |
+| `ninja -C build test-panic` | Boots with `fault=data-abort`; the panic report must decode the fault and symbolize the backtrace |
 | `ninja -C build check` | All of the above tests |
+
+`Meta/run.sh` also takes `--boot-args` (the kernel command line, for example
+`-v` for a verbose boot) and, with `--headless`, `--screenshot FILE` to save
+the screen as PNG. Kernel code that does not touch hardware (such as
+`Kernel/BootArguments.cpp`) is compiled into host tests too; see
+`Tests/Kernel`.
 
 UEFI uses PE/COFF, so the loader compiles for a Windows target. We use the
 GNU flavor (`windows-gnu`) because it keeps the Itanium C++ ABI the rest of
@@ -94,10 +101,11 @@ as a stub.
 ```
 Meta/          build system (CMake parts, toolchains), run.sh, CI
 Tools/         host C++ tools: ipcc, mkimage, mkvfs, fsck.vfs, symbolize, imgdiff, generators      (M1+)
-Boot/          VultureBoot UEFI loader, handwritten UEFI definitions
-Kernel/        Arch/aarch64 · Memory · Tasks · Scheduler · Syscalls · IPC · FileSystem · Devices
-               Net · Security · Time · Firmware/{FDT,ACPI} · Debug · Tests · API                     (M1+)
-Libraries/     LibBase · LibTest now; LibC, LibCore, LibGfx, LibUI (pranaUI) … as milestones land
+Boot/          VultureBoot UEFI loader: Arch/aarch64 (page tables, handoff), UEFI definitions
+Kernel/        API (BootInfo) · Arch (CPU interface; aarch64: entry, vectors, page table format)
+               Console (framebuffer, font, boot screen) · Debug (log, panic, symbols)
+               Devices/Serial · Library (C++ runtime) · Init.cpp; Memory, Tasks, IPC … land from M2
+Libraries/     LibBase · LibDeviceTree · LibELF · LibTest; LibC, LibCore, LibGfx, LibUI (pranaUI) … later
 Services/      vlaunchd · logd · PranaWindowServer · AudioServer · Indexer · SystemUI · Dock …        (M6+)
 Applications/  Finder · Terminal · TextEdit · Preview · SystemSettings · WidgetGallery …              (M9+)
 Utilities/     vsh and command-line tools                                                             (M6+)
@@ -118,6 +126,14 @@ macOS-style at the top, real Unix underneath:
 ## Kernel design
 
 - **Boot.** VultureBoot hands the kernel a versioned `BootInfo`; see [Boot Protocol](BootProtocol.md).
+- **Arch boundary.** Generic kernel code includes only `Kernel/Arch/*.h`
+  (`CPU.h`, `TrapFrame.h`); each architecture implements them in
+  `Kernel/Arch/<arch>/`.
+- **Crash reports (M1).** Every exception lands in `handle_exception`. A
+  panic switches the screen to a text console and prints the decoded fault,
+  the registers and a backtrace. The backtrace follows frame pointers (kept in
+  every function) and is symbolized from the kernel's own ELF file, with C++
+  names demangled by LibELF.
 - **Memory.** Buddy page allocator with per-CPU page caches, size-class slab
   `kmalloc`, VMObjects (anonymous, file-backed, MMIO, shared), demand paging,
   copy-on-write `fork`, one page cache shared by `read` and `mmap`, ASIDs,

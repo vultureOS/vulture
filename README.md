@@ -5,9 +5,14 @@ Everything inside it is built from scratch in this repository: bootloader,
 kernel, C library, graphics, fonts rasterizer, UI framework, window server,
 desktop and apps.
 
-**Status:** milestone M0 is done. VultureBoot, our own UEFI loader, boots on
-AArch64 in QEMU, and the shared base library is in place with its unit tests.
-The kernel arrives in M1. See the [Roadmap](Documentation/Roadmap.md).
+**Status:** milestone M1 is done.
+
+- VultureBoot, our own UEFI loader, loads the kernel on AArch64 and hands it
+  the machine: memory map, framebuffer, device tree and serial port.
+- The kernel boots to a macOS-style boot screen, or a verbose log with `-v`.
+- Crashes produce a symbolized backtrace.
+
+Next is M2, the core kernel. See the [Roadmap](Documentation/Roadmap.md).
 
 ## Requirements
 
@@ -24,11 +29,14 @@ brew install llvm@22 lld@22 cmake ninja qemu
 cmake -G Ninja -S . -B build
 ninja -C build            # build everything
 ninja -C build run        # boot in QEMU
-ninja -C build check      # unit tests + headless boot test
+ninja -C build check      # unit tests + headless boot and crash tests
 ```
 
-`Meta/run.sh --help` lists more options, such as software emulation (`--tcg`)
-and waiting for a debugger (`--gdb`).
+- `Meta/run.sh --boot-args -v` boots verbosely.
+- `Meta/run.sh --help` lists the other options, such as software emulation
+  (`--tcg`), waiting for a debugger (`--gdb`) and saving a screenshot.
+- For editor support, point clangd at `/opt/homebrew/opt/llvm@22/bin/clangd`.
+  The build writes `build/compile_commands.json`.
 
 ## Documentation
 

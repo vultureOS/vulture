@@ -12,8 +12,8 @@ See [Architecture](Architecture.md) for the design behind these steps.
 | # | Status | Delivers | Done when |
 |---|---|---|---|
 | **M0 Clean slate** | ✅ 2026-10-31 | Rust tree archived (tag `v0.1-rust`, branch `legacy/rust`); CMake/Ninja superbuild with host, UEFI and target parts; `Meta/run.sh`; LibBase core (types, `Span`, `Optional`, `ErrorOr`/`TRY`, `StringView`, checked `format`) + LibTest; VultureBoot v0 | QEMU+HVF shows "VultureBoot" on screen and serial; `ninja test-host` passes. Verified by `ninja check`. |
-| **M1 Boot + early kernel** | Next | VultureBoot loads the kernel ELF and boot archive, framebuffer, memory map, DTB; higher-half entry; global constructors; framebuffer console (built-in bitmap font + logo) + PL011; exception vectors; symbolized panic backtraces | Kernel prints the memory map, draws the boot logo; a deliberate fault shows a symbolized backtrace |
-| **M2 Core kernel** | | FDT parser, GICv3, generic timer (tickless), PSCI SMP bring-up and power-off, buddy allocator + slab `kmalloc`, kernel page tables and direct map, IRQ-safe `SpinLock` vs sleeping `Mutex`, per-CPU data (TPIDR_EL1), `ktest` | All 8 vCPUs online; allocator/timer/lock stress `ktest` passes; QEMU exits with a pass marker |
+| **M1 Boot + early kernel** | ✅ 2026-10-31 | VultureBoot loads the kernel ELF (and boot archive, once one exists), the boot-args, framebuffer, memory map and DTB, builds the first page tables and hands over; higher-half kernel; global constructors; framebuffer console (built-in 8x16 font) and boot screen (logo, progress bar); PL011 serial; exception vectors; symbolized, demangled panic backtraces; LibELF and LibDeviceTree | Kernel prints the memory map, draws the boot logo; a deliberate fault shows a symbolized backtrace. Verified by `ninja check` (`test-boot`, `test-panic`). |
+| **M2 Core kernel** | Next | GICv3, generic timer (tickless), PSCI SMP bring-up and power-off, buddy allocator + slab `kmalloc`, kernel-owned page tables and direct map, IRQ-safe `SpinLock` vs sleeping `Mutex`, per-CPU data (TPIDR_EL1), `ktest` | All 8 vCPUs online; allocator/timer/lock stress `ktest` passes; QEMU exits with a pass marker |
 | **M3 Threads + scheduler** | | Threads, kernel stacks, context switch with FP/SIMD, per-CPU queues + work stealing, QoS, wait queues, mutex/semaphore, sleep | 1000 threads ping-pong across 8 CPUs for 60 s with no hang; context-switch benchmark recorded |
 | **M4 Userspace** | | Address spaces (TTBR0+ASID), regions/VMObjects, demand paging, CoW, ELF loader, SVC entry, generated syscall table, fault-safe user copies, fork/exec/exit/wait, signals, boot archive as root; LibC v0, LibCxxRT, crt0 | `/sbin/init` runs at EL0, forks/execs tests; a user segfault kills only that process and prints a crash report |
 | **M5 Storage + vultureFS** | | VFS, file descriptors, pipes, devfs, tmpfs; PCIe ECAM + virtio core, virtio-blk, NVMe; GPT; FAT32; page cache + `mmap`; vultureFS v1; `Tools/mkvfs`, `fsck.vfs`, `mkimage` | Root on vultureFS persists across reboots; 100 forced kills mid-write always remount clean and pass fsck |
@@ -67,5 +67,16 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
 
 - **M0:** With `-machine virt,acpi=off` the firmware publishes a device tree
   (no ACPI tables), as planned. `virtio-gpu-pci` only offers a blit-only GOP,
-  so `Meta/run.sh` uses `ramfb`, which gives a linear BGRX8 framebuffer
-  (800×600 by default) for the M1 boot console.
+  so `Meta/run.sh` uses `ramfb`, which gives a linear BGRX8 framebuffer for
+  the boot console.
+- **M1:**
+  - The device tree parser moved up from M2 into a shared library
+    (LibDeviceTree), because the loader needs it to find the serial port.
+  - The loader must switch graphics modes after its last console output:
+    resetting the firmware's text console to adapt to a new mode switches the
+    mode back. Done that way, `ramfb` gives 1024×768.
+  - A framebuffer in RAM (as `ramfb`'s is) is mapped cacheable. An uncached
+    alias of memory the host reads through its cache risks stale pixels under
+    virtualization.
+  - Under HVF the CPU reports Apple as implementer but hides the part number.
+  - From handoff to "boot complete" takes about 12 ms.

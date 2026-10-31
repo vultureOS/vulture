@@ -4,7 +4,7 @@
 before committing:
 
 ```sh
-find Boot Libraries Tests -name '*.cpp' -o -name '*.h' | xargs /opt/homebrew/opt/llvm@22/bin/clang-format -i
+find Boot Kernel Libraries Tests -name '*.cpp' -o -name '*.h' | xargs /opt/homebrew/opt/llvm@22/bin/clang-format -i
 ```
 
 ## Language
