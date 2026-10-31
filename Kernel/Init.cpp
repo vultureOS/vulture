@@ -10,12 +10,14 @@
 #include <Kernel/Arch/InterruptController.h>
 #include <Kernel/Arch/Power.h>
 #include <Kernel/BootArguments.h>
+#include <Kernel/Bus/PCI/PCI.h>
 #include <Kernel/Console/BootScreen.h>
 #include <Kernel/Console/TextConsole.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Debug/Panic.h>
 #include <Kernel/Debug/Symbols.h>
 #include <Kernel/Devices/Serial/PL011.h>
+#include <Kernel/Devices/Storage/BlockDevice.h>
 #include <Kernel/FileSystem/BootArchive.h>
 #include <Kernel/FileSystem/DevFS.h>
 #include <Kernel/FileSystem/TmpFS.h>
@@ -186,6 +188,7 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     make_directory("/tmp"_sv);
     must("devfs"_sv, VirtualFileSystem::mount(must("devfs"_sv, DevFS::create()), "/dev"_sv));
     must("devices"_sv, create_basic_devices());
+    initialize_storage();
     must("/tmp"_sv, VirtualFileSystem::mount(must("tmpfs"_sv, TmpFS::create()), "/tmp"_sv));
 
     // "utest" runs the userland tests.
@@ -320,6 +323,14 @@ extern "C" [[noreturn]] void kernel_main(API::BootInfo const* loader_boot_info)
     FixedStringBuilder<64> power;
     Arch::describe_power_management(power);
     dmesgln("Power management: {}", power.view());
+    if (auto result = PCI::initialize(tree); result.is_error()) {
+        dmesgln("PCI: unavailable ({})", result.error());
+    } else {
+        FixedStringBuilder<96> pci;
+        PCI::describe(pci);
+        dmesgln("PCI: {}", pci.view());
+    }
+
     // From here on, this code is the "boot" thread.
     Scheduler::initialize();
     dmesgln("Scheduler: {} QoS classes, {} ms time slices, idle processors take work", qos_class_count, Scheduler::time_slice_microseconds / 1000);

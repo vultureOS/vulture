@@ -12,6 +12,10 @@ namespace Kernel {
 
 namespace {
 
+// PCI INTx lines are shared, so an interrupt may have a few handlers; each
+// checks whether its device asked.
+constexpr size_t max_handlers_per_interrupt = 4;
+
 struct Registration {
     InterruptHandler handler;
     void* context;
@@ -20,19 +24,27 @@ struct Registration {
 }
 
 // Written before the interrupt is enabled, read only in interrupt context.
-static Registration s_handlers[max_interrupts];
+static Registration s_handlers[max_interrupts][max_handlers_per_interrupt];
 
 void register_interrupt_handler(u32 interrupt, InterruptHandler handler, void* context)
 {
     VERIFY(interrupt < max_interrupts);
-    VERIFY(!s_handlers[interrupt].handler);
-    s_handlers[interrupt] = { handler, context };
+    for (auto& slot : s_handlers[interrupt]) {
+        if (!slot.handler) {
+            slot = { handler, context };
+            return;
+        }
+    }
+    VERIFY_NOT_REACHED();
 }
 
 void dispatch_interrupt(u32 interrupt)
 {
-    if (interrupt < max_interrupts && s_handlers[interrupt].handler) {
-        s_handlers[interrupt].handler(s_handlers[interrupt].context);
+    if (interrupt < max_interrupts && s_handlers[interrupt][0].handler) {
+        for (auto& slot : s_handlers[interrupt]) {
+            if (slot.handler)
+                slot.handler(slot.context);
+        }
         return;
     }
     dmesgln("Interrupts: no handler for interrupt {}", interrupt);

@@ -15,6 +15,30 @@
 
 namespace Kernel::AArch64 {
 
+inline u8 mmio_read8(FlatPtr address)
+{
+    u32 value;
+    asm volatile("ldrb %w0, [%1]" : "=r"(value) : "r"(address) : "memory");
+    return static_cast<u8>(value);
+}
+
+inline void mmio_write8(FlatPtr address, u8 value)
+{
+    asm volatile("strb %w0, [%1]" ::"rZ"(static_cast<u32>(value)), "r"(address) : "memory");
+}
+
+inline u16 mmio_read16(FlatPtr address)
+{
+    u32 value;
+    asm volatile("ldrh %w0, [%1]" : "=r"(value) : "r"(address) : "memory");
+    return static_cast<u16>(value);
+}
+
+inline void mmio_write16(FlatPtr address, u16 value)
+{
+    asm volatile("strh %w0, [%1]" ::"rZ"(static_cast<u32>(value)), "r"(address) : "memory");
+}
+
 inline u32 mmio_read32(FlatPtr address)
 {
     u32 value;

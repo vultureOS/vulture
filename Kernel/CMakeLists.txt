@@ -21,6 +21,7 @@ add_executable(Kernel
     Arch/aarch64/UserContext.cpp
     Arch/aarch64/Vectors.S
     BootArguments.cpp
+    Bus/PCI/PCI.cpp
     Console/BootScreen.cpp
     Console/Font.cpp
     Console/Framebuffer.cpp
@@ -29,6 +30,9 @@ add_executable(Kernel
     Debug/Panic.cpp
     Debug/Symbols.cpp
     Devices/Serial/PL011.cpp
+    Devices/Storage/BlockDevice.cpp
+    Devices/Storage/VirtIOBlockDevice.cpp
+    Devices/VirtIO/VirtIO.cpp
     FileSystem/BootArchive.cpp
     FileSystem/DevFS.cpp
     FileSystem/FileDescription.cpp
