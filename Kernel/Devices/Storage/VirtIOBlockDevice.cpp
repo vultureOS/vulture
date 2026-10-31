@@ -7,7 +7,7 @@
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Arch/InterruptController.h>
 #include <Kernel/Debug/KernelLog.h>
-#include <Kernel/Devices/Storage/BlockDevice.h>
+#include <Kernel/Devices/Storage/StorageControllers.h>
 #include <Kernel/Devices/VirtIO/VirtIO.h>
 #include <Kernel/Interrupts/InterruptHandlers.h>
 #include <Kernel/Locking/WaitQueue.h>
@@ -149,30 +149,10 @@ private:
 
 }
 
-void initialize_storage()
+ErrorOr<NonnullRefPtr<BlockDevice>> create_virtio_block_device(PCI::Device const& pci, String name)
 {
-    u32 disk_number = 0;
-    for (auto& pci : PCI::devices()) {
-        if (pci.vendor_id() != VirtIO::vendor_id || (pci.device_id() != 0x1001 && pci.device_id() != 0x1042))
-            continue;
-        StringBuilder name;
-        name.appendff("disk{}", disk_number);
-        auto device = VirtIOBlockDevice::create(pci, MUST(name.to_string()));
-        if (device.is_error()) {
-            dmesgln("Storage: virtio-blk at {:02x}:{:02x}.{}: {}", pci.bus(), pci.slot(), pci.function(), device.error());
-            continue;
-        }
-        ++disk_number;
-        auto& disk = *device.value();
-        if (auto result = BlockDevice::register_device(device.value()); result.is_error()) {
-            dmesgln("Storage: cannot register {}: {}", disk.name(), result.error());
-            continue;
-        }
-        auto partitions = scan_partitions(disk);
-        dmesgln("Storage: {} (virtio-blk) {} MiB{}, {} partition{}", disk.name(), disk.block_count() * BlockDevice::block_size / MiB,
-            disk.is_read_only() ? ", read-only"_sv : ""_sv, partitions.is_error() ? 0 : partitions.value(),
-            partitions.is_error() || partitions.value() != 1 ? "s"_sv : ""_sv);
-    }
+    auto device = TRY(VirtIOBlockDevice::create(pci, move(name)));
+    return NonnullRefPtr<BlockDevice>(*device);
 }
 
 }

@@ -32,12 +32,17 @@ public:
     ErrorOr<size_t> read(u64 offset, size_t count, IOBuffer const&) override;
     ErrorOr<size_t> write(u64 offset, size_t count, IOBuffer const&) override;
 
+    // This, if it is a partition.
+    [[nodiscard]] virtual class PartitionDevice* as_partition() { return nullptr; }
+
     static Vector<NonnullRefPtr<BlockDevice>>& all();
     // Adds it to /dev and to all().
     static ErrorOr<void> register_device(NonnullRefPtr<BlockDevice>);
 
 protected:
     BlockDevice(String name, u64 block_count, bool read_only);
+    // For drivers that learn the size after construction.
+    void set_block_count(u64 count) { m_block_count = count; }
 
 private:
     String m_name;
@@ -53,6 +58,7 @@ public:
     ErrorOr<void> read_blocks(u64 first, size_t count, Bytes) override;
     ErrorOr<void> write_blocks(u64 first, size_t count, ReadonlyBytes) override;
     ErrorOr<void> flush() override { return m_disk->flush(); }
+    [[nodiscard]] PartitionDevice* as_partition() override { return this; }
 
     // The GPT partition type (MBR types become 00..00tt).
     [[nodiscard]] u8 const* type() const { return m_type; }

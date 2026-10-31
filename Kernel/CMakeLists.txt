@@ -31,6 +31,8 @@ add_executable(Kernel
     Debug/Symbols.cpp
     Devices/Serial/PL011.cpp
     Devices/Storage/BlockDevice.cpp
+    Devices/Storage/NVMeDevice.cpp
+    Devices/Storage/Storage.cpp
     Devices/Storage/VirtIOBlockDevice.cpp
     Devices/VirtIO/VirtIO.cpp
     FileSystem/BootArchive.cpp
