@@ -10,10 +10,16 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_compile_options(
-    -Wall
-    -Wextra
-    -Werror
+add_compile_options(-Wall -Wextra -Werror -g -fdiagnostics-color=always)
+
+# Flags that only mean something to the C++ compiler (assembly files skip them).
+function(vulture_add_cxx_options)
+    foreach(option IN LISTS ARGN)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:${option}>)
+    endforeach()
+endfunction()
+
+vulture_add_cxx_options(
     -Wshadow
     -Wnon-virtual-dtor
     -Wimplicit-fallthrough
@@ -22,9 +28,7 @@ add_compile_options(
     -fno-threadsafe-statics
     -nostdinc
     -nostdinc++
-    -fno-omit-frame-pointer
-    -g
-    -fdiagnostics-color=always)
+    -fno-omit-frame-pointer)
 
 add_compile_definitions(VULTURE_VERSION_STRING="${VULTURE_VERSION}")
 
@@ -33,10 +37,20 @@ include_directories(${VULTURE_SOURCE_ROOT} ${VULTURE_SOURCE_ROOT}/Libraries)
 if(VULTURE_PART STREQUAL "host")
     # Host tests link only libSystem's C functions (malloc, write, abort);
     # LibTest supplies the C++ runtime pieces.
-    add_compile_options(-O1 -fsanitize=address,undefined -fno-sanitize-recover=all)
+    vulture_add_cxx_options(-O1 -fsanitize=address,undefined -fno-sanitize-recover=all)
     add_link_options(-fsanitize=address,undefined -nostdlib++)
 elseif(VULTURE_PART STREQUAL "uefi")
-    add_compile_options(-O2 -ffreestanding -fno-stack-protector -mno-stack-arg-probe)
+    vulture_add_cxx_options(-O2 -ffreestanding -fno-stack-protector -mno-stack-arg-probe)
 elseif(VULTURE_PART STREQUAL "target")
-    add_compile_options(-O2 -ffreestanding -fno-stack-protector -mgeneral-regs-only)
+    # The kernel keeps frame pointers in every function, leaves included, so
+    # backtraces never skip a frame; it uses no floating point.
+    vulture_add_cxx_options(
+        -O2
+        -ffreestanding
+        -fno-stack-protector
+        -mgeneral-regs-only
+        -mno-omit-leaf-frame-pointer
+        -mno-outline-atomics
+        -fno-unwind-tables
+        -fno-asynchronous-unwind-tables)
 endif()

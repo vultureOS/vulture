@@ -17,6 +17,8 @@ endif()
 
 set(CMAKE_CXX_COMPILER ${VULTURE_LLVM_ROOT}/bin/clang++)
 set(CMAKE_CXX_COMPILER_TARGET aarch64-unknown-none-elf)
+set(CMAKE_ASM_COMPILER ${VULTURE_LLVM_ROOT}/bin/clang)
+set(CMAKE_ASM_COMPILER_TARGET aarch64-unknown-none-elf)
 set(CMAKE_AR ${VULTURE_LLVM_ROOT}/bin/llvm-ar CACHE FILEPATH "Archiver")
 set(CMAKE_RANLIB ${VULTURE_LLVM_ROOT}/bin/llvm-ranlib CACHE FILEPATH "Archive indexer")
 
