@@ -23,6 +23,7 @@
 #include <Kernel/FileSystem/FATFS.h>
 #include <Kernel/FileSystem/TmpFS.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
+#include <Kernel/FileSystem/VultureFS.h>
 #include <Kernel/Library/CxxRuntime.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
@@ -199,32 +200,75 @@ static void mount_volumes()
     }
 }
 
-// Builds the file tree: a tmpfs root filled from the boot archive, devfs
-// at /dev and a fresh tmpfs at /tmp. Then starts /sbin/init as process 1.
-static void start_userland(API::BootInfo const& boot_info, BootArguments const& arguments)
+// The root filesystem: the first vultureFS partition that mounts, or, with
+// none, a tmpfs filled from the boot archive (everything then lives in
+// memory and is gone at power off).
+static bool mount_root_file_system(API::BootInfo const& boot_info)
 {
-    VirtualFileSystem::mount_root(must("root filesystem"_sv, TmpFS::create()));
-    if (boot_info.boot_archive.size == 0) {
-        dmesgln("Userland: no boot archive, so no init");
-        return;
+    for (auto& device : BlockDevice::all()) {
+        if (!is_vulturefs_partition(*device))
+            continue;
+        auto file_system = mount_vulturefs(*device);
+        if (file_system.is_error()) {
+            dmesgln("Root: cannot mount {}: {}", device->name(), file_system.error());
+            continue;
+        }
+        VirtualFileSystem::mount_root(file_system.release_value());
+        dmesgln("Root: vultureFS on {}", device->name());
+        return true;
     }
+    VirtualFileSystem::mount_root(must("root filesystem"_sv, TmpFS::create()));
+    if (boot_info.boot_archive.size == 0)
+        return false;
     ReadonlyBytes archive { physical_to_virtual(PhysicalAddress(boot_info.boot_archive.base)), boot_info.boot_archive.size };
     auto unpacked = must("unpacking the boot archive"_sv, unpack_boot_archive(archive));
     dmesgln("Root: tmpfs with {} files ({} KiB) and {} directories from the boot archive", unpacked.files, unpacked.bytes / KiB, unpacked.directories);
+    return true;
+}
 
-    make_directory("/dev"_sv);
-    make_directory("/tmp"_sv);
-    must("devfs"_sv, VirtualFileSystem::mount(must("devfs"_sv, DevFS::create()), "/dev"_sv));
+// Every few seconds, everything changed is written and committed, so a
+// crash loses at most that much.
+static void start_sync_thread()
+{
+    auto thread = must("sync thread"_sv, Thread::create("sync"_sv, [](void*) {
+        for (;;) {
+            (void)Thread::sleep_for_microseconds(5'000'000);
+            if (auto result = VirtualFileSystem::sync_all(); result.is_error())
+                dmesgln("sync: {}", result.error());
+        } }, nullptr, { .qos = QoS::Utility }));
+    thread->start();
+}
+
+// Builds the file tree (the root, devfs at /dev, a fresh tmpfs at /tmp,
+// FAT volumes under /Volumes), then starts /sbin/init as process 1.
+static void start_userland(API::BootInfo const& boot_info, BootArguments const& arguments)
+{
+    // devfs comes first: disks add themselves to it as they are found.
+    auto devices = must("devfs"_sv, DevFS::create());
     must("devices"_sv, create_basic_devices());
     initialize_storage();
+    if (!mount_root_file_system(boot_info)) {
+        dmesgln("Userland: no root disk and no boot archive, so no init");
+        return;
+    }
+    make_directory("/dev"_sv);
+    make_directory("/tmp"_sv);
+    must("devfs"_sv, VirtualFileSystem::mount(move(devices), "/dev"_sv));
     mount_volumes();
     must("/tmp"_sv, VirtualFileSystem::mount(must("tmpfs"_sv, TmpFS::create()), "/tmp"_sv));
+    start_sync_thread();
 
-    // "utest" runs the userland tests.
-    StringView const plain[] = { "/sbin/init"_sv };
-    StringView const testing[] = { "/sbin/init"_sv, "--test"_sv };
-    bool test = arguments.has_flag("utest"_sv);
-    (void)must("starting init"_sv, Process::create_init("/sbin/init"_sv, test ? Span<StringView const>(testing) : Span<StringView const>(plain)));
+    // Boot flags that make init run tests: "utest" the userland tests,
+    // "crashtest" and "persisttest" the storage tests.
+    StringView init_arguments[2] = { "/sbin/init"_sv, {} };
+    size_t argument_count = 1;
+    if (arguments.has_flag("utest"_sv))
+        init_arguments[argument_count++] = "--test"_sv;
+    else if (arguments.has_flag("crashtest"_sv))
+        init_arguments[argument_count++] = "--crash-test"_sv;
+    else if (arguments.has_flag("persisttest"_sv))
+        init_arguments[argument_count++] = "--persist-test"_sv;
+    (void)must("starting init"_sv, Process::create_init("/sbin/init"_sv, Span<StringView const>(init_arguments, argument_count)));
 }
 
 static void initialize_interrupts_and_time(DeviceTree::FlattenedDeviceTree const& tree)

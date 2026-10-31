@@ -9,6 +9,7 @@
 #include <Kernel/Arch/Power.h>
 #include <Kernel/Arch/UserContext.h>
 #include <Kernel/Debug/KernelLog.h>
+#include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Memory/Heap.h>
 #include <Kernel/Memory/UserAccess.h>
 #include <Kernel/Tasks/Process.h>
@@ -44,6 +45,8 @@ ErrorOr<FlatPtr> Process::sys_power_off(TrapFrame&, SyscallArguments const&)
     if (m_pid != 1)
         return Error::from_errno(EPERM);
     dmesgln("Powering off at the request of init.");
+    if (auto result = VirtualFileSystem::sync_all(); result.is_error())
+        dmesgln("Power off: could not write everything to disk: {}", result.error());
     Arch::power_off();
 }
 

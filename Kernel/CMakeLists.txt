@@ -44,6 +44,7 @@ add_executable(Kernel
     FileSystem/Pipe.cpp
     FileSystem/TmpFS.cpp
     FileSystem/VirtualFileSystem.cpp
+    FileSystem/VultureFS.cpp
     Init.cpp
     Interrupts/InterruptHandlers.cpp
     Library/CxxRuntime.cpp
@@ -92,6 +93,6 @@ target_link_options(Kernel PRIVATE
     -Wl,-z,max-page-size=4096
     -Wl,--build-id=none)
 
-target_link_libraries(Kernel PRIVATE LibArchive LibDeviceTree LibELF LibBase LibBaseFreestanding)
+target_link_libraries(Kernel PRIVATE LibArchive LibDeviceTree LibELF LibVultureFS LibBase LibBaseFreestanding)
 
 install(TARGETS Kernel RUNTIME DESTINATION System/Library/Kernels)
