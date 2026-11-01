@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
+add_subdirectory(imgdiff)
 add_subdirectory(ipcc)
 add_subdirectory(mkarchive)
+add_subdirectory(mkvicns)
 add_subdirectory(vfs)
