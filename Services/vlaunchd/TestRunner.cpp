@@ -54,6 +54,7 @@ Test const s_tests[] = {
     { "/usr/tests/interactive", 0, 0 },
     { "/usr/tests/accounts", 0, 0 },
     { "/usr/tests/eventloop", 0, 0 },
+    { "/usr/tests/launchd", 0, 0 },
     { "/usr/tests/many-processes", 0, 0 },
     // A crash must kill only the crashing process.
     { "/usr/tests/segfault", 0, SIGSEGV },

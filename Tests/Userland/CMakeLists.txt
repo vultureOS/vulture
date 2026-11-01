@@ -17,6 +17,7 @@ set(tests
     files
     filesystem
     interactive
+    launchd
     fork
     hello
     libc
