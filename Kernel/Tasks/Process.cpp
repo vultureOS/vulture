@@ -134,10 +134,18 @@ void Process::describe(vulture_process_info& info)
         info.state = 'R';
     else
         info.state = 'S';
-    if (auto* terminal = m_controlling_terminal.ptr())
+    // Our own references: whoever this is about may exec or exit at any moment.
+    RefPtr<TTY> terminal;
+    RefPtr<AddressSpace> space;
+    {
+        SpinLockGuard guard(m_describe_lock);
+        terminal = m_controlling_terminal;
+        space = m_address_space;
+    }
+    if (terminal)
         info.terminal = terminal->metadata().device;
-    if (m_address_space && !is_zombie())
-        info.resident_bytes = m_address_space->resident_pages() * page_size;
+    if (space && !is_zombie())
+        info.resident_bytes = space->resident_pages() * page_size;
     info.cpu_nanoseconds = Time::nanoseconds_from_ticks(ticks);
     info.start_time = m_start_time;
     size_t length = min(m_name_length, sizeof(info.name) - 1);
@@ -184,8 +192,13 @@ void Process::thread_finished(Thread& thread)
 {
     m_exited_cpu_ticks.fetch_add(thread.cpu_ticks());
     if (m_thread_objects.fetch_sub(1) == 1) {
-        // No thread runs on this address space anywhere now.
-        m_address_space.clear();
+        // No thread runs on this address space anywhere now. (Freed outside the lock,
+        // which is for moments.)
+        RefPtr<AddressSpace> gone;
+        {
+            SpinLockGuard guard(m_describe_lock);
+            gone = move(m_address_space);
+        }
         return;
     }
     m_thread_gone_wait.wake_all();
@@ -579,15 +592,17 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     // process's only thread.
     end_other_threads();
     m_ending_thread.store(nullptr);
-    OwnPtr<AddressSpace> old_space;
+    RefPtr<AddressSpace> old_space;
     {
-        // No switch may see the process between the two address spaces.
-        InterruptDisabler disabler;
+        // No switch may see the process between the two address spaces (the lock masks
+        // interrupts), nor anyone looking in from outside.
+        SpinLockGuard guard(m_describe_lock);
         old_space = move(m_address_space);
-        m_address_space = OwnPtr<AddressSpace>(move(space));
+        m_address_space = move(space);
         m_address_space->activate();
     }
-    // Nothing uses the old one now (this process has one thread).
+    // No thread uses the old one now (this process has one). It goes here, or with
+    // whoever is looking at it.
     old_space.clear();
     {
         auto& thread = Thread::current();
@@ -926,13 +941,19 @@ ErrorOr<void> Process::set_controlling_terminal(TTY& tty)
     if (tty.session() != 0 && tty.session() != m_pid)
         return Error::from_errno(EPERM);
     tty.set_session(m_pid, pgid());
+    SpinLockGuard guard(m_describe_lock);
     m_controlling_terminal = tty;
     return {};
 }
 
 void Process::lose_controlling_terminal()
 {
-    if (auto tty = move(m_controlling_terminal); tty && m_sid.load() == m_pid)
+    RefPtr<TTY> tty;
+    {
+        SpinLockGuard guard(m_describe_lock);
+        tty = move(m_controlling_terminal);
+    }
+    if (tty && m_sid.load() == m_pid)
         tty->release_session(m_pid);
 }
 

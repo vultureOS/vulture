@@ -33,6 +33,7 @@ set(tests
     pipes
     ports
     posix
+    process-info
     segfault
     services
     shell

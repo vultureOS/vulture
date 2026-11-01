@@ -76,9 +76,12 @@ enum class PageFaultResult : u8 {
 
 // A process's user space: its regions and the page table that maps them.
 // Pages are mapped lazily, by the page fault handler.
-class AddressSpace {
+//
+// Its process owns it; anyone else looking in (Process::describe) holds a reference
+// for as long as that takes, so that exec and exit cannot free it under them.
+class AddressSpace final : public RefCounted<AddressSpace> {
 public:
-    [[nodiscard]] static ErrorOr<NonnullOwnPtr<AddressSpace>> create();
+    [[nodiscard]] static ErrorOr<NonnullRefPtr<AddressSpace>> create();
     ~AddressSpace();
 
     // Maps anonymous memory. With `fixed`, exactly at `address` (replacing
@@ -98,7 +101,7 @@ public:
     PageFaultResult handle_fault(FlatPtr address, AccessKind);
 
     // For fork: a copy that shares every page copy-on-write.
-    [[nodiscard]] ErrorOr<NonnullOwnPtr<AddressSpace>> clone_for_fork();
+    [[nodiscard]] ErrorOr<NonnullRefPtr<AddressSpace>> clone_for_fork();
 
     // Makes this the current processor's user space.
     void activate() const;

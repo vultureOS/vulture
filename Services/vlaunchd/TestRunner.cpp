@@ -65,6 +65,7 @@ Test const s_tests[] = {
     { "/usr/tests/bootstrap", 0, 0 },
     { "/usr/tests/services", 0, 0 },
     { "/usr/tests/many-processes", 0, 0 },
+    { "/usr/tests/process-info", 0, 0 },
     // A crash must kill only the crashing process.
     { "/usr/tests/segfault", 0, SIGSEGV },
     { "/usr/tests/abort", 0, SIGABRT },

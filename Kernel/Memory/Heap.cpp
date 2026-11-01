@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Debug/Panic.h>
 #include <Kernel/Memory/Heap.h>
 #include <Kernel/Memory/PhysicalMemory.h>
@@ -104,6 +105,37 @@ Slab* SlabCache::create_slab()
     return slab;
 }
 
+// A link in a free list, before it is followed: something else having written over a
+// free object is only ever seen here, and what is around it is the best clue left.
+static bool is_object_in_slab(Slab const* slab, FreeObject const* object, size_t object_size)
+{
+    size_t offset = reinterpret_cast<FlatPtr>(object) - reinterpret_cast<FlatPtr>(slab);
+    return offset >= slab_header_size && offset < slab_size && (offset - slab_header_size) % object_size == 0;
+}
+
+[[noreturn]] static void report_corrupt_free_list(Slab const* slab, FreeObject const* holder, FreeObject const* link, size_t object_size)
+{
+    auto dump = [&](char const* what, void const* start, size_t bytes) {
+        dmesgln("{} at {:p}:", what, start);
+        auto const* words = static_cast<u64 const*>(start);
+        for (size_t i = 0; i + 4 <= bytes / 8; i += 4)
+            dmesgln("  {:016x} {:016x} {:016x} {:016x}", words[i], words[i + 1], words[i + 2], words[i + 3]);
+    };
+    dump("Slab header", slab, slab_header_size);
+    if (holder) {
+        auto const* bytes = reinterpret_cast<u8 const*>(holder);
+        size_t words = min<size_t>(object_size, 128);
+        if (reinterpret_cast<FlatPtr>(bytes) - reinterpret_cast<FlatPtr>(slab) >= slab_header_size + object_size)
+            dump("The object before it", bytes - object_size, words);
+        dump("The free object holding the link", bytes, words);
+        if (reinterpret_cast<FlatPtr>(bytes) - reinterpret_cast<FlatPtr>(slab) + 2 * object_size <= slab_size)
+            dump("The object after it", bytes + object_size, words);
+    }
+    FixedStringBuilder<96> reason;
+    format_to(reason, "kmalloc: free list of {}-byte objects has {:p} in it", object_size, link);
+    panic(reason.view());
+}
+
 size_t SlabCache::allocate_batch(void** objects, size_t count)
 {
     SpinLockGuard guard(m_lock);
@@ -118,11 +150,15 @@ size_t SlabCache::allocate_batch(void** objects, size_t count)
                 break;
             m_partial.append(*slab);
         }
+        FreeObject* holder = nullptr;
         while (taken < count && slab->free_list) {
             auto* object = slab->free_list;
+            if (!is_object_in_slab(slab, object, m_object_size)) [[unlikely]]
+                report_corrupt_free_list(slab, holder, object, m_object_size);
             slab->free_list = object->next;
             ++slab->in_use;
             objects[taken++] = object;
+            holder = object;
         }
         if (!slab->free_list) {
             m_partial.remove(*slab);

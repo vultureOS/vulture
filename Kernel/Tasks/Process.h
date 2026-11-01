@@ -164,7 +164,10 @@ private:
     IntrusiveListNode m_table_node;
     IntrusiveList<Process, &Process::m_sibling_node> m_children;
 
-    OwnPtr<AddressSpace> m_address_space;
+    // Other processes' threads follow these two to describe this one (see describe()):
+    // changes to them, and those threads taking a reference, go under this.
+    SpinLock m_describe_lock;
+    RefPtr<AddressSpace> m_address_space;
     // Its threads, until each ends. Lock order: m_signal_lock, then this.
     mutable SpinLock m_threads_lock;
     Thread::ProcessThreadList m_threads;

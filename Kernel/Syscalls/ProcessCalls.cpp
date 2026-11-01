@@ -59,11 +59,19 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
     child->m_cwd = current_directory();
     child->m_pgid.store(pgid());
     child->m_sid.store(sid());
-    child->m_controlling_terminal = m_controlling_terminal;
+    {
+        // (The child is in the process table already: it can be described.)
+        SpinLockGuard guard(child->m_describe_lock);
+        child->m_controlling_terminal = m_controlling_terminal;
+    }
     child->m_bootstrap_port = m_bootstrap_port;
     child->m_credentials = m_credentials;
     child->m_umask = m_umask;
-    child->m_address_space = TRY(m_address_space->clone_for_fork());
+    auto space = TRY(m_address_space->clone_for_fork());
+    {
+        SpinLockGuard guard(child->m_describe_lock);
+        child->m_address_space = move(space);
+    }
     {
         SpinLockGuard guard(m_files_lock);
         for (size_t fd = 0; fd < max_open_files; ++fd)

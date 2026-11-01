@@ -74,7 +74,7 @@ AddressSpace::AddressSpace(Arch::PageTable page_table, u16 asid)
 {
 }
 
-ErrorOr<NonnullOwnPtr<AddressSpace>> AddressSpace::create()
+ErrorOr<NonnullRefPtr<AddressSpace>> AddressSpace::create()
 {
     auto page_table = TRY(Arch::PageTable::create());
     auto asid = Arch::allocate_address_space_id();
@@ -88,7 +88,7 @@ ErrorOr<NonnullOwnPtr<AddressSpace>> AddressSpace::create()
         page_table.destroy();
         return Error::from_errno(ENOMEM);
     }
-    return adopt_own(*space);
+    return adopt_ref(*space);
 }
 
 AddressSpace::~AddressSpace()
@@ -407,7 +407,7 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
     return PageFaultResult::Resolved;
 }
 
-ErrorOr<NonnullOwnPtr<AddressSpace>> AddressSpace::clone_for_fork()
+ErrorOr<NonnullRefPtr<AddressSpace>> AddressSpace::clone_for_fork()
 {
     auto child = TRY(create());
     MutexLocker locker(m_lock);
