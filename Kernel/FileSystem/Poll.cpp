@@ -21,6 +21,11 @@ u64 poll_generation()
     return s_generation.load(MemoryOrder::Acquire);
 }
 
+void note_poll_change()
+{
+    s_generation.fetch_add(1, MemoryOrder::Release);
+}
+
 void notify_pollers()
 {
     s_generation.fetch_add(1, MemoryOrder::Release);

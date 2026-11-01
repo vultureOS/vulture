@@ -50,7 +50,8 @@ struct vulture_port_received {
     int* rights;
     unsigned right_capacity;
     unsigned right_count;
-    int reply; // A send right to answer through, or -1.
+    int reply; // A send right to answer through, or -1. (port_call failing
+               // with EMSGSIZE: the receive right the answer waits on.)
     struct vulture_port_region* regions; // Out: where the memory now is.
     unsigned region_capacity;
     unsigned region_count;

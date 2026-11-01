@@ -14,6 +14,10 @@ namespace Kernel {
 // calls notify_pollers(); every poller then looks again at what it waits
 // for. Simple, and plenty for a desktop's handful of pollers.
 void notify_pollers();
+// A change only some pollers care about: the generation moves (so nobody
+// misses it), and the caller wakes those itself (ports wake the threads
+// polling them, see Port).
+void note_poll_change();
 [[nodiscard]] u64 poll_generation();
 [[nodiscard]] WaitQueue& poll_queue();
 

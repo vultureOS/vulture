@@ -117,6 +117,9 @@ public:
     void wake_all();
     // wake_one(), the woken thread to run next on this processor.
     void wake_one_for_handoff();
+    // Wakes `thread` if it waits here (and not the others); `handoff` as
+    // wake_one_for_handoff().
+    void wake_thread(Thread&, bool handoff);
 
 private:
     SpinLock m_lock;

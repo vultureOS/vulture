@@ -11,6 +11,7 @@
 #include <Kernel/Arch/Power.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/FileSystem/Poll.h>
+#include <Kernel/IPC/Port.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
@@ -79,6 +80,32 @@ ErrorOr<FlatPtr> Process::sys_poll(TrapFrame&, SyscallArguments const& arguments
         TRY(copy_from_user(descriptors, address, count * sizeof(vulture_pollfd)));
     u64 deadline = timeout < 0 ? ~0ull : Time::now() + Time::ticks_from_microseconds(static_cast<u64>(timeout) * 1000);
 
+    // Ports we poll know we do, and wake us themselves.
+    struct WatchedPort {
+        NonnullRefPtr<Port> port;
+        bool receive_right;
+    };
+    Vector<WatchedPort> watched_ports;
+    for (size_t i = 0; i < count && timeout != 0; ++i) {
+        if (descriptors[i].fd < 0)
+            continue;
+        auto description = file(descriptors[i].fd);
+        if (description.is_error() || !description.value()->port())
+            continue;
+        bool receive_right = description.value()->is_port_receive_right();
+        if (watched_ports.try_append({ *description.value()->port(), receive_right }).is_error())
+            break;
+        description.value()->port()->add_poller(Thread::current(), receive_right);
+    }
+    struct Unwatch {
+        Vector<WatchedPort>& ports;
+        ~Unwatch()
+        {
+            for (auto& watched : ports)
+                watched.port->remove_poller(Thread::current(), watched.receive_right);
+        }
+    } unwatch { watched_ports };
+
     for (;;) {
         // Read before looking, so a change after the look wakes us.
         u64 generation = poll_generation();
@@ -108,7 +135,13 @@ ErrorOr<FlatPtr> Process::sys_poll(TrapFrame&, SyscallArguments const& arguments
                 TRY(copy_to_user(address, descriptors, count * sizeof(vulture_pollfd)));
             return ready;
         }
-        auto result = poll_queue().wait_until_interruptible([&] { return poll_generation() != generation; }, deadline);
+        // No timeout: no timer to arm (and, under a hypervisor, no timer
+        // register to write and trap on) for every wait.
+        WaitQueue::WaitResult result;
+        if (timeout < 0)
+            result = poll_queue().wait_until_interruptible([&] { return poll_generation() != generation; }) ? WaitQueue::WaitResult::Satisfied : WaitQueue::WaitResult::Interrupted;
+        else
+            result = poll_queue().wait_until_interruptible([&] { return poll_generation() != generation; }, deadline);
         if (result == WaitQueue::WaitResult::Interrupted)
             return Error::from_errno(EINTR);
         if (result == WaitQueue::WaitResult::TimedOut) {

@@ -184,6 +184,9 @@ private:
     Credentials m_credentials;
     u32 m_umask { 022 };
     RefPtr<TTY> m_controlling_terminal;
+    // A send right to the name service (vlaunchd), inherited across fork
+    // and exec, as a Mach task's bootstrap port is.
+    RefPtr<FileDescription> m_bootstrap_port;
     Atomic<ProcessID> m_pgid { 0 };
     Atomic<ProcessID> m_sid { 0 };
     Atomic<bool> m_stopped { false };

@@ -59,11 +59,66 @@ void Port::detach(bool receive_right)
                 m_count.store(0);
             }
             m_sendable.wake_all();
+            // Senders now see the hang-up.
+            wake_pollers(false, false);
         }
     } else if (m_senders.fetch_sub(1) == 1) {
         m_receivable.wake_all();
+        // The receiver now sees the end.
+        wake_pollers(true, false);
     }
-    notify_pollers();
+}
+
+void Port::add_poller(Thread& thread, bool receive_right)
+{
+    SpinLockGuard guard(m_poller_lock);
+    auto& pollers = receive_right ? m_receive_pollers : m_send_pollers;
+    for (auto& slot : pollers.threads) {
+        if (!slot) {
+            slot = thread;
+            return;
+        }
+    }
+    ++pollers.overflowed;
+}
+
+void Port::remove_poller(Thread& thread, bool receive_right)
+{
+    SpinLockGuard guard(m_poller_lock);
+    auto& pollers = receive_right ? m_receive_pollers : m_send_pollers;
+    for (auto& slot : pollers.threads) {
+        if (slot.ptr() == &thread) {
+            slot = nullptr;
+            return;
+        }
+    }
+    if (pollers.overflowed > 0)
+        --pollers.overflowed;
+}
+
+void Port::wake_pollers(bool receivers, bool handoff)
+{
+    RefPtr<Thread> threads[max_pollers];
+    bool overflow;
+    {
+        SpinLockGuard guard(m_poller_lock);
+        auto& pollers = receivers ? m_receive_pollers : m_send_pollers;
+        for (size_t i = 0; i < max_pollers; ++i)
+            threads[i] = pollers.threads[i];
+        overflow = pollers.overflowed > 0;
+    }
+    if (overflow) {
+        notify_pollers();
+        return;
+    }
+    note_poll_change();
+    bool handed_off = false;
+    for (auto& thread : threads) {
+        if (!thread)
+            continue;
+        poll_queue().wake_thread(*thread, handoff && !handed_off);
+        handed_off = true;
+    }
 }
 
 ErrorOr<void> Port::send(NonnullOwnPtr<PortMessage> message, bool nonblocking, bool handoff)
@@ -86,11 +141,14 @@ ErrorOr<void> Port::send(NonnullOwnPtr<PortMessage> message, bool nonblocking, b
             return Error::from_errno(EINTR);
     }
     // An answer goes straight back to the caller, waiting for nothing else.
-    if (handoff || m_is_reply_port)
+    bool direct = handoff || m_is_reply_port;
+    if (direct)
         m_receivable.wake_one_for_handoff();
     else
         m_receivable.wake_one();
-    notify_pollers();
+    // Those polling for it: woken by name (the first, for a call, onto
+    // this processor), not every poller in the system.
+    wake_pollers(true, direct);
     return {};
 }
 
@@ -120,7 +178,8 @@ ErrorOr<NonnullOwnPtr<PortMessage>> Port::receive(bool nonblocking, size_t max_s
             return Error::from_errno(EINTR);
     }
     m_sendable.wake_one();
-    notify_pollers();
+    // Room again, for whoever polls to send.
+    wake_pollers(false, false);
     return message.release_nonnull();
 }
 

@@ -9,6 +9,7 @@
 #include <Kernel/Locking/SpinLock.h>
 #include <Kernel/Locking/WaitQueue.h>
 #include <Kernel/Memory/AnonymousVMObject.h>
+#include <Kernel/Tasks/Thread.h>
 #include <LibBase/OwnPtr.h>
 #include <LibBase/RefPtr.h>
 #include <LibBase/Vector.h>
@@ -61,6 +62,13 @@ public:
     void attach(bool receive_right);
     void detach(bool receive_right);
 
+    // Threads in poll() on a right to this port: what changes wakes them
+    // by name (a message, onto the sender's processor for a call), not
+    // every poller in the system. `receive_right`: polling the receive
+    // right (else a send right).
+    void add_poller(Thread&, bool receive_right);
+    void remove_poller(Thread&, bool receive_right);
+
     // For poll().
     [[nodiscard]] bool can_receive() const { return m_count.load() > 0 || m_senders.load() == 0; }
     [[nodiscard]] bool can_send() const { return m_count.load() < m_capacity || m_receivers.load() == 0; }
@@ -85,6 +93,20 @@ private:
     WaitQueue m_sendable;
     size_t m_capacity { queue_limit };
     bool m_is_reply_port { false };
+
+    // Wakes the pollers of the receive right (`receivers`) or of send
+    // rights; the first onto this processor with `handoff`.
+    void wake_pollers(bool receivers, bool handoff);
+
+    static constexpr size_t max_pollers = 4;
+    struct Pollers {
+        RefPtr<Thread> threads[max_pollers];
+        // Those that did not fit (everyone is woken then, as for files).
+        size_t overflowed { 0 };
+    };
+    SpinLock m_poller_lock;
+    Pollers m_receive_pollers;
+    Pollers m_send_pollers;
 };
 
 }

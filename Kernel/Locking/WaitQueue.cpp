@@ -32,6 +32,22 @@ void WaitQueue::wake_one_for_handoff()
         Scheduler::wake_for_handoff(*thread);
 }
 
+void WaitQueue::wake_thread(Thread& thread, bool handoff)
+{
+    {
+        SpinLockGuard guard(m_lock);
+        if (!m_waiters.contains(thread))
+            return;
+        m_waiters.remove(thread);
+    }
+    if (handoff) {
+        Scheduler::wake_for_handoff(thread);
+    } else {
+        Scheduler::wake(thread);
+        Scheduler::reschedule_if_needed();
+    }
+}
+
 void WaitQueue::wake_all()
 {
     // Waking takes run queue locks, so move the waiters out first.

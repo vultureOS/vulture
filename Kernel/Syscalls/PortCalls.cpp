@@ -231,6 +231,24 @@ ErrorOr<FlatPtr> Process::sys_port_receive(TrapFrame&, SyscallArguments const& a
     return 0;
 }
 
+// bootstrap_port(-1, flags): a descriptor for our bootstrap port (ENOENT
+// if there is none); bootstrap_port(fd, 0): `fd` (a send right) becomes
+// it, for us and every process we start from now on.
+ErrorOr<FlatPtr> Process::sys_bootstrap_port(TrapFrame&, SyscallArguments const& arguments)
+{
+    int fd = as_int(arguments.values[0]);
+    if (fd < 0) {
+        if (!m_bootstrap_port)
+            return Error::from_errno(ENOENT);
+        return static_cast<FlatPtr>(TRY(allocate_fd(*m_bootstrap_port, as_int(arguments.values[1]) & O_CLOEXEC)));
+    }
+    auto description = TRY(file(fd));
+    if (!description->is_port_send_right())
+        return Error::from_errno(EINVAL);
+    m_bootstrap_port = move(description);
+    return 0;
+}
+
 // A request, and its answer: the message goes with a send right to a port
 // of its own, the receiver runs next on this processor (direct handoff),
 // and the call waits for the answer there. EPIPE if the receiver lets the
@@ -254,7 +272,15 @@ ErrorOr<FlatPtr> Process::sys_port_call(TrapFrame&, SyscallArguments const& argu
     bool nonblocking = as_int(arguments.values[3]) & VULTURE_PORT_NONBLOCK;
     TRY(description->port()->send(move(message), nonblocking, true));
     finish_move(move_rights, sent_fds, sent_regions);
-    TRY(deliver_port_message(*answers, false, arguments.values[2]));
+    auto delivered = deliver_port_message(*answers, false, arguments.values[2]);
+    if (delivered.is_error() && delivered.error().code() == EMSGSIZE) {
+        // The answer does not fit: the caller gets the answer port's
+        // receive right (in `reply`) to take it from with more room.
+        auto received = TRY(copy_from_user<vulture_port_received>(arguments.values[2]));
+        received.reply = TRY(allocate_fd(answers_receive, true));
+        TRY(copy_to_user(arguments.values[2], received));
+    }
+    TRY(delivered);
     return 0;
 }
 
