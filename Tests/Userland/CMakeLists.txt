@@ -11,6 +11,7 @@ set(tests
     bad-pointers
     copy-on-write
     devices
+    dynamic
     eventloop
     exec
     exec-target

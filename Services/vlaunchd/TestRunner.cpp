@@ -37,6 +37,7 @@ Test const s_tests[] = {
     { "/usr/tests/fork", 0, 0 },
     { "/usr/tests/copy-on-write", 0, 0 },
     { "/usr/tests/exec", 0, 0 },
+    { "/usr/tests/dynamic", 0, 0 },
     { "/usr/tests/memory", 0, 0 },
     { "/usr/tests/bad-pointers", 0, 0 },
     { "/usr/tests/signals", 0, 0 },
