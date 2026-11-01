@@ -73,8 +73,11 @@ boot_args=""
 gui=""
 debug=0
 accelerator="${VULTURE_ACCEL:-}"
-gpu_width="${VULTURE_GPU_WIDTH:-2560}"
-gpu_height="${VULTURE_GPU_HEIGHT:-1600}"
+# QEMU's own default, so that its window is a comfortable size to work beside. (A window
+# takes the size of its display: VULTURE_GPU_WIDTH=2560 VULTURE_GPU_HEIGHT=1600 gives the
+# 2x look, in a window that fills most laptops' screens.)
+gpu_width="${VULTURE_GPU_WIDTH:-1280}"
+gpu_height="${VULTURE_GPU_HEIGHT:-800}"
 gdb=0
 headless=0
 expectations=()
