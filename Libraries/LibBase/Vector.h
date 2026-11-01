@@ -112,7 +112,13 @@ public:
     template<typename U = T>
     ErrorOr<void> try_append(U&& value)
     {
-        TRY(try_ensure_capacity(m_size + 1));
+        if (m_size == m_capacity) {
+            // `value` may be one of our own elements: keep it through the move.
+            T kept(forward<U>(value));
+            TRY(try_ensure_capacity(m_size + 1));
+            unchecked_append(move(kept));
+            return {};
+        }
         unchecked_append(forward<U>(value));
         return {};
     }
