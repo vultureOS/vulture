@@ -260,6 +260,8 @@ void Supervisor::load_file(char const* path)
         log("%s: %s", path, error);
         return;
     }
+    if (job->only_in_graphical_session && !m_graphical_session)
+        return;
     for (auto const& existing : m_jobs) {
         if (existing->label == job->label) {
             log("%s: a job named %s is loaded already", path, job->label.characters());

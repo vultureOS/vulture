@@ -27,6 +27,8 @@ public:
     explicit Supervisor(Core::EventLoop&);
 
     // Every *.plist in `directory`, in name order.
+    // Jobs for the graphical session load only in one. Before loading any.
+    void set_graphical_session(bool graphical) { m_graphical_session = graphical; }
     void load_directory(char const* directory);
     void load_file(char const* path);
     [[nodiscard]] size_t job_count() const { return m_jobs.size(); }
@@ -44,6 +46,7 @@ public:
     i32 register_service(IPC::Sender const&, String name, IPC::Port service) override;
 
 private:
+    bool m_graphical_session { false };
     struct Service {
         String name;
         IPC::Port receive; // Our share, for MachServices (empty when registered).

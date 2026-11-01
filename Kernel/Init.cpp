@@ -286,6 +286,10 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
         init_arguments[argument_count++] = "--crash-test"_sv;
     else if (arguments.has_flag("persisttest"_sv))
         init_arguments[argument_count++] = "--persist-test"_sv;
+    else if (arguments.has_flag("uitest"_sv))
+        init_arguments[argument_count++] = "--ui-test"_sv;
+    else if (arguments.has_flag("gui"_sv))
+        init_arguments[argument_count++] = "--gui"_sv;
     (void)must("starting init"_sv, Process::create_init("/sbin/vlaunchd"_sv, Span<StringView const>(init_arguments, argument_count)));
 }
 

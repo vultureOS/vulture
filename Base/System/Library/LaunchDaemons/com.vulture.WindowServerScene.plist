@@ -1,0 +1,9 @@
+{
+    "Label" : "com.vulture.WindowServerScene",
+    "ProgramArguments" : [
+        "/usr/tests/ui-scene"
+    ],
+    "LimitLoadToSessionType" : "Aqua",
+    "RunAtLoad" : true,
+    "ThrottleInterval" : 1
+}

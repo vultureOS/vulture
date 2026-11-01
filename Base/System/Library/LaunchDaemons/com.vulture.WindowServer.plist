@@ -1,0 +1,13 @@
+{
+    "Label" : "com.vulture.WindowServer",
+    "ProgramArguments" : [
+        "/System/Library/CoreServices/WindowServer"
+    ],
+    "MachServices" : {
+        "com.vulture.windowserver" : true
+    },
+    "LimitLoadToSessionType" : "Aqua",
+    "RunAtLoad" : true,
+    "KeepAlive" : true,
+    "ThrottleInterval" : 1
+}

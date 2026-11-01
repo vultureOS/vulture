@@ -70,6 +70,8 @@ OwnPtr<Job> Job::from_plist(JSON::Value const& plist, char const*& error)
         job->exit_timeout = static_cast<u32>(timeout.value());
     if (auto mask = plist.get_integer("Umask"_sv); mask.has_value())
         job->umask = static_cast<mode_t>(mask.value() & 0777);
+    if (auto session = plist.get_string("LimitLoadToSessionType"_sv); session.has_value())
+        job->only_in_graphical_session = session.value() == "Aqua"_sv;
     job->user_name = optional_string(plist, "UserName"_sv);
     job->group_name = optional_string(plist, "GroupName"_sv);
     job->working_directory = optional_string(plist, "WorkingDirectory"_sv);

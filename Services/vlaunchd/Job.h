@@ -34,6 +34,8 @@ namespace Launchd {
 //   StandardInPath, StandardOutPath, StandardErrorPath  (/dev/null)
 //   Umask                 its file creation mask
 //   ExitTimeOut           seconds between SIGTERM and SIGKILL when stopped (20)
+//   LimitLoadToSessionType  "Aqua": only when the machine boots to the graphical
+//                         session (the boot flag "gui")
 //   MachServices          { "name": true, ... }: services the job provides.
 //                         Found through the bootstrap port; the job is
 //                         started when a message arrives for one, and
@@ -57,6 +59,7 @@ struct Job {
     u32 throttle_interval { 10 };
     u32 start_interval { 0 };
     u32 exit_timeout { 20 };
+    bool only_in_graphical_session { false };
     Optional<String> user_name;
     Optional<String> group_name;
     Optional<String> working_directory;

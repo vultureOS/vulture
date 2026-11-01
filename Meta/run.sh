@@ -10,6 +10,7 @@
 #
 #   --build-dir DIR     build directory (default: <repo>/build)
 #   --boot-args TEXT    kernel command line, e.g. "-v" for a verbose boot
+#   --gui               boot to the window server, and show its display
 #   --tcg               software emulation (TCG) instead of the hypervisor
 #                       (HVF on macOS, KVM on AArch64 Linux), which is
 #                       otherwise used where there is one
@@ -42,6 +43,8 @@
 #                       types TEXT (with \r, \n, \t and \xHH escapes),
 #                       "type TEXT" types it on the keyboard instead (\r for
 #                       Return), "key KEYS" presses keys there (up, ctrl-c),
+#                       "pointer X Y" moves the pointer (0 to 32767 across the
+#                       screen), "button left down" presses a mouse button,
 #                       "pause SECONDS" waits (as a person would before ^Z);
 #                       blank lines and "#" comments are skipped. Succeeds
 #                       once every step is done (and any --expect found)
@@ -56,6 +59,7 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="$root_dir/build"
 boot_args=""
+gui=0
 accelerator="${VULTURE_ACCEL:-}"
 gpu_width="${VULTURE_GPU_WIDTH:-2560}"
 gpu_height="${VULTURE_GPU_HEIGHT:-1600}"
@@ -79,6 +83,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --build-dir) build_dir="$2"; shift 2 ;;
         --boot-args) boot_args="$2"; shift 2 ;;
+        --gui) gui=1; shift ;;
         --tcg) accelerator="tcg"; shift ;;
         --gdb) gdb=1; shift ;;
         --headless) headless=1; shift ;;
@@ -155,6 +160,9 @@ for required in "$esp_dir/EFI/BOOT/BOOTAA64.EFI" "$kernels_dir/vulture"; do
 done
 
 # VultureBoot passes the contents of boot-args to the kernel as its command line.
+if [ "$gui" -eq 1 ]; then
+    boot_args="${boot_args:+$boot_args }gui"
+fi
 if [ -n "$boot_args" ]; then
     printf '%s\n' "$boot_args" > "$kernels_dir/boot-args"
 else
@@ -229,6 +237,13 @@ else
     )
 fi
 
+# QEMU's window shows the first display: the text console, unless booting to the
+# window server.
+display_devices=(-device ramfb -device "virtio-gpu-pci,id=gpu0,xres=$gpu_width,yres=$gpu_height")
+if [ "$gui" -eq 1 ]; then
+    display_devices=(-device "virtio-gpu-pci,id=gpu0,xres=$gpu_width,yres=$gpu_height" -device ramfb)
+fi
+
 args=(
     # acpi=off makes the firmware publish a device tree, which the kernel uses for hardware discovery.
     -machine virt,gic-version=3,acpi=off
@@ -240,8 +255,7 @@ args=(
     # ramfb gives the firmware a linear framebuffer for the boot console (and the
     # text console); virtio-gpu only offers blit operations until the kernel's
     # driver takes it, and is what the window server draws on.
-    -device ramfb
-    -device "virtio-gpu-pci,id=gpu0,xres=$gpu_width,yres=$gpu_height"
+    "${display_devices[@]}"
     # Lets the firmware hand the kernel some entropy.
     -device virtio-rng-pci
     # USB has no driver yet (M14). These reach the text console and the window server.
@@ -283,7 +297,7 @@ if [ -n "$chat_file" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
             "" | "#"*) ;;
-            "expect "* | "send "* | "pause "* | "type "* | "key "*) chat_steps+=("$line") ;;
+            "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "button "*) chat_steps+=("$line") ;;
             *) echo "run.sh: $chat_file: not a step: $line" >&2; exit 2 ;;
         esac
     done < "$chat_file"
@@ -317,6 +331,23 @@ press_keys() {
 {\"execute\":\"send-key\",\"arguments\":{\"keys\":[$keys],\"hold-time\":10}}"
     done
     printf '%s\n' "$commands" | nc -U -w 1 "$qmp_socket" > /dev/null || echo "run.sh: QMP failed" >&2
+}
+
+send_input_events() {
+    printf '{"execute":"qmp_capabilities"}\n{"execute":"input-send-event","arguments":{"events":[%s]}}\n' "$1" |
+        nc -U -w 1 "$qmp_socket" > /dev/null || echo "run.sh: QMP failed" >&2
+}
+
+# The pointer, at this fraction of the screen, in 32768ths.
+move_pointer() {
+    send_input_events "{\"type\":\"abs\",\"data\":{\"axis\":\"x\",\"value\":$1}},{\"type\":\"abs\",\"data\":{\"axis\":\"y\",\"value\":$2}}"
+}
+
+# "left down", "left up".
+press_button() {
+    local down=false
+    [ "$2" = down ] && down=true
+    send_input_events "{\"type\":\"btn\",\"data\":{\"down\":$down,\"button\":\"$1\"}}"
 }
 
 # The keys for one character of text, on a US keyboard.
@@ -394,6 +425,14 @@ advance_chat() {
                 ;;
             "key "*)
                 press_keys "${step#key }"
+                chat_index=$((chat_index + 1))
+                ;;
+            "pointer "*)
+                move_pointer ${step#pointer }
+                chat_index=$((chat_index + 1))
+                ;;
+            "button "*)
+                press_button ${step#button }
                 chat_index=$((chat_index + 1))
                 ;;
             "pause "*)
