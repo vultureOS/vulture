@@ -136,6 +136,10 @@ private:
     Thread* m_thread { nullptr };
     // The program's ELF file, kept for crash reports.
     RefPtr<KernelBuffer> m_executable;
+    FlatPtr m_executable_bias { 0 };
+    // The dynamic linker the program runs with, if any.
+    RefPtr<KernelBuffer> m_interpreter;
+    FlatPtr m_interpreter_bias { 0 };
     // The canonical working directory.
     String m_cwd;
     i64 m_start_time { 0 };

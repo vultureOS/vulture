@@ -44,6 +44,12 @@ constexpr FlatPtr kernel_image_base = 0xffff'ffff'8000'0000;
 
 constexpr FlatPtr user_space_start = 0x0000'0000'0001'0000;
 constexpr FlatPtr user_space_end = 0x0001'0000'0000'0000;
+// Position-independent programs load here (the first page of their image),
+// as programs linked for a fixed address traditionally do.
+constexpr FlatPtr user_program_base = 0x0000'0000'0040'0000;
+// A position-independent dynamic linker loads here (/usr/lib/dyld is
+// linked for this address).
+constexpr FlatPtr user_interpreter_base = 0x0000'7f00'0000'0000;
 constexpr FlatPtr user_mmap_base = 0x0000'1000'0000'0000;
 constexpr FlatPtr user_stack_top = 0x0000'8000'0000'0000;
 constexpr u64 user_stack_size = 8 * MiB;

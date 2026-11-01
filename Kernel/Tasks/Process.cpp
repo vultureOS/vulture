@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/API/POSIX/auxv.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/memory.h>
 #include <Kernel/API/POSIX/sysctl.h>
@@ -304,10 +305,18 @@ static int protection_from_segment_flags(u32 flags)
 
 // The initial stack, laid out the way crt0 expects: argc, argv[], NULL,
 // envp[], NULL, auxv pairs, then the strings themselves at the top.
-static ErrorOr<FlatPtr> build_initial_stack(Region& stack, Span<StringView const> arguments, Span<StringView const> environment, FlatPtr entry)
+// The new program's stack: argc, then argv, environ and the auxiliary
+// vector (pairs ending with AT_NULL), pointing at strings at the top.
+struct AuxiliaryValue {
+    u64 type;
+    u64 value;
+};
+
+static ErrorOr<FlatPtr> build_initial_stack(Region& stack, Span<StringView const> arguments, Span<StringView const> environment, StringView path,
+    Span<AuxiliaryValue const> auxiliary)
 {
     constexpr size_t limit = 128 * KiB;
-    size_t strings_size = 0;
+    size_t strings_size = path.length() + 1;
     for (auto string : arguments)
         strings_size += string.length() + 1;
     for (auto string : environment)
@@ -315,10 +324,8 @@ static ErrorOr<FlatPtr> build_initial_stack(Region& stack, Span<StringView const
     if (strings_size > limit || arguments.size() + environment.size() > 4096)
         return Error::from_errno(E2BIG);
 
-    constexpr u64 at_null = 0;
-    constexpr u64 at_pagesz = 6;
-    constexpr u64 at_entry = 9;
-    size_t pointer_words = 1 + arguments.size() + 1 + environment.size() + 1 + 6;
+    // AT_EXECFN and AT_NULL follow the given pairs.
+    size_t pointer_words = 1 + arguments.size() + 1 + environment.size() + 1 + 2 * (auxiliary.size() + 2);
     FlatPtr top = MemoryLayout::user_stack_top;
     FlatPtr strings_start = top - strings_size;
     FlatPtr sp = align_down<FlatPtr>(strings_start - pointer_words * sizeof(u64), 16);
@@ -327,27 +334,32 @@ static ErrorOr<FlatPtr> build_initial_stack(Region& stack, Span<StringView const
     if (!words)
         return Error::from_errno(ENOMEM);
     size_t word = 0;
-    words[word++] = arguments.size();
     FlatPtr string_address = strings_start;
-    for (auto string : arguments) {
-        words[word++] = string_address;
-        TRY(write_to_region(stack, string_address, { reinterpret_cast<u8 const*>(string.characters_without_null_termination()), string.length() }));
+    auto place = [&](StringView string) -> ErrorOr<FlatPtr> {
+        FlatPtr address = string_address;
+        TRY(write_to_region(stack, address, { reinterpret_cast<u8 const*>(string.characters_without_null_termination()), string.length() }));
         string_address += string.length() + 1;
-    }
-    words[word++] = 0;
-    for (auto string : environment) {
-        words[word++] = string_address;
-        TRY(write_to_region(stack, string_address, { reinterpret_cast<u8 const*>(string.characters_without_null_termination()), string.length() }));
-        string_address += string.length() + 1;
-    }
-    words[word++] = 0;
-    words[word++] = at_pagesz;
-    words[word++] = page_size;
-    words[word++] = at_entry;
-    words[word++] = entry;
-    words[word++] = at_null;
-    words[word++] = 0;
-    auto result = write_to_region(stack, sp, { reinterpret_cast<u8 const*>(words), pointer_words * sizeof(u64) });
+        return address;
+    };
+    auto fill = [&]() -> ErrorOr<void> {
+        words[word++] = arguments.size();
+        for (auto string : arguments)
+            words[word++] = TRY(place(string));
+        words[word++] = 0;
+        for (auto string : environment)
+            words[word++] = TRY(place(string));
+        words[word++] = 0;
+        for (auto const& entry : auxiliary) {
+            words[word++] = entry.type;
+            words[word++] = entry.value;
+        }
+        words[word++] = AT_EXECFN;
+        words[word++] = TRY(place(path));
+        words[word++] = AT_NULL;
+        words[word++] = 0;
+        return write_to_region(stack, sp, { reinterpret_cast<u8 const*>(words), pointer_words * sizeof(u64) });
+    };
+    auto result = fill();
     kfree(words);
     TRY(result);
     // The NULs after each string: pages start zeroed, and only the
@@ -371,6 +383,69 @@ static ErrorOr<NonnullRefPtr<KernelBuffer>> read_executable(Inode& inode)
     if (read != metadata.size)
         return Error::from_errno(EIO);
     return buffer;
+}
+
+// One ELF image in a new address space, `bias` added to its addresses:
+// the program, or its dynamic linker.
+struct LoadedImage {
+    FlatPtr bias { 0 };
+    FlatPtr entry { 0 };
+    FlatPtr program_headers { 0 }; // Where they are in memory (AT_PHDR).
+    FlatPtr lowest { 0 };
+};
+
+static ErrorOr<LoadedImage> load_image(AddressSpace& space, ELF::Image const& image, FlatPtr base, StringView name)
+{
+    auto const& header = image.header();
+    // An image linked for any address goes at `base`; one linked for its
+    // own address (ET_EXEC) stays there.
+    FlatPtr lowest_vaddr = ~FlatPtr(0);
+    for (auto const& segment : image.program_headers()) {
+        if (segment.p_type == ELF::PT_LOAD && segment.p_memsz > 0)
+            lowest_vaddr = min(lowest_vaddr, align_down<FlatPtr>(segment.p_vaddr, page_size));
+    }
+    if (lowest_vaddr == ~FlatPtr(0))
+        return Error::from_errno(ENOEXEC);
+    LoadedImage loaded;
+    loaded.bias = header.e_type == ELF::ET_DYN ? base - lowest_vaddr : 0;
+    loaded.lowest = lowest_vaddr + loaded.bias;
+    loaded.entry = header.e_entry + loaded.bias;
+    if (!is_user_range(loaded.entry, 4))
+        return Error::from_errno(ENOEXEC);
+
+    for (auto const& segment : image.program_headers()) {
+        if (segment.p_type == ELF::PT_PHDR)
+            loaded.program_headers = segment.p_vaddr + loaded.bias;
+        if (segment.p_type != ELF::PT_LOAD || segment.p_memsz == 0)
+            continue;
+        FlatPtr vaddr = segment.p_vaddr + loaded.bias;
+        if (segment.p_filesz > segment.p_memsz || !is_user_range(vaddr, segment.p_memsz))
+            return Error::from_errno(ENOEXEC);
+        int protection = protection_from_segment_flags(segment.p_flags);
+        if ((protection & PROT_WRITE) && (protection & PROT_EXEC))
+            return Error::from_errno(ENOEXEC);
+        FlatPtr start = align_down<FlatPtr>(vaddr, page_size);
+        FlatPtr end = align_up<FlatPtr>(vaddr + segment.p_memsz, page_size);
+        // Nothing of another segment, or of the other image, may be there.
+        for (FlatPtr page = start; page < end; page += page_size) {
+            if (space.find_region(page))
+                return Error::from_errno(ENOEXEC);
+        }
+        auto* region = TRY(space.map_anonymous(start, end - start, protection, name, true));
+        TRY(write_to_region(*region, vaddr, image.segment_data(segment)));
+        if (protection & PROT_EXEC) {
+            for (FlatPtr page = start; page < end; page += page_size) {
+                auto physical = region->object().page(region->object_index(page));
+                if (physical.get())
+                    Arch::make_code_coherent(physical);
+            }
+        }
+        // Without PT_PHDR: the headers inside the segment that maps the
+        // start of the file.
+        if (!loaded.program_headers && segment.p_offset <= header.e_phoff && header.e_phoff < segment.p_offset + segment.p_filesz)
+            loaded.program_headers = vaddr + (header.e_phoff - segment.p_offset);
+    }
+    return loaded;
 }
 
 ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, Span<StringView const> environment, TrapFrame& frame)
@@ -412,35 +487,71 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
         return Error::from_errno(ENOEXEC);
     auto const& image = image_or_error.value();
     auto const& header = image.header();
-    if (header.e_type != ELF::ET_EXEC || header.e_machine != ELF::EM_AARCH64 || !is_user_range(header.e_entry, 4))
+    if ((header.e_type != ELF::ET_EXEC && header.e_type != ELF::ET_DYN) || header.e_machine != ELF::EM_AARCH64)
+        return Error::from_errno(ENOEXEC);
+
+    // A dynamically linked program names its dynamic linker (/usr/lib/dyld),
+    // which the kernel loads too and starts instead; it loads the libraries.
+    RefPtr<KernelBuffer> interpreter;
+    Optional<ELF::Image> interpreter_image;
+    for (auto const& segment : image.program_headers()) {
+        if (segment.p_type != ELF::PT_INTERP)
+            continue;
+        auto name = image.segment_data(segment);
+        size_t length = 0;
+        while (length < name.size() && name[length] != 0)
+            ++length;
+        StringView interpreter_path { reinterpret_cast<char const*>(name.data()), length };
+        if (length == 0 || length >= 256 || interpreter_path[0] != '/')
+            return Error::from_errno(ENOEXEC);
+        auto resolved_interpreter = TRY(VirtualFileSystem::resolve(interpreter_path, "/"_sv));
+        interpreter = TRY(read_executable(*resolved_interpreter.inode));
+        auto parsed = ELF::Image::parse(interpreter->bytes());
+        if (parsed.is_error())
+            return Error::from_errno(ENOEXEC);
+        interpreter_image = parsed.release_value();
+        auto const& interpreter_header = interpreter_image->header();
+        if ((interpreter_header.e_type != ELF::ET_EXEC && interpreter_header.e_type != ELF::ET_DYN) || interpreter_header.e_machine != ELF::EM_AARCH64)
+            return Error::from_errno(ENOEXEC);
+        for (auto const& inner : interpreter_image->program_headers()) {
+            if (inner.p_type == ELF::PT_INTERP)
+                return Error::from_errno(ENOEXEC);
+        }
+        break;
+    }
+    // A position-independent program cannot relocate itself.
+    if (header.e_type == ELF::ET_DYN && !interpreter)
         return Error::from_errno(ENOEXEC);
 
     auto space = TRY(AddressSpace::create());
-    for (auto const& segment : image.program_headers()) {
-        if (segment.p_type != ELF::PT_LOAD || segment.p_memsz == 0)
-            continue;
-        if (segment.p_filesz > segment.p_memsz || !is_user_range(segment.p_vaddr, segment.p_memsz))
-            return Error::from_errno(ENOEXEC);
-        int protection = protection_from_segment_flags(segment.p_flags);
-        if ((protection & PROT_WRITE) && (protection & PROT_EXEC))
-            return Error::from_errno(ENOEXEC);
-        FlatPtr start = align_down<FlatPtr>(segment.p_vaddr, page_size);
-        FlatPtr end = align_up<FlatPtr>(segment.p_vaddr + segment.p_memsz, page_size);
-        auto* region = TRY(space->map_anonymous(start, end - start, protection, "program"_sv, true));
-        // File contents are copied now; the rest (.bss) is zero on demand.
-        TRY(write_to_region(*region, segment.p_vaddr, image.segment_data(segment)));
-        if (protection & PROT_EXEC) {
-            for (FlatPtr page = start; page < end; page += page_size) {
-                auto physical = region->object().page(region->object_index(page));
-                if (physical.get())
-                    Arch::make_code_coherent(physical);
-            }
-        }
-    }
+    auto program = TRY(load_image(*space, image, header.e_type == ELF::ET_DYN ? MemoryLayout::user_program_base : 0, "program"_sv));
+    Optional<LoadedImage> linker;
+    if (interpreter_image.has_value())
+        linker = TRY(load_image(*space, *interpreter_image, interpreter_image->header().e_type == ELF::ET_DYN ? MemoryLayout::user_interpreter_base : 0, "dyld"_sv));
 
     FlatPtr stack_bottom = MemoryLayout::user_stack_top - MemoryLayout::user_stack_size;
     auto* stack = TRY(space->map_anonymous(stack_bottom, MemoryLayout::user_stack_size, PROT_READ | PROT_WRITE, "stack"_sv, true));
-    FlatPtr stack_pointer = TRY(build_initial_stack(*stack, arguments, environment, header.e_entry));
+    // Set-user-ID and set-group-ID programs run as the file's owner and
+    // group (from below); the dynamic linker must then trust no environment.
+    auto program_file = resolved.inode->metadata();
+    u32 new_euid = (program_file.permissions & 04000) ? program_file.uid : m_credentials.euid;
+    u32 new_egid = (program_file.permissions & 02000) ? program_file.gid : m_credentials.egid;
+    bool secure = new_euid != m_credentials.uid || new_egid != m_credentials.gid;
+    AuxiliaryValue const auxiliary[] = {
+        { AT_PHDR, program.program_headers },
+        { AT_PHENT, sizeof(ELF::Elf64_Phdr) },
+        { AT_PHNUM, header.e_phnum },
+        { AT_PAGESZ, page_size },
+        { AT_BASE, linker.has_value() ? linker->lowest : 0 },
+        { AT_FLAGS, 0 },
+        { AT_ENTRY, program.entry },
+        { AT_UID, m_credentials.uid },
+        { AT_EUID, new_euid },
+        { AT_GID, m_credentials.gid },
+        { AT_EGID, new_egid },
+        { AT_SECURE, secure ? 1u : 0u },
+    };
+    FlatPtr stack_pointer = TRY(build_initial_stack(*stack, arguments, environment, path, { auxiliary, array_size(auxiliary) }));
 
     // The point of no return: the new program replaces the old one.
     OwnPtr<AddressSpace> old_space;
@@ -455,15 +566,16 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     old_space.clear();
 
     m_executable = executable;
-    // Set-user-ID and set-group-ID programs run as the file's owner and group.
-    auto program = resolved.inode->metadata();
-    if (program.permissions & 04000) {
-        m_credentials.euid = program.uid;
-        m_credentials.saved_uid = program.uid;
+    m_executable_bias = program.bias;
+    m_interpreter = interpreter;
+    m_interpreter_bias = linker.has_value() ? linker->bias : 0;
+    if (program_file.permissions & 04000) {
+        m_credentials.euid = program_file.uid;
+        m_credentials.saved_uid = program_file.uid;
     }
-    if (program.permissions & 02000) {
-        m_credentials.egid = program.gid;
-        m_credentials.saved_gid = program.gid;
+    if (program_file.permissions & 02000) {
+        m_credentials.egid = program_file.gid;
+        m_credentials.saved_gid = program_file.gid;
     }
     auto slash = path.find_last('/');
     set_name(slash.has_value() ? path.substring_view(slash.value() + 1) : path);
@@ -484,7 +596,7 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     }
     for (auto& file : closing)
         file = {};
-    Arch::prepare_user_entry(frame, header.e_entry, stack_pointer);
+    Arch::prepare_user_entry(frame, linker.has_value() ? linker->entry : program.entry, stack_pointer);
     return {};
 }
 
@@ -841,6 +953,77 @@ static void write_user_symbol(FormatSink& sink, Optional<ELF::Image> const& imag
     format_to(sink, "+{:#x}", address - symbol->address);
 }
 
+namespace {
+
+// Names the addresses of a crash report: in the program, in the dynamic
+// linker, or in a library mapped from a file (read once for the report),
+// the last two with the library's name, as in "abort+0x14 (libSystem.B.dylib)".
+class CrashSymbolizer {
+public:
+    CrashSymbolizer(AddressSpace& space, RefPtr<KernelBuffer> program, FlatPtr program_bias, RefPtr<KernelBuffer> linker, FlatPtr linker_bias)
+        : m_space(space)
+        , m_program_bias(program_bias)
+        , m_linker_bias(linker_bias)
+    {
+        if (program) {
+            if (auto parsed = ELF::Image::parse(program->bytes()); !parsed.is_error())
+                m_program = parsed.release_value();
+        }
+        if (linker) {
+            if (auto parsed = ELF::Image::parse(linker->bytes()); !parsed.is_error())
+                m_linker = parsed.release_value();
+        }
+    }
+
+    void write(FormatSink& sink, FlatPtr address)
+    {
+        if (m_program.has_value() && m_program->contains_address(address - m_program_bias)) {
+            write_user_symbol(sink, m_program, address - m_program_bias);
+            return;
+        }
+        if (m_linker.has_value() && m_linker->contains_address(address - m_linker_bias)) {
+            write_user_symbol(sink, m_linker, address - m_linker_bias);
+            sink.write(" (dyld)"_sv);
+            return;
+        }
+        auto location = m_space.file_location(address);
+        if (!location.has_value() || !location->file) {
+            sink.write("??"_sv);
+            return;
+        }
+        if (location->file.ptr() != m_library_file.ptr()) {
+            m_library_file = location->file;
+            m_library_bytes = nullptr;
+            m_library = {};
+            if (auto bytes = read_executable(*location->file); !bytes.is_error()) {
+                m_library_bytes = bytes.release_value();
+                if (auto parsed = ELF::Image::parse(m_library_bytes->bytes()); !parsed.is_error())
+                    m_library = parsed.release_value();
+            }
+        }
+        Optional<u64> vaddr = m_library.has_value() ? m_library->address_of_offset(location->offset) : Optional<u64> {};
+        if (!vaddr.has_value()) {
+            sink.write("??"_sv);
+            return;
+        }
+        write_user_symbol(sink, m_library, vaddr.value());
+        if (auto name = m_library->soname(); name.has_value())
+            format_to(sink, " ({})", name.value());
+    }
+
+private:
+    AddressSpace& m_space;
+    Optional<ELF::Image> m_program;
+    FlatPtr m_program_bias;
+    Optional<ELF::Image> m_linker;
+    FlatPtr m_linker_bias;
+    RefPtr<Inode> m_library_file;
+    RefPtr<KernelBuffer> m_library_bytes;
+    Optional<ELF::Image> m_library;
+};
+
+}
+
 void Process::report_crash(TrapFrame const& frame, int signal, vulture_siginfo const& info)
 {
     FixedStringBuilder<192> reason;
@@ -860,15 +1043,11 @@ void Process::report_crash(TrapFrame const& frame, int signal, vulture_siginfo c
     Arch::dump_registers(registers, user_view);
     kernel_log().write(registers.view());
 
-    Optional<ELF::Image> image;
-    if (m_executable) {
-        if (auto parsed = ELF::Image::parse(m_executable->bytes()); !parsed.is_error())
-            image = parsed.release_value();
-    }
+    CrashSymbolizer symbolizer(*m_address_space, m_executable, m_executable_bias, m_interpreter, m_interpreter_bias);
     dmesgln("Backtrace:");
     FixedStringBuilder<256> line;
     format_to(line, "  #0  {:#018x}  ", frame.program_counter());
-    write_user_symbol(line, image, frame.program_counter());
+    symbolizer.write(line, frame.program_counter());
     dmesgln("{}", line.view());
     FlatPtr frame_pointer = frame.frame_pointer();
     for (size_t index = 1; index < 32 && frame_pointer; ++index) {
@@ -877,7 +1056,7 @@ void Process::report_crash(TrapFrame const& frame, int signal, vulture_siginfo c
             break;
         line.clear();
         format_to(line, "  #{:<2} {:#018x}  ", index, record.value().return_address);
-        write_user_symbol(line, image, record.value().return_address - 4);
+        symbolizer.write(line, record.value().return_address - 4);
         dmesgln("{}", line.view());
         if (record.value().previous_frame_pointer <= frame_pointer)
             break;

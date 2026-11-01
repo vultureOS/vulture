@@ -7,6 +7,7 @@
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/memory.h>
 #include <Kernel/Arch/MemoryLayout.h>
+#include <Kernel/Arch/UserContext.h>
 #include <Kernel/FileSystem/Inode.h>
 #include <Kernel/Memory/AddressSpace.h>
 #include <Kernel/Memory/MemoryManager.h>
@@ -238,6 +239,16 @@ ErrorOr<void> AddressSpace::unmap(FlatPtr address, size_t size)
     return {};
 }
 
+Optional<AddressSpace::FileLocation> AddressSpace::file_location(FlatPtr address)
+{
+    MutexLocker locker(m_lock);
+    auto* region = find_region(address);
+    if (!region || !region->file())
+        return {};
+    FlatPtr page = align_down<FlatPtr>(address, page_size);
+    return FileLocation { region->file(), region->file_page(region->object_index(page)) * page_size + (address - page) };
+}
+
 size_t AddressSpace::resident_pages()
 {
     MutexLocker locker(m_lock);
@@ -277,11 +288,14 @@ ErrorOr<void> AddressSpace::protect(FlatPtr address, size_t size, int protection
     for (auto& region : m_regions) {
         if (region.base() < address || region.end() > address + size)
             continue;
+        bool becomes_code = (protection & PROT_EXEC) && !(region.m_protection & PROT_EXEC);
         region.m_protection = protection;
         for (FlatPtr page = region.base(); page < region.end(); page += page_size) {
             auto physical = region.object().page(region.object_index(page));
             if (!physical.get())
                 continue;
+            if (becomes_code)
+                Arch::make_code_coherent(physical);
             if (protection == PROT_NONE) {
                 (void)m_page_table.unmap_user_page(page);
                 continue;
@@ -330,6 +344,11 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
             return PageFaultResult::OutOfMemory;
         return PageFaultResult::Resolved;
     }
+
+    // Code from a file (a library's text) was written through the data
+    // cache; instruction fetches must see it.
+    if (protection & PROT_EXEC)
+        Arch::make_code_coherent(physical);
 
     bool exclusive = region->is_shared() || physical_memory().user_page_references(physical) == 1;
     if (access == AccessKind::Write && !exclusive) {

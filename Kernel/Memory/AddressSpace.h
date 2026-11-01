@@ -10,7 +10,9 @@
 #include <Kernel/Locking/Mutex.h>
 #include <Kernel/Memory/AnonymousVMObject.h>
 #include <LibBase/IntrusiveList.h>
+#include <LibBase/Optional.h>
 #include <LibBase/OwnPtr.h>
+#include <LibBase/RefPtr.h>
 
 namespace Kernel {
 
@@ -102,6 +104,14 @@ public:
     void activate() const;
 
     [[nodiscard]] Region* find_region(FlatPtr address);
+
+    // The file (and where in it) that `address` is mapped from, if any:
+    // what crash reports name a library frame by.
+    struct FileLocation {
+        RefPtr<Inode> file;
+        u64 offset { 0 };
+    };
+    [[nodiscard]] Optional<FileLocation> file_location(FlatPtr address);
     // Pages the program has touched (some may be shared).
     [[nodiscard]] size_t resident_pages();
     [[nodiscard]] Arch::PageTable const& page_table() const { return m_page_table; }
