@@ -94,6 +94,8 @@ constexpr u32 R_AARCH64_COPY = 1024;
 constexpr u32 R_AARCH64_GLOB_DAT = 1025;
 constexpr u32 R_AARCH64_JUMP_SLOT = 1026;
 constexpr u32 R_AARCH64_RELATIVE = 1027;
+constexpr u32 R_AARCH64_TLS_TPREL64 = 1030;
+constexpr u32 R_AARCH64_TLSDESC = 1031;
 
 constexpr u32 elf64_r_sym(u64 info) { return static_cast<u32>(info >> 32); }
 constexpr u32 elf64_r_type(u64 info) { return static_cast<u32>(info & 0xffffffff); }

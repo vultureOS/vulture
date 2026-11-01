@@ -10,12 +10,14 @@
 #include <Kernel/API/POSIX/signal_numbers.h>
 #include <LibELF/ELF.h>
 #include <LibSystem/Syscall.h>
+#include <LibSystem/ThreadPointer.h>
 
 // dyld, the dynamic linker (/usr/lib/dyld). The kernel loads a dynamically
 // linked program and this, and starts this. It loads the libraries the
 // program needs (and they need) from /usr/lib, maps their segments from
-// the files (so every process shares the pages), relocates everything,
-// runs the initializers, and jumps to the program.
+// the files (so every process shares the pages), relocates everything, sets
+// up the first thread's thread-local storage, runs the initializers, and
+// jumps to the program.
 //
 // It has no C library to use (it is what loads it): raw system calls, no
 // allocation, everything in fixed tables. It is linked for its own
@@ -156,6 +158,13 @@ struct Object {
     u64 relro_size { 0 };
     u64 needed[max_needed];
     size_t needed_count { 0 };
+    // Its thread-local storage (PT_TLS), and where that is from the thread
+    // pointer in every thread.
+    u64 tls_address { 0 };
+    u64 tls_file_size { 0 };
+    u64 tls_memory_size { 0 };
+    u64 tls_alignment { 1 };
+    u64 tls_offset { 0 };
 };
 
 Object s_objects[max_objects];
@@ -250,6 +259,14 @@ Object* find_loaded(char const* name)
     return nullptr;
 }
 
+void note_tls_segment(Object& object, Elf64_Phdr const& segment)
+{
+    object.tls_address = object.bias + segment.p_vaddr;
+    object.tls_file_size = segment.p_filesz;
+    object.tls_memory_size = segment.p_memsz;
+    object.tls_alignment = segment.p_align ? segment.p_align : 1;
+}
+
 // Maps the library's segments from `fd`; false (and `reason`) if it is
 // not one.
 bool map_library(int fd, Object& object, char* reason, size_t reason_size)
@@ -298,6 +315,8 @@ bool map_library(int fd, Object& object, char* reason, size_t reason_size)
         auto const& segment = segments[i];
         if (segment.p_type == PT_DYNAMIC)
             object.dynamic = reinterpret_cast<Elf64_Dyn const*>(object.bias + segment.p_vaddr);
+        if (segment.p_type == PT_TLS)
+            note_tls_segment(object, segment);
         if (segment.p_type == PT_GNU_RELRO) {
             object.relro_start = align_down(object.bias + segment.p_vaddr);
             object.relro_size = align_down(object.bias + segment.p_vaddr + segment.p_memsz) - object.relro_start;
@@ -434,8 +453,9 @@ u32 elf_hash(char const* name)
     return hash;
 }
 
-// The symbol `name` as `object` defines it (DT_HASH lookup).
-Elf64_Sym const* defined_in(Object const& object, char const* name, u32 hash)
+// The symbol `name` as `object` defines it (DT_HASH lookup): an ordinary
+// one, or a thread-local one.
+Elf64_Sym const* defined_in(Object const& object, char const* name, u32 hash, bool thread_local_symbol = false)
 {
     if (!object.hash || !object.symbols || !object.strings)
         return nullptr;
@@ -445,7 +465,7 @@ Elf64_Sym const* defined_in(Object const& object, char const* name, u32 hash)
     for (u32 index = buckets[hash % bucket_count]; index; index = chains[index]) {
         auto const& symbol = object.symbols[index];
         u8 binding = elf64_st_bind(symbol.st_info);
-        if (symbol.st_shndx == SHN_UNDEF || (binding != STB_GLOBAL && binding != STB_WEAK) || elf64_st_type(symbol.st_info) == STT_TLS)
+        if (symbol.st_shndx == SHN_UNDEF || (binding != STB_GLOBAL && binding != STB_WEAK) || (elf64_st_type(symbol.st_info) == STT_TLS) != thread_local_symbol)
             continue;
         if (strings_equal(object.strings + symbol.st_name, name))
             return &symbol;
@@ -471,6 +491,97 @@ bool resolve(char const* name, u64& address, Object const** where = nullptr, Obj
     return false;
 }
 
+// --- Thread-local storage ---
+//
+// All of it is static: every library is loaded before the program starts,
+// and each module's block sits at a fixed distance from the thread pointer,
+// after the two words of the control block. A variable's address is the
+// thread pointer plus its module's offset plus its offset in the module.
+
+extern "C" u8 dyld_tlsdesc_static[];
+
+System::ThreadLocalImage s_tls_image { nullptr, 0, 16 };
+
+// The usual size, kept here: no system calls for it.
+alignas(64) u8 s_small_tls_image[1024];
+alignas(64) u8 s_small_tls_block[1024];
+
+// Each module's offset, from what the static linker assumes for the program:
+// 16 bytes on, then up to an address that agrees with the segment's own
+// modulo its alignment.
+void assign_tls_offsets()
+{
+    u64 end = sizeof(System::ThreadControlBlock);
+    u64 alignment = 16;
+    for (size_t i = 0; i < s_object_count; ++i) {
+        auto& object = s_objects[i];
+        if (!object.tls_memory_size)
+            continue;
+        u64 virtual_address = object.tls_address - object.bias;
+        object.tls_offset = end + ((virtual_address - end) & (object.tls_alignment - 1));
+        end = object.tls_offset + object.tls_memory_size;
+        if (object.tls_alignment > alignment)
+            alignment = object.tls_alignment;
+    }
+    s_tls_image.size = end;
+    s_tls_image.alignment = alignment;
+}
+
+// Once relocated: the image every thread's block is copied from, and the
+// first thread's block.
+void set_up_first_thread()
+{
+    u8* image = s_small_tls_image;
+    u8* block = s_small_tls_block;
+    u64 size = s_tls_image.size;
+    u64 alignment = s_tls_image.alignment;
+    if (size > sizeof(s_small_tls_image) || alignment > 64) {
+        u64 room = align_up(size * 2 + alignment * 2);
+        long mapped = call(Syscall::mmap, 0, room, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, static_cast<unsigned long>(-1), 0);
+        if (mapped < 0)
+            fail("out of memory setting up thread-local storage");
+        auto base = static_cast<u64>(mapped);
+        image = reinterpret_cast<u8*>(base);
+        block = reinterpret_cast<u8*>((base + size + alignment - 1) & ~(alignment - 1));
+    }
+    for (size_t i = 0; i < s_object_count; ++i) {
+        auto const& object = s_objects[i];
+        auto const* source = reinterpret_cast<u8 const*>(object.tls_address);
+        for (u64 byte = 0; byte < object.tls_file_size; ++byte)
+            image[object.tls_offset + byte] = source[byte];
+    }
+    s_tls_image.data = image;
+    for (u64 byte = 0; byte < size; ++byte)
+        block[byte] = image[byte];
+    auto* control = reinterpret_cast<System::ThreadControlBlock*>(block);
+    control->image = &s_tls_image;
+    control->thread = nullptr;
+    System::set_thread_control_block(control);
+}
+
+// The offset from the thread pointer of a thread-local symbol that `object`
+// refers to (by index; 0 is `object`'s own block).
+u64 tls_offset_of(Object const& object, u32 symbol_index)
+{
+    if (symbol_index == 0)
+        return object.tls_offset;
+    auto const& symbol = object.symbols[symbol_index];
+    char const* name = object.strings + symbol.st_name;
+    if (elf64_st_bind(symbol.st_info) == STB_LOCAL)
+        return object.tls_offset + symbol.st_value;
+    u32 hash = elf_hash(name);
+    for (size_t i = 0; i < s_object_count; ++i) {
+        if (auto const* found = defined_in(s_objects[i], name, hash, true))
+            return s_objects[i].tls_offset + found->st_value;
+    }
+    char message[600] = "Symbol not found: ";
+    append_string(message, sizeof(message), name);
+    append_string(message, sizeof(message), "\n  Referenced from: ");
+    append_string(message, sizeof(message), object.path);
+    append_string(message, sizeof(message), "\n  Expected in: flat namespace");
+    fail(message);
+}
+
 void relocate_table(Object const& object, Elf64_Rela const* table, u64 size)
 {
     if (!table)
@@ -485,6 +596,17 @@ void relocate_table(Object const& object, Elf64_Rela const* table, u64 size)
             continue;
         if (type == R_AARCH64_RELATIVE) {
             *place = object.bias + static_cast<u64>(relocation.r_addend);
+            continue;
+        }
+        if (type == R_AARCH64_TLS_TPREL64) {
+            *place = tls_offset_of(object, symbol_index) + static_cast<u64>(relocation.r_addend);
+            continue;
+        }
+        if (type == R_AARCH64_TLSDESC) {
+            // Two words: what to call, and what it hands back from its
+            // descriptor. All the storage is static, so that is the offset.
+            place[1] = tls_offset_of(object, symbol_index) + static_cast<u64>(relocation.r_addend);
+            place[0] = reinterpret_cast<u64>(dyld_tlsdesc_static);
             continue;
         }
         if (type != R_AARCH64_GLOB_DAT && type != R_AARCH64_JUMP_SLOT && type != R_AARCH64_ABS64 && type != R_AARCH64_COPY) {
@@ -597,6 +719,8 @@ extern "C" u64 dyld_main(u64* stack)
     for (u64 i = 0; i < header_count; ++i) {
         if (headers[i].p_type == PT_DYNAMIC)
             program.dynamic = reinterpret_cast<Elf64_Dyn const*>(program.bias + headers[i].p_vaddr);
+        if (headers[i].p_type == PT_TLS)
+            note_tls_segment(program, headers[i]);
         if (headers[i].p_type == PT_GNU_RELRO) {
             program.relro_start = align_down(program.bias + headers[i].p_vaddr);
             program.relro_size = align_down(program.bias + headers[i].p_vaddr + headers[i].p_memsz) - program.relro_start;
@@ -610,6 +734,8 @@ extern "C" u64 dyld_main(u64* stack)
             load_library(s_objects[i].strings + s_objects[i].needed[n], s_objects[i]);
     }
 
+    assign_tls_offsets();
+
     // Libraries before the program (the program's copy relocations take
     // what the libraries' data holds once relocated).
     for (size_t i = s_object_count; i > 0; --i) {
@@ -619,6 +745,8 @@ extern "C" u64 dyld_main(u64* stack)
         if (object.relro_size)
             call(Syscall::mprotect, object.relro_start, object.relro_size, PROT_READ);
     }
+
+    set_up_first_thread();
 
     // Initializers: the libraries most depended on first, the program last;
     // each called as the C library's (argc, argv, environ).

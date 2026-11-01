@@ -23,3 +23,13 @@ _dyld_start:
     mov x30, xzr
     br x16
 .size _dyld_start, . - _dyld_start
+
+// What a TLS descriptor's first word points at: returns, in x0, the offset
+// from the thread pointer held in its second word (x0 points at the
+// descriptor). Its callers count on every other register being kept.
+.global dyld_tlsdesc_static
+.type dyld_tlsdesc_static, %function
+dyld_tlsdesc_static:
+    ldr x0, [x0, #8]
+    ret
+.size dyld_tlsdesc_static, . - dyld_tlsdesc_static

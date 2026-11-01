@@ -7,7 +7,7 @@
 # The dynamic linker, /usr/lib/dyld: a static program linked for its own
 # address (MemoryLayout::user_interpreter_base), with no C library.
 add_executable(dyld Start.S dyld.cpp)
-target_compile_options(dyld PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffreestanding>)
+target_compile_options(dyld PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffreestanding -fno-threadsafe-statics>)
 target_link_libraries(dyld PRIVATE LibBaseFreestanding)
 target_link_options(dyld PRIVATE
     -Wl,--image-base=0x7f0000000000
