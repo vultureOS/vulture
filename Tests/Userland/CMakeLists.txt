@@ -14,6 +14,7 @@ set(tests
     exec-target
     files
     filesystem
+    interactive
     fork
     hello
     libc

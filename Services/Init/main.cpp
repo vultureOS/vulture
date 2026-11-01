@@ -49,6 +49,7 @@ Test const s_tests[] = {
     { "/usr/tests/permissions", 0, 0 },
     { "/usr/tests/shell", 0, 0 },
     { "/usr/tests/tools", 0, 0 },
+    { "/usr/tests/interactive", 0, 0 },
     { "/usr/tests/many-processes", 0, 0 },
     // A crash must kill only the crashing process.
     { "/usr/tests/segfault", 0, SIGSEGV },
