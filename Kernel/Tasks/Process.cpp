@@ -780,9 +780,12 @@ void Process::dispatch_signal(TrapFrame& frame)
             stop(signal);
             return;
         }
-        if (what == DefaultAction::CrashReport)
+        // A crash report for faults, and for signals a process sends
+        // itself (abort()); not for `kill -SEGV` from elsewhere. No core
+        // files are written, so the status never says one was.
+        if (what == DefaultAction::CrashReport && (info.si_code != SI_USER || info.si_pid == m_pid))
             report_crash(frame, signal, info);
-        terminate(VULTURE_W_SIGNALED(signal, what == DefaultAction::CrashReport));
+        terminate(VULTURE_W_SIGNALED(signal, false));
     }
     if (action.handler == VULTURE_SIG_IGN)
         return;
@@ -792,7 +795,7 @@ void Process::dispatch_signal(TrapFrame& frame)
     if (Arch::push_signal_frame(frame, signal, info, saved_mask, action.handler, action.restorer).is_error()) {
         // No room for the frame (the stack is gone or bad): fatal.
         report_crash(frame, SIGSEGV, info);
-        terminate(VULTURE_W_SIGNALED(SIGSEGV, true));
+        terminate(VULTURE_W_SIGNALED(SIGSEGV, false));
     }
     SpinLockGuard guard(m_signal_lock);
     m_signal_mask |= action.mask;
@@ -819,6 +822,7 @@ void Process::handle_user_fault(TrapFrame& frame, FlatPtr address, AccessKind, b
 void Process::handle_user_exception(TrapFrame& frame, int signal)
 {
     vulture_siginfo info {};
+    info.si_code = SI_KERNEL;
     info.si_addr = reinterpret_cast<void*>(frame.program_counter());
     force_signal(signal, info);
 }
