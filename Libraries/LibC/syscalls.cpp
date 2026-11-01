@@ -139,6 +139,16 @@ int port_call(int send_right, struct vulture_port_message const* message, struct
     return check<int>(call(Syscall::port_call, send_right, message, answer, flags));
 }
 
+int bootstrap_port_get(int flags)
+{
+    return check<int>(call(Syscall::bootstrap_port, -1, flags));
+}
+
+int bootstrap_port_set(int send_right)
+{
+    return check<int>(call(Syscall::bootstrap_port, send_right, 0));
+}
+
 ssize_t pread(int fd, void* buffer, size_t count, off_t offset)
 {
     return check<ssize_t>(call(Syscall::pread, fd, buffer, count, offset));

@@ -11,7 +11,7 @@
 #include <string.h>
 #include <sys/mman.h>
 
-// Small blocks (up to 4 KiB with their header) come from size classes
+// Small blocks (up to 16 KiB with their header) come from size classes
 // carved out of 64 KiB chunks; larger ones are mappings of their own.
 // Every block starts with a 16-byte header, which keeps payloads 16-byte
 // aligned and lets free() catch bad and double frees. Not thread-safe yet
@@ -22,7 +22,7 @@ namespace {
 constexpr uint32_t used_magic = 0x6d616c6c; // "mall"
 constexpr uint32_t free_magic = 0x66726565; // "free"
 constexpr size_t header_size = 16;
-constexpr size_t class_count = 8; // 32 .. 4096 bytes
+constexpr size_t class_count = 10; // 32 .. 16384 bytes
 constexpr size_t smallest_shift = 5;
 constexpr size_t chunk_size = 64 * 1024;
 constexpr uint32_t large_class = 0xff;

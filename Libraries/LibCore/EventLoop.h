@@ -33,6 +33,7 @@ public:
     // Runs until quit(); returns the code given to it.
     int exec();
     void quit(int code = 0);
+    [[nodiscard]] bool is_quitting() const { return m_quitting; }
     // One round: waits (unless told not to) until something happens, then
     // handles everything that has.
     void pump(bool wait = true);

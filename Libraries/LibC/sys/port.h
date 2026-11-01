@@ -24,4 +24,11 @@ int port_receive(int receive_right, struct vulture_port_received*, int flags);
 // Sends and waits for the answer (the receiver gets a reply right).
 int port_call(int send_right, struct vulture_port_message const*, struct vulture_port_received* answer, int flags);
 
+// A new descriptor for this process's bootstrap port (the name service,
+// vlaunchd), or -1 and ENOENT if it has none.
+int bootstrap_port_get(int flags);
+// `send_right` becomes the bootstrap port, for this process and those it
+// starts.
+int bootstrap_port_set(int send_right);
+
 __END_DECLS
