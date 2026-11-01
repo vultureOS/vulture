@@ -8,6 +8,7 @@
 set(tests
     abort
     accounts
+    bootstrap
     bad-pointers
     copy-on-write
     devices
@@ -54,4 +55,9 @@ endforeach()
 
 # The tests of libraries above LibC.
 target_link_libraries(test-eventloop PRIVATE LibCore LibJSON)
-target_link_libraries(test-ports PRIVATE LibCore)
+target_link_libraries(test-ports PRIVATE LibIPC LibCore)
+target_link_libraries(test-bootstrap PRIVATE LibIPC)
+vulture_compile_ipc(test-bootstrap Echo.ipc)
+# The service bootstrap.cpp starts through vlaunchd.
+vulture_add_program(echo-service SOURCES echo-service.cpp DESTINATION usr/tests LIBRARIES LibIPC)
+vulture_compile_ipc(echo-service Echo.ipc)

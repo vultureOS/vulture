@@ -1,0 +1,11 @@
+// A test service: Tests/Userland/echo-service.cpp serves it, bootstrap.cpp
+// calls it.
+endpoint Echo
+{
+    echo(String text) => (String text)
+    // Appended to /tmp/bootstrap-test/shouts.
+    shout(String text) =|
+    process() => (i32 pid)
+    lengths(Vector<String> words) => (Vector<u32> lengths, u64 total)
+    stop() =|
+}

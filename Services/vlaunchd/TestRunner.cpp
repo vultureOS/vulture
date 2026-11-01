@@ -58,6 +58,7 @@ Test const s_tests[] = {
     { "/usr/tests/launchd", 0, 0 },
     { "/usr/tests/posix", 0, 0 },
     { "/usr/tests/ports", 0, 0 },
+    { "/usr/tests/bootstrap", 0, 0 },
     { "/usr/tests/many-processes", 0, 0 },
     // A crash must kill only the crashing process.
     { "/usr/tests/segfault", 0, SIGSEGV },

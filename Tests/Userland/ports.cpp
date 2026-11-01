@@ -6,6 +6,7 @@
 
 #include "Test.h"
 #include <LibCore/EventLoop.h>
+#include <LibIPC/Listener.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -369,6 +370,96 @@ void measure_round_trip()
 
 }
 
+// The same, with the server waiting in its event loop (poll()) rather
+// than in port_receive(), as services do.
+void measure_round_trip_through_event_loop()
+{
+    int fds[2];
+    CHECK(port_create(fds, 0) == 0);
+    pid_t server = fork();
+    if (server == 0) {
+        close(fds[1]);
+        Core::EventLoop loop;
+        loop.watch(fds[0], Core::EventLoop::Interest::Read, [&] {
+            char byte[8];
+            vulture_port_received request {};
+            for (;;) {
+                request.bytes = byte;
+                request.capacity = sizeof(byte);
+                if (port_receive(fds[0], &request, VULTURE_PORT_NONBLOCK) < 0) {
+                    if (errno == EPIPE)
+                        loop.quit(0);
+                    return;
+                }
+                vulture_port_message answer {};
+                answer.reply = -1;
+                port_send(request.reply, &answer, 0);
+                close(request.reply);
+            }
+        });
+        _exit(loop.exec());
+    }
+    close(fds[0]);
+    vulture_port_message request {};
+    request.reply = -1;
+    vulture_port_received answer {};
+    for (int i = 0; i < 200; ++i)
+        port_call(fds[1], &request, &answer, 0);
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    constexpr int rounds = 2000;
+    int failures = 0;
+    for (int i = 0; i < rounds; ++i)
+        failures += port_call(fds[1], &request, &answer, 0) < 0;
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    long long nanoseconds = ((end.tv_sec - start.tv_sec) * 1'000'000'000LL + (end.tv_nsec - start.tv_nsec)) / rounds;
+    printf("ports: round trip to a server in its event loop: %lld ns\n", nanoseconds);
+    CHECK(failures == 0);
+    close(fds[1]);
+    waitpid(server, nullptr, 0);
+}
+
+// The same through LibIPC: its listener receives, the answer goes back
+// with IPC::answer().
+void measure_listener()
+{
+    int fds[2];
+    CHECK(port_create(fds, 0) == 0);
+    pid_t server = fork();
+    if (server == 0) {
+        close(fds[1]);
+        Core::EventLoop loop;
+        IPC::Listener listener(loop, IPC::Port(fds[0]), [&](IPC::ReceivedMessage& message) {
+            IPC::Encoder answer(1, 1);
+            (void)IPC::answer(message, answer);
+        });
+        _exit(loop.exec());
+    }
+    close(fds[0]);
+    vulture_port_message request {};
+    request.reply = -1;
+    vulture_port_received answer {};
+    char bytes[64];
+    for (int i = 0; i < 200; ++i) {
+        answer.bytes = bytes;
+        answer.capacity = sizeof(bytes);
+        port_call(fds[1], &request, &answer, 0);
+    }
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    constexpr int rounds = 2000;
+    for (int i = 0; i < rounds; ++i) {
+        answer.bytes = bytes;
+        answer.capacity = sizeof(bytes);
+        port_call(fds[1], &request, &answer, 0);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    printf("ports: round trip to a LibIPC listener: %lld ns\n", ((end.tv_sec - start.tv_sec) * 1'000'000'000LL + (end.tv_nsec - start.tv_nsec)) / rounds);
+    kill(server, SIGKILL);
+    waitpid(server, nullptr, 0);
+    close(fds[1]);
+}
+
 int main()
 {
     signal(SIGPIPE, SIG_IGN);
@@ -378,5 +469,7 @@ int main()
     test_memory();
     test_event_loop();
     measure_round_trip();
+    measure_round_trip_through_event_loop();
+    measure_listener();
     return finish();
 }
