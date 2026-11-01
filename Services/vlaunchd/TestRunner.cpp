@@ -57,6 +57,7 @@ Test const s_tests[] = {
     { "/usr/tests/eventloop", 0, 0 },
     { "/usr/tests/launchd", 0, 0 },
     { "/usr/tests/posix", 0, 0 },
+    { "/usr/tests/threads", 0, 0 },
     { "/usr/tests/ports", 0, 0 },
     { "/usr/tests/bootstrap", 0, 0 },
     { "/usr/tests/services", 0, 0 },
