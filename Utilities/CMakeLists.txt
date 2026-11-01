@@ -17,6 +17,14 @@ vulture_add_program(passwd SOURCES bin/passwd.cpp DESTINATION usr/bin LIBRARIES 
 vulture_add_program(sudo SOURCES bin/sudo.cpp DESTINATION usr/bin LIBRARIES LibCore)
 vulture_add_program(getty SOURCES bin/getty.cpp DESTINATION usr/libexec)
 
+# The system services' tools.
+vulture_add_program(log SOURCES bin/log.cpp DESTINATION usr/bin LIBRARIES LibServices)
+vulture_add_program(logger SOURCES bin/logger.cpp DESTINATION usr/bin LIBRARIES LibServices)
+vulture_add_program(notifyutil SOURCES bin/notifyutil.cpp DESTINATION usr/bin LIBRARIES LibServices)
+vulture_add_program(scutil SOURCES bin/scutil.cpp DESTINATION usr/sbin LIBRARIES LibServices)
+vulture_add_program(pbcopy SOURCES bin/pbcopy.cpp DESTINATION usr/bin LIBRARIES LibServices)
+vulture_install_alias(pbcopy usr/bin pbpaste)
+
 # vulture_add_tool(<name> <directory> [<other names> <directory>]...):
 # bin/<name>.cpp, installed in <directory> (and under the other names,
 # for tools that act by the name they are run as).
