@@ -8,47 +8,80 @@ the system font is Inter (SIL OFL).
 
 ## How "pixel-perfect" is achieved
 
-1. **Measure real macOS.** Capture controls, title bars, traffic lights, the
-   menu bar, Dock, sidebars, menus, sheets and shadows at 2x, in light and dark
-   appearance, using Screenshot and Digital Color Meter. Record sizes, radii,
-   colors, blur, shadow and animation timing.
+1. **Measure AppKit.** `Meta/Calibration/measure.sh` links a program against a
+   macOS 15 SDK, which is what selects Sequoia's look on any newer macOS, has
+   AppKit draw every control off screen in light and dark at 1x and 2x, and prints
+   numbers: frames, alignment insets, intrinsic sizes, the box of what shows, rows
+   of pixels through the middle, and system colors and metrics. It runs only on a
+   Mac, only when calibrating. Nothing in the OS or its build depends on it, and no
+   picture of Apple's goes in the repository.
 2. **Encode the measurements as tokens** in
-   `Base/System/Library/Themes/{Light,Dark}.json`: colors, materials (blur
-   radius, saturation, tint), metrics, corner radii, shadows, type scale and
-   animation curves. pranaUI and PranaWindowServer read only tokens; no visual
-   value is hard-coded in code.
-3. **Compare and lock.** The Widget Gallery app renders every control at 1x
-   and 2x, in light and dark. `Tools/imgdiff` overlays our render on the
-   measured reference for review. Approved renders become golden images, and
-   `ninja test-ui` fails on any regression (max channel difference ≤ 2, ≤ 0.1%
-   of pixels).
+   `Base/System/Library/Themes/{Light,Dark}.json` (colors, and each control's face
+   as a fill with rings of shadow outside and shading inside) and `Metrics.json`
+   (sizes, which do not change with the appearance). pranaUI and PranaWindowServer
+   read only tokens; no visual value is hard-coded in code. A token that is missing
+   draws magenta and is counted, and the tests hold the count at zero.
+3. **Compare.** `Meta/Calibration/compare.py` sets AppKit's rows and boxes against
+   those of `ui-catalog`, which draws the same controls set up the same way.
+   `Tests/UI/Measured/controls.json` keeps the sizes and boxes, and `TestMetrics` holds
+   every control's visible box within a pixel of AppKit's on every edge, in light and
+   dark, at 1x and 2x (300 looks).
+4. **Lock.** The Widget Gallery shows every control on the real window server. Its
+   screenshots, approved by eye, are golden images: `ninja test-ui` fails on any
+   regression (max channel difference 2, at most 0.1% of pixels).
 
 ## Where this stands
 
-Tokens and golden tests exist (M8): `Base/System/Library/Themes/{Light,Dark}.json` drive
-the window server, and `ninja test-ui` compares its output with
-`Tests/UI/Golden` at 1x and 2x. Step 1 has not been done: nothing has been measured
-against a real Mac yet, so the values are estimates, and a passing golden shows
-that nothing changed, not that it matches macOS. Calibrating them, with the Widget
-Gallery of M9, is what "pixel-perfect" still needs.
+Controls are measured, and held to AppKit by a test. Be clear about what that does
+and does not mean:
 
-## Starting tokens
+- **It is AppKit linked against SDK 15.2, running on macOS 26.4, not a Sequoia
+  install.** SDK-linked behavior gives Sequoia's look for what AppKit gates on the
+  SDK: window corners (12 pt, 16 on 26), title bars (28 pt, 32 on 26), buttons and
+  the controls drawn with them. What it does not gate is today's macOS: menu rows
+  report 24 pt under both SDKs, so they say nothing of Sequoia, and the 22 pt here
+  is from memory, not measured. The same goes for anything else not gated.
+- **Text differs.** Our font is Inter, not SF, so widths differ. Padding is what is
+  carried over; a label's ends are not compared. Bezel labels use Inter Medium, which
+  matched AppKit's weight by eye; SF's letterforms are not reproduced.
+- **Not measured:** window shadows and vibrancy (AppKit's frame view renders opaque
+  off screen), materials in general, focus rings, the inactive-window look of controls,
+  anything in motion. These are estimates, and goldens only say they have not changed.
+- **Bezel shading is a fit.** Rings of alpha reproduce AppKit's rows at the edges to a
+  few levels out of 255, not exactly. At 2x they come close; at 1x they follow from
+  the same numbers. Control symbols (chevrons, checkmarks) are original shapes
+  drawn to match in size and weight.
+- **System colors** are the published values for macOS, not measured here (they are
+  not gated either).
 
-All values are approximate (≈) and get calibrated in step 1. Units are points;
-2x displays double them.
+So it reads as Sequoia and lines up to the pixel on the metrics that are tested,
+but it has not been compared with a real Sequoia install. Doing so, with the same tool,
+is what remains.
+
+## Tokens, as measured
+
+Units are points; 2x displays double them.
 
 | Token | Value |
 |---|---|
-| Menu bar height | ≈ 24 pt, translucent material |
-| Title bar / unified toolbar | ≈ 28 pt / ≈ 52 pt |
-| Window corner radius | ≈ 10 pt |
-| Traffic lights | ⌀ ≈ 12 pt, ≈ 8 pt gaps; red/yellow/green; glyphs on hover; grey when the window is inactive |
-| Type (Inter) | body 13 pt, small 11, mini 9, title 13 semibold, large title 26 |
-| Accent | systemBlue `#007AFF` (light) / `#0A84FF` (dark); user-selectable accent |
-| Push button | ≈ 22 pt tall, ≈ 6 pt radius; the default button uses the accent fill |
-| Dock | 48–64 pt icons, magnifying to 128; rounded translucent shelf; running-app dots |
-| Motion | standard ≈ 0.25 s ease-in-out; springs for the Dock, Mission Control and sheets; genie minimize |
+| Title bar / toolbar | 28 pt / 44 expanded, 52 unified, 38 compact |
+| Window corner radius | 12 pt |
+| Traffic lights | ⌀ 12 pt, 8 pt gaps, 8 pt inset, centered at y = 14 |
+| Type (Inter) | body 13, small 11, mini 9, large title 26, title1 22, title2 17, title3 15 |
+| Accent | systemBlue `#007AFF` (user-selectable: what uses it follows its hue) |
+| Push button | 20 pt tall (large 28, small 16, mini 13), radius 5 (6, 4, 3), padding 10.35 |
+| Checkbox, radio | 14 pt (16, 12, 10) |
+| Switch | 38 by 22 (32 by 18, 26 by 15) |
+| Segmented | 22 pt (30, 18, 15) |
+| Pop-up | 20 pt (28, 16, 13) |
+| Field | 21 pt, rounded 22, search 22 (large 30) |
+| Table | row 24, header 28, indent 13 |
+| Menu | row 22 (unmeasured: see above), separator 11, padding 5 |
+| Alert | 260 pt wide |
+| Motion | standard 0.25 s ease-in-out; window resize 0.35 s; springs for switches and sheets |
 | Rendering | 2x HiDPI by default (2560×1600 px = 1280×800 pt), with a 1x fallback |
+
+The Dock, Mission Control and the like are M10's, with tokens to come.
 
 ## Materials
 

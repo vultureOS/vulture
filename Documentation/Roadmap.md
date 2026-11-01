@@ -47,7 +47,7 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
 | Null syscall | < 150 ns | |
 | Context switch | < 1 µs | 173 ns (M3, yield between two threads on one processor) |
 | IPC round trip | < 3 µs | 0.84 µs (M7, call and answer between two processes; 4.6 µs through a generated proxy to a vlaunchd-started service) |
-| Window drag at 2560×1600 | 60 fps | 59.2–59.7 fps (M8; 10 windows, 5 with blur; 16.7 ms beat, 8–9 ms of work per frame; beats with no pointer movement draw nothing) |
+| Window drag at 2560×1600 | 60 fps | 59.2–59.7 fps (M8, and again at M9; 10 windows, 5 with blur; 16.7 ms beat, 8–11 ms of work per frame; beats with no pointer movement draw nothing) |
 | Input to photon | ≤ 1 frame | |
 | TextEdit cold launch | < 300 ms | |
 
@@ -177,3 +177,16 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
     what macOS is known to use, not measurements of it (see
     [Design System](DesignSystem.md)). Goldens catch regressions, not distance from
     macOS.
+- **M9:** The look can be measured without anyone's screenshots: AppKit picks its
+  look by the SDK a program links against, so a program linked against SDK 15.2 draws
+  Sequoia's window corners, title bars and control sizes on macOS 26, off screen (see
+  `Meta/Calibration` and `DesignSystem.md`, which says what this leaves out). A face is
+  a stack of rounded rectangles of alpha, a shape's edge at 2x spreads a pixel with
+  about 12% of its coverage, and 1x is the box filter of 2x; rings outside must not
+  run under the face, or a translucent one shows them. Golden screenshots found a real
+  race: material jobs each blurred the screen while siblings wrote to it, so a band of
+  a sidebar depended on which thread got there first. They now compute everything and
+  then place it. pranaUI runs on the host with a platform of the test's own, so its 58
+  tests run under ASan and UBSan; a test on the real server caught what the host's
+  could not: a press that becomes a drag, move or menu never hears its release.
+
