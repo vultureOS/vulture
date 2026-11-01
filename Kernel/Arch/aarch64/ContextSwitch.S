@@ -8,8 +8,8 @@
  * Thread switching; the layout is ThreadContext (ThreadContext.h).
  *
  * aarch64_switch_context(x0 = from, x1 = to) saves what the calling
- * convention says survives a call (x19-x30, sp) plus the FP/SIMD state,
- * loads the same from `to`, and returns into it.
+ * convention says survives a call (x19-x30, sp) plus the FP/SIMD state and
+ * the user's thread pointer, loads the same from `to`, and returns into it.
  */
 
 .text
@@ -27,7 +27,8 @@ aarch64_switch_context:
     mrs x10, fpcr
     stp x9, x10, [x0, #96]
     mrs x9, fpsr
-    str x9, [x0, #112]
+    mrs x10, tpidr_el0
+    stp x9, x10, [x0, #112]
 
     add x9, x0, #128
     stp q0, q1, [x9, #0]
@@ -68,8 +69,9 @@ aarch64_switch_context:
     ldp x9, x10, [x1, #96]
     mov sp, x9
     msr fpcr, x10
-    ldr x9, [x1, #112]
+    ldp x9, x10, [x1, #112]
     msr fpsr, x9
+    msr tpidr_el0, x10
     ldp x19, x20, [x1, #0]
     ldp x21, x22, [x1, #16]
     ldp x23, x24, [x1, #32]
@@ -91,3 +93,60 @@ aarch64_thread_trampoline:
     bl kernel_thread_start
     brk #0
 .size aarch64_thread_trampoline, . - aarch64_thread_trampoline
+
+/*
+ * The FP/SIMD state, for signal frames and fork. x0 = 66 words: q0-q31,
+ * FPCR, FPSR. Kernel code never touches these registers, so they hold the
+ * current thread's user state whenever it is in the kernel.
+ */
+.global aarch64_save_fp_state
+.type aarch64_save_fp_state, %function
+aarch64_save_fp_state:
+    stp q0, q1, [x0, #0]
+    stp q2, q3, [x0, #32]
+    stp q4, q5, [x0, #64]
+    stp q6, q7, [x0, #96]
+    stp q8, q9, [x0, #128]
+    stp q10, q11, [x0, #160]
+    stp q12, q13, [x0, #192]
+    stp q14, q15, [x0, #224]
+    stp q16, q17, [x0, #256]
+    stp q18, q19, [x0, #288]
+    stp q20, q21, [x0, #320]
+    stp q22, q23, [x0, #352]
+    stp q24, q25, [x0, #384]
+    stp q26, q27, [x0, #416]
+    stp q28, q29, [x0, #448]
+    stp q30, q31, [x0, #480]
+    mrs x9, fpcr
+    mrs x10, fpsr
+    str x9, [x0, #512]
+    str x10, [x0, #520]
+    ret
+.size aarch64_save_fp_state, . - aarch64_save_fp_state
+
+.global aarch64_load_fp_state
+.type aarch64_load_fp_state, %function
+aarch64_load_fp_state:
+    ldp q0, q1, [x0, #0]
+    ldp q2, q3, [x0, #32]
+    ldp q4, q5, [x0, #64]
+    ldp q6, q7, [x0, #96]
+    ldp q8, q9, [x0, #128]
+    ldp q10, q11, [x0, #160]
+    ldp q12, q13, [x0, #192]
+    ldp q14, q15, [x0, #224]
+    ldp q16, q17, [x0, #256]
+    ldp q18, q19, [x0, #288]
+    ldp q20, q21, [x0, #320]
+    ldp q22, q23, [x0, #352]
+    ldp q24, q25, [x0, #384]
+    ldp q26, q27, [x0, #416]
+    ldp q28, q29, [x0, #448]
+    ldp q30, q31, [x0, #480]
+    ldr x9, [x0, #512]
+    ldr x10, [x0, #520]
+    msr fpcr, x9
+    msr fpsr, x10
+    ret
+.size aarch64_load_fp_state, . - aarch64_load_fp_state

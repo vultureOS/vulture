@@ -98,17 +98,17 @@ void handle_user_synchronous(TrapFrame& frame)
     Arch::mask_interrupts();
 }
 
-// The last stop before user mode: switch threads if asked to, and deliver
-// signals (which may end the process instead).
+// The last stop before user mode: switch threads if asked to, and do what
+// the process has for this thread (deliver signals, stop, end).
 void prepare_return_to_user(TrapFrame& frame)
 {
     for (;;) {
         Scheduler::preempt_if_needed();
         auto* process = Process::current();
-        if (!process || !process->has_deliverable_signal())
+        if (!process || !process->has_work_before_user())
             return;
         Arch::enable_interrupts();
-        process->dispatch_signal(frame);
+        process->do_work_before_user(frame);
         Arch::mask_interrupts();
     }
 }

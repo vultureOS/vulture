@@ -56,7 +56,7 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
     auto child = TRY(create(this));
     child->set_name(name());
     child->m_executable = m_executable;
-    child->m_cwd = m_cwd;
+    child->m_cwd = current_directory();
     child->m_pgid.store(pgid());
     child->m_sid.store(sid());
     child->m_controlling_terminal = m_controlling_terminal;
@@ -71,7 +71,6 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
     }
     {
         SpinLockGuard guard(m_signal_lock);
-        child->m_signal_mask = m_signal_mask;
         for (int signal = 0; signal < NSIG; ++signal)
             child->m_signal_actions[signal] = m_signal_actions[signal];
     }
@@ -83,8 +82,12 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
     // The child resumes from the same point, seeing 0 from fork().
     thread->user_trap_frame() = frame;
     Arch::set_fork_child_result(thread->user_trap_frame());
+    Arch::copy_current_user_state(thread->m_context);
+    auto& self = Thread::current();
+    thread->m_signal_mask.store(self.m_signal_mask.load());
+    thread->m_alternate_stack = self.m_alternate_stack;
+    thread->m_alternate_stack_size = self.m_alternate_stack_size;
     thread->set_process(*child);
-    child->m_thread = thread.ptr();
 
     child->register_with_parent();
     thread->start();

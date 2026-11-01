@@ -70,6 +70,7 @@ add_executable(Kernel
     Syscalls/ProcessCalls.cpp
     Syscalls/SignalCalls.cpp
     Syscalls/SystemCalls.cpp
+    Syscalls/ThreadCalls.cpp
     Syscalls/TimeCalls.cpp
     Tasks/Process.cpp
     Tasks/Processor.cpp

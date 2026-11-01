@@ -23,13 +23,14 @@ struct alignas(16) ThreadContext {
     u64 stack_pointer;
     u64 fpcr;
     u64 fpsr;
-    u64 reserved;
+    u64 thread_pointer; // TPIDR_EL0: the user's, for thread-local storage.
     u64 vector_registers[64]; // q0-q31
 };
 
 static_assert(__builtin_offsetof(ThreadContext, frame_pointer) == 80);
 static_assert(__builtin_offsetof(ThreadContext, stack_pointer) == 96);
 static_assert(__builtin_offsetof(ThreadContext, fpsr) == 112);
+static_assert(__builtin_offsetof(ThreadContext, thread_pointer) == 120);
 static_assert(__builtin_offsetof(ThreadContext, vector_registers) == 128);
 static_assert(sizeof(ThreadContext) == 640);
 

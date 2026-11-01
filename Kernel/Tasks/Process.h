@@ -9,6 +9,7 @@
 #include <Kernel/API/POSIX/signal_numbers.h>
 #include <Kernel/Arch/TrapFrame.h>
 #include <Kernel/FileSystem/FileDescription.h>
+#include <Kernel/Locking/Mutex.h>
 #include <Kernel/Locking/WaitQueue.h>
 #include <Kernel/Memory/AddressSpace.h>
 #include <Kernel/API/POSIX/port.h>
@@ -37,9 +38,9 @@ struct SignalAction {
     FlatPtr restorer { 0 };
 };
 
-// A running program: an address space, open files, signal state and (for
-// now) one thread. Parents hold a reference to each child until they reap
-// it with waitpid(); a process whose thread has gone is a zombie until then.
+// A running program: an address space, open files, signal state and its
+// threads. Parents hold a reference to each child until they reap it with
+// waitpid(); a process whose threads have gone is a zombie until then.
 class Process final : public RefCounted<Process> {
 public:
     static constexpr size_t max_open_files = 64;
@@ -77,8 +78,10 @@ public:
     [[nodiscard]] Credentials const& credentials() const { return m_credentials; }
     [[nodiscard]] u32 umask() const { return m_umask; }
 
-    // Called when the process's thread is gone (its last reference).
-    void thread_finished();
+    // Called when one of its threads is gone (its last reference).
+    void thread_finished(Thread&);
+    // A new thread of this process.
+    void add_thread(Thread&);
 
     // System calls (see Kernel/API/Syscalls.def).
 #define SYSCALL(name, arguments) ErrorOr<FlatPtr> sys_##name(TrapFrame&, SyscallArguments const&);
@@ -91,12 +94,24 @@ public:
     // A fault other than a page fault (illegal instruction, alignment...).
     void handle_user_exception(TrapFrame&, int signal);
 
-    // Delivers one pending signal, on the way back to user mode.
+    // For the current thread, on the way back to user mode: is there
+    // anything to do first; do it (deliver one signal, wait while the
+    // process is stopped, or end the thread).
+    [[nodiscard]] bool has_work_before_user() const;
+    void do_work_before_user(TrapFrame&);
+
+    // Should the thread stop waiting and return toward user mode (it has a
+    // signal to take, or must end)?
+    [[nodiscard]] bool has_deliverable_signal(Thread const&) const;
+    // The same for the current thread.
     [[nodiscard]] bool has_deliverable_signal() const;
     void dispatch_signal(TrapFrame&);
 
-    // From any thread: queues `signal` and interrupts sleeps and waits.
+    // From any thread: queues `signal` for the process (any thread not
+    // blocking it takes it) and interrupts that thread.
     void send_signal(int signal, vulture_siginfo const&);
+    // The same for one thread of this process.
+    void send_signal_to_thread(Thread&, int signal, vulture_siginfo const&);
     // To every process in the group; ESRCH if there is none.
     static ErrorOr<void> send_signal_to_group(ProcessID pgid, int signal, vulture_siginfo const&);
     [[nodiscard]] static bool group_exists_in_session(ProcessID pgid, ProcessID sid);
@@ -119,6 +134,18 @@ private:
     void stop(int signal);
     void continue_running();
     void notify_parent(int code, int status);
+    void wait_while_stopped(Thread const&);
+
+    // Threads. end_other_threads() makes every other thread end and waits
+    // for that; if another thread got there first, the caller ends instead.
+    void end_other_threads();
+    [[nodiscard]] bool must_end(Thread const&) const;
+    [[noreturn]] void exit_current_thread();
+    // A thread not blocking `signal` looks at its pending signals.
+    void interrupt_a_thread_for(int signal);
+    void reroute_pending_signals(u64 signals);
+    [[nodiscard]] bool blocked_by_every_thread(int signal);
+    [[nodiscard]] String current_directory();
 
     ErrorOr<int> allocate_fd(NonnullRefPtr<FileDescription>, bool close_on_exec, int lowest = 0);
     void release_fd(int fd);
@@ -138,7 +165,15 @@ private:
     IntrusiveList<Process, &Process::m_sibling_node> m_children;
 
     OwnPtr<AddressSpace> m_address_space;
-    Thread* m_thread { nullptr };
+    // Its threads, until each ends. Lock order: m_signal_lock, then this.
+    mutable SpinLock m_threads_lock;
+    Thread::ProcessThreadList m_threads;
+    // Thread objects not destroyed yet: threads that left the list may
+    // still be on a processor, on this address space.
+    Atomic<u32> m_thread_objects { 0 };
+    WaitQueue m_thread_gone_wait;
+    // The thread ending all the others (for exit or exec).
+    Atomic<Thread*> m_ending_thread { nullptr };
     // The program's ELF file, kept for crash reports.
     // Ports (Syscalls/PortCalls.cpp).
     ErrorOr<NonnullOwnPtr<PortMessage>> build_port_message(FlatPtr user_message, bool& move_rights, Vector<int>& sent_fds, Vector<vulture_port_region>& sent_regions);
@@ -151,9 +186,10 @@ private:
     RefPtr<KernelBuffer> m_interpreter;
     FlatPtr m_interpreter_bias { 0 };
     // The canonical working directory.
+    Mutex m_cwd_lock;
     String m_cwd;
     i64 m_start_time { 0 };
-    u64 m_exited_cpu_ticks { 0 };
+    Atomic<u64> m_exited_cpu_ticks { 0 };
     // exec() of a "#!" script nests at most this deep.
     u32 m_interpreter_depth { 0 };
 
@@ -165,19 +201,18 @@ private:
     SpinLock m_files_lock;
     FileDescriptor m_files[max_open_files];
 
-    // Signals: pending bits may be set by any thread; the rest is touched
-    // only by this process's own thread.
+    // Signals sent to the process and what each does; masks, and signals
+    // sent to one thread, are the thread's (see Thread.h).
     mutable SpinLock m_signal_lock;
     Atomic<u64> m_pending_signals { 0 };
-    u64 m_signal_mask { 0 };
     SignalAction m_signal_actions[NSIG];
     vulture_siginfo m_signal_info[NSIG] {};
 
     // Job control.
-    // sigsuspend(): the mask to restore once its signal has been handled.
-    Optional<u64> m_mask_after_suspend;
+    // sigsuspend() and sigtimedwait() wait here.
     WaitQueue m_suspend_wait;
     // alarm(): SIGALRM when it fires.
+    Mutex m_alarm_lock;
     Timer m_alarm_timer;
     u64 m_alarm_deadline { 0 };
 
@@ -195,7 +230,6 @@ private:
     Atomic<int> m_unreported_stop { 0 };
     Atomic<bool> m_unreported_continue { false };
 
-    Atomic<bool> m_exiting { false };
     Atomic<bool> m_zombie { false };
     int m_exit_status { 0 };
 

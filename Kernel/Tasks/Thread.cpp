@@ -53,13 +53,14 @@ Thread::~Thread()
     VERIFY(state() == State::Dead || state() == State::Created);
     release_stack();
     if (m_process)
-        m_process->thread_finished();
+        m_process->thread_finished(*this);
 }
 
 void Thread::set_process(Process& process)
 {
     VERIFY(!m_process);
     m_process = process;
+    process.add_thread(*this);
 }
 
 void Thread::activate_user_space() const
@@ -174,7 +175,7 @@ Thread::SleepResult Thread::sleep_until(u64 deadline)
     auto state = thread.m_sleep_lock.lock();
     // A signal sent before this point is seen here; one sent after finds
     // m_sleeping set (both under the lock), so none is missed.
-    if (thread.m_process && thread.m_process->has_deliverable_signal()) {
+    if (thread.m_process && thread.m_process->has_deliverable_signal(thread)) {
         thread.m_sleep_lock.unlock(state);
         return SleepResult::Interrupted;
     }
@@ -217,7 +218,15 @@ void Thread::interrupt_waits()
 
 bool Thread::has_pending_signal() const
 {
-    return m_process && m_process->has_deliverable_signal();
+    return m_process && m_process->has_deliverable_signal(*this);
+}
+
+void Thread::interrupt_for_signal()
+{
+    interrupt_sleep();
+    // A waitpid(), or a wait on a pipe, returns to let the signal through.
+    interrupt_waits();
+    Scheduler::kick(*this);
 }
 
 void Thread::interrupt_sleep()

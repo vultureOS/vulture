@@ -11,6 +11,8 @@
 #include <Kernel/Memory/UserAccess.h>
 
 extern "C" [[noreturn]] void aarch64_return_to_user(Kernel::TrapFrame*);
+extern "C" void aarch64_save_fp_state(u64*);
+extern "C" void aarch64_load_fp_state(u64 const*);
 
 namespace Kernel::Arch {
 
@@ -25,6 +27,11 @@ void prepare_user_entry(TrapFrame& frame, FlatPtr entry, FlatPtr stack_pointer)
     frame.elr = entry;
     frame.user_sp = stack_pointer;
     frame.spsr = user_spsr;
+}
+
+void set_user_entry_argument(TrapFrame& frame, u64 value)
+{
+    frame.x[0] = value;
 }
 
 void return_to_user(TrapFrame& frame)
@@ -58,7 +65,7 @@ FlatPtr user_stack_pointer(TrapFrame const& frame)
     return frame.user_sp;
 }
 
-ErrorOr<void> push_signal_frame(TrapFrame& frame, int signal, vulture_siginfo const& info, u64 saved_mask, FlatPtr handler, FlatPtr restorer)
+ErrorOr<void> push_signal_frame(TrapFrame& frame, int signal, vulture_siginfo const& info, u64 saved_mask, FlatPtr handler, FlatPtr restorer, FlatPtr stack_top)
 {
     vulture_signal_frame signal_frame {};
     for (size_t i = 0; i < 31; ++i)
@@ -69,9 +76,10 @@ ErrorOr<void> push_signal_frame(TrapFrame& frame, int signal, vulture_siginfo co
     signal_frame.saved_mask = saved_mask;
     signal_frame.magic = VULTURE_SIGNAL_FRAME_MAGIC;
     signal_frame.info = info;
+    aarch64_save_fp_state(reinterpret_cast<u64*>(signal_frame.fp_state));
 
     // AArch64 has no red zone below the stack pointer; 16-byte aligned.
-    FlatPtr address = align_down<FlatPtr>(frame.user_sp - sizeof(signal_frame), 16);
+    FlatPtr address = align_down<FlatPtr>((stack_top ? stack_top : frame.user_sp) - sizeof(signal_frame), 16);
     TRY(copy_to_user(address, signal_frame));
 
     frame.x[0] = static_cast<u64>(signal);
@@ -96,6 +104,7 @@ ErrorOr<u64> pop_signal_frame(TrapFrame& frame)
     frame.elr = signal_frame.pc;
     // Never let a program raise its privilege through a forged frame.
     frame.spsr = user_spsr | (signal_frame.pstate & user_condition_flags);
+    aarch64_load_fp_state(reinterpret_cast<u64 const*>(signal_frame.fp_state));
     return signal_frame.saved_mask;
 }
 

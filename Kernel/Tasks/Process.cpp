@@ -75,7 +75,8 @@ Process::Process(ProcessID pid, Process* parent)
 
 Process::~Process()
 {
-    VERIFY(!m_thread);
+    VERIFY(m_threads.is_empty());
+    VERIFY(m_thread_objects.load() == 0);
     VERIFY(m_children.is_empty());
 }
 
@@ -115,13 +116,21 @@ void Process::describe(vulture_process_info& info)
     info.uid = m_credentials.uid;
     info.euid = m_credentials.euid;
     info.gid = m_credentials.gid;
+    u64 ticks = m_exited_cpu_ticks.load();
+    bool running = false;
+    {
+        SpinLockGuard guard(m_threads_lock);
+        for (auto& thread : m_threads) {
+            ticks += thread.cpu_ticks();
+            running = running || thread.state() == Thread::State::Running || thread.state() == Thread::State::Runnable;
+        }
+        info.threads = m_threads.size();
+    }
     if (is_zombie())
         info.state = 'Z';
     else if (is_stopped())
         info.state = 'T';
-    else if (m_thread && m_thread->state() == Thread::State::Running)
-        info.state = 'R';
-    else if (m_thread && m_thread->state() == Thread::State::Runnable)
+    else if (running)
         info.state = 'R';
     else
         info.state = 'S';
@@ -129,10 +138,8 @@ void Process::describe(vulture_process_info& info)
         info.terminal = terminal->metadata().device;
     if (m_address_space && !is_zombie())
         info.resident_bytes = m_address_space->resident_pages() * page_size;
-    u64 ticks = m_thread ? m_thread->cpu_ticks() : m_exited_cpu_ticks;
     info.cpu_nanoseconds = Time::nanoseconds_from_ticks(ticks);
     info.start_time = m_start_time;
-    info.threads = m_thread ? 1 : 0;
     size_t length = min(m_name_length, sizeof(info.name) - 1);
     __builtin_memcpy(info.name, m_name, length);
 }
@@ -166,13 +173,28 @@ void Process::set_name(StringView name)
     __builtin_memcpy(m_name, name.characters_without_null_termination(), m_name_length);
 }
 
-void Process::thread_finished()
+void Process::add_thread(Thread& thread)
 {
-    if (m_thread)
-        m_exited_cpu_ticks = m_thread->cpu_ticks();
-    // The thread no longer runs on this address space anywhere.
-    m_thread = nullptr;
-    m_address_space.clear();
+    SpinLockGuard guard(m_threads_lock);
+    m_threads.append(thread);
+    m_thread_objects.fetch_add(1);
+}
+
+void Process::thread_finished(Thread& thread)
+{
+    m_exited_cpu_ticks.fetch_add(thread.cpu_ticks());
+    if (m_thread_objects.fetch_sub(1) == 1) {
+        // No thread runs on this address space anywhere now.
+        m_address_space.clear();
+        return;
+    }
+    m_thread_gone_wait.wake_all();
+}
+
+String Process::current_directory()
+{
+    MutexLocker locker(m_cwd_lock);
+    return m_cwd;
 }
 
 ErrorOr<int> Process::allocate_fd(NonnullRefPtr<FileDescription> description, bool close_on_exec, int lowest)
@@ -260,7 +282,6 @@ ErrorOr<NonnullRefPtr<Process>> Process::create_init(StringView path, Span<Strin
         delete init;
         Arch::return_to_user(frame); }, init_arguments));
     thread->set_process(*process);
-    process->m_thread = thread.ptr();
     {
         SpinLockGuard guard(s_tree_lock);
         s_processes.append(*process);
@@ -450,7 +471,8 @@ static ErrorOr<LoadedImage> load_image(AddressSpace& space, ELF::Image const& im
 
 ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, Span<StringView const> environment, TrapFrame& frame)
 {
-    auto resolved = TRY(VirtualFileSystem::resolve(path, m_cwd.view()));
+    auto directory = current_directory();
+    auto resolved = TRY(VirtualFileSystem::resolve(path, directory.view()));
     auto executable = TRY(read_executable(*resolved.inode));
 
     // A script: "#!interpreter [argument]" runs the interpreter with the
@@ -553,7 +575,10 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     };
     FlatPtr stack_pointer = TRY(build_initial_stack(*stack, arguments, environment, path, { auxiliary, array_size(auxiliary) }));
 
-    // The point of no return: the new program replaces the old one.
+    // The point of no return: the new program replaces the old one, as the
+    // process's only thread.
+    end_other_threads();
+    m_ending_thread.store(nullptr);
     OwnPtr<AddressSpace> old_space;
     {
         // No switch may see the process between the two address spaces.
@@ -564,6 +589,12 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     }
     // Nothing uses the old one now (this process has one thread).
     old_space.clear();
+    {
+        auto& thread = Thread::current();
+        thread.m_alternate_stack_size = 0;
+        thread.m_clear_tid_address = 0;
+        Arch::set_current_user_thread_pointer(0);
+    }
 
     m_executable = executable;
     m_executable_bias = program.bias;
@@ -611,9 +642,7 @@ void Process::child_state_changed()
 void Process::terminate(int status)
 {
     VERIFY(this == current());
-    if (m_exiting.exchange(true)) {
-        Thread::exit();
-    }
+    end_other_threads();
     if (this == s_init) {
         FixedStringBuilder<64> reason;
         format_to(reason, "init exited (status {:#x})", status);
@@ -664,15 +693,110 @@ void Process::terminate(int status)
     } else {
         s_init->child_state_changed();
     }
+    exit_current_thread();
+}
+
+// --- Threads ---
+
+bool Process::must_end(Thread const& thread) const
+{
+    auto* ending = m_ending_thread.load();
+    return ending && ending != &thread;
+}
+
+void Process::end_other_threads()
+{
+    auto& self = Thread::current();
+    Thread* expected = nullptr;
+    if (!m_ending_thread.compare_exchange_strong(expected, &self))
+        exit_current_thread();
+    {
+        SpinLockGuard guard(m_threads_lock);
+        for (auto& thread : m_threads) {
+            if (&thread != &self)
+                thread.interrupt_for_signal();
+        }
+    }
+    // Those stopped with the process (it may be stopped by now).
+    m_continue_wait.wake_all();
+    // Not just out of the list: off every processor, too.
+    m_thread_gone_wait.wait_until([&] { return m_thread_objects.load() == 1; });
+}
+
+void Process::exit_current_thread()
+{
+    auto& thread = Thread::current();
+    {
+        SpinLockGuard guard(m_threads_lock);
+        if (thread.m_process_node.is_in_list())
+            m_threads.remove(thread);
+    }
+    // It may have been the thread a signal was meant to interrupt.
+    if (!m_ending_thread.load())
+        reroute_pending_signals(m_pending_signals.load());
     Thread::exit();
 }
 
 // --- Signals ---
 
+bool Process::has_deliverable_signal(Thread const& thread) const
+{
+    if (must_end(thread))
+        return true;
+    u64 pending = m_pending_signals.load(MemoryOrder::Acquire) | thread.m_pending_signals.load(MemoryOrder::Acquire);
+    return (pending & ~thread.m_signal_mask.load(MemoryOrder::Relaxed)) || (pending & unblockable_signals);
+}
+
 bool Process::has_deliverable_signal() const
 {
-    u64 pending = m_pending_signals.load(MemoryOrder::Acquire);
-    return (pending & ~m_signal_mask) || (pending & unblockable_signals);
+    return has_deliverable_signal(Thread::current());
+}
+
+bool Process::has_work_before_user() const
+{
+    return has_deliverable_signal() || m_stopped.load();
+}
+
+void Process::do_work_before_user(TrapFrame& frame)
+{
+    auto& thread = Thread::current();
+    if (must_end(thread))
+        exit_current_thread();
+    u64 pending = m_pending_signals.load() | thread.m_pending_signals.load();
+    if (m_stopped.load() && !(pending & bit(SIGKILL))) {
+        wait_while_stopped(thread);
+        return;
+    }
+    dispatch_signal(frame);
+}
+
+void Process::interrupt_a_thread_for(int signal)
+{
+    SpinLockGuard guard(m_threads_lock);
+    for (auto& thread : m_threads) {
+        if ((bit(signal) & unblockable_signals) || !(thread.m_signal_mask.load() & bit(signal))) {
+            thread.interrupt_for_signal();
+            return;
+        }
+    }
+}
+
+void Process::reroute_pending_signals(u64 signals)
+{
+    while (signals) {
+        interrupt_a_thread_for(__builtin_ctzll(signals));
+        signals &= signals - 1;
+    }
+}
+
+bool Process::blocked_by_every_thread(int signal)
+{
+    SpinLockGuard guard(m_threads_lock);
+    for (auto& thread : m_threads) {
+        if (!(thread.m_signal_mask.load() & bit(signal)))
+            return false;
+    }
+    return true;
 }
 
 static bool is_ignored(SignalAction const& action, int signal);
@@ -693,8 +817,10 @@ void Process::send_signal(int signal, vulture_siginfo const& info)
         if (signal == SIGCONT)
             m_pending_signals.fetch_and(~stop_signals);
         // An ignored signal is discarded right away: it must not interrupt
-        // sleeps or waits (POSIX).
-        if (is_ignored(m_signal_actions[signal], signal))
+        // sleeps or waits (POSIX). One ignored only by default stays while
+        // every thread blocks it: sigwait() may want it.
+        auto const& action = m_signal_actions[signal];
+        if (is_ignored(action, signal) && !(action.handler == VULTURE_SIG_DFL && blocked_by_every_thread(signal)))
             return;
         m_signal_info[signal] = info;
         m_signal_info[signal].si_signo = signal;
@@ -703,11 +829,27 @@ void Process::send_signal(int signal, vulture_siginfo const& info)
     if (signal == SIGKILL)
         m_continue_wait.wake_all();
     m_suspend_wait.wake_all();
-    if (m_thread) {
-        m_thread->interrupt_sleep();
-        // A waitpid(), or a wait on a pipe, returns to let the signal through.
-        m_thread->interrupt_waits();
+    interrupt_a_thread_for(signal);
+}
+
+void Process::send_signal_to_thread(Thread& thread, int signal, vulture_siginfo const& info)
+{
+    VERIFY(signal > 0 && signal < NSIG);
+    if (signal == SIGCONT)
+        continue_running();
+    {
+        SpinLockGuard guard(m_signal_lock);
+        auto const& action = m_signal_actions[signal];
+        if (is_ignored(action, signal) && !(action.handler == VULTURE_SIG_DFL && (thread.m_signal_mask.load() & bit(signal))))
+            return;
+        thread.m_signal_info[signal] = info;
+        thread.m_signal_info[signal].si_signo = signal;
+        thread.m_pending_signals.fetch_or(bit(signal));
     }
+    if (signal == SIGKILL)
+        m_continue_wait.wake_all();
+    m_suspend_wait.wake_all();
+    thread.interrupt_for_signal();
 }
 
 ErrorOr<void> Process::send_signal_to_group(ProcessID pgid, int signal, vulture_siginfo const& info)
@@ -772,7 +914,9 @@ void Process::notify_parent(int code, int status)
 bool Process::is_signal_ignored_or_blocked(int signal) const
 {
     SpinLockGuard guard(m_signal_lock);
-    return (m_signal_mask & bit(signal)) || m_signal_actions[signal].handler == VULTURE_SIG_IGN;
+    auto& thread = Thread::current();
+    bool blocked = thread.process() == this && (thread.m_signal_mask.load() & bit(signal));
+    return blocked || m_signal_actions[signal].handler == VULTURE_SIG_IGN;
 }
 
 ErrorOr<void> Process::set_controlling_terminal(TTY& tty)
@@ -808,23 +952,36 @@ void Process::stop(int signal)
     m_unreported_stop.store(signal);
     m_stopped.store(true);
     notify_parent(CLD_STOPPED, signal);
-    // Until SIGCONT (continue_running) or SIGKILL.
-    m_continue_wait.wait_until([&] {
-        return !m_stopped.load() || (m_pending_signals.load() & bit(SIGKILL));
-    });
+    // The others stop on their way to user mode: those running get there now.
+    {
+        SpinLockGuard guard(m_threads_lock);
+        for (auto& thread : m_threads)
+            Scheduler::kick(thread);
+    }
+    wait_while_stopped(Thread::current());
     m_stopped.store(false);
+}
+
+// Until SIGCONT (continue_running), SIGKILL, or the thread must end.
+void Process::wait_while_stopped(Thread const& thread)
+{
+    m_continue_wait.wait_until([&] {
+        return !m_stopped.load() || ((m_pending_signals.load() | thread.m_pending_signals.load()) & bit(SIGKILL)) || must_end(thread);
+    });
 }
 
 void Process::force_signal(int signal, vulture_siginfo const& info)
 {
-    // A fault cannot be ignored or blocked: that would retry it forever.
+    // A fault cannot be ignored or blocked: that would retry it forever. It
+    // is the faulting thread's.
+    auto& thread = Thread::current();
     {
         SpinLockGuard guard(m_signal_lock);
-        m_signal_mask &= ~bit(signal);
+        thread.m_signal_mask.fetch_and(~bit(signal));
         if (m_signal_actions[signal].handler == VULTURE_SIG_IGN)
             m_signal_actions[signal] = {};
     }
-    send_signal(signal, info);
+    send_signal_to_thread(thread, signal, info);
 }
 
 enum class DefaultAction : u8 {
@@ -869,19 +1026,30 @@ static bool is_ignored(SignalAction const& action, int signal)
 
 void Process::dispatch_signal(TrapFrame& frame)
 {
+    auto& thread = Thread::current();
     int signal = 0;
     SignalAction action;
     vulture_siginfo info;
     {
         SpinLockGuard guard(m_signal_lock);
-        u64 pending = m_pending_signals.load();
-        u64 deliverable = (pending & ~m_signal_mask) | (pending & unblockable_signals);
-        if (!deliverable)
+        u64 mask = thread.m_signal_mask.load();
+        // Its own first: a fault must be handled before it happens again.
+        u64 own = thread.m_pending_signals.load();
+        own = (own & ~mask) | (own & unblockable_signals);
+        u64 shared = m_pending_signals.load();
+        shared = (shared & ~mask) | (shared & unblockable_signals);
+        if (own) {
+            signal = __builtin_ctzll(own);
+            thread.m_pending_signals.fetch_and(~bit(signal));
+            info = thread.m_signal_info[signal];
+        } else if (shared) {
+            signal = __builtin_ctzll(shared);
+            m_pending_signals.fetch_and(~bit(signal));
+            info = m_signal_info[signal];
+        } else {
             return;
-        signal = __builtin_ctzll(deliverable);
-        m_pending_signals.fetch_and(~bit(signal));
+        }
         action = m_signal_actions[signal];
-        info = m_signal_info[signal];
     }
 
     if (signal == SIGKILL || signal == SIGSTOP || action.handler == VULTURE_SIG_DFL) {
@@ -903,17 +1071,24 @@ void Process::dispatch_signal(TrapFrame& frame)
         return;
 
     // After sigsuspend(), the handler's return restores the mask from before it.
-    u64 saved_mask = m_mask_after_suspend.has_value() ? m_mask_after_suspend.release_value() : m_signal_mask;
-    if (Arch::push_signal_frame(frame, signal, info, saved_mask, action.handler, action.restorer).is_error()) {
+    u64 saved_mask = thread.m_mask_after_suspend.has_value() ? thread.m_mask_after_suspend.release_value() : thread.m_signal_mask.load();
+    // The alternate stack, if the handler wants it and is not on it already.
+    FlatPtr stack_top = 0;
+    if ((action.flags & SA_ONSTACK) && thread.m_alternate_stack_size) {
+        FlatPtr sp = Arch::user_stack_pointer(frame);
+        if (sp < thread.m_alternate_stack || sp - thread.m_alternate_stack >= thread.m_alternate_stack_size)
+            stack_top = thread.m_alternate_stack + thread.m_alternate_stack_size;
+    }
+    if (Arch::push_signal_frame(frame, signal, info, saved_mask, action.handler, action.restorer, stack_top).is_error()) {
         // No room for the frame (the stack is gone or bad): fatal.
         report_crash(frame, SIGSEGV, info);
         terminate(VULTURE_W_SIGNALED(SIGSEGV, false));
     }
     SpinLockGuard guard(m_signal_lock);
-    m_signal_mask |= action.mask;
+    u64 mask = thread.m_signal_mask.load() | action.mask;
     if (!(action.flags & SA_NODEFER))
-        m_signal_mask |= bit(signal);
-    m_signal_mask &= ~unblockable_signals;
+        mask |= bit(signal);
+    thread.m_signal_mask.store(mask & ~unblockable_signals);
     if (action.flags & SA_RESETHAND)
         m_signal_actions[signal] = {};
 }

@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/API/POSIX/time.h>
 #include <Kernel/Arch/CPU.h>
 #include <Kernel/Arch/UserContext.h>
 #include <Kernel/Memory/UserAccess.h>
@@ -126,24 +127,28 @@ ErrorOr<FlatPtr> Process::sys_sigprocmask(TrapFrame&, SyscallArguments const& ar
     int how = static_cast<int>(arguments.values[0]);
     FlatPtr set_address = arguments.values[1];
     FlatPtr old_set_address = arguments.values[2];
-    u64 old_mask = m_signal_mask;
+    auto& thread = Thread::current();
+    u64 old_mask = thread.m_signal_mask.load();
     if (set_address) {
         u64 set = TRY(copy_from_user<u64>(set_address));
-        SpinLockGuard guard(m_signal_lock);
+        u64 mask = old_mask;
         switch (how) {
         case SIG_BLOCK:
-            m_signal_mask |= set;
+            mask |= set;
             break;
         case SIG_UNBLOCK:
-            m_signal_mask &= ~set;
+            mask &= ~set;
             break;
         case SIG_SETMASK:
-            m_signal_mask = set;
+            mask = set;
             break;
         default:
             return Error::from_errno(EINVAL);
         }
-        m_signal_mask &= ~(bit(SIGKILL) | bit(SIGSTOP));
+        mask &= ~(bit(SIGKILL) | bit(SIGSTOP));
+        thread.m_signal_mask.store(mask);
+        // A signal this thread was to take now waits for another.
+        reroute_pending_signals(m_pending_signals.load() & mask & ~old_mask);
     }
     if (old_set_address)
         TRY(copy_to_user(old_set_address, old_mask));
@@ -158,10 +163,7 @@ ErrorOr<FlatPtr> Process::sys_sigreturn(TrapFrame& frame, SyscallArguments const
         force_signal(SIGSEGV, info);
         return 0;
     }
-    {
-        SpinLockGuard guard(m_signal_lock);
-        m_signal_mask = saved_mask.value() & ~(bit(SIGKILL) | bit(SIGSTOP));
-    }
+    Thread::current().m_signal_mask.store(saved_mask.value() & ~(bit(SIGKILL) | bit(SIGSTOP)));
     // The dispatcher stores this in x0: give back the restored x0.
     return Arch::syscall_argument(frame, 0);
 }
@@ -169,32 +171,110 @@ ErrorOr<FlatPtr> Process::sys_sigreturn(TrapFrame& frame, SyscallArguments const
 ErrorOr<FlatPtr> Process::sys_sigsuspend(TrapFrame&, SyscallArguments const& arguments)
 {
     u64 mask = TRY(copy_from_user<u64>(arguments.values[0]));
-    {
-        SpinLockGuard guard(m_signal_lock);
-        m_mask_after_suspend = m_signal_mask;
-        m_signal_mask = mask & ~(bit(SIGKILL) | bit(SIGSTOP));
-    }
+    auto& thread = Thread::current();
+    thread.m_mask_after_suspend = thread.m_signal_mask.load();
+    thread.m_signal_mask.store(mask & ~(bit(SIGKILL) | bit(SIGSTOP)));
     // Until a signal arrives that the new mask lets through; it is handled
     // on the way out, and sigsuspend() returns EINTR.
     (void)m_suspend_wait.wait_until_interruptible([] { return false; });
-    if (!has_deliverable_signal()) {
-        SpinLockGuard guard(m_signal_lock);
-        if (m_mask_after_suspend.has_value())
-            m_signal_mask = m_mask_after_suspend.release_value();
-    }
+    if (!has_deliverable_signal() && thread.m_mask_after_suspend.has_value())
+        thread.m_signal_mask.store(thread.m_mask_after_suspend.release_value());
     return Error::from_errno(EINTR);
 }
 
 ErrorOr<FlatPtr> Process::sys_sigpending(TrapFrame&, SyscallArguments const& arguments)
 {
-    u64 pending = m_pending_signals.load() & m_signal_mask;
+    auto& thread = Thread::current();
+    u64 pending = (m_pending_signals.load() | thread.m_pending_signals.load()) & thread.m_signal_mask.load();
     TRY(copy_to_user(arguments.values[0], pending));
+    return 0;
+}
+
+// sigtimedwait(set, info, timeout): takes a pending signal in `set` (blocked
+// by the caller, or it might be delivered first), waiting for one if need be:
+// its number, or EAGAIN after the relative `timeout`, or EINTR for another
+// signal.
+ErrorOr<FlatPtr> Process::sys_sigtimedwait(TrapFrame&, SyscallArguments const& arguments)
+{
+    u64 set = TRY(copy_from_user<u64>(arguments.values[0])) & ~(bit(SIGKILL) | bit(SIGSTOP));
+    FlatPtr info_address = arguments.values[1];
+    u64 deadline = 0;
+    bool timed = arguments.values[2] != 0;
+    if (timed) {
+        auto timeout = TRY(copy_from_user<vulture_timespec>(arguments.values[2]));
+        if (timeout.tv_sec < 0 || timeout.tv_nsec < 0 || timeout.tv_nsec >= 1'000'000'000)
+            return Error::from_errno(EINVAL);
+        deadline = Time::now() + Time::ticks_from_nanoseconds(static_cast<u64>(timeout.tv_sec) * 1'000'000'000 + static_cast<u64>(timeout.tv_nsec));
+    }
+    auto& thread = Thread::current();
+    auto is_there = [&] { return ((m_pending_signals.load() | thread.m_pending_signals.load()) & set) != 0; };
+    for (;;) {
+        int signal = 0;
+        vulture_siginfo info {};
+        {
+            SpinLockGuard guard(m_signal_lock);
+            if (u64 own = thread.m_pending_signals.load() & set) {
+                signal = __builtin_ctzll(own);
+                thread.m_pending_signals.fetch_and(~bit(signal));
+                info = thread.m_signal_info[signal];
+            } else if (u64 shared = m_pending_signals.load() & set) {
+                signal = __builtin_ctzll(shared);
+                m_pending_signals.fetch_and(~bit(signal));
+                info = m_signal_info[signal];
+            }
+        }
+        if (signal) {
+            if (info_address)
+                TRY(copy_to_user(info_address, info));
+            return static_cast<FlatPtr>(signal);
+        }
+        if (timed) {
+            auto result = m_suspend_wait.wait_until_interruptible(is_there, deadline);
+            if (result == WaitQueue::WaitResult::Interrupted)
+                return Error::from_errno(EINTR);
+            if (result == WaitQueue::WaitResult::TimedOut)
+                return Error::from_errno(EAGAIN);
+        } else if (!m_suspend_wait.wait_until_interruptible(is_there)) {
+            return Error::from_errno(EINTR);
+        }
+    }
+}
+
+ErrorOr<FlatPtr> Process::sys_sigaltstack(TrapFrame& frame, SyscallArguments const& arguments)
+{
+    auto& thread = Thread::current();
+    FlatPtr sp = Arch::user_stack_pointer(frame);
+    bool on_it = thread.m_alternate_stack_size && sp >= thread.m_alternate_stack && sp - thread.m_alternate_stack < thread.m_alternate_stack_size;
+    if (arguments.values[1]) {
+        vulture_stack old {};
+        old.ss_sp = reinterpret_cast<void*>(thread.m_alternate_stack);
+        old.ss_size = thread.m_alternate_stack_size;
+        old.ss_flags = on_it ? SS_ONSTACK : (thread.m_alternate_stack_size ? 0 : SS_DISABLE);
+        TRY(copy_to_user(arguments.values[1], old));
+    }
+    if (arguments.values[0]) {
+        auto stack = TRY(copy_from_user<vulture_stack>(arguments.values[0]));
+        if (stack.ss_flags & ~SS_DISABLE)
+            return Error::from_errno(EINVAL);
+        if (on_it)
+            return Error::from_errno(EPERM);
+        if (stack.ss_flags & SS_DISABLE) {
+            thread.m_alternate_stack = 0;
+            thread.m_alternate_stack_size = 0;
+        } else {
+            if (stack.ss_size < MINSIGSTKSZ)
+                return Error::from_errno(ENOMEM);
+            thread.m_alternate_stack = reinterpret_cast<FlatPtr>(stack.ss_sp);
+            thread.m_alternate_stack_size = stack.ss_size;
+        }
+    }
     return 0;
 }
 
 ErrorOr<FlatPtr> Process::sys_alarm(TrapFrame&, SyscallArguments const& arguments)
 {
     u64 seconds = arguments.values[0];
+    MutexLocker locker(m_alarm_lock);
     u64 now = Time::now();
     // What was left of the previous alarm, rounded up.
     u64 remaining = 0;

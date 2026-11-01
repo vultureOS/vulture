@@ -9,6 +9,7 @@
 
 extern "C" void aarch64_switch_context(Kernel::Arch::ThreadContext*, Kernel::Arch::ThreadContext const*);
 extern "C" u8 aarch64_thread_trampoline[];
+extern "C" void aarch64_save_fp_state(u64*);
 
 namespace Kernel::Arch {
 
@@ -26,6 +27,26 @@ void initialize_thread_context(ThreadContext& context, FlatPtr stack_top, Thread
 void switch_context(ThreadContext& from, ThreadContext const& to)
 {
     aarch64_switch_context(&from, &to);
+}
+
+void set_user_thread_pointer(ThreadContext& context, FlatPtr pointer)
+{
+    context.thread_pointer = pointer;
+}
+
+void set_current_user_thread_pointer(FlatPtr pointer)
+{
+    WRITE_SYSTEM_REGISTER(tpidr_el0, pointer);
+}
+
+void copy_current_user_state(ThreadContext& child)
+{
+    u64 state[66];
+    aarch64_save_fp_state(state);
+    __builtin_memcpy(child.vector_registers, state, sizeof(child.vector_registers));
+    child.fpcr = state[64];
+    child.fpsr = state[65];
+    child.thread_pointer = READ_SYSTEM_REGISTER(tpidr_el0);
 }
 
 void enable_floating_point()

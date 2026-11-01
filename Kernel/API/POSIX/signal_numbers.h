@@ -88,6 +88,21 @@ struct vulture_signal_frame {
     unsigned long long saved_mask;
     unsigned long long magic;
     struct vulture_siginfo info;
+    // q0-q31, FPCR and FPSR: a handler may use them freely.
+    unsigned long long fp_state[66];
 };
+
+// sigaltstack(): another stack for handlers installed with SA_ONSTACK, for
+// one thread (say, to survive overflowing the normal one).
+struct vulture_stack {
+    void* ss_sp;
+    int ss_flags;
+    unsigned long ss_size;
+};
+
+#define SS_ONSTACK 0x0001
+#define SS_DISABLE 0x0004
+#define MINSIGSTKSZ 32768
+#define SIGSTKSZ 131072
 
 #define VULTURE_SIGNAL_FRAME_MAGIC 0x5349474e414c4652ull

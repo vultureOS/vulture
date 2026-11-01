@@ -28,6 +28,14 @@ void switch_context(ThreadContext& from, ThreadContext const& to);
 // switch saves those registers).
 void enable_floating_point();
 
+// A new user thread's thread pointer (for thread-local storage).
+void set_user_thread_pointer(ThreadContext&, FlatPtr);
+// The current thread's: what exec starts a program with.
+void set_current_user_thread_pointer(FlatPtr);
+// For fork: the child starts with the registers the trap frame does not
+// hold (FP/SIMD, the thread pointer) as the calling thread has them now.
+void copy_current_user_state(ThreadContext& child);
+
 }
 
 // Where every thread begins (defined by the scheduler).

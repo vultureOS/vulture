@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <Kernel/API/POSIX/signal_numbers.h>
 #include <Kernel/Arch/ThreadContext.h>
 #include <Kernel/Arch/TrapFrame.h>
 #include <Kernel/Locking/SpinLock.h>
@@ -86,6 +87,9 @@ public:
     // wake it there (see WaitQueue::wait_until_interruptible()).
     void set_blocked_on(WaitQueue*);
     void interrupt_waits();
+    // For a signal: ends its sleep or wait, or makes it enter the kernel if
+    // it is running.
+    void interrupt_for_signal();
     [[nodiscard]] bool has_pending_signal() const;
 
     // Makes a created thread runnable.
@@ -114,6 +118,7 @@ public:
     ~Thread();
 
 private:
+    friend class Process;
     friend class Scheduler;
     friend class RunQueue;
     friend class RefCounted<Thread>;
@@ -149,6 +154,22 @@ private:
     IntrusiveList<Thread, &Thread::m_queue_node> m_joiners;
 
     RefPtr<Process> m_process;
+    // In its process's list of threads, until it ends.
+    IntrusiveListNode m_process_node;
+
+    // A user thread's own part of the signal state (the rest is its
+    // process's). Only the thread itself changes its mask.
+    Atomic<u64> m_signal_mask { 0 };
+    // Directed at this thread: its faults, pthread_kill().
+    Atomic<u64> m_pending_signals { 0 };
+    vulture_siginfo m_signal_info[NSIG] {};
+    // sigsuspend(): the mask to restore once its signal has been handled.
+    Optional<u64> m_mask_after_suspend;
+    // sigaltstack(); no size means there is none.
+    FlatPtr m_alternate_stack { 0 };
+    size_t m_alternate_stack_size { 0 };
+    // Cleared and woken as a futex when the thread ends (pthread_join).
+    FlatPtr m_clear_tid_address { 0 };
 
     // Guards m_blocked_on, so a waker never uses a queue that is gone.
     SpinLock m_blocked_lock;
@@ -171,6 +192,7 @@ public:
     // also uses for its run queue (a thread is never on both).
     using WaitList = IntrusiveList<Thread, &Thread::m_queue_node>;
     using AllThreadsList = IntrusiveList<Thread, &Thread::m_all_threads_node>;
+    using ProcessThreadList = IntrusiveList<Thread, &Thread::m_process_node>;
 };
 
 }

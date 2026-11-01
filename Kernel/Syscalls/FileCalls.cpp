@@ -26,7 +26,7 @@ ErrorOr<FlatPtr> Process::sys_open(TrapFrame&, SyscallArguments const& arguments
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     int flags = as_int(arguments.values[1]);
-    auto description = TRY(VirtualFileSystem::open(path.view(), m_cwd.view(), flags, static_cast<u32>(arguments.values[2]) & ~m_umask));
+    auto description = TRY(VirtualFileSystem::open(path.view(), current_directory().view(), flags, static_cast<u32>(arguments.values[2]) & ~m_umask));
     // A session leader without a terminal gets the first one it opens.
     if (auto* tty = description->inode()->as_tty(); tty && !(flags & O_NOCTTY) && sid() == m_pid && !m_controlling_terminal && tty->session() == 0)
         (void)set_controlling_terminal(*tty);
@@ -126,13 +126,13 @@ static ErrorOr<FlatPtr> stat_path(StringView path, StringView cwd, FlatPtr resul
 ErrorOr<FlatPtr> Process::sys_stat(TrapFrame&, SyscallArguments const& arguments)
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
-    return stat_path(path.view(), m_cwd.view(), arguments.values[1], true);
+    return stat_path(path.view(), current_directory().view(), arguments.values[1], true);
 }
 
 ErrorOr<FlatPtr> Process::sys_lstat(TrapFrame&, SyscallArguments const& arguments)
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
-    return stat_path(path.view(), m_cwd.view(), arguments.values[1], false);
+    return stat_path(path.view(), current_directory().view(), arguments.values[1], false);
 }
 
 ErrorOr<FlatPtr> Process::sys_dup(TrapFrame&, SyscallArguments const& arguments)
@@ -190,21 +190,21 @@ ErrorOr<FlatPtr> Process::sys_pipe(TrapFrame&, SyscallArguments const& arguments
 ErrorOr<FlatPtr> Process::sys_mkdir(TrapFrame&, SyscallArguments const& arguments)
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
-    TRY(VirtualFileSystem::mkdir(path.view(), m_cwd.view(), static_cast<u32>(arguments.values[1]) & ~m_umask));
+    TRY(VirtualFileSystem::mkdir(path.view(), current_directory().view(), static_cast<u32>(arguments.values[1]) & ~m_umask));
     return 0;
 }
 
 ErrorOr<FlatPtr> Process::sys_rmdir(TrapFrame&, SyscallArguments const& arguments)
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
-    TRY(VirtualFileSystem::rmdir(path.view(), m_cwd.view()));
+    TRY(VirtualFileSystem::rmdir(path.view(), current_directory().view()));
     return 0;
 }
 
 ErrorOr<FlatPtr> Process::sys_unlink(TrapFrame&, SyscallArguments const& arguments)
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
-    TRY(VirtualFileSystem::unlink(path.view(), m_cwd.view()));
+    TRY(VirtualFileSystem::unlink(path.view(), current_directory().view()));
     return 0;
 }
 
@@ -212,28 +212,32 @@ ErrorOr<FlatPtr> Process::sys_rename(TrapFrame&, SyscallArguments const& argumen
 {
     auto old_path = TRY(copy_path_from_user(arguments.values[0]));
     auto new_path = TRY(copy_path_from_user(arguments.values[1]));
-    TRY(VirtualFileSystem::rename(old_path.view(), new_path.view(), m_cwd.view()));
+    TRY(VirtualFileSystem::rename(old_path.view(), new_path.view(), current_directory().view()));
     return 0;
 }
 
 ErrorOr<FlatPtr> Process::sys_getcwd(TrapFrame&, SyscallArguments const& arguments)
 {
     size_t size = arguments.values[1];
-    if (m_cwd.length() + 1 > size)
+    auto directory = current_directory();
+    if (directory.length() + 1 > size)
         return Error::from_errno(ERANGE);
-    TRY(copy_to_user(arguments.values[0], m_cwd.characters(), m_cwd.length() + 1));
-    return m_cwd.length();
+    TRY(copy_to_user(arguments.values[0], directory.characters(), directory.length() + 1));
+    return directory.length();
 }
 
 ErrorOr<FlatPtr> Process::sys_chdir(TrapFrame&, SyscallArguments const& arguments)
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
-    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), m_cwd.view()));
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view()));
     auto metadata = resolved.inode->metadata();
     if (metadata.type != InodeType::Directory)
         return Error::from_errno(ENOTDIR);
     TRY(check_access(metadata, X_OK));
-    m_cwd = move(resolved.path);
+    {
+        MutexLocker locker(m_cwd_lock);
+        m_cwd = move(resolved.path);
+    }
     return 0;
 }
 
@@ -265,7 +269,7 @@ ErrorOr<FlatPtr> Process::sys_ftruncate(TrapFrame&, SyscallArguments const& argu
 ErrorOr<FlatPtr> Process::sys_readlink(TrapFrame&, SyscallArguments const& arguments)
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
-    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), m_cwd.view(), false));
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view(), false));
     char target[VirtualFileSystem::max_path];
     size_t length = TRY(resolved.inode->read_link({ reinterpret_cast<u8*>(target), sizeof(target) }));
     length = min<size_t>(length, arguments.values[2]);
@@ -277,7 +281,7 @@ ErrorOr<FlatPtr> Process::sys_symlink(TrapFrame&, SyscallArguments const& argume
 {
     auto target = TRY(copy_path_from_user(arguments.values[0]));
     auto link_path = TRY(copy_path_from_user(arguments.values[1]));
-    TRY(VirtualFileSystem::symlink(target.view(), link_path.view(), m_cwd.view()));
+    TRY(VirtualFileSystem::symlink(target.view(), link_path.view(), current_directory().view()));
     return 0;
 }
 
@@ -321,7 +325,7 @@ ErrorOr<FlatPtr> Process::sys_access(TrapFrame&, SyscallArguments const& argumen
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     int mode = as_int(arguments.values[1]);
-    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), m_cwd.view()));
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view()));
     auto metadata = resolved.inode->metadata();
     TRY(check_access(metadata, mode & (R_OK | W_OK | X_OK)));
     if ((mode & W_OK) && resolved.inode->file_system().is_read_only())
@@ -363,7 +367,7 @@ static ErrorOr<void> change_owner(Inode& inode, i64 uid, i64 gid)
 ErrorOr<FlatPtr> Process::sys_chmod(TrapFrame&, SyscallArguments const& arguments)
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
-    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), m_cwd.view()));
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view()));
     TRY(change_permissions(*resolved.inode, static_cast<u32>(arguments.values[1])));
     return 0;
 }
@@ -381,7 +385,7 @@ ErrorOr<FlatPtr> Process::sys_chown(TrapFrame&, SyscallArguments const& argument
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     bool follow = !(arguments.values[3] & AT_SYMLINK_NOFOLLOW);
-    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), m_cwd.view(), follow));
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view(), follow));
     TRY(change_owner(*resolved.inode, static_cast<i32>(arguments.values[1]), static_cast<i32>(arguments.values[2])));
     return 0;
 }
@@ -399,7 +403,7 @@ ErrorOr<FlatPtr> Process::sys_link(TrapFrame&, SyscallArguments const& arguments
 {
     auto existing = TRY(copy_path_from_user(arguments.values[0]));
     auto created = TRY(copy_path_from_user(arguments.values[1]));
-    TRY(VirtualFileSystem::link(existing.view(), created.view(), m_cwd.view()));
+    TRY(VirtualFileSystem::link(existing.view(), created.view(), current_directory().view()));
     return 0;
 }
 
@@ -442,7 +446,7 @@ ErrorOr<FlatPtr> Process::sys_utimensat(TrapFrame&, SyscallArguments const& argu
         return Error::from_errno(ENOTSUP);
     auto path = TRY(copy_path_from_user(arguments.values[1]));
     bool follow = !(arguments.values[3] & AT_SYMLINK_NOFOLLOW);
-    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), m_cwd.view(), follow));
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view(), follow));
     TRY(change_times(*resolved.inode, arguments.values[2]));
     return 0;
 }

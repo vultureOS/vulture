@@ -64,6 +64,10 @@ public:
     // From the wakeup IPI: another processor queued work here.
     static void handle_wakeup_ipi();
 
+    // If the thread is running on another processor, makes it enter the
+    // kernel, so it notices what was just left for it (a signal).
+    static void kick(Thread&);
+
     // A thread's rank for comparisons: 0 for idle, then the QoS classes.
     [[nodiscard]] static u8 rank(QoS qos) { return static_cast<u8>(to_underlying(qos) + 1); }
 

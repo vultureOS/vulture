@@ -393,6 +393,16 @@ void Scheduler::reschedule_if_needed()
     Arch::restore_interrupts(state);
 }
 
+void Scheduler::kick(Thread& thread)
+{
+    InterruptDisabler disabler;
+    if (thread.state() != Thread::State::Running)
+        return;
+    u32 processor = thread.last_processor();
+    if (processor != Processor::current().id())
+        Arch::send_ipi(Processor::with_id(processor).hardware_id(), IPI::Wakeup);
+}
+
 void Scheduler::handle_wakeup_ipi()
 {
     auto& processor = Processor::current();

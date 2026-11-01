@@ -18,6 +18,9 @@ namespace Kernel::Arch {
 // Starts a program: `entry` with `stack_pointer`, every other register zero.
 void prepare_user_entry(TrapFrame&, FlatPtr entry, FlatPtr stack_pointer);
 
+// What a new thread's entry function receives as its argument.
+void set_user_entry_argument(TrapFrame&, u64);
+
 // Enters user mode through `frame`, which must sit at the top of the
 // current thread's kernel stack.
 [[noreturn]] void return_to_user(TrapFrame&);
@@ -31,9 +34,10 @@ void set_fork_child_result(TrapFrame&);
 [[nodiscard]] FlatPtr user_stack_pointer(TrapFrame const&);
 
 // Runs a signal handler next: pushes a vulture_signal_frame (the current
-// state, `saved_mask` and `info`) on the user stack and points the frame at
-// handler(signal, &info, &signal_frame), returning to `restorer`.
-ErrorOr<void> push_signal_frame(TrapFrame&, int signal, vulture_siginfo const&, u64 saved_mask, FlatPtr handler, FlatPtr restorer);
+// state, `saved_mask` and `info`) on the user stack, or below `stack_top` if
+// that is not 0, and points the frame at handler(signal, &info,
+// &signal_frame), returning to `restorer`.
+ErrorOr<void> push_signal_frame(TrapFrame&, int signal, vulture_siginfo const&, u64 saved_mask, FlatPtr handler, FlatPtr restorer, FlatPtr stack_top);
 // sigreturn: restores the state from the signal frame; returns its saved mask.
 ErrorOr<u64> pop_signal_frame(TrapFrame&);
 
