@@ -242,7 +242,7 @@ static void start_sync_thread()
 }
 
 // Builds the file tree (the root, devfs at /dev, a fresh tmpfs at /tmp,
-// FAT volumes under /Volumes), then starts /sbin/init as process 1.
+// FAT volumes under /Volumes), then starts /sbin/vlaunchd as process 1.
 static void start_userland(API::BootInfo const& boot_info, BootArguments const& arguments)
 {
     // devfs comes first: disks add themselves to it as they are found.
@@ -272,9 +272,9 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
         kernel_log().attach_console(&console);
     }
 
-    // Boot flags that make init run tests: "utest" the userland tests,
+    // Boot flags that make vlaunchd run tests: "utest" the userland tests,
     // "crashtest" and "persisttest" the storage tests.
-    StringView init_arguments[2] = { "/sbin/init"_sv, {} };
+    StringView init_arguments[2] = { "/sbin/vlaunchd"_sv, {} };
     size_t argument_count = 1;
     if (arguments.has_flag("utest"_sv))
         init_arguments[argument_count++] = "--test"_sv;
@@ -282,7 +282,7 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
         init_arguments[argument_count++] = "--crash-test"_sv;
     else if (arguments.has_flag("persisttest"_sv))
         init_arguments[argument_count++] = "--persist-test"_sv;
-    (void)must("starting init"_sv, Process::create_init("/sbin/init"_sv, Span<StringView const>(init_arguments, argument_count)));
+    (void)must("starting init"_sv, Process::create_init("/sbin/vlaunchd"_sv, Span<StringView const>(init_arguments, argument_count)));
 }
 
 static void initialize_interrupts_and_time(DeviceTree::FlattenedDeviceTree const& tree)

@@ -1,0 +1,11 @@
+{
+    "Label" : "com.vulture.getty.console",
+    "ProgramArguments" : [
+        "/usr/libexec/getty",
+        "std.9600",
+        "console"
+    ],
+    "RunAtLoad" : true,
+    "KeepAlive" : true,
+    "ThrottleInterval" : 1
+}

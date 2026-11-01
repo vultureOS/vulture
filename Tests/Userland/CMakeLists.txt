@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-# Programs /sbin/init runs with --test (see Services/Init).
+# Programs /sbin/vlaunchd runs with --test (see Services/vlaunchd/TestRunner.cpp).
 set(tests
     abort
     accounts

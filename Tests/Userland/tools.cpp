@@ -124,7 +124,7 @@ Case const s_cases[] = {
     { "date -u -r 0 '+%Y-%m-%d %H:%M:%S'", "1970-01-01 00:00:00\n", 0 },
     { "date -u -r 86399 '+%a %b %e %T'", "Thu Jan  1 23:59:59\n", 0 },
     { "ps -A | head -1", "  PID TTY           TIME CMD\n", 0 },
-    { "ps -A | grep -c ' /sbin/init$\\| init$'", "1\n", 0 },
+    { "ps -p 1 | tail -1 | grep -c ' vlaunchd$'", "1\n", 0 },
     { "ps -p $$ | tail -1 | grep -c sh", "1\n", 0 },
     { "df | head -1", "Filesystem     512-blocks       Used  Available Capacity  Mounted on\n", 0 },
     { "df | grep -c ' /tmp$'", "1\n", 0 },

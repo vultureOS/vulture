@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "TestRunner.h"
 #include <errno.h>
-#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -13,10 +13,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-// Process 1. For now it greets, and with "--test" runs the userland test
-// programs: each in a child it forks and execs, judged by how the child
-// ended. It also reaps orphans, which the kernel hands to it. (vlaunchd
-// takes over this job in M6.)
+// The test boots: with "utest", process 1 runs the userland test programs,
+// each in a child it forks and execs, judged by how the child ended; with
+// "crashtest" and "persisttest", the storage tests' writer. Then it powers
+// the machine off.
+
+namespace Launchd {
 
 namespace {
 
@@ -72,30 +74,40 @@ bool run(Test const& test)
 {
     pid_t pid = fork();
     if (pid < 0) {
-        perror("init: fork");
+        perror("vlaunchd: fork");
         return false;
     }
     if (pid == 0) {
         char* argv[] = { const_cast<char*>(test.path), nullptr };
         execv(test.path, argv);
-        fprintf(stderr, "init: cannot run %s: %s\n", test.path, strerror(errno));
+        fprintf(stderr, "vlaunchd: cannot run %s: %s\n", test.path, strerror(errno));
         _exit(127);
     }
+    // Any child: orphans the test left are handed to us, and reaped here
+    // as process 1 must.
     int status = 0;
-    pid_t result;
-    do {
-        result = waitpid(pid, &status, 0);
-    } while (result < 0 && errno == EINTR);
-    if (result != pid) {
-        perror("init: waitpid");
-        return false;
+    for (;;) {
+        int any_status = 0;
+        pid_t result = waitpid(-1, &any_status, 0);
+        if (result < 0 && errno == EINTR)
+            continue;
+        if (result < 0) {
+            perror("vlaunchd: waitpid");
+            return false;
+        }
+        if (result == pid) {
+            status = any_status;
+            break;
+        }
     }
     bool passed = test.signal ? (WIFSIGNALED(status) && WTERMSIG(status) == test.signal)
                               : (WIFEXITED(status) && WEXITSTATUS(status) == test.exit_code);
     char how[64];
     describe(status, how, sizeof(how));
-    printf("init: [%s] %s (%s)\n", passed ? " OK " : "FAIL", test.path, how);
+    printf("vlaunchd: [%s] %s (%s)\n", passed ? " OK " : "FAIL", test.path, how);
     return passed;
+}
+
 }
 
 int run_tests()
@@ -123,7 +135,7 @@ int run_storage_test(bool once)
     if (pid == 0) {
         char* argv[] = { const_cast<char*>("/usr/tests/crash-writer"), const_cast<char*>(once ? "--once" : nullptr), nullptr };
         execv(argv[0], argv);
-        fprintf(stderr, "init: cannot run %s: %s\n", argv[0], strerror(errno));
+        fprintf(stderr, "vlaunchd: cannot run %s: %s\n", argv[0], strerror(errno));
         _exit(127);
     }
     int status = 0;
@@ -131,43 +143,10 @@ int run_storage_test(bool once)
     }
     char how[64];
     describe(status, how, sizeof(how));
-    printf("init: crash-writer %s\n", how);
+    printf("vlaunchd: crash-writer %s\n", how);
     fflush(stdout);
     vulture_power_off();
     return 0;
 }
 
-void print_file(char const* path)
-{
-    int fd = open(path, O_RDONLY);
-    if (fd < 0)
-        return;
-    char buffer[256];
-    ssize_t length;
-    while ((length = read(fd, buffer, sizeof(buffer))) > 0)
-        write(STDOUT_FILENO, buffer, static_cast<size_t>(length));
-    close(fd);
-}
-
-}
-
-int main(int argc, char** argv)
-{
-    printf("init: vultureOS userland is up (process %d)\n", getpid());
-    print_file("/etc/motd");
-
-    if (argc > 1 && strcmp(argv[1], "--test") == 0)
-        return run_tests();
-    if (argc > 1 && strcmp(argv[1], "--crash-test") == 0)
-        return run_storage_test(false);
-    if (argc > 1 && strcmp(argv[1], "--persist-test") == 0)
-        return run_storage_test(true);
-
-    // Reap whatever the kernel hands over; sleep while there is nothing.
-    for (;;) {
-        int status;
-        if (waitpid(-1, &status, 0) < 0 && errno == ECHILD)
-            sleep(3600);
-        // EINTR: a signal; just wait again.
-    }
 }

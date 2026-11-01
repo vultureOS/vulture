@@ -41,7 +41,7 @@ int main()
     CHECK(open("/etc", O_WRONLY) == -1 && errno == EISDIR);
     CHECK(open("/etc/motd", O_RDONLY | O_DIRECTORY) == -1 && errno == ENOTDIR);
 
-    CHECK(stat("/sbin/init", &information) == 0);
+    CHECK(stat("/sbin/vlaunchd", &information) == 0);
     CHECK(S_ISREG(information.st_mode) && (information.st_mode & 0111));
     CHECK(stat("/etc", &information) == 0 && S_ISDIR(information.st_mode));
     CHECK(stat("/", &information) == 0 && S_ISDIR(information.st_mode));

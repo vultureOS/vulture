@@ -103,7 +103,7 @@ add_custom_target(test-boot
         --expect "Memory map"
         --expect "8 of 8 processors online"
         --expect "vultureKernel: boot complete"
-        --expect "init: vultureOS userland is up (process 1)"
+        --expect "vlaunchd: vultureOS userland is up (process 1)"
     DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
@@ -131,7 +131,7 @@ add_custom_target(test-kernel
     USES_TERMINAL
     VERBATIM)
 
-# Userland: /sbin/init --test forks and execs the test programs in
+# Userland: /sbin/vlaunchd --test forks and execs the test programs in
 # /usr/tests (fork, copy-on-write, exec, signals, memory, files...), checks
 # how each ended, and powers the machine off.
 add_custom_target(test-userland

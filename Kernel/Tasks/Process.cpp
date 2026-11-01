@@ -226,7 +226,7 @@ ErrorOr<NonnullRefPtr<Process>> Process::create_init(StringView path, Span<Strin
     process->m_pgid.store(process->pid());
     process->m_sid.store(process->pid());
     VERIFY(process->pid() == 1);
-    process->set_name("init"_sv);
+    process->set_name("vlaunchd"_sv);
 
     auto* init_arguments = new (Base::nothrow) InitArguments {};
     if (!init_arguments || path.length() >= sizeof(init_arguments->path) || arguments.size() > array_size(init_arguments->arguments))

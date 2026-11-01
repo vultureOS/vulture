@@ -6,6 +6,7 @@
 
 #include "Common.h"
 #include <libgen.h>
+#include <signal.h>
 #include <limits.h>
 #include <sys/ioctl.h>
 #include <sys/reboot.h>
@@ -327,7 +328,7 @@ int tool_sysctl(int argc, char** argv)
     return status;
 }
 
-// reboot / halt / poweroff / shutdown [-h | -r] [now]
+// reboot / halt / poweroff / shutdown [-h | -r] [now]: asks process 1.
 int tool_reboot(int argc, char** argv)
 {
     char const* program = last_component(argv[0]);
@@ -343,6 +344,10 @@ int tool_reboot(int argc, char** argv)
         fprintf(stderr, "%s: Operation not permitted\n", program);
         return 1;
     }
+    // vlaunchd stops every job and writes everything out first: asked as
+    // BSD's init is, SIGUSR2 to power off, SIGINT to restart.
+    if (kill(1, power_off ? SIGUSR2 : SIGINT) == 0)
+        return 0;
     sync();
     if (reboot(power_off ? RB_POWEROFF : RB_AUTOBOOT) < 0) {
         perror(program);
