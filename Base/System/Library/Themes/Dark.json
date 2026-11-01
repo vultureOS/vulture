@@ -218,7 +218,7 @@
             "legacyBorder" : "#1a1a1a"
         },
         "tableHeader" : { "fill" : "#000000", "border" : "#1a1a1a", "divider" : "#ffffff19", "text" : "#ffffffd8" },
-        "tabs" : { "fill" : "#ffffff0a", "border" : "#ffffff0c" },
+        "tabs" : { "fill" : "#ffffff04", "border" : "#ffffff10" },
         "menu" : {
             "tint" : "#323232e0",
             "text" : "#ffffffd8",
@@ -246,7 +246,7 @@
         },
         "sheet" : { "fill" : "#282828", "scrim" : "#00000000" },
         "alert" : { "fill" : "#282828e0" },
-        "popover" : { "tint" : "#323232e0" },
+        "popover" : { "fill" : "#323232" },
         "fieldFace" : {
             "fill" : "#ffffff19",
             "outer" : [ 0.5, 1, 0.5, 0.02, 0, 0.5, 0, 0.4 ],

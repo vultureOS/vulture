@@ -97,7 +97,7 @@ private:
     size_t m_selected { 0 };
 };
 
-class ToolbarItem;
+class ToolbarButton;
 
 // Across the top of a window with a unified title: it draws the bar the title would be
 // in, moves the window by its empty parts, and keeps clear of the traffic lights.
@@ -112,8 +112,10 @@ public:
     void set_style(Style);
     // The window's title, next to the lights.
     void set_title(StringView);
+    // Clear of the lights by default; less where a sidebar has them.
+    void set_left_padding(float);
 
-    Button& add_button(Symbol, Function<void()> action, StringView label = {});
+    ToolbarButton& add_button(Symbol, Function<void()> action, StringView label = {});
     SearchField& add_search(float width);
     SegmentedControl& add_segmented();
     template<typename T, typename... Args>
@@ -134,20 +136,24 @@ private:
     View* m_items { nullptr };
     String m_title;
     Style m_style { Style::Unified };
+    float m_left_padding { -1 };
 };
 
 class ToolbarButton final : public Control {
 public:
-    explicit ToolbarButton(Symbol);
+    explicit ToolbarButton(Symbol, StringView label = {});
 
     [[nodiscard]] Gfx::FloatSize intrinsic_size() const override;
     void draw(Graphics&) override;
     void mouse_entered() override;
     void mouse_exited() override;
     [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::Button; }
+    [[nodiscard]] String accessibility_label() const override { return MUST(String::from_view(m_label.view())); }
+    bool accessibility_press() override;
 
 private:
     Symbol m_symbol;
+    String m_label;
 };
 
 // The list down the side of a window, over a material: sections and rows.
@@ -155,6 +161,8 @@ class Sidebar : public View {
 public:
     Sidebar();
 
+    // Room at the top, for a window's traffic lights when it reaches up to them.
+    void set_top_padding(float);
     void add_section(StringView title);
     size_t add_row(StringView title, Symbol = Symbol::Folder);
     void select_row(size_t);
@@ -184,6 +192,7 @@ private:
     Vector<Entry> m_entries;
     size_t m_rows { 0 };
     int m_selected { -1 };
+    float m_top_padding { -1 };
 };
 
 }

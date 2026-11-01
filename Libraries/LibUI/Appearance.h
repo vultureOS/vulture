@@ -35,6 +35,15 @@ enum class ControlSize : u8 {
 
 [[nodiscard]] StringView name_of(ControlSize);
 
+// Hue around the wheel, 0 to 1; the rest also 0 to 1.
+struct HSV {
+    float hue { 0 };
+    float saturation { 0 };
+    float value { 1 };
+};
+[[nodiscard]] HSV hsv_from_color(Gfx::Color);
+[[nodiscard]] Gfx::Color color_from_hsv(HSV, u8 alpha = 255);
+
 enum class FontWeight : u8 {
     Regular,
     Medium,
@@ -70,8 +79,9 @@ public:
     [[nodiscard]] bool has_metric(StringView key) const { return m_metrics.contains(key); }
     [[nodiscard]] bool has_list(StringView key) const { return m_lists.contains(key); }
 
-    // The accent replaced (as System Settings would): this is what selection and
-    // default buttons are drawn with. No alpha: tints follow from it.
+    // The accent replaced (as System Settings would). Whatever is drawn in the accent
+    // (selection, default buttons, switches, ...) moves to its hue, keeping how light or
+    // deep each of them was against the theme's own accent.
     void set_accent(Gfx::Color);
     [[nodiscard]] Gfx::Color accent() const { return m_accent; }
 
@@ -95,11 +105,15 @@ public:
 private:
     Appearance() = default;
     ErrorOr<void> merge(StringView prefix, void const* value);
+    void recolor_for_accent();
+    [[nodiscard]] Gfx::Color theme_accent() const;
 
     String m_name;
     bool m_dark { false };
     Gfx::Color m_accent;
     HashMap<String, Gfx::Color> m_colors;
+    // The tokens as the theme has them, for those the accent moves.
+    HashMap<String, Gfx::Color> m_theme_colors;
     HashMap<String, float> m_metrics;
     HashMap<String, Vector<float>> m_lists;
 };

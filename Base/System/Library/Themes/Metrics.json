@@ -136,7 +136,7 @@
     "sidebar" : { "topPadding" : 8, "rowHeight" : 28, "rowInset" : 10, "rowRadius" : 5, "sectionHeight" : 28, "iconSize" : 16, "iconGap" : 6, "textLeft" : 16, "width" : 200 },
     "sheet" : { "radius" : 12, "topMargin" : 0 },
     "alert" : { "width" : 260, "height" : 202, "padding" : 20, "iconSize" : 64, "buttonHeight" : 28, "buttonSpacing" : 8, "radius" : 12, "spacing" : 10 },
-    "popover" : { "radius" : 10, "arrow" : 7, "padding" : 12 },
+    "popover" : { "radius" : 10, "arrow" : 7, "padding" : 12, "shadow" : 16 },
     "panel" : { "width" : 560, "height" : 380, "rowHeight" : 24, "sidebarWidth" : 150 },
     "colorPanel" : { "width" : 240, "height" : 320, "wheel" : 180 },
     "fontPanel" : { "width" : 420, "height" : 300 },

@@ -223,9 +223,18 @@ public:
     [[nodiscard]] FloatSize intrinsic_size() const override { return { 0, 0 }; }
 };
 
-ToolbarButton::ToolbarButton(Symbol symbol)
+ToolbarButton::ToolbarButton(Symbol symbol, StringView label)
     : m_symbol(symbol)
+    , m_label(MUST(String::from_view(label)))
 {
+}
+
+bool ToolbarButton::accessibility_press()
+{
+    if (!is_enabled())
+        return false;
+    activate();
+    return true;
 }
 
 FloatSize ToolbarButton::intrinsic_size() const
@@ -280,12 +289,9 @@ void Toolbar::set_title(StringView title)
     set_needs_display();
 }
 
-Button& Toolbar::add_button(Symbol symbol, Function<void()> action, StringView label)
+ToolbarButton& Toolbar::add_button(Symbol symbol, Function<void()> action, StringView label)
 {
-    auto& button = m_items->add<Button>(label, ButtonStyle::Borderless);
-    button.set_symbol(symbol);
-    float size = tokens().metric("toolbar.itemSize"_sv);
-    button.set_fixed_size({ size, size });
+    auto& button = m_items->add<ToolbarButton>(symbol, label);
     button.on_action = move(action);
     return button;
 }
@@ -307,6 +313,13 @@ void Toolbar::add_flexible_space()
     m_items->add<ToolbarSpacer>();
 }
 
+void Toolbar::set_left_padding(float padding)
+{
+    m_left_padding = padding;
+    set_needs_layout();
+    set_needs_display();
+}
+
 FloatSize Toolbar::intrinsic_size() const
 {
     auto const& t = tokens();
@@ -316,7 +329,7 @@ FloatSize Toolbar::intrinsic_size() const
 void Toolbar::layout()
 {
     auto const& t = tokens();
-    float left = t.metric("toolbar.paddingLeft"_sv);
+    float left = m_left_padding >= 0 ? m_left_padding : t.metric("toolbar.paddingLeft"_sv);
     if (!m_title.is_empty())
         left += Appearance::text_width(t.named_font("headline"_sv), m_title.view()) + t.metric("toolbar.spacing"_sv) * 2;
     m_items->set_frame({ left, 0, max(width() - left - t.metric("toolbar.paddingRight"_sv), 0.0f), height() });
@@ -329,7 +342,7 @@ void Toolbar::draw(Graphics& graphics)
     graphics.fill({ 0, graphics.snap(height() - 1), width(), 1 }, t.color("toolbar.separator"_sv));
     if (!m_title.is_empty()) {
         auto font = t.named_font("headline"_sv);
-        graphics.draw_text(m_title.view(), font, { t.metric("toolbar.paddingLeft"_sv), (height() + Appearance::cap_height(font)) / 2 }, t.color(window() && window()->is_key() ? "label"_sv : "tertiaryLabel"_sv));
+        graphics.draw_text(m_title.view(), font, { m_left_padding >= 0 ? m_left_padding : t.metric("toolbar.paddingLeft"_sv), (height() + Appearance::cap_height(font)) / 2 }, t.color(window() && window()->is_key() ? "label"_sv : "tertiaryLabel"_sv));
     }
 }
 
@@ -337,7 +350,7 @@ bool Toolbar::mouse_down(MouseEvent const& event)
 {
     if (event.button != WS::ButtonLeft || !window())
         return false;
-    window()->backend().begin_move();
+    window()->move_by_pointer();
     return true;
 }
 
@@ -368,10 +381,16 @@ StringView Sidebar::row_title(size_t row) const
     return {};
 }
 
+void Sidebar::set_top_padding(float padding)
+{
+    m_top_padding = padding;
+    set_needs_display();
+}
+
 float Sidebar::y_of(size_t index) const
 {
     auto const& t = tokens();
-    float y = t.metric("sidebar.topPadding"_sv);
+    float y = m_top_padding >= 0 ? m_top_padding : t.metric("sidebar.topPadding"_sv);
     float row = t.metric("sidebar.rowHeight"_sv);
     float section = t.metric("sidebar.sectionHeight"_sv);
     for (size_t i = 0; i < index; ++i)

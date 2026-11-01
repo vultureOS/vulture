@@ -5,6 +5,7 @@
  */
 
 #include <LibUI/Appearance.h>
+#include <LibUI/Motion.h>
 #include <LibUI/Platform.h>
 #include <LibUI/ScrollView.h>
 #include <LibUI/TextView.h>
@@ -257,6 +258,8 @@ void TextView::restart_blink()
     stop_blink();
     m_caret_shown = true;
     set_needs_display();
+    if (!motion_enabled())
+        return;
     auto every = static_cast<u64>(tokens().metric("field.caretBlinkMilliseconds"_sv));
     m_blink_timer = Platform::the().add_timer(every, true, [this] {
         m_caret_shown = !m_caret_shown;

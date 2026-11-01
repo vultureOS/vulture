@@ -965,9 +965,61 @@ TEST_CASE(appearance_changes_redraw_every_window)
     EXPECT(dark.red < 80);
     Appearance::the().set_accent(Color { 255, 0, 0, 255 });
     EXPECT_EQ(Appearance::the().accent().red, static_cast<u8>(255));
-    Appearance::the().set_accent(Appearance::the().color("accent"_sv));
+    Appearance::the().set_accent(Color { 0, 122, 255, 255 });
     MUST(Appearance::use("Light"_sv));
     EXPECT_EQ(Appearance::missing_tokens(), static_cast<size_t>(0));
+}
+
+TEST_CASE(the_accent_moves_what_is_drawn_in_it)
+{
+    TestWindow test;
+    auto& button = test.place<Button>({ 20, 60, 100, 20 }, "Go"_sv, ButtonStyle::Default);
+    (void)button;
+    auto blue = shown_pixels(*test.window).color_at(60, 140);
+    EXPECT(blue.blue > 200 && blue.red < 100);
+    Appearance::the().set_accent(Color { 255, 59, 48, 255 });
+    auto red = shown_pixels(*test.window).color_at(60, 140);
+    EXPECT(red.red > 200 && red.blue < 120);
+    // Still its own lightness: the fill's top is lighter than the bottom.
+    auto top = Appearance::the().color("bezelAccent.fillTop"_sv);
+    auto bottom = Appearance::the().color("bezelAccent.fillBottom"_sv);
+    EXPECT(top.green >= bottom.green);
+    // It outlives a change of appearance.
+    MUST(Appearance::use("Dark"_sv));
+    EXPECT_EQ(Appearance::the().accent().red, static_cast<u8>(255));
+    EXPECT(Appearance::the().color("switch.trackOn"_sv).red > Appearance::the().color("switch.trackOn"_sv).blue);
+    Appearance::the().set_accent(Color { 0, 122, 255, 255 });
+    MUST(Appearance::use("Light"_sv));
+    EXPECT_EQ(Appearance::the().color("bezelAccent.fillTop"_sv), (Color { 0x27, 0x91, 0xff, 255 }));
+}
+
+TEST_CASE(indeterminate_progress_sweeps_and_spinners_turn_with_motion_on)
+{
+    TestWindow test;
+    auto& bar = test.place<ProgressBar>({ 20, 60, 200, 18 });
+    auto& spinner = test.place<Spinner>({ 20, 100, 32, 32 });
+    set_motion_enabled(true);
+    bar.set_indeterminate(true);
+    spinner.set_running(true);
+    TestPlatform::the().advance(0.5);
+    test.settle();
+    bar.set_indeterminate(false);
+    spinner.set_running(false);
+    TestPlatform::the().advance(0.5);
+    set_motion_enabled(false);
+    test.settle();
+}
+
+TEST_CASE(a_switch_springs_across_with_motion_on)
+{
+    TestWindow test;
+    auto& toggle = test.place<Switch>({ 20, 60, 38, 22 });
+    set_motion_enabled(true);
+    toggle.set_on(true);
+    TestPlatform::the().advance(1);
+    EXPECT(toggle.is_on());
+    set_motion_enabled(false);
+    test.settle();
 }
 
 TEST_CASE(a_layer_is_drawn_once_and_faded_without_redrawing)

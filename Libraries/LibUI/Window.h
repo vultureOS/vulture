@@ -68,6 +68,9 @@ public:
     // Gets what falls outside every view, as it does for a window with the pointer
     // grabbed: an open menu, to know of clicks elsewhere.
     void set_pointer_catcher(View*);
+    // Where sheets hang from, for a window whose toolbar reaches into its title bar.
+    void set_sheet_top(float top) { m_sheet_top = top; }
+    [[nodiscard]] float sheet_top() const { return m_sheet_top >= 0 ? m_sheet_top : title_bar_height(); }
     // Tabbing stays inside this, while set: a sheet.
     void set_focus_scope(View*);
     // Lays out at once, for those that must know sizes now.
@@ -91,6 +94,11 @@ public:
     void draw_focus_ring(Graphics&, View&);
     void set_materials(Span<MaterialRegion const>);
 
+    // The press going on now will end elsewhere (a menu took the pointer, a drag or a
+    // move is under way): nothing here will hear it let go.
+    void forget_press();
+    // The rest of this press moves the window.
+    void move_by_pointer();
     // Drags, from a view that got a mouse_down: this data, with `size` of the drawing
     // following the pointer.
     void begin_drag(StringView type, ReadonlyBytes data, Gfx::FloatSize size, Function<void(Graphics&)> draw);
@@ -134,6 +142,7 @@ private:
     Responder* m_key_interceptor { nullptr };
     View* m_focus_scope { nullptr };
     View* m_pointer_catcher { nullptr };
+    float m_sheet_top { -1 };
     View* m_mouse_target { nullptr };
     View* m_hovered { nullptr };
     View* m_drop_target { nullptr };

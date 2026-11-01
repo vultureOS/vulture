@@ -450,8 +450,21 @@ void Window::set_materials(Span<MaterialRegion const> regions)
     m_backend->set_materials(regions);
 }
 
+void Window::forget_press()
+{
+    m_mouse_target = nullptr;
+    m_buttons_down = 0;
+}
+
+void Window::move_by_pointer()
+{
+    forget_press();
+    m_backend->begin_move();
+}
+
 void Window::begin_drag(StringView type, ReadonlyBytes data, FloatSize size, Function<void(Graphics&)> draw)
 {
+    forget_press();
     IntRect image_frame { static_cast<int>(m_pointer.x), static_cast<int>(m_pointer.y), static_cast<int>(size.width + 0.999f), static_cast<int>(size.height + 0.999f) };
     m_drag_image = adopt_own(*new Window("drag"_sv, image_frame, WS::WindowBare | WS::WindowPopup));
     m_drag_image->set_transparent(true);
@@ -624,10 +637,13 @@ void Window::handle_mouse(WS::MouseKind kind, FloatPoint position, u32 buttons, 
         for (auto* view = hit; view; view = view->parent()) {
             if (!view->is_enabled())
                 continue;
-            if (view->mouse_down(make_event(*view, button))) {
+            bool had_press = m_buttons_down != 0;
+            bool taken = view->mouse_down(make_event(*view, button));
+            // (It may have handed the press on: see forget_press.)
+            if (taken && had_press && m_buttons_down != 0)
                 m_mouse_target = view;
+            if (taken)
                 break;
-            }
         }
         // A click in a control that takes the keyboard gives it the keyboard.
         for (auto* view = hit; view; view = view->parent()) {
@@ -647,6 +663,9 @@ void Window::handle_mouse(WS::MouseKind kind, FloatPoint position, u32 buttons, 
             if (buttons == 0)
                 m_mouse_target = nullptr;
             target->mouse_up(make_event(*target, button));
+        } else if (m_pointer_catcher) {
+            // A press that began before this window took the pointer: a menu's.
+            m_pointer_catcher->mouse_up(make_event(*m_pointer_catcher, button));
         }
         auto* hit = view_at(position);
         set_hovered(hit);

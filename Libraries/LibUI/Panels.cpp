@@ -129,8 +129,8 @@ void Sheet::present(Window& window, NonnullOwnPtr<View> content, FloatSize size,
     VERIFY(!sheet_of(window));
     auto* previous = window.first_responder();
     auto& scrim = window.root_view().add<SheetScrim>(move(content), size, move(on_dismissed));
-    float title_bar = window.title_bar_height();
-    scrim.set_frame({ 0, title_bar, window.size().width, window.size().height - title_bar });
+    float top = window.sheet_top();
+    scrim.set_frame({ 0, top, window.size().width, window.size().height - top });
     s_sheets.append(PresentedSheet { &window, &scrim, previous });
     window.make_first_responder(nullptr);
     window.set_focus_scope(&scrim);
@@ -323,16 +323,22 @@ public:
         auto const& t = tokens();
         float arrow = t.metric("popover.arrow"_sv);
         float radius = t.metric("popover.radius"_sv);
+        float shadow = t.metric("popover.shadow"_sv);
+        // Inside the shadow's margin, and the arrow's room.
+        FloatRect body { shadow, shadow + (m_edge == ArrowEdge::Top ? arrow : 0), width() - shadow * 2, height() - shadow * 2 - arrow };
+        for (int i = static_cast<int>(shadow); i > 0; i -= 2) {
+            auto spread = static_cast<float>(i);
+            graphics.fill_rounded({ body.x - spread, body.y - spread * 0.5f, body.width + spread * 2, body.height + spread * 1.5f }, radius + spread, Color { 0, 0, 0, 5 });
+        }
         Path path;
-        FloatRect body = m_edge == ArrowEdge::Top ? FloatRect { 0, arrow, width(), height() - arrow } : FloatRect { 0, 0, width(), height() - arrow };
         path.add_rounded_rect(body, radius);
-        float tip_y = m_edge == ArrowEdge::Top ? 0 : height();
-        float base_y = m_edge == ArrowEdge::Top ? arrow + 0.5f : height() - arrow - 0.5f;
+        float tip_y = m_edge == ArrowEdge::Top ? shadow : height() - shadow;
+        float base_y = m_edge == ArrowEdge::Top ? shadow + arrow + 0.5f : height() - shadow - arrow - 0.5f;
         path.move_to({ m_arrow_x - arrow, base_y });
         path.line_to({ m_arrow_x, tip_y });
         path.line_to({ m_arrow_x + arrow, base_y });
         path.close();
-        graphics.painter().fill_path(path, t.color("popover.tint"_sv));
+        graphics.painter().fill_path(path, t.color("popover.fill"_sv));
     }
 
     bool mouse_down(MouseEvent const& event) override
@@ -392,25 +398,25 @@ void Popover::show(Window& owner, NonnullOwnPtr<View> content, FloatSize size, F
     auto const& t = tokens();
     m_owner = &owner;
     float arrow = t.metric("popover.arrow"_sv);
+    float shadow = t.metric("popover.shadow"_sv);
     auto origin = owner.frame().origin();
     float anchor_x = static_cast<float>(origin.x) + anchor.x + anchor.width / 2;
     float top = edge == ArrowEdge::Top ? static_cast<float>(origin.y) + anchor.bottom() : static_cast<float>(origin.y) + anchor.y - size.height - arrow;
     float left = anchor_x - size.width / 2;
     auto screen = Platform::the().screen_size();
     left = clamp(left, 4.0f, max(static_cast<float>(screen.width) - size.width - 4, 4.0f));
-    IntRect frame { static_cast<int>(left), static_cast<int>(top), static_cast<int>(size.width), static_cast<int>(size.height + arrow) };
-    m_window = adopt_own(*new Window("popover"_sv, frame, WS::WindowPopup));
+    // With room for its arrow and its own shadow: an odd shape, which a window's
+    // corners and shadow cannot be. So it has neither, and no material.
+    IntRect frame { static_cast<int>(left - shadow), static_cast<int>(top - shadow), static_cast<int>(size.width + shadow * 2), static_cast<int>(size.height + arrow + shadow * 2) };
+    m_window = adopt_own(*new Window("popover"_sv, frame, WS::WindowPopup | WS::WindowBare));
     m_window->set_transparent(true);
-    m_window->backend().set_corner_radius(0);
     auto& view = m_window->root_view().add<Frame>(*this, edge);
-    view.set_frame({ 0, 0, size.width, size.height + arrow });
+    view.set_frame({ 0, 0, static_cast<float>(frame.width), static_cast<float>(frame.height) });
     m_window->set_pointer_catcher(&view);
-    view.set_arrow_x(anchor_x - left);
+    view.set_arrow_x(anchor_x - left + shadow);
     auto* raw = content.ptr();
     view.adopt_child(move(content));
-    raw->set_frame({ 0, edge == ArrowEdge::Top ? arrow : 0, size.width, size.height });
-    MaterialRegion material { { 0, edge == ArrowEdge::Top ? static_cast<int>(arrow) : 0, frame.width, static_cast<int>(size.height) }, WS::Material::Popover };
-    m_window->set_materials(Span<MaterialRegion const>(&material, 1));
+    raw->set_frame({ shadow, shadow + (edge == ArrowEdge::Top ? arrow : 0), size.width, size.height });
     m_window->show();
     m_window->backend().grab_pointer(true);
     m_forwarder = adopt_own(*new KeyForwarder(*this));
@@ -633,68 +639,6 @@ void FilePanel::run(Window& window, Kind kind, StringView directory, StringView 
 // ---- Color panel
 
 namespace {
-
-struct HSV {
-    float hue { 0 };
-    float saturation { 0 };
-    float value { 1 };
-};
-
-Color color_from_hsv(HSV hsv, u8 alpha = 255)
-{
-    float h = hsv.hue * 6;
-    float s = hsv.saturation;
-    float v = hsv.value;
-    int sector = static_cast<int>(h);
-    float f = h - static_cast<float>(sector);
-    float p = v * (1 - s);
-    float q = v * (1 - s * f);
-    float t = v * (1 - s * (1 - f));
-    float r = v, g = t, b = p;
-    switch (sector % 6) {
-    case 0:
-        r = v, g = t, b = p;
-        break;
-    case 1:
-        r = q, g = v, b = p;
-        break;
-    case 2:
-        r = p, g = v, b = t;
-        break;
-    case 3:
-        r = p, g = q, b = v;
-        break;
-    case 4:
-        r = t, g = p, b = v;
-        break;
-    case 5:
-        r = v, g = p, b = q;
-        break;
-    }
-    auto byte = [](float x) { return static_cast<u8>(clamp(x, 0.0f, 1.0f) * 255 + 0.5f); };
-    return { byte(r), byte(g), byte(b), alpha };
-}
-
-HSV hsv_from_color(Color color)
-{
-    float r = static_cast<float>(color.red) / 255, g = static_cast<float>(color.green) / 255, b = static_cast<float>(color.blue) / 255;
-    float high = max(r, max(g, b));
-    float low = min(r, min(g, b));
-    float delta = high - low;
-    HSV hsv;
-    hsv.value = high;
-    hsv.saturation = high <= 0 ? 0 : delta / high;
-    if (delta > 0) {
-        if (high == r)
-            hsv.hue = (g - b) / delta + (g < b ? 6 : 0);
-        else if (high == g)
-            hsv.hue = (b - r) / delta + 2;
-        else
-            hsv.hue = (r - g) / delta + 4;
-        hsv.hue /= 6;
-    }
-    return hsv;
-}
 
 // Hue around, saturation out from the middle.
 class ColorWheel final : public View {

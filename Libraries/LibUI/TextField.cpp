@@ -5,6 +5,7 @@
  */
 
 #include <LibBase/Math.h>
+#include <LibUI/Motion.h>
 #include <LibUI/Platform.h>
 #include <LibUI/TextField.h>
 #include <LibUI/Window.h>
@@ -238,6 +239,8 @@ void TextField::restart_blink()
     stop_blink();
     m_caret_shown = true;
     set_needs_display();
+    if (!motion_enabled())
+        return;
     auto every = static_cast<u64>(tokens().metric("field.caretBlinkMilliseconds"_sv));
     m_blink_timer = Platform::the().add_timer(every, true, [this] {
         m_caret_shown = !m_caret_shown;

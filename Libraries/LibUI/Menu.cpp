@@ -112,6 +112,9 @@ public:
 
     void mouse_moved(MouseEvent const& event) override
     {
+        // Still held, from the press that opened it.
+        if (event.buttons)
+            m_menu.m_dragged = true;
         m_menu.pointer_at(screen_of(event), event.buttons);
     }
 
@@ -266,6 +269,7 @@ void Menu::open(Window& owner, IntPoint screen_point, int aligned)
         s_open_menu = this;
         m_key_forwarder = adopt_own(*new KeyForwarder(*this));
         owner.set_key_interceptor(m_key_forwarder.ptr());
+        owner.forget_press();
     }
 }
 

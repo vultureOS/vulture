@@ -179,6 +179,7 @@ public:
         // Stripes carry on past the rows.
         int last = static_cast<int>(visible_bottom / row_height) + 1;
 
+        graphics.fill({ 0, visible_top, width(), visible_bottom - visible_top }, t.color("controlBackground"_sv));
         if (m_table.m_alternating) {
             auto stripe = t.color("alternatingRow"_sv);
             for (int i = first; i <= last; ++i) {

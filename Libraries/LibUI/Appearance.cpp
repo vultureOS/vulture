@@ -100,6 +100,62 @@ ErrorOr<JSON::Value> read_json(StringView name)
 
 }
 
+HSV hsv_from_color(Gfx::Color color)
+{
+    float r = static_cast<float>(color.red) / 255, g = static_cast<float>(color.green) / 255, b = static_cast<float>(color.blue) / 255;
+    float high = max(r, max(g, b));
+    float low = min(r, min(g, b));
+    float delta = high - low;
+    HSV hsv;
+    hsv.value = high;
+    hsv.saturation = high <= 0 ? 0 : delta / high;
+    if (delta > 0) {
+        if (high == r)
+            hsv.hue = (g - b) / delta + (g < b ? 6 : 0);
+        else if (high == g)
+            hsv.hue = (b - r) / delta + 2;
+        else
+            hsv.hue = (r - g) / delta + 4;
+        hsv.hue /= 6;
+    }
+    return hsv;
+}
+
+Gfx::Color color_from_hsv(HSV hsv, u8 alpha)
+{
+    float h = hsv.hue * 6;
+    float s = hsv.saturation;
+    float v = hsv.value;
+    int sector = static_cast<int>(h);
+    float f = h - static_cast<float>(sector);
+    float p = v * (1 - s);
+    float q = v * (1 - s * f);
+    float t = v * (1 - s * (1 - f));
+    float r = v, g = t, b = p;
+    switch (sector % 6) {
+    case 0:
+        r = v, g = t, b = p;
+        break;
+    case 1:
+        r = q, g = v, b = p;
+        break;
+    case 2:
+        r = p, g = v, b = t;
+        break;
+    case 3:
+        r = p, g = q, b = v;
+        break;
+    case 4:
+        r = t, g = p, b = v;
+        break;
+    case 5:
+        r = v, g = p, b = q;
+        break;
+    }
+    auto byte = [](float x) { return static_cast<u8>(clamp(x, 0.0f, 1.0f) * 255 + 0.5f); };
+    return { byte(r), byte(g), byte(b), alpha };
+}
+
 StringView name_of(ControlSize size)
 {
     switch (size) {
@@ -176,17 +232,74 @@ ErrorOr<void> Appearance::use(StringView name)
     auto metrics = TRY(read_json("Metrics.json"_sv));
     TRY(appearance->merge(""_sv, &metrics));
     appearance->m_accent = appearance->color("accent"_sv);
-    // Whoever is drawn from tokens looks them up afresh after this.
-    if (s_current)
-        appearance->m_accent = s_current->m_accent;
+    // A chosen accent outlives a change of appearance.
+    bool chosen = s_current && s_current->m_accent != s_current->theme_accent();
+    Gfx::Color previous = chosen ? s_current->m_accent : Gfx::Color {};
     s_current = move(appearance);
+    if (chosen) {
+        s_current->m_accent = previous;
+        s_current->recolor_for_accent();
+    }
     WindowRegistry::appearance_changed();
     return {};
+}
+
+Gfx::Color Appearance::theme_accent() const
+{
+    auto const* theme = m_theme_colors.get("accent"_sv);
+    if (theme)
+        return *theme;
+    auto const* color_now = m_colors.get("accent"_sv);
+    return color_now ? *color_now : m_accent;
+}
+
+void Appearance::recolor_for_accent()
+{
+    // Everything measured as a tint of the accent.
+    static StringView const accented[] = {
+        "accent"_sv,
+        "bezelAccent.fillTop"_sv,
+        "bezelAccent.fillBottom"_sv,
+        "bezelAccentPressed.fillTop"_sv,
+        "bezelAccentPressed.fillBottom"_sv,
+        "popupArrow.fillTop"_sv,
+        "popupArrow.fillBottom"_sv,
+        "switch.trackOn"_sv,
+        "slider.fill"_sv,
+        "progress.fill"_sv,
+        "selectedContent"_sv,
+        "selectedText"_sv,
+        "focus"_sv,
+        "menu.selection"_sv,
+        "sidebar.icon"_sv,
+        "link"_sv,
+    };
+    if (m_theme_colors.is_empty()) {
+        for (auto token : accented) {
+            if (auto const* color_now = m_colors.get(token))
+                m_theme_colors.set(MUST(String::from_view(token)), *color_now);
+        }
+    }
+    auto base = hsv_from_color(*m_theme_colors.get("accent"_sv));
+    auto chosen = hsv_from_color(m_accent);
+    float saturation_ratio = base.saturation > 0 ? chosen.saturation / base.saturation : 1;
+    float value_ratio = base.value > 0 ? chosen.value / base.value : 1;
+    for (auto token : accented) {
+        auto const* theme = m_theme_colors.get(token);
+        if (!theme)
+            continue;
+        auto hsv = hsv_from_color(*theme);
+        hsv.hue = chosen.hue;
+        hsv.saturation = clamp(hsv.saturation * saturation_ratio, 0.0f, 1.0f);
+        hsv.value = clamp(hsv.value * value_ratio, 0.0f, 1.0f);
+        m_colors.set(MUST(String::from_view(token)), color_from_hsv(hsv, theme->alpha));
+    }
 }
 
 void Appearance::set_accent(Gfx::Color color)
 {
     m_accent = color;
+    recolor_for_accent();
     WindowRegistry::appearance_changed();
 }
 
