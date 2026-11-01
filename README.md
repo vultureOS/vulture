@@ -25,12 +25,20 @@ a text login on the console.
   look and job control, and about 70 commands in the places macOS keeps
   them (`ls`, `grep`, `sed`, `find`, `ps`, `sudo`, ...). Root has no
   password, as on macOS: use `sudo`.
+- Programs talk through Mach-style ports, with messages described in an
+  interface language (`ipcc`) and services found by name through vlaunchd.
+  The system services are there: `logd` (`log stream`, `log show`), `notifyd`
+  (`notify(3)`, `notifyutil`), `configd` (`scutil`) and `pboard` (`pbcopy`,
+  `pbpaste`).
+- Processes have threads: `pthread_*`, `thread_local`, futexes, each thread
+  with its own signal mask and alternate stack.
 - Every push is built on macOS and Linux by GitHub Actions; `ninja check`
-  runs the unit tests, the kernel tests, 30 userland suites (among them our
+  runs the unit tests, the kernel tests, 34 userland suites (among them our
   [POSIX conformance subset](Documentation/POSIX.md): 208 requirements), a
   console login typed over the serial line, and the storage tests.
 
-Next is M7, IPC and services. See the [Roadmap](Documentation/Roadmap.md).
+Next is M8, graphics and the window server. See the
+[Roadmap](Documentation/Roadmap.md).
 
 ## Requirements
 

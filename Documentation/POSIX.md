@@ -24,7 +24,7 @@ The rest of `test-userland` checks the same interfaces from other sides:
 the shell language (`shell`), the command-line tools against macOS's
 output (`tools`), the interactive shell and job control through a
 pseudo-terminal (`interactive`), terminals and sessions (`terminals`),
-credentials and permissions (`permissions`), and more.
+credentials and permissions (`permissions`), threads (`threads`), and more.
 
 ## What the subset covers
 
@@ -41,15 +41,28 @@ credentials and permissions (`permissions`), and more.
 | Environment | `getenv`, `setenv`, `unsetenv`, `environ`, `getuid` and friends, `getpwnam`, `getpwuid`, `getgrnam`, `getgrgid`, `uname`, `gethostname`, `sysconf` |
 | C library | `printf` family, `scanf` family, `strto*`, `atoi`, `qsort`, `bsearch`, the string functions, `strtok_r`, `strerror`, `strsignal`, `stdio` streams, `tmpfile`, `atexit`, `getopt`, `regcomp`/`regexec`, `fnmatch`, `glob` |
 
+## Threads
+
+`Tests/Userland/threads.cpp` checks them, with the process as a whole:
+
+| Area | Interfaces |
+|---|---|
+| Threads | `pthread_create`, `pthread_join`, `pthread_detach`, `pthread_exit`, `pthread_self`, `pthread_equal`, `pthread_once`, `pthread_atfork`, `pthread_attr_*` (detach state, stack size and address, guard size); macOS's `pthread_threadid_np`, `pthread_setname_np`, `pthread_getname_np`, `pthread_main_np`, `pthread_get_stackaddr_np`, `pthread_get_stacksize_np`, `pthread_yield_np`; `sched_yield` |
+| Synchronization | `pthread_mutex_*` (normal, recursive, error-checking, timed), `pthread_cond_*` (timed, on either clock), `pthread_rwlock_*`, `pthread_barrier_*`, `pthread_spin_*`, unnamed `sem_*` |
+| Thread-specific data | `pthread_key_*`, cleanup handlers, C and C++ `thread_local` with destructors, thread-safe function-local statics; `errno` per thread |
+| Signals | `pthread_sigmask`, `pthread_kill`, `sigwait`, `sigwaitinfo`, `sigtimedwait`, `sigaltstack` |
+| The process | `exit` and `exec` from any thread end the others, however they are occupied; a fault in any thread ends the process; stopping stops them all; `fork` makes a child of one thread, with `malloc` and stdio usable; `flockfile` and the `_unlocked` stdio calls |
+
 ## Not yet
 
 These POSIX interfaces are not there yet, and arrive with the milestones
 that need them:
 
-- Threads: `pthread_*`, thread-local storage, `sigaltstack` (M7, with the
-  services that need them).
-- Sockets and networking: `socket` and friends, `getaddrinfo` (M12; Unix
-  domain sockets with M7's IPC).
+- Thread cancellation (`pthread_cancel`, `pthread_setcancelstate`,
+  `pthread_testcancel`), and synchronization across processes
+  (`PTHREAD_PROCESS_SHARED`, named semaphores): futexes are private to a process.
+- Sockets and networking: `socket` and friends, `getaddrinfo`, Unix domain
+  sockets (M12; between processes here, ports do that job).
 - The `*at` family (`openat`, `fstatat`, `unlinkat`, ...) and `fchdir`.
 - Interval timers (`setitimer`, `getitimer`, `timer_create`), `waitid`,
   `sigqueue` and real-time signals.

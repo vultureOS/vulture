@@ -133,9 +133,9 @@ Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page
                FileSystem (VFS, vultureFS, FAT, tmpfs, devfs, pipes, boot archive)
                Time (timer queues) · Tests (ktest) · Library (C++ runtime) · Init.cpp
 Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem (libSystem.B.dylib) · LibDyld (dyld)
-               LibCore (event loop, accounts) · LibCrypto · LibJSON · LibDeviceTree · LibELF · LibVultureFS · LibTest
+               LibCore (event loop, accounts) · LibCrypto · LibIPC · LibJSON · LibServices · LibDeviceTree · LibELF · LibVultureFS · LibTest
                LibGfx, LibUI (pranaUI) … later
-Services/      vlaunchd (process 1, M6); logd · PranaWindowServer · Dock …                           (M7+)
+Services/      vlaunchd (process 1, M6); logd · notifyd · configd · pboard (M7); PranaWindowServer · Dock …  (M8+)
 Applications/  Finder · Terminal · TextEdit · Preview · SystemSettings · WidgetGallery …              (M9+)
 Utilities/     vsh and the command-line tools (bin/), login and accounts                               (M6)
 Base/          root filesystem skeleton, themes, fonts, icons, wallpapers, sounds                    (M5+)
@@ -209,7 +209,7 @@ macOS-style at the top, real Unix underneath:
   one (a slice ended, or a more urgent thread woke). Later: boosts for input
   and the window server, coalescing for background work.
 - **Processes (M4).** A process has an address space, open files, signal
-  state and one thread (several come with M7's services). Its address space is a list of
+  state and its threads (see below). Its address space is a list of
   regions over anonymous VMObjects, mapped lazily by the page fault handler:
   a first touch gets a zeroed page; after `fork` both processes share every
   page, counted per page, and a write to a shared page copies it. User TLB
@@ -219,6 +219,26 @@ macOS-style at the top, real Unix underneath:
   first write in a private mapping).
   A fatal signal prints a crash report: the fault, registers and a backtrace
   symbolized from the program's own symbol table.
+- **Threads (M7).** A process's threads share everything but their signal
+  masks, the signals sent to them alone (faults, `pthread_kill`), their
+  alternate signal stacks, and registers: the thread pointer (TPIDR_EL0) is
+  switched with them. A signal for the process goes to the first thread not
+  blocking it; a thread that is running in user mode is sent an IPI, as nothing
+  else would make it enter the kernel in a tickless system. Stopping stops every
+  thread on its way to user mode. `exit` and `exec` end the other threads and
+  wait until each is off its processor before the address space changes. The
+  last thread to end ends the process. Futexes are private to a process, keyed
+  by address space and address; a waiter joins its bucket before reading the
+  word, as reading can fault and sleep. `pthread_*` is in the C library, with no
+  system call for an uncontended lock; `malloc` and stdio take locks of the same
+  kind, and `fork` holds them across the copy so a child never inherits one
+  held by a thread it does not have.
+- **Thread-local storage (M7).** ELF TLS, AArch64's variant 1: all of it static,
+  as every library is loaded before the program starts. dyld gives each module
+  an offset from the thread pointer, resolves `TLS_TPREL64` and `TLSDESC`, builds
+  the image every thread's block is copied from and sets up the first thread's
+  (a statically linked program's C library does it itself). `errno` is one such
+  variable.
 - **Dynamic linking (M6).** Programs are position independent and name
   `/usr/lib/dyld` as their interpreter; `exec` loads both and starts dyld,
   which maps the libraries the program needs from their files (so all
@@ -239,12 +259,23 @@ macOS-style at the top, real Unix underneath:
   the shell (`/bin/sh`), with zsh's prompt and messages for people.
 - **Syscalls.** `SVC #0`, negative-errno returns, ELF64 binaries. Defined
   once in `Kernel/API/Syscalls.def`, from which the kernel's dispatcher and
-  LibSystem's numbers come; see [System Calls](Syscalls.md). Port calls join
-  in M7.
-- **IPC.** Mach-style ports with send/receive rights in a per-task handle
-  table. Messages carry inline bytes, port rights and out-of-line memory moved
-  by page remapping. Request/reply uses direct-handoff scheduling. Pipes, Unix
-  sockets, signals, futexes and shared memory sit alongside.
+  LibSystem's numbers come; see [System Calls](Syscalls.md).
+- **IPC (M7).** Mach-style ports: one receive right, any number of send rights,
+  all of them file descriptors, so `poll` and the run loop watch them. Messages
+  carry inline bytes (up to 64 KiB), up to 16 descriptors, a reply right and up
+  to 8 out-of-line regions (shared copy-on-write), and receivers learn the
+  sender's pid, uid and gid from the kernel. A call hands the processor straight
+  to the receiver and back. `ipcc` turns an interface description (`*.ipc`) into
+  a proxy for clients and a stub for servers; LibIPC has the encoding, large
+  byte buffers going out of line by themselves. Each process inherits a bootstrap
+  port, which vlaunchd serves: `look_up` finds a service by name, and starts it
+  if it is a job with `MachServices` that is not running. Pipes, signals,
+  futexes and shared mappings sit alongside; Unix sockets come with networking.
+- **System services (M7).** Each a vlaunchd job reached by name: logd (the
+  unified log, `os_log`, `log stream` and `log show` in macOS's format), notifyd
+  (`notify(3)`), configd (ComputerName, LocalHostName and HostName in
+  `/Library/Preferences/SystemConfiguration/preferences.plist`; it names the
+  machine) and pboard (each user's pasteboards).
 - **Filesystems (M5).**
   - **VFS.** Paths resolve one component at a time across a mount table.
     Open files are shared by `dup` and `fork`.
