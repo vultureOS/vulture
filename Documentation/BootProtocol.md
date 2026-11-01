@@ -154,5 +154,6 @@ it. Addresses are physical unless named otherwise.
 | `-v` | Verbose boot: the kernel log on screen instead of the boot screen |
 | `ktest`, `ktest=PREFIX` | Run the in-kernel tests (all, or those whose `suite.name` starts with PREFIX), print `ktest: PASS` or `ktest: FAIL`, and power off |
 | `ktest-seconds=N` | How long soak tests run, in seconds (default 2) |
-| `utest` | Start `/sbin/init --test`: run the userland tests, then power off |
+| `utest` | Start `/sbin/vlaunchd --test`: run the userland tests, then power off |
+| `crashtest`, `persisttest` | Start vlaunchd's storage tests (see `Meta/storage-test.sh`) |
 | `fault=KIND` | End the boot with a deliberate failure, to test crash reporting: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (a panic in a timer interrupt) or `processor` (a panic on processor 1) |

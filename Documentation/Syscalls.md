@@ -26,31 +26,40 @@ Numbers are positions in `Syscalls.def`: only ever append to it.
 - **Ignored signals are discarded when sent** (POSIX), so they interrupt
   nothing.
 
-## The calls (M4)
+## The calls
 
 | Call | Arguments | Notes |
 |---|---|---|
 | `exit` | status | Ends the process; the parent's `waitpid` sees the status |
-| `write` | fd, buffer, size | The console (fds 0-2) writes to the kernel log |
-| `read` | fd, buffer, size | Boot archive files; the console reads as end of file until M6 |
-| `open` | path, flags, mode | Read-only boot archive (writes fail with `EROFS`) |
-| `close` | fd | |
-| `lseek` | fd, offset, origin | `ESPIPE` on the console |
-| `fstat`, `stat` | fd or path, `vulture_stat*` | |
-| `getpid`, `getppid`, `gettid` | | |
 | `fork` | | The child shares every page copy-on-write |
-| `execve` | path, argv, envp | Static ELF executables (`ET_EXEC`) from the boot archive |
-| `waitpid` | pid (-1: any), status*, options (`WNOHANG`) | |
-| `kill` | pid, signal | Process groups arrive with job control (M6) |
-| `sigaction` | signal, new*, old* | LibC always supplies a restorer (`SA_RESTORER`) |
-| `sigprocmask` | how, set*, old* | |
-| `sigreturn` | | Called by the restorer when a handler returns |
-| `mmap` | address, length, protection, flags, fd, offset | Anonymous private memory; writable+executable is refused (W^X) |
+| `execve` | path, argv, envp | ELF programs: position-independent ones (`ET_DYN`, loaded at 0x400000) with the dynamic linker their `PT_INTERP` names, or static ones (`ET_EXEC`); `#!` scripts run their interpreter. The auxiliary vector gives `AT_PHDR`, `AT_PHENT`, `AT_PHNUM`, `AT_PAGESZ`, `AT_BASE`, `AT_ENTRY`, the user and group IDs, `AT_SECURE` and `AT_EXECFN` |
+| `waitpid` | pid (-1: any; 0 or -pgid: a group), status*, options | `WNOHANG`, `WUNTRACED`, `WCONTINUED` |
+| `getpid`, `getppid`, `gettid` | | |
+| `kill` | pid (0, -1, -pgid: groups), signal | Only to processes the caller may signal |
+| `sigaction`, `sigprocmask`, `sigreturn` | | LibC always supplies a restorer (`SA_RESTORER`) |
+| `sigsuspend`, `sigpending`, `alarm` | | |
+| `setpgid`, `getpgid`, `setsid`, `getsid` | | Job control |
+| `read`, `write` | fd, buffer, size | |
+| `pread`, `pwrite` | fd, buffer, size, offset | At the offset given; the file's own offset stays |
+| `open` | path, flags, mode | `O_NOFOLLOW` refuses a symbolic link (`ELOOP`); a session leader without a terminal gets the first it opens |
+| `close`, `dup`, `dup2`, `fcntl` | | |
+| `lseek` | fd, offset, origin | `ESPIPE` on pipes and terminals |
+| `fstat`, `stat`, `lstat` | fd or path, `vulture_stat*` | |
+| `pipe` | fds*, flags | |
+| `poll` | pollfd*, count, milliseconds | Files, pipes, terminals |
+| `ioctl` | fd, request, argument | Terminals: termios, window size, foreground group, controlling terminal, pseudo-terminals |
+| `mkdir`, `rmdir`, `unlink`, `rename`, `link`, `symlink`, `readlink` | | |
+| `getcwd`, `chdir`, `getdents` | | |
+| `fsync`, `ftruncate`, `sync` | | |
+| `access`, `umask`, `chmod`, `fchmod`, `chown`, `fchown` | | Permissions are checked as POSIX says |
+| `utimensat`, `futimens` | | |
+| `getuid`, `geteuid`, `getgid`, `getegid`, `setuid`, `setgid`, `seteuid`, `setegid`, `getgroups`, `setgroups` | | Set-ID programs run as the file's owner and group |
+| `mmap` | address, length, protection, flags, fd, offset | Anonymous and file mappings, private or shared; writable and executable at once is refused (W^X) |
 | `munmap`, `mprotect` | address, length (, protection) | |
-| `sched_yield` | | |
-| `clock_gettime` | clock, timespec* | `CLOCK_REALTIME` counts from boot until there is an RTC driver |
-| `nanosleep` | timespec* | |
-| `power_off` | | Process 1 only |
+| `sched_yield`, `clock_gettime`, `nanosleep` | | |
+| `uname`, `getrandom`, `sysctl` | | `sysctl` by name: `kern.*` (including `kern.proc.all`, every process), `hw.*`, `vfs.mounts` |
+| `reboot` | how | Root: restart or power off (vlaunchd does it, after stopping every job) |
+| `power_off` | | Process 1 only, for the test boots |
 
 The shared constants and structures (errno values, signal numbers, `mmap`
 flags, `vulture_stat`, the signal frame) are in

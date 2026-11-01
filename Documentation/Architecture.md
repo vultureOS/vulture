@@ -69,8 +69,11 @@ ExternalProject over the same source tree and adds these targets:
 | `ninja -C build test-boot` | Boots headless; the kernel must print its memory map and finish booting |
 | `ninja -C build test-panic` | Boots with `fault=data-abort`; the panic report must decode the fault and symbolize the backtrace |
 | `ninja -C build test-kernel` | Boots with `ktest`: the in-kernel tests run on all processors, print `ktest: PASS`, and power the machine off |
-| `ninja -C build test-userland` | Boots with `utest`: `/sbin/init --test` runs the programs in `/usr/tests`, prints `userland: PASS`, and powers off |
+| `ninja -C build test-userland` | Boots with `utest`: `/sbin/vlaunchd --test` runs the programs in `/usr/tests`, prints `userland: PASS`, and powers off |
+| `ninja -C build test-login` | Boots normally and logs in on the console over the serial line (`Meta/run.sh --chat Tests/Console/login.chat`), then powers off with `sudo` |
+| `ninja -C build test-persistence` | Three boots in a row on one disk, each finding what the last committed |
 | `ninja -C build check` | All of the above tests |
+| `ninja -C build test-crash` | 100 power cuts while writing; fsck clean after each (not part of `check`) |
 | `ninja -C build test-soak` | 1000 threads ping-ponging for 60 s (not part of `check`) |
 | `ninja -C build bench` | Boots with `ktest=bench` and prints the measurements |
 
@@ -88,7 +91,7 @@ Kernel command line words:
 | `-v` | Verbose boot: the kernel log on screen instead of the boot screen |
 | `ktest`, `ktest=PREFIX` | Run the in-kernel tests (those whose `suite.name` starts with PREFIX), then power off |
 | `ktest-seconds=N` | How long soak tests run (default 2) |
-| `utest` | Start `/sbin/init --test`, which runs the userland tests and powers off |
+| `utest` | Start `/sbin/vlaunchd --test`, which runs the userland tests and powers off |
 | `fault=KIND` | End the boot with a deliberate crash: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (in a timer interrupt) or `processor` (on processor 1) | Kernel code that does not touch hardware (such as
 `Kernel/BootArguments.cpp`) is compiled into host tests too; see
 `Tests/Kernel`.
@@ -105,7 +108,7 @@ header dependency tracking.
  Desktop      LoginWindow · SystemUI (menu bar) · Dock · Spotlight · Mission Control · Notification/Control Center
  Frameworks   pranaUI (AppKit-like) · LibAnimation · LibGfx (Quartz-2D-like) · LibText (CoreText-like) · LibImage
  Core libs    LibCore (run loop, JSON plists) · LibIPC (+ipcc IDL) · LibCrypto/TLS/HTTP · LibUnicode · LibVT · LibAudio
- Runtime      LibC · LibM · LibCxxRT · LibSystem (syscalls) · DynamicLoader · LibBase (shared with kernel)
+ Runtime      LibC · LibM · LibCxxRT · LibSystem (syscalls; libSystem.B.dylib) · dyld · LibBase (shared with kernel)
  Services     vlaunchd (PID 1) · logd · notifyd · configd · PranaWindowServer · AudioServer · Indexer · Pasteboard
  ─────────────────────────────── syscalls (SVC) + Mach-style ports ───────────────────────────────
  Kernel       Hybrid (XNU-style): monolithic core for speed + port IPC for services
@@ -129,13 +132,15 @@ Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page
                Tasks (Processor, Thread, Scheduler, Process) · Syscalls · Bus/PCI · Devices (VirtIO, Storage)
                FileSystem (VFS, vultureFS, FAT, tmpfs, devfs, pipes, boot archive)
                Time (timer queues) · Tests (ktest) · Library (C++ runtime) · Init.cpp
-Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem · LibDeviceTree · LibELF · LibVultureFS · LibTest
-               LibCore, LibGfx, LibUI (pranaUI) … later
-Services/      Init (process 1, M4); vlaunchd · logd · PranaWindowServer · Dock …                    (M6+)
+Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem (libSystem.B.dylib) · LibDyld (dyld)
+               LibCore (event loop, accounts) · LibCrypto · LibJSON · LibDeviceTree · LibELF · LibVultureFS · LibTest
+               LibGfx, LibUI (pranaUI) … later
+Services/      vlaunchd (process 1, M6); logd · PranaWindowServer · Dock …                           (M7+)
 Applications/  Finder · Terminal · TextEdit · Preview · SystemSettings · WidgetGallery …              (M9+)
-Utilities/     vsh and command-line tools                                                             (M6+)
+Utilities/     vsh and the command-line tools (bin/), login and accounts                               (M6)
 Base/          root filesystem skeleton, themes, fonts, icons, wallpapers, sounds                    (M5+)
-Tests/         unit, integration and UI golden tests
+Tests/         host unit tests, kernel tests, userland suites (Userland; posix.cpp is the POSIX subset),
+               the console login (Console/login.chat), UI golden tests later
 Documentation/ these documents
 ```
 
@@ -204,20 +209,34 @@ macOS-style at the top, real Unix underneath:
   one (a slice ended, or a more urgent thread woke). Later: boosts for input
   and the window server, coalescing for background work.
 - **Processes (M4).** A process has an address space, open files, signal
-  state and one thread (several in M6). Its address space is a list of
+  state and one thread (several come with M7's services). Its address space is a list of
   regions over anonymous VMObjects, mapped lazily by the page fault handler:
   a first touch gets a zeroed page; after `fork` both processes share every
   page, counted per page, and a write to a shared page copies it. User TLB
   entries are tagged with a 16-bit ASID, so switching processes flushes
-  nothing. Programs are static ELF files loaded from the root filesystem;
-  `/sbin/init` is process 1 and adopts orphans. Files can be mapped into
+  nothing. `/sbin/vlaunchd` is process 1 and reaps orphans. Files can be mapped into
   memory: a mapping's pages are the file's own cached pages (copied on the
   first write in a private mapping).
   A fatal signal prints a crash report: the fault, registers and a backtrace
   symbolized from the program's own symbol table.
-- **User memory layout (M4).** Programs at 0x400000, `mmap` from
+- **Dynamic linking (M6).** Programs are position independent and name
+  `/usr/lib/dyld` as their interpreter; `exec` loads both and starts dyld,
+  which maps the libraries the program needs from their files (so all
+  processes share their pages through the page cache), relocates
+  everything, runs the initializers and jumps to the program. The C
+  library, the C++ runtime and LibBase's compiled parts are one library,
+  `/usr/lib/libSystem.B.dylib`. Crash reports name library frames with
+  their library. See [POSIX](POSIX.md) for what the C library offers.
+- **User memory layout (M4, M6).** Programs at 0x400000, dyld at
+  0x0000'7f00'0000'0000, `mmap` (libraries included) from
   0x0000'1000'0000'0000 upwards, the stack (8 MiB) below
   0x0000'8000'0000'0000, nothing below 0x10000 (null pointers fault).
+- **Unix userland (M6).** Sessions, process groups and job control;
+  terminals with a line discipline (the console, pseudo-terminals);
+  users, groups and set-ID programs; vlaunchd starts and keeps the jobs of
+  `/System/Library/LaunchDaemons` (JSON property lists with launchd's
+  keys), getty on the console among them, and shuts down cleanly. vsh is
+  the shell (`/bin/sh`), with zsh's prompt and messages for people.
 - **Syscalls.** `SVC #0`, negative-errno returns, ELF64 binaries. Defined
   once in `Kernel/API/Syscalls.def`, from which the kernel's dispatcher and
   LibSystem's numbers come; see [System Calls](Syscalls.md). Port calls join

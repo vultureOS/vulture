@@ -5,24 +5,32 @@ Everything inside it is built from scratch in this repository: bootloader,
 kernel, C library, graphics, fonts rasterizer, UI framework, window server,
 desktop and apps.
 
-**Status:** milestone M4 is done.
+**Status:** milestone M6 is done: vultureOS is a working Unix system, with
+a text login on the console.
 
 - VultureBoot, our own UEFI loader, loads the kernel on AArch64 and hands it
   the machine: memory map, framebuffer, device tree and serial port.
 - The kernel boots to a macOS-style boot screen, or a verbose log with `-v`.
-- It runs on its own page tables with buddy and slab allocators, takes
-  interrupts through the GICv3, keeps time without a periodic tick, and
-  brings all 8 processors online.
-- Threads are scheduled preemptively over all processors by QoS class, with
-  work stealing, sleeping locks and a 173 ns context switch.
-- Programs run in user mode with their own address spaces: `/sbin/init`
-  starts from the boot archive, and processes fork (copy-on-write), exec,
-  wait and handle signals through our own C library. A crashing program is
-  killed alone, with a symbolized crash report.
-- Crashes produce a symbolized backtrace; booting with `ktest` runs the
-  in-kernel test suite.
+  It runs all 8 processors, schedules threads preemptively by QoS class
+  (173 ns context switch), and keeps time without a periodic tick.
+- Programs run in their own address spaces, dynamically linked against
+  `/usr/lib/libSystem.B.dylib` by our dynamic linker, `/usr/lib/dyld`. A
+  crashing program is killed alone, with a symbolized crash report.
+- Files live on vultureFS, our copy-on-write filesystem with checksummed
+  metadata, on virtio-blk or NVMe disks; 100 power cuts in a row while
+  writing leave it consistent.
+- `vlaunchd` is process 1, as launchd is on macOS: it keeps the jobs of
+  `/System/Library/LaunchDaemons` running, getty on the console among them.
+- Log in as `vulture` (password `vulture`) to `vsh`, a shell with zsh's
+  look and job control, and about 70 commands in the places macOS keeps
+  them (`ls`, `grep`, `sed`, `find`, `ps`, `sudo`, ...). Root has no
+  password, as on macOS: use `sudo`.
+- Every push is built on macOS and Linux by GitHub Actions; `ninja check`
+  runs the unit tests, the kernel tests, 30 userland suites (among them our
+  [POSIX conformance subset](Documentation/POSIX.md): 208 requirements), a
+  console login typed over the serial line, and the storage tests.
 
-Next is M5, storage and vultureFS. See the [Roadmap](Documentation/Roadmap.md).
+Next is M7, IPC and services. See the [Roadmap](Documentation/Roadmap.md).
 
 ## Requirements
 
@@ -47,8 +55,9 @@ sudo apt install clang-22 lld-22 llvm-22 libclang-rt-22-dev cmake ninja-build \
 `Meta/run.sh` picks the firmware and accelerator for the machine
 (`VULTURE_ACCEL=tcg` forces emulation).
 
-Both are built and tested on every push by GitHub Actions
-([macOS](.github/workflows/macos.yml), [Linux](.github/workflows/linux.yml)).
+Both are built on every push by GitHub Actions
+([macOS](.github/workflows/macos.yml), [Linux](.github/workflows/linux.yml));
+`ninja check` runs the tests.
 
 ## Build and run
 
