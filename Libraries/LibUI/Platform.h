@@ -27,6 +27,7 @@ class Window;
 struct MaterialRegion {
     Gfx::IntRect rect;
     WS::Material material;
+    int radius { 0 };
 };
 
 // One window's link to whatever shows it.
@@ -49,6 +50,9 @@ public:
     virtual void begin_move() = 0;
     virtual void grab_pointer(bool) = 0;
     virtual void set_cursor(WS::CursorShape) = 0;
+    virtual void minimize() { }
+    virtual void zoom() { }
+    virtual void set_input_region(Gfx::IntRect) { }
     virtual void begin_drag(WindowBackend& image, StringView type, ReadonlyBytes data) = 0;
     virtual void accept_drop(bool) = 0;
     virtual void set_materials(Span<MaterialRegion const>) = 0;

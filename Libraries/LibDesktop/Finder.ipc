@@ -1,0 +1,5 @@
+// Finder (com.vulture.Finder), so that there is one of it.
+endpoint Finder
+{
+    open_folder(String path) =|
+}

@@ -1,0 +1,7 @@
+// The login session (com.vulture.loginwindow), for what ends it.
+endpoint Session
+{
+    log_out() =|
+    restart() =|
+    shut_down() =|
+}

@@ -1,0 +1,16 @@
+// The notification center (com.vulture.usernoted): programs post, and whoever shows
+// them hears. Keeps what was posted, for the list in Notification Center.
+endpoint NotificationCenter
+{
+    post(String application, String title, String body) =|
+    // Everything still kept, as JSON: newest first.
+    all() => (String json)
+    clear() =|
+    // Where to hear of new ones.
+    subscribe(Port events) =|
+}
+
+endpoint NotificationEvents
+{
+    posted(String application, String title, String body) =|
+}

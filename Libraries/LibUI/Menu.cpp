@@ -150,8 +150,7 @@ MenuItem& Menu::add(StringView title, Function<void()> action)
     MenuItem item;
     item.title = MUST(String::from_view(title));
     item.action = move(action);
-    m_items.append(move(item));
-    return m_items.last();
+    return m_items.append(move(item));
 }
 
 MenuItem& Menu::add_with_shortcut(StringView title, u16 code, StringView shown, Function<void()> action, u32 modifiers)
@@ -168,7 +167,7 @@ void Menu::add_separator()
     MenuItem item;
     item.separator = true;
     item.enabled = false;
-    m_items.append(move(item));
+    (void)m_items.append(move(item));
 }
 
 Menu& Menu::add_submenu(StringView title)
@@ -190,7 +189,8 @@ FloatSize Menu::size() const
     float widest = 0;
     float widest_shortcut = 0;
     bool has_submenu = false;
-    for (auto const& item : m_items) {
+    for (size_t i = 0; i < m_items.size(); ++i) {
+        auto const& item = m_items[i];
         height += item.separator ? separator : row;
         if (item.separator)
             continue;
@@ -374,7 +374,9 @@ void Menu::pointer_at(FloatPoint screen, u32)
             menu->close_submenu();
         return;
     }
-    deepest()->set_highlight(-1);
+    root->deepest()->set_highlight(-1);
+    if (root->on_pointer_outside)
+        root->on_pointer_outside(screen);
 }
 
 void Menu::released_at(FloatPoint screen)

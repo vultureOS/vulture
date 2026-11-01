@@ -1,0 +1,9 @@
+// The metadata server (com.vulture.mds): what Spotlight searches.
+endpoint Search
+{
+    // By name and by words in the text of files; JSON: [ { "path", "name", "kind" } ].
+    query(String text, u32 limit) => (String json)
+    // Scans again, soon.
+    update() =|
+    status() => (u64 files, u64 words)
+}

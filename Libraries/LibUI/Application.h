@@ -25,7 +25,9 @@ namespace UI {
 
 class Application final : public Platform {
 public:
-    [[nodiscard]] static ErrorOr<NonnullOwnPtr<Application>> create(StringView name = {});
+    // With a name, an application, shown in the Dock and menu bar; without, a part of the
+    // desktop itself.
+    [[nodiscard]] static ErrorOr<NonnullOwnPtr<Application>> create(StringView name = {}, StringView identifier = {});
     ~Application() override;
 
     [[nodiscard]] static Application& the();
@@ -40,6 +42,15 @@ public:
     void set_main_menu(NonnullOwnPtr<Menu>);
     [[nodiscard]] Menu* main_menu() const { return m_main_menu.ptr(); }
     bool perform_main_menu_shortcut(KeyEvent const&);
+    // The usual menus, for set_main_menu: About, Hide and Quit under the program's name;
+    // and Edit and Window, which act on what has the keyboard. `extra` go between
+    // the first and Edit.
+    [[nodiscard]] NonnullOwnPtr<Menu> standard_menus(Function<void()> on_about = nullptr);
+    // Says the menus again, after a change to them.
+    void publish_menus();
+    // What has the keyboard: gets "copy" and the like, up the responder chain.
+    bool send_command(StringView command);
+    [[nodiscard]] Window* key_window() const;
 
     // Windows the application keeps until they close.
     template<typename T, typename... Args>
@@ -73,6 +84,7 @@ private:
     Core::EventLoop m_loop;
     OwnPtr<::Window::Connection> m_connection;
     OwnPtr<Menu> m_main_menu;
+    Vector<MenuItem*> m_menu_items;
     Vector<NonnullOwnPtr<Window>> m_windows;
     String m_name;
     bool m_quits_with_last_window { true };

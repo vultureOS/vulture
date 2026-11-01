@@ -20,6 +20,9 @@ namespace UI {
 class Menu;
 
 struct MenuItem {
+    MenuItem() = default;
+    MenuItem(MenuItem&&) = default;
+
     String title;
     Function<void()> action;
     // Command, and this key: 0 for none. The text is what shows, "S" or "⇧S".
@@ -32,6 +35,56 @@ struct MenuItem {
     bool checked { false };
 };
 
+// A list of items, kept in place: an item's address is what its menu's published form
+// refers to. Those added later go on the end, or at a place.
+class MenuItems {
+public:
+    MenuItem& append(MenuItem item)
+    {
+        auto owned = adopt_own(*new MenuItem(move(item)));
+        auto& result = *owned;
+        m_items.append(move(owned));
+        return result;
+    }
+    // A title's item here, for its submenu to be set.
+    MenuItem& insert_returning(size_t index, StringView title)
+    {
+        auto owned = adopt_own(*new MenuItem);
+        owned->title = MUST(String::from_view(title));
+        auto& result = *owned;
+        m_items.insert(index, move(owned));
+        return result;
+    }
+    [[nodiscard]] MenuItem& operator[](size_t index) { return *m_items[index]; }
+    [[nodiscard]] MenuItem const& operator[](size_t index) const { return *m_items[index]; }
+    [[nodiscard]] size_t size() const { return m_items.size(); }
+    [[nodiscard]] bool is_empty() const { return m_items.is_empty(); }
+    void clear() { m_items.clear(); }
+
+    class Iterator {
+    public:
+        explicit Iterator(NonnullOwnPtr<MenuItem>* at)
+            : m_at(at)
+        {
+        }
+        MenuItem& operator*() const { return **m_at; }
+        Iterator& operator++()
+        {
+            ++m_at;
+            return *this;
+        }
+        bool operator!=(Iterator const& other) const { return m_at != other.m_at; }
+
+    private:
+        NonnullOwnPtr<MenuItem>* m_at;
+    };
+    [[nodiscard]] Iterator begin() { return Iterator(m_items.data()); }
+    [[nodiscard]] Iterator end() { return Iterator(m_items.data() + m_items.size()); }
+
+private:
+    Vector<NonnullOwnPtr<MenuItem>> m_items;
+};
+
 class Menu {
 public:
     explicit Menu(StringView title = {});
@@ -42,7 +95,7 @@ public:
     MenuItem& add_with_shortcut(StringView title, u16 code, StringView shown, Function<void()> action, u32 modifiers = WS::ModifierCommand);
     void add_separator();
     Menu& add_submenu(StringView title);
-    [[nodiscard]] Vector<MenuItem>& items() { return m_items; }
+    [[nodiscard]] MenuItems& items() { return m_items; }
 
     // Opens it from `owner`, at this point on the screen; with `aligned` naming an item,
     // that item sits at the point, as a pop-up button's does. It closes by itself.
@@ -52,6 +105,8 @@ public:
     [[nodiscard]] Window* window() const { return m_window.ptr(); }
     // Whatever the choice was, or none: after the action.
     Function<void()> on_close;
+    // The pointer is outside every menu of the chain: a menu bar, to slide along.
+    Function<void(Gfx::FloatPoint screen)> on_pointer_outside;
 
     // A key's item anywhere in it, for a window's shortcuts.
     bool perform_shortcut(KeyEvent const&);
@@ -81,7 +136,7 @@ private:
     [[nodiscard]] bool screen_point_in_chain(Gfx::FloatPoint) const;
 
     String m_title;
-    Vector<MenuItem> m_items;
+    MenuItems m_items;
     OwnPtr<Window> m_window;
     class KeyForwarder;
     OwnPtr<KeyForwarder> m_key_forwarder;

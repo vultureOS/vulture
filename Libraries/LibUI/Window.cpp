@@ -686,10 +686,15 @@ void Window::handle_mouse(WS::MouseKind kind, FloatPoint position, u32 buttons, 
         }
         return;
     }
-    case WS::MouseKind::Entered:
-        set_hovered(m_root->hit_test(position));
+    case WS::MouseKind::Entered: {
+        // It came in somewhere: as good as moving there.
+        auto* hit = view_at(position);
+        set_hovered(hit);
         update_cursor();
+        for (auto* view = hit; view; view = view->parent())
+            view->mouse_moved(make_event(*view, 0));
         return;
+    }
     case WS::MouseKind::Left:
         hide_tooltip();
         set_hovered(nullptr);
