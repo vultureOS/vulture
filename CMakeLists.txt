@@ -74,8 +74,10 @@ elseif(VULTURE_PART STREQUAL "userland")
     add_subdirectory(Libraries/LibServices)
     add_subdirectory(Libraries/LibSystem)
     add_subdirectory(Libraries/LibText)
+    add_subdirectory(Libraries/LibWindow)
     add_subdirectory(Services)
     add_subdirectory(Utilities)
+    add_subdirectory(Tests/UI)
     add_subdirectory(Tests/Userland)
     # The root filesystem skeleton: /etc and friends, and the macOS
     # hierarchy's directories even while nothing is in them (their modes

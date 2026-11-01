@@ -42,6 +42,7 @@ set(tests
     time
     tools
     volumes
+    windows
     # Not in init's test list: the storage crash and persistence tests run it.
     crash-writer)
 
@@ -62,6 +63,7 @@ target_link_libraries(test-ports PRIVATE LibIPC LibCore)
 target_link_libraries(test-bootstrap PRIVATE LibIPC)
 target_link_libraries(test-graphics PRIVATE LibIPC)
 target_link_libraries(test-services PRIVATE LibServices)
+target_link_libraries(test-windows PRIVATE LibWindow LibImage LibGfx LibIPC LibCore)
 target_link_libraries(test-threads PRIVATE LibIPC LibCore)
 vulture_compile_ipc(test-bootstrap Echo.ipc)
 # The service bootstrap.cpp starts through vlaunchd.

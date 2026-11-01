@@ -181,7 +181,15 @@ add_custom_target(test-keyboard
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-persistence)
+# Golden screenshots: the scene in Tests/UI, composed by the window server, must
+# match what is in Tests/UI/Golden (Meta/ui-test.sh --update, after looking).
+add_custom_target(test-ui
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/ui-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    DEPENDS host uefi target boot-archive test-keyboard
+    USES_TERMINAL
+    VERBATIM)
+
+add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-ui test-persistence)
 
 # M5's "done when": 100 power cuts at random moments while writing; each
 # must leave a disk that passes fsck and remounts with every committed

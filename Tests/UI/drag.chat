@@ -1,0 +1,13 @@
+# The front window dragged by its title bar with the pointer: at (300, 114) points
+# on a screen of 1280 by 800, to 200 right and 60 down from there.
+expect ui: ready
+pointer 7680 4669
+pause 0.3
+button left down
+pause 0.2
+pointer 10240 5898
+pause 0.2
+pointer 12800 7127
+pause 0.2
+button left up
+pause 1

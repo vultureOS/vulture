@@ -1,0 +1,7 @@
+{
+    "Label" : "com.vulture.test.scene",
+    "ProgramArguments" : [ "/usr/tests/ui-scene" ],
+    "RunAtLoad" : true,
+    "StandardOutPath" : "/dev/console",
+    "StandardErrorPath" : "/dev/console"
+}

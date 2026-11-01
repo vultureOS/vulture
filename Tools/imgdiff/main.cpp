@@ -140,7 +140,8 @@ int main(int argc, char** argv)
     }
     double percent = total ? 100.0 * static_cast<double>(off) / static_cast<double>(total) : 0;
     bool matches = percent <= max_percent;
-    outln("imgdiff: {} of {} pixels differ by more than {} (allowed {} percent); the worst by {} at {},{}: {}", off, total, max_channel, static_cast<int>(max_percent * 1000), worst, worst_x, worst_y, matches ? "match"_sv : "DIFFERENT"_sv);
+    auto allowed = static_cast<u64>(static_cast<double>(total) * max_percent / 100);
+    outln("imgdiff: {} of {} pixels differ by more than {} ({} may); the worst by {} at {},{}: {}", off, total, max_channel, allowed, worst, worst_x, worst_y, matches ? "match"_sv : "DIFFERENT"_sv);
     if (output_path) {
         auto encoded = MUST(Image::encode_png(*difference));
         FILE* file = fopen(output_path, "wb");
