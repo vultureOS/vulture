@@ -81,7 +81,10 @@ Units are points; 2x displays double them.
 | Motion | standard 0.25 s ease-in-out; window resize 0.35 s; springs for switches and sheets |
 | Rendering | 2x HiDPI by default (2560×1600 px = 1280×800 pt), with a 1x fallback |
 
-The Dock, Mission Control and the like are M10's, with tokens to come.
+The desktop (menu bar, Dock, Spotlight, notifications, Control Center, Launchpad, Mission
+Control) has tokens of its own, in the same files. **None of those are measured:** AppKit
+does not draw them off screen for a program, so their sizes and colors are estimates
+from memory of Sequoia, to be compared with a real one.
 
 ## Materials
 

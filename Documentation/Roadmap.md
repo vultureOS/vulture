@@ -189,4 +189,15 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
   then place it. pranaUI runs on the host with a platform of the test's own, so its 58
   tests run under ASan and UBSan; a test on the real server caught what the host's
   could not: a press that becomes a drag, move or menu never hears its release.
+- **M10:** A desktop is mostly clients like any other: the server adds only what they
+  cannot do themselves (who is an application, whose menus show, hotkeys, minimizing,
+  spaces, Mission Control), and tells a shell client the rest as a JSON state on any
+  change. Damage for materials must grow to a fixed point: a lower window's blur
+  reach dirtied part of the menu bar after the bar had been considered, and the bar
+  then blurred from finished pixels beside it. An active window's shadow must be
+  invalidated before it shrinks. A menu published as JSON is rebuilt only when it
+  changes, since any window, its own included, changes the state. The walkthrough
+  (`Tests/UI/desktop.chat`, real keyboard and pointer) found what unit tests had not:
+  a reference to an appearance that a switch to dark had replaced, a path held across
+  the reload that freed it, and Return going on from a field to what contains it.
 
