@@ -102,6 +102,8 @@ public:
     void activate() const;
 
     [[nodiscard]] Region* find_region(FlatPtr address);
+    // Pages the program has touched (some may be shared).
+    [[nodiscard]] size_t resident_pages();
     [[nodiscard]] Arch::PageTable const& page_table() const { return m_page_table; }
     [[nodiscard]] u16 asid() const { return m_asid; }
 

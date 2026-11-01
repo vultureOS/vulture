@@ -238,6 +238,19 @@ ErrorOr<void> AddressSpace::unmap(FlatPtr address, size_t size)
     return {};
 }
 
+size_t AddressSpace::resident_pages()
+{
+    MutexLocker locker(m_lock);
+    size_t count = 0;
+    for (auto& region : m_regions) {
+        for (FlatPtr page = region.base(); page < region.end(); page += page_size) {
+            if (region.object().page(region.object_index(page)).get())
+                ++count;
+        }
+    }
+    return count;
+}
+
 void AddressSpace::remove_all_regions()
 {
     MutexLocker locker(m_lock);

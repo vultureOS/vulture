@@ -50,6 +50,9 @@ public:
     static ErrorOr<void> symlink(StringView target, StringView link_path, StringView cwd);
     static ErrorOr<void> link(StringView existing_path, StringView new_path, StringView cwd);
     static ErrorOr<void> sync_all();
+    // Each mounted filesystem with where it is mounted.
+    using Function = ErrorOr<void> (*)(void* context, FileSystem&, StringView path);
+    static ErrorOr<void> for_each_mount_point(Function, void* context);
 
     template<typename Callback>
     static void for_each_mount(Callback callback);

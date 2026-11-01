@@ -90,6 +90,13 @@ public:
     static ErrorOr<NonnullRefPtr<VultureFileSystem>> create(BlockDevice&);
 
     [[nodiscard]] StringView name() const override { return "vultureFS"_sv; }
+    [[nodiscard]] StringView device_name() const override { return m_device_name.view(); }
+    [[nodiscard]] Statistics statistics() override
+    {
+        MutexLocker locker(m_lock);
+        auto statistics = m_volume->statistics();
+        return { VultureFS::block_size, statistics.block_count, statistics.free_blocks };
+    }
     [[nodiscard]] NonnullRefPtr<Inode> root_inode() override;
     ErrorOr<void> sync() override;
     ErrorOr<void> rename(Inode& old_parent, StringView old_name, Inode& new_parent, StringView new_name) override;
@@ -114,12 +121,14 @@ public:
 private:
     explicit VultureFileSystem(BlockDevice& device)
         : m_store(device)
+        , m_device_name(MUST(String::from_view(device.name())))
     {
     }
 
     void forget_unused_inodes();
 
     PartitionStore m_store;
+    String m_device_name;
     OwnPtr<VultureFS::Volume> m_volume;
     Mutex m_lock;
     HashMap<InodeNumber, RefPtr<VultureFSInode>> m_inodes;

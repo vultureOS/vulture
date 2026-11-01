@@ -199,6 +199,10 @@ void Scheduler::switch_to(Processor& processor, Thread& current, Thread& next)
     next.m_state.store(Thread::State::Running, MemoryOrder::Relaxed);
     next.m_last_processor.store(processor.id(), MemoryOrder::Relaxed);
     ++next.m_switch_count;
+    // CPU time: what `current` ran since it was switched in.
+    u64 now = Time::now();
+    current.m_cpu_ticks.fetch_add(now - current.m_switched_in_at, MemoryOrder::Relaxed);
+    next.m_switched_in_at = now;
 
     processor.m_current_thread = &next;
     processor.m_switching_from = &current;

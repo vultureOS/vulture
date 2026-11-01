@@ -236,4 +236,12 @@ Thread::SleepResult Thread::sleep_for_microseconds(u64 microseconds)
     return sleep_until(Time::now() + Time::ticks_from_microseconds(microseconds));
 }
 
+u64 Thread::cpu_ticks() const
+{
+    u64 total = m_cpu_ticks.load(MemoryOrder::Relaxed);
+    if (m_state.load(MemoryOrder::Relaxed) == State::Running)
+        total += Time::now() - m_switched_in_at;
+    return total;
+}
+
 }

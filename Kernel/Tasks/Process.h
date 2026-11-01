@@ -49,6 +49,8 @@ public:
     [[nodiscard]] static size_t count();
     // Every process, living or zombie.
     [[nodiscard]] static Vector<NonnullRefPtr<Process>> all();
+    // For ps and top.
+    void describe(struct vulture_process_info&);
 
     ~Process();
 
@@ -136,6 +138,8 @@ private:
     RefPtr<KernelBuffer> m_executable;
     // The canonical working directory.
     String m_cwd;
+    i64 m_start_time { 0 };
+    u64 m_exited_cpu_ticks { 0 };
     // exec() of a "#!" script nests at most this deep.
     u32 m_interpreter_depth { 0 };
 

@@ -160,8 +160,13 @@ private:
     bool m_sleep_interrupted { false };
 
     u64 m_switch_count { 0 };
+    // CPU time used, in counter ticks; and when it last got a processor.
+    Atomic<u64> m_cpu_ticks { 0 };
+    u64 m_switched_in_at { 0 };
 
 public:
+    // CPU time so far, including the current run if it is running.
+    [[nodiscard]] u64 cpu_ticks() const;
     // Threads waiting for the same thing, linked through the node a thread
     // also uses for its run queue (a thread is never on both).
     using WaitList = IntrusiveList<Thread, &Thread::m_queue_node>;

@@ -18,6 +18,15 @@ public:
     [[nodiscard]] virtual StringView name() const = 0;
     [[nodiscard]] virtual NonnullRefPtr<Inode> root_inode() = 0;
     [[nodiscard]] virtual bool is_read_only() const { return false; }
+
+    struct Statistics {
+        u64 block_size { 4096 };
+        u64 blocks { 0 };
+        u64 free_blocks { 0 };
+    };
+    [[nodiscard]] virtual Statistics statistics() { return {}; }
+    // The device it is on ("disk1s1"), or its type for those on none.
+    [[nodiscard]] virtual StringView device_name() const { return name(); }
     // Writes everything to stable storage.
     virtual ErrorOr<void> sync() { return {}; }
 

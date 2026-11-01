@@ -48,6 +48,8 @@
 #define S_ISBLK(mode) (((mode) & S_IFMT) == S_IFBLK)
 #define S_ISLNK(mode) (((mode) & S_IFMT) == S_IFLNK)
 #define S_ISFIFO(mode) (((mode) & S_IFMT) == S_IFIFO)
+#define S_IFSOCK 0140000
+#define S_ISSOCK(mode) (((mode) & S_IFMT) == S_IFSOCK)
 
 // fcntl() commands and descriptor flags.
 #define F_DUPFD 0

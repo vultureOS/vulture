@@ -116,6 +116,8 @@ public:
     [[nodiscard]] StringView name() const override { return "fat"_sv; }
     [[nodiscard]] NonnullRefPtr<Inode> root_inode() override;
     [[nodiscard]] bool is_read_only() const override { return true; }
+    [[nodiscard]] StringView device_name() const override { return m_device->name(); }
+    [[nodiscard]] Statistics statistics() override { return { m_cluster_size, m_cluster_count, 0 }; }
 
     [[nodiscard]] Variant variant() const { return m_variant; }
     [[nodiscard]] size_t cluster_size() const { return m_cluster_size; }

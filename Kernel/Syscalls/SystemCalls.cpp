@@ -6,6 +6,7 @@
 
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/poll.h>
+#include <Kernel/API/POSIX/sysctl.h>
 #include <Kernel/API/POSIX/utsname.h>
 #include <Kernel/Arch/Power.h>
 #include <Kernel/Debug/KernelLog.h>
@@ -136,6 +137,8 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
 
     u8 value[128];
     size_t value_length = 0;
+    Vector<u8> table; // For the names that give a list.
+    ReadonlyBytes result;
     auto set_string = [&](StringView text) {
         value_length = min(text.length(), sizeof(value) - 1);
         __builtin_memcpy(value, text.characters_without_null_termination(), value_length);
@@ -187,17 +190,47 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
         set_number(static_cast<i32>(page_size));
     } else if (name == "hw.machine"_sv) {
         set_string("arm64"_sv);
+    } else if (name == "kern.proc.all"_sv) {
+        for (auto& process : all()) {
+            vulture_process_info info;
+            process->describe(info);
+            size_t offset = table.size();
+            TRY(table.try_resize(offset + sizeof(info)));
+            __builtin_memcpy(table.begin() + offset, &info, sizeof(info));
+        }
+    } else if (name == "vfs.mounts"_sv) {
+        TRY(VirtualFileSystem::for_each_mount_point([](void* context, FileSystem& file_system, StringView path) -> ErrorOr<void> {
+            auto& rows = *static_cast<Vector<u8>*>(context);
+            vulture_mount_info info {};
+            auto copy = [](char* destination, size_t size, StringView text) {
+                size_t length = min(text.length(), size - 1);
+                __builtin_memcpy(destination, text.characters_without_null_termination(), length);
+            };
+            copy(info.type, sizeof(info.type), file_system.name());
+            copy(info.point, sizeof(info.point), path);
+            copy(info.device, sizeof(info.device), file_system.device_name());
+            auto statistics = file_system.statistics();
+            info.block_size = statistics.block_size;
+            info.blocks = statistics.blocks;
+            info.free_blocks = statistics.free_blocks;
+            info.read_only = file_system.is_read_only();
+            size_t offset = rows.size();
+            TRY(rows.try_resize(offset + sizeof(info)));
+            __builtin_memcpy(rows.begin() + offset, &info, sizeof(info));
+            return {};
+        }, &table));
     } else {
         return Error::from_errno(ENOENT);
     }
+    result = name == "kern.proc.all"_sv || name == "vfs.mounts"_sv ? ReadonlyBytes { table.begin(), table.size() } : ReadonlyBytes { value, value_length };
     if (old_length_address) {
         auto room = TRY(copy_from_user<u64>(old_length_address));
         if (old_buffer) {
-            if (room < value_length)
+            if (room < result.size())
                 return Error::from_errno(ENOMEM);
-            TRY(copy_to_user(old_buffer, value, value_length));
+            TRY(copy_to_user(old_buffer, result.data(), result.size()));
         }
-        TRY(copy_to_user(old_length_address, static_cast<u64>(value_length)));
+        TRY(copy_to_user(old_length_address, static_cast<u64>(result.size())));
     }
     return 0;
 }

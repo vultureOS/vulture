@@ -6,6 +6,7 @@
 
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/memory.h>
+#include <Kernel/API/POSIX/sysctl.h>
 #include <Kernel/API/POSIX/wait.h>
 #include <Kernel/Arch/CPU.h>
 #include <Kernel/Arch/MemoryLayout.h>
@@ -20,6 +21,7 @@
 #include <Kernel/Tasks/Process.h>
 #include <Kernel/Tasks/Processor.h>
 #include <Kernel/Tasks/Scheduler.h>
+#include <Kernel/Time/Time.h>
 #include <LibBase/New.h>
 #include <LibELF/Demangle.h>
 #include <LibELF/ELF.h>
@@ -81,6 +83,7 @@ ErrorOr<NonnullRefPtr<Process>> Process::create(Process* parent)
     auto* process = new (Base::nothrow) Process(s_next_pid.fetch_add(1), parent);
     if (!process)
         return Error::from_errno(ENOMEM);
+    process->m_start_time = Time::wall_clock_seconds();
     return adopt_ref(*process);
 }
 
@@ -99,6 +102,38 @@ RefPtr<Process> Process::from_pid(ProcessID pid)
             return process;
     }
     return nullptr;
+}
+
+void Process::describe(vulture_process_info& info)
+{
+    info = {};
+    info.pid = m_pid;
+    info.ppid = parent_pid();
+    info.pgid = pgid();
+    info.sid = sid();
+    info.uid = m_credentials.uid;
+    info.euid = m_credentials.euid;
+    info.gid = m_credentials.gid;
+    if (is_zombie())
+        info.state = 'Z';
+    else if (is_stopped())
+        info.state = 'T';
+    else if (m_thread && m_thread->state() == Thread::State::Running)
+        info.state = 'R';
+    else if (m_thread && m_thread->state() == Thread::State::Runnable)
+        info.state = 'R';
+    else
+        info.state = 'S';
+    if (auto* terminal = m_controlling_terminal.ptr())
+        info.terminal = terminal->metadata().device;
+    if (m_address_space && !is_zombie())
+        info.resident_bytes = m_address_space->resident_pages() * page_size;
+    u64 ticks = m_thread ? m_thread->cpu_ticks() : m_exited_cpu_ticks;
+    info.cpu_nanoseconds = Time::nanoseconds_from_ticks(ticks);
+    info.start_time = m_start_time;
+    info.threads = m_thread ? 1 : 0;
+    size_t length = min(m_name_length, sizeof(info.name) - 1);
+    __builtin_memcpy(info.name, m_name, length);
 }
 
 Vector<NonnullRefPtr<Process>> Process::all()
@@ -132,6 +167,8 @@ void Process::set_name(StringView name)
 
 void Process::thread_finished()
 {
+    if (m_thread)
+        m_exited_cpu_ticks = m_thread->cpu_ticks();
     // The thread no longer runs on this address space anywhere.
     m_thread = nullptr;
     m_address_space.clear();

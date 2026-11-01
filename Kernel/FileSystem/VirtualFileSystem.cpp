@@ -56,6 +56,7 @@ struct Mount {
     FileSystem* host_file_system;
     InodeIndex host_inode;
     NonnullRefPtr<FileSystem> file_system;
+    String path;
 };
 
 Mutex s_mounts_lock;
@@ -122,7 +123,7 @@ ErrorOr<void> VirtualFileSystem::mount(NonnullRefPtr<FileSystem> file_system, St
     if (!target.inode->is_directory())
         return Error::from_errno(ENOTDIR);
     MutexLocker locker(s_mounts_lock);
-    TRY(s_mounts.try_append(Mount { &target.inode->file_system(), target.inode->index(), file_system }));
+    TRY(s_mounts.try_append(Mount { &target.inode->file_system(), target.inode->index(), file_system, move(target.path) }));
     return {};
 }
 
@@ -321,6 +322,26 @@ ErrorOr<void> VirtualFileSystem::link(StringView existing_path, StringView new_p
         return Error::from_errno(EEXIST);
     TRY(check_access(parent.directory->metadata(), write_access | search_access));
     return parent.directory->add_child(parent.name.view(), *existing.inode);
+}
+
+ErrorOr<void> VirtualFileSystem::for_each_mount_point(Function callback, void* context)
+{
+    Vector<NonnullRefPtr<FileSystem>> systems;
+    Vector<String> paths;
+    {
+        MutexLocker locker(s_mounts_lock);
+        if (s_root) {
+            TRY(systems.try_append(*s_root));
+            TRY(paths.try_append(TRY(String::from_view("/"_sv))));
+        }
+        for (auto const& mount : s_mounts) {
+            TRY(systems.try_append(mount.file_system));
+            TRY(paths.try_append(mount.path));
+        }
+    }
+    for (size_t i = 0; i < systems.size(); ++i)
+        TRY(callback(context, *systems[i], paths[i].view()));
+    return {};
 }
 
 ErrorOr<void> VirtualFileSystem::sync_all()
