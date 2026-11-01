@@ -79,6 +79,7 @@ public:
     [[nodiscard]] u8 read_interrupt_status();
 
     [[nodiscard]] u8 config_read8(u32 offset) const;
+    void config_write8(u32 offset, u8 value);
     [[nodiscard]] u32 config_read32(u32 offset) const;
     [[nodiscard]] u64 config_read64(u32 offset) const;
 

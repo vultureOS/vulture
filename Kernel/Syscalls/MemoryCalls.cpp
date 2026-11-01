@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/FileSystem/TmpFS.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/memory.h>
 #include <Kernel/FileSystem/FileDescription.h>
@@ -40,7 +41,7 @@ ErrorOr<FlatPtr> Process::sys_mmap(TrapFrame&, SyscallArguments const& arguments
 
     auto description = TRY(file(fd));
     auto* inode = description->inode();
-    if (!inode || inode->metadata().type != InodeType::File)
+    if (!inode || (inode->metadata().type != InodeType::File && !inode->can_be_mapped()))
         return Error::from_errno(ENODEV);
     if (!description->is_readable())
         return Error::from_errno(EACCES);
@@ -71,6 +72,35 @@ ErrorOr<FlatPtr> Process::sys_mprotect(TrapFrame&, SyscallArguments const& argum
         return Error::from_errno(EINVAL);
     TRY(m_address_space->protect(address, length, protection));
     return 0;
+}
+
+// shared_memory_create(size, flags): a file with no name, for mapping into
+// several processes: what is mapped MAP_SHARED is the same memory everywhere.
+// Sent to another process through a port. Flags: O_CLOEXEC.
+ErrorOr<FlatPtr> Process::sys_shared_memory_create(TrapFrame&, SyscallArguments const& arguments)
+{
+    size_t size = arguments.values[0];
+    int flags = static_cast<int>(arguments.values[1]);
+    if (size == 0 || size > 1ull << 40)
+        return Error::from_errno(EINVAL);
+    static RefPtr<TmpFS> s_file_system;
+    static SpinLock s_file_system_lock;
+    RefPtr<TmpFS> file_system;
+    {
+        SpinLockGuard guard(s_file_system_lock);
+        file_system = s_file_system;
+    }
+    if (!file_system) {
+        auto created = TRY(TmpFS::create());
+        SpinLockGuard guard(s_file_system_lock);
+        if (!s_file_system)
+            s_file_system = created;
+        file_system = s_file_system;
+    }
+    auto inode = TRY(TmpFSInode::create(*file_system, InodeType::File, 0600));
+    TRY(inode->truncate(size));
+    auto description = TRY(FileDescription::create(NonnullRefPtr<Inode>(*inode), O_RDWR));
+    return static_cast<FlatPtr>(TRY(allocate_fd(move(description), flags & O_CLOEXEC)));
 }
 
 }

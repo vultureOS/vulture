@@ -99,6 +99,11 @@ pid_t getppid()
     return static_cast<pid_t>(call(Syscall::getppid));
 }
 
+int vulture_shared_memory_create(unsigned long size, int flags)
+{
+    return check<int>(call(Syscall::shared_memory_create, size, flags));
+}
+
 pid_t gettid()
 {
     return static_cast<pid_t>(call(Syscall::gettid));

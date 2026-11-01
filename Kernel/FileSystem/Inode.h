@@ -104,6 +104,8 @@ public:
     // with a reference for the caller. Mappings of a file share these
     // pages with read() and write().
     virtual ErrorOr<PhysicalAddress> mapped_page(u64 index);
+    // Devices mmap() works on (as all regular files do).
+    [[nodiscard]] virtual bool can_be_mapped() const { return false; }
     // A shared, writable mapping of the file begins or ends; while one
     // exists its pages may change at any moment.
     virtual void add_shared_writer() { }

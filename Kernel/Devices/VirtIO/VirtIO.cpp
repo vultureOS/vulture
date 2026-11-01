@@ -304,6 +304,11 @@ u8 Device::config_read8(u32 offset) const
     return mmio_read8(m_device_config + offset);
 }
 
+void Device::config_write8(u32 offset, u8 value)
+{
+    mmio_write8(m_device_config + offset, value);
+}
+
 u32 Device::config_read32(u32 offset) const
 {
     return mmio_read32(m_device_config + offset);

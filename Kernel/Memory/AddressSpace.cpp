@@ -367,8 +367,12 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
         // First touch of a file mapping: the file's page, shared with its
         // cache (a private mapping copies it on the first write, below).
         auto page = region->file()->mapped_page(region->file_page(index));
-        if (page.is_error())
+        if (page.is_error()) {
+            // Past the end of a device's memory: a bad access by the program.
+            if (page.error().is_errno() && page.error().code() == ENXIO)
+                return PageFaultResult::BadAccess;
             return PageFaultResult::OutOfMemory;
+        }
         object.set_page(index, page.value());
         physical = page.value();
     } else if (!physical.get()) {
