@@ -7,6 +7,7 @@
 add_subdirectory(Kernel)
 add_subdirectory(LibArchive)
 add_subdirectory(LibBase)
+add_subdirectory(LibCrypto)
 add_subdirectory(LibDeviceTree)
 add_subdirectory(LibELF)
 add_subdirectory(LibVultureFS)
