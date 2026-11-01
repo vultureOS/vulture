@@ -29,6 +29,7 @@ set(tests
     memory
     permissions
     pipes
+    posix
     segfault
     shell
     signals
