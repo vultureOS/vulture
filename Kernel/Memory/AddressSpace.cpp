@@ -249,6 +249,43 @@ Optional<AddressSpace::FileLocation> AddressSpace::file_location(FlatPtr address
     return FileLocation { region->file(), region->file_page(region->object_index(page)) * page_size + (address - page) };
 }
 
+ErrorOr<NonnullRefPtr<AnonymousVMObject>> AddressSpace::copy_range(FlatPtr address, size_t size)
+{
+    if (!is_page_aligned(address) || size == 0 || size % page_size != 0 || !is_valid_user_range(address, size))
+        return Error::from_errno(EINVAL);
+    MutexLocker locker(m_lock);
+    auto* region = find_region(address);
+    if (!region || address + size > region->end())
+        return Error::from_errno(EFAULT);
+    // A file mapping's untouched pages are not in its object yet (they
+    // come from the file on the first touch): only anonymous memory.
+    if (region->file())
+        return Error::from_errno(EINVAL);
+    auto object = TRY(region->object().clone_range(region->object_index(address), size / page_size));
+    // Shared now: our writable pages must fault on the next write, as
+    // after fork().
+    if ((region->protection() & PROT_WRITE) && !region->is_shared()) {
+        for (FlatPtr page = address; page < address + size; page += page_size) {
+            if (region->object().page(region->object_index(page)).get())
+                m_page_table.protect_user_page(page, protection_for(region->protection(), false));
+        }
+    }
+    return object;
+}
+
+ErrorOr<FlatPtr> AddressSpace::map_object(NonnullRefPtr<AnonymousVMObject> object, size_t size, int protection, StringView name)
+{
+    if (size == 0 || size % page_size != 0 || ((protection & PROT_WRITE) && (protection & PROT_EXEC)))
+        return Error::from_errno(EINVAL);
+    MutexLocker locker(m_lock);
+    FlatPtr address = TRY(find_free_range(0, size));
+    auto* region = new (Base::nothrow) Region(address, size, protection, name, move(object), 0);
+    if (!region)
+        return Error::from_errno(ENOMEM);
+    insert_sorted(*region);
+    return address;
+}
+
 size_t AddressSpace::resident_pages()
 {
     MutexLocker locker(m_lock);

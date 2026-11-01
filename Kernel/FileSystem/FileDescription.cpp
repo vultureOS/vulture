@@ -6,6 +6,7 @@
 
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/FileSystem/FileDescription.h>
+#include <Kernel/IPC/Port.h>
 #include <Kernel/FileSystem/FileSystem.h>
 #include <Kernel/FileSystem/Pipe.h>
 #include <LibBase/New.h>
@@ -37,14 +38,29 @@ ErrorOr<NonnullRefPtr<FileDescription>> FileDescription::create_for_pipe(Nonnull
     return adopt_ref(*description);
 }
 
+ErrorOr<NonnullRefPtr<FileDescription>> FileDescription::create_for_port(NonnullRefPtr<Port> port, bool receive_right)
+{
+    auto* description = new (Base::nothrow) FileDescription(receive_right ? O_RDONLY : O_WRONLY);
+    if (!description)
+        return Error::from_errno(ENOMEM);
+    port->attach(receive_right);
+    description->m_port = move(port);
+    description->m_is_port_receiver = receive_right;
+    return adopt_ref(*description);
+}
+
 FileDescription::~FileDescription()
 {
     if (m_pipe)
         m_pipe->detach(m_is_pipe_writer);
+    if (m_port)
+        m_port->detach(m_is_port_receiver);
 }
 
 bool FileDescription::can_read() const
 {
+    if (m_port)
+        return m_is_port_receiver && m_port->can_receive();
     if (m_pipe)
         return m_pipe->can_read();
     return m_inode && m_inode->can_read();
@@ -52,6 +68,8 @@ bool FileDescription::can_read() const
 
 bool FileDescription::can_write() const
 {
+    if (m_port)
+        return !m_is_port_receiver && m_port->can_send();
     if (m_pipe)
         return m_pipe->can_write();
     return m_inode && m_inode->can_write();
@@ -59,6 +77,8 @@ bool FileDescription::can_write() const
 
 bool FileDescription::is_hung_up() const
 {
+    if (m_port)
+        return m_is_port_receiver ? !m_port->has_senders() : !m_port->has_receiver();
     if (m_pipe)
         return m_is_pipe_writer ? !m_pipe->has_readers() : !m_pipe->has_writers();
     return false;
@@ -72,6 +92,8 @@ void FileDescription::set_status_flags(int flags)
 
 ErrorOr<size_t> FileDescription::read(IOBuffer const& buffer, size_t count)
 {
+    if (m_port)
+        return Error::from_errno(EINVAL); // Ports take port_receive().
     if (!is_readable())
         return Error::from_errno(EBADF);
     if (m_pipe)
@@ -90,6 +112,8 @@ ErrorOr<size_t> FileDescription::read(IOBuffer const& buffer, size_t count)
 
 ErrorOr<size_t> FileDescription::write(IOBuffer const& buffer, size_t count)
 {
+    if (m_port)
+        return Error::from_errno(EINVAL); // Ports take port_send().
     if (!is_writable())
         return Error::from_errno(EBADF);
     if (m_pipe)
@@ -109,7 +133,7 @@ ErrorOr<size_t> FileDescription::read_at(IOBuffer const& buffer, size_t count, u
 {
     if (!is_readable())
         return Error::from_errno(EBADF);
-    if (m_pipe)
+    if (m_pipe || m_port)
         return Error::from_errno(ESPIPE);
     auto metadata = m_inode->metadata();
     if (metadata.type == InodeType::Directory)
@@ -123,14 +147,14 @@ ErrorOr<size_t> FileDescription::write_at(IOBuffer const& buffer, size_t count, 
 {
     if (!is_writable())
         return Error::from_errno(EBADF);
-    if (m_pipe || m_inode->metadata().type == InodeType::CharacterDevice)
+    if (m_pipe || m_port || m_inode->metadata().type == InodeType::CharacterDevice)
         return Error::from_errno(ESPIPE);
     return m_inode->write(offset, count, buffer);
 }
 
 ErrorOr<i64> FileDescription::seek(i64 offset, int origin)
 {
-    if (m_pipe || m_inode->metadata().type == InodeType::CharacterDevice)
+    if (m_pipe || m_port || m_inode->metadata().type == InodeType::CharacterDevice)
         return Error::from_errno(ESPIPE);
     MutexLocker locker(m_lock);
     i64 base = 0;
@@ -155,6 +179,14 @@ ErrorOr<i64> FileDescription::seek(i64 offset, int origin)
 
 ErrorOr<vulture_stat> FileDescription::stat() const
 {
+    if (m_port) {
+        // A port shows as a socket would: not a file, not a pipe.
+        vulture_stat result {};
+        result.st_mode = S_IFSOCK | 0600;
+        result.st_nlink = 1;
+        result.st_blksize = 4096;
+        return result;
+    }
     if (m_pipe) {
         vulture_stat result {};
         result.st_mode = S_IFIFO | 0600;

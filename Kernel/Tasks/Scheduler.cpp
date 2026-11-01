@@ -33,6 +33,15 @@ void RunQueue::push(Thread& thread)
         m_stealable_count.fetch_add(1, MemoryOrder::Relaxed);
 }
 
+void RunQueue::push_front(Thread& thread)
+{
+    VERIFY(lock.is_locked_by_current_processor());
+    m_classes[to_underlying(thread.qos())].prepend(thread);
+    m_count.fetch_add(1, MemoryOrder::Relaxed);
+    if (!thread.m_pinned_processor.has_value())
+        m_stealable_count.fetch_add(1, MemoryOrder::Relaxed);
+}
+
 void RunQueue::remove(Thread& thread)
 {
     m_classes[to_underlying(thread.qos())].remove(thread);
@@ -318,6 +327,27 @@ void Scheduler::wake(Thread& thread)
     while (thread.m_on_processor.load(MemoryOrder::Acquire))
         Arch::pause();
     enqueue(thread);
+}
+
+void Scheduler::wake_for_handoff(Thread& thread)
+{
+    VERIFY(thread.state() == Thread::State::Blocked);
+    while (thread.m_on_processor.load(MemoryOrder::Acquire))
+        Arch::pause();
+    InterruptDisabler disabler;
+    auto& processor = Processor::current();
+    if (thread.m_pinned_processor.has_value() && thread.m_pinned_processor.value() != processor.id()) {
+        enqueue(thread);
+        return;
+    }
+    {
+        SpinLockGuard guard(processor.m_run_queue.lock);
+        thread.m_state.store(Thread::State::Runnable, MemoryOrder::Release);
+        processor.m_run_queue.push_front(thread);
+    }
+    // No other processor is told: the caller blocks next (waiting for the
+    // answer), and this processor switches straight to the thread then,
+    // with no interrupt between processors and caches still warm.
 }
 
 void Scheduler::block(Thread::WaitList* waiters, SpinLock* lock, Arch::InterruptState state)

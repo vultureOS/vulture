@@ -11,6 +11,7 @@
 #include <Kernel/FileSystem/FileDescription.h>
 #include <Kernel/Locking/WaitQueue.h>
 #include <Kernel/Memory/AddressSpace.h>
+#include <Kernel/API/POSIX/port.h>
 #include <Kernel/Memory/KernelBuffer.h>
 #include <Kernel/Security/Credentials.h>
 #include <Kernel/Tasks/Thread.h>
@@ -18,6 +19,9 @@
 #include <LibBase/String.h>
 
 namespace Kernel {
+
+class Port;
+struct PortMessage;
 
 class TTY;
 using ProcessID = i32;
@@ -117,6 +121,7 @@ private:
     void notify_parent(int code, int status);
 
     ErrorOr<int> allocate_fd(NonnullRefPtr<FileDescription>, bool close_on_exec, int lowest = 0);
+    void release_fd(int fd);
     ErrorOr<NonnullRefPtr<FileDescription>> file(int fd);
     void set_name(StringView);
     ErrorOr<String> copy_path_from_user(FlatPtr);
@@ -135,6 +140,11 @@ private:
     OwnPtr<AddressSpace> m_address_space;
     Thread* m_thread { nullptr };
     // The program's ELF file, kept for crash reports.
+    // Ports (Syscalls/PortCalls.cpp).
+    ErrorOr<NonnullOwnPtr<PortMessage>> build_port_message(FlatPtr user_message, bool& move_rights, Vector<int>& sent_fds, Vector<vulture_port_region>& sent_regions);
+    void finish_move(bool move_rights, Vector<int> const& sent_fds, Vector<vulture_port_region> const& sent_regions);
+    ErrorOr<void> deliver_port_message(Port&, bool nonblocking, FlatPtr user_received);
+
     RefPtr<KernelBuffer> m_executable;
     FlatPtr m_executable_bias { 0 };
     // The dynamic linker the program runs with, if any.

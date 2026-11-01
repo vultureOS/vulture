@@ -42,6 +42,9 @@ public:
     // Makes a new or woken thread runnable.
     static void enqueue(Thread&);
     static void wake(Thread&);
+    // Wakes a thread to run next on this processor (direct handoff: for a
+    // caller that is about to block waiting on it).
+    static void wake_for_handoff(Thread&);
 
     // Called with `lock` held (interrupts masked as a result): marks the
     // current thread blocked, adds it to `waiters` (if given), releases

@@ -21,6 +21,17 @@ void WaitQueue::wake_one()
     }
 }
 
+void WaitQueue::wake_one_for_handoff()
+{
+    Thread* thread;
+    {
+        SpinLockGuard guard(m_lock);
+        thread = m_waiters.take_first();
+    }
+    if (thread)
+        Scheduler::wake_for_handoff(*thread);
+}
+
 void WaitQueue::wake_all()
 {
     // Waking takes run queue locks, so move the waiters out first.

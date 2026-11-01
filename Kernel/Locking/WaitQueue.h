@@ -115,6 +115,8 @@ public:
 
     void wake_one();
     void wake_all();
+    // wake_one(), the woken thread to run next on this processor.
+    void wake_one_for_handoff();
 
 private:
     SpinLock m_lock;

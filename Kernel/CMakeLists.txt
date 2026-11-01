@@ -42,6 +42,7 @@ add_executable(Kernel
     FileSystem/IOBuffer.cpp
     FileSystem/Inode.cpp
     FileSystem/Pipe.cpp
+    IPC/Port.cpp
     FileSystem/Poll.cpp
     FileSystem/TmpFS.cpp
     FileSystem/VirtualFileSystem.cpp
@@ -65,6 +66,7 @@ add_executable(Kernel
     Syscalls/FileCalls.cpp
     Syscalls/IdentityCalls.cpp
     Syscalls/MemoryCalls.cpp
+    Syscalls/PortCalls.cpp
     Syscalls/ProcessCalls.cpp
     Syscalls/SignalCalls.cpp
     Syscalls/SystemCalls.cpp

@@ -17,6 +17,8 @@ public:
     SpinLock lock;
 
     void push(Thread&);
+    // At the front of its class: next to run (direct handoff).
+    void push_front(Thread&);
     // The first thread of the most urgent class.
     [[nodiscard]] Thread* pop_most_urgent();
     // For another processor: the last thread of the most urgent class that

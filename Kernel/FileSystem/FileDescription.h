@@ -12,6 +12,7 @@
 namespace Kernel {
 
 class Pipe;
+class Port;
 
 // An open file: what a file descriptor points to. Descriptors duplicated
 // by dup() or fork() share one description, and with it the file offset.
@@ -19,6 +20,8 @@ class FileDescription final : public RefCounted<FileDescription> {
 public:
     [[nodiscard]] static ErrorOr<NonnullRefPtr<FileDescription>> create(NonnullRefPtr<Inode>, int flags);
     [[nodiscard]] static ErrorOr<NonnullRefPtr<FileDescription>> create_for_pipe(NonnullRefPtr<Pipe>, bool is_writer);
+    // A right to a port: the receive right, or a send right.
+    [[nodiscard]] static ErrorOr<NonnullRefPtr<FileDescription>> create_for_port(NonnullRefPtr<Port>, bool receive_right);
     ~FileDescription();
 
     ErrorOr<size_t> read(IOBuffer const&, size_t count);
@@ -41,6 +44,9 @@ public:
     [[nodiscard]] int flags() const { return m_flags; }
     void set_status_flags(int flags);
     [[nodiscard]] Inode* inode() const { return m_inode.ptr(); }
+    [[nodiscard]] Port* port() const { return m_port.ptr(); }
+    [[nodiscard]] bool is_port_receive_right() const { return m_port && m_is_port_receiver; }
+    [[nodiscard]] bool is_port_send_right() const { return m_port && !m_is_port_receiver; }
     [[nodiscard]] bool is_readable() const { return (m_flags & O_ACCMODE) != O_WRONLY; }
     [[nodiscard]] bool is_writable() const { return (m_flags & O_ACCMODE) != O_RDONLY; }
 
@@ -50,6 +56,8 @@ private:
     RefPtr<Inode> m_inode;
     RefPtr<Pipe> m_pipe;
     bool m_is_pipe_writer { false };
+    RefPtr<Port> m_port;
+    bool m_is_port_receiver { false };
     int m_flags { 0 };
     mutable Mutex m_lock;
     u64 m_offset { 0 };

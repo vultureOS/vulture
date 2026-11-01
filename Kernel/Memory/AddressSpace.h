@@ -112,6 +112,12 @@ public:
         u64 offset { 0 };
     };
     [[nodiscard]] Optional<FileLocation> file_location(FlatPtr address);
+
+    // Out-of-line memory in port messages: the pages of [address, address +
+    // size) (within one region) as a new object sharing them copy-on-write;
+    // and an object mapped at a free address.
+    ErrorOr<NonnullRefPtr<AnonymousVMObject>> copy_range(FlatPtr address, size_t size);
+    ErrorOr<FlatPtr> map_object(NonnullRefPtr<AnonymousVMObject>, size_t size, int protection, StringView name);
     // Pages the program has touched (some may be shared).
     [[nodiscard]] size_t resident_pages();
     [[nodiscard]] Arch::PageTable const& page_table() const { return m_page_table; }
