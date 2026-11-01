@@ -290,6 +290,8 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
         init_arguments[argument_count++] = "--ui-test"_sv;
     else if (arguments.has_flag("uigallery"_sv))
         init_arguments[argument_count++] = "--ui-gallery"_sv;
+    else if (arguments.has_flag("uidesktop"_sv))
+        init_arguments[argument_count++] = "--ui-desktop"_sv;
     else if (arguments.has_flag("gui"_sv))
         init_arguments[argument_count++] = "--gui"_sv;
     (void)must("starting init"_sv, Process::create_init("/sbin/vlaunchd"_sv, Span<StringView const>(init_arguments, argument_count)));

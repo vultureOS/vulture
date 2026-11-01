@@ -1,0 +1,8 @@
+{
+    "Label" : "com.vulture.LoginWindow",
+    "ProgramArguments" : [ "/System/Library/CoreServices/LoginWindow", "--still" ],
+    "MachServices" : { "com.vulture.loginwindow" : true },
+    "RunAtLoad" : true,
+    "StandardOutPath" : "/dev/console",
+    "StandardErrorPath" : "/dev/console"
+}

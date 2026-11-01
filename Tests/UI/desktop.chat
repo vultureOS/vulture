@@ -1,0 +1,227 @@
+# The desktop, from the login window on: a person's first minutes with it, done with
+# the real keyboard and pointer. Each screenshot is compared with Tests/UI/Golden.
+expect loginwindow: ready
+pause 0.5
+screenshot login.png
+# The wrong password first.
+type nothing\r
+expect loginwindow: incorrect password
+pause 0.5
+screenshot login-wrong.png
+type vulture\r
+expect finder: ready
+pause 2
+screenshot desktop.png
+# The application's File menu, and the system's.
+pointer 3072 491
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.6
+screenshot menu-file.png
+pointer 512 491
+pause 0.6
+screenshot menu-system.png
+pointer 16000 24000
+pause 0.2
+button left down
+pause 0.2
+button left up
+pause 0.6
+# Spotlight: a word, then what it found, by Return.
+key meta_l-spc
+expect spotlight: shown
+pause 0.3
+type system
+pause 1
+screenshot spotlight.png
+type \r
+expect settings: Appearance
+pause 1
+screenshot settings.png
+# Dark, then a wallpaper.
+pointer 26060 9011
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 1
+screenshot settings-dark.png
+pointer 6656 6963
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect settings: Wallpaper
+pause 0.5
+pointer 18200 10977
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 1.5
+screenshot wallpaper.png
+# Back to the first wallpaper and to light.
+pointer 12800 10977
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.5
+pointer 6656 5816
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect settings: Appearance
+pause 0.5
+pointer 25100 9011
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 1
+# A notification, and where they are kept.
+pointer 6656 10404
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect settings: Notifications
+pause 0.5
+pointer 26112 9093
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect notification: It works
+pause 0.5
+screenshot notification.png
+pointer 30900 491
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.6
+screenshot notification-center.png
+pointer 16000 24000
+pause 0.2
+button left down
+pause 0.2
+button left up
+pause 0.6
+# Control Center.
+pointer 28800 491
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.6
+screenshot control-center.png
+pointer 16000 24000
+pause 0.2
+button left down
+pause 0.2
+button left up
+pause 0.6
+# Mission Control, and a new space.
+key ctrl-up
+pause 1
+screenshot mission-control.png
+pointer 18227 2949
+pause 0.2
+button left down
+pause 0.2
+button left up
+pause 0.6
+screenshot mission-control-spaces.png
+pointer 26000 28000
+pause 0.2
+button left down
+pause 0.2
+button left up
+pause 1
+key ctrl-right
+pause 1
+screenshot second-space.png
+key ctrl-left
+pause 1
+# Launchpad.
+pointer 14670 31070
+pause 0.5
+button left down
+pause 0.2
+button left up
+expect launchpad: shown
+pause 1
+screenshot launchpad.png
+key esc
+pause 1
+# Settings goes away; Finder, by its own folders.
+pointer 16000 24000
+pause 0.2
+button left down
+pause 0.2
+button left up
+pause 0.3
+key meta_l-q
+pause 1
+pointer 13619 7332
+pause 0.3
+button left down
+pause 0.1
+button left up
+pause 0.1
+button left down
+pause 0.1
+button left up
+pause 1
+screenshot finder-documents.png
+pointer 25958 4301
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.6
+type Notes\r
+pause 1
+screenshot finder-new-folder.png
+pointer 24934 4301
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.6
+screenshot finder-list.png
+# Into the Dock with the yellow light, and back.
+pointer 5478 3850
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 1
+screenshot minimized.png
+pointer 18700 31070
+pause 0.5
+button left down
+pause 0.2
+button left up
+pause 1
+screenshot restored.png
+# Out, and the login window is back.
+pointer 512 491
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.6
+screenshot before-log-out.png
+pointer 3000 6595
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect loginwindow: ready
+pause 1
+screenshot logged-out.png

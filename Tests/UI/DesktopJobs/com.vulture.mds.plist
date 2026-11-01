@@ -1,0 +1,7 @@
+{
+    "Label" : "com.vulture.mds",
+    "ProgramArguments" : [ "/usr/libexec/mds" ],
+    "MachServices" : { "com.vulture.mds" : true },
+    "RunAtLoad" : true,
+    "StandardErrorPath" : "/dev/console"
+}

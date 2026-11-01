@@ -60,21 +60,21 @@ for config in "scene-2x 2560 1600 still" "scene-1x 1280 800 still" "scene-dragge
 done
 
 # The Widget Gallery on the real server: one boot walks through all of it, at each
-# scale, in both appearances.
-gallery_shots() {
-    grep '^screenshot ' "$source_dir/Tests/UI/gallery.chat" | cut -d' ' -f2
+# scale, in both appearances. And the desktop, from the login window on.
+chat_shots() {
+    grep '^screenshot ' "$source_dir/Tests/UI/$1.chat" | cut -d' ' -f2
 }
-for config in "gallery-2x 2560 1600" "gallery-1x 1280 800"; do
-    read -r name width height <<< "$config"
+for config in "gallery-2x 2560 1600 gallery uigallery" "gallery-1x 1280 800 gallery uigallery" "desktop-2x 2560 1600 desktop uidesktop"; do
+    read -r name width height chat flag <<< "$config"
     rm -f "$out_dir/$name"-*.png
     if ! VULTURE_GPU_WIDTH="$width" VULTURE_GPU_HEIGHT="$height" VULTURE_SCREENSHOT_DEVICE=gpu0 VULTURE_SCREENSHOT_PREFIX="$out_dir/$name-" \
-        "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --boot-args uigallery \
-        --chat "$source_dir/Tests/UI/gallery.chat" --timeout 240 > "$out_dir/$name.log" 2>&1; then
-        echo "ui-test: $name: the gallery did not get through; see $out_dir/$name.log" >&2
+        "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --fresh-disk --boot-args "$flag" \
+        --chat "$source_dir/Tests/UI/$chat.chat" --timeout 240 > "$out_dir/$name.log" 2>&1; then
+        echo "ui-test: $name: it did not get through; see $out_dir/$name.log" >&2
         status=1
         continue
     fi
-    for shot in $(gallery_shots); do
+    for shot in $(chat_shots "$chat"); do
         # Written as QEMU gets around to it.
         for _ in $(seq 1 50); do
             [ -s "$out_dir/$name-$shot" ] && break
