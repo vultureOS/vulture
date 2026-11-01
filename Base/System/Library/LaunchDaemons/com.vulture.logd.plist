@@ -1,0 +1,12 @@
+{
+    "Label" : "com.vulture.logd",
+    "ProgramArguments" : [
+        "/usr/libexec/logd"
+    ],
+    "MachServices" : {
+        "com.vulture.logd" : true
+    },
+    "RunAtLoad" : true,
+    "KeepAlive" : true,
+    "ThrottleInterval" : 1
+}

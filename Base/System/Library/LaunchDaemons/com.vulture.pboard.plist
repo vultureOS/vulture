@@ -1,0 +1,11 @@
+{
+    "Label" : "com.vulture.pboard",
+    "ProgramArguments" : [
+        "/usr/libexec/pboard"
+    ],
+    "MachServices" : {
+        "com.vulture.pasteboard" : true
+    },
+    "UserName" : "nobody",
+    "ThrottleInterval" : 1
+}

@@ -14,10 +14,10 @@
 #include <sys/reboot.h>
 #include <unistd.h>
 
-// vlaunchd: process 1, as launchd is on macOS. It names the machine (from
-// /etc/hostname), loads the jobs in /System/Library/LaunchDaemons and
-// /Library/LaunchDaemons (JSON property lists, see Job.h) and keeps them
-// as they ask: the console's getty, so there is a login, among them. It
+// vlaunchd: process 1, as launchd is on macOS. It loads the jobs in
+// /System/Library/LaunchDaemons and /Library/LaunchDaemons (JSON property lists, see Job.h) and keeps them
+// as they ask: the console's getty, so there is a login, and the system
+// services (logd, notifyd, configd, which names the machine) among them. It
 // reaps every orphan. To shut down: SIGUSR2 or SIGTERM powers off, SIGINT
 // restarts (what reboot, halt and shutdown send), each after stopping the
 // jobs and writing everything to disk.
@@ -31,25 +31,10 @@
 
 namespace {
 
-void set_hostname()
-{
-    FILE* file = fopen("/etc/hostname", "r");
-    if (!file)
-        return;
-    char name[256];
-    if (fgets(name, sizeof(name), file)) {
-        name[strcspn(name, "\r\n \t")] = '\0';
-        if (name[0])
-            sethostname(name, strlen(name));
-    }
-    fclose(file);
-}
-
 int run_as_process_one()
 {
     printf("vlaunchd: vultureOS userland is up (process %d)\n", getpid());
     fflush(stdout);
-    set_hostname();
     Launchd::open_log("/var/log/system.log");
 
     Core::EventLoop loop;

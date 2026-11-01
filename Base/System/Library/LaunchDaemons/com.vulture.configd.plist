@@ -1,0 +1,12 @@
+{
+    "Label" : "com.vulture.configd",
+    "ProgramArguments" : [
+        "/usr/libexec/configd"
+    ],
+    "MachServices" : {
+        "com.vulture.SystemConfiguration.configd" : true
+    },
+    "RunAtLoad" : true,
+    "KeepAlive" : true,
+    "ThrottleInterval" : 1
+}
