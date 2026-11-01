@@ -12,6 +12,7 @@ add_executable(TestLibBase
     TestErrorOr.cpp
     TestFastRandom.cpp
     TestFormat.cpp
+    TestFunction.cpp
     TestIntrusiveList.cpp
     TestOptional.cpp
     TestQuickSort.cpp
