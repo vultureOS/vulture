@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 // memcpy, memmove, memset and memcmp come from LibBase's freestanding set.
@@ -195,70 +196,91 @@ char* strndup(char const* string, size_t maximum)
     return copy;
 }
 
+// macOS's words for each error, as its strerror() gives them.
 char* strerror(int error)
 {
-    switch (error) {
-    case 0:
-        return const_cast<char*>("Success");
-    case EPERM:
-        return const_cast<char*>("Operation not permitted");
-    case ENOENT:
-        return const_cast<char*>("No such file or directory");
-    case ESRCH:
-        return const_cast<char*>("No such process");
-    case EINTR:
-        return const_cast<char*>("Interrupted system call");
-    case EIO:
-        return const_cast<char*>("Input/output error");
-    case E2BIG:
-        return const_cast<char*>("Argument list too long");
-    case ENOEXEC:
-        return const_cast<char*>("Exec format error");
-    case EBADF:
-        return const_cast<char*>("Bad file descriptor");
-    case ECHILD:
-        return const_cast<char*>("No child processes");
-    case EAGAIN:
-        return const_cast<char*>("Resource temporarily unavailable");
-    case ENOMEM:
-        return const_cast<char*>("Out of memory");
-    case EACCES:
-        return const_cast<char*>("Permission denied");
-    case EFAULT:
-        return const_cast<char*>("Bad address");
-    case EEXIST:
-        return const_cast<char*>("File exists");
-    case EXDEV:
-        return const_cast<char*>("Cross-device link");
-    case ENOTDIR:
-        return const_cast<char*>("Not a directory");
-    case EISDIR:
-        return const_cast<char*>("Is a directory");
-    case EINVAL:
-        return const_cast<char*>("Invalid argument");
-    case EMFILE:
-        return const_cast<char*>("Too many open files");
-    case ENOTTY:
-        return const_cast<char*>("Not a terminal");
-    case ENOSPC:
-        return const_cast<char*>("No space left on device");
-    case ESPIPE:
-        return const_cast<char*>("Illegal seek");
-    case EROFS:
-        return const_cast<char*>("Read-only file system");
-    case EMLINK:
-        return const_cast<char*>("Too many links");
-    case EPIPE:
-        return const_cast<char*>("Broken pipe");
-    case ERANGE:
-        return const_cast<char*>("Result out of range");
-    case ENAMETOOLONG:
-        return const_cast<char*>("File name too long");
-    case ENOSYS:
-        return const_cast<char*>("Function not implemented");
-    default:
-        return const_cast<char*>("Unknown error");
+    static struct {
+        int number;
+        char const* text;
+    } const messages[] = {
+        { 0, "Undefined error: 0" },
+        { EPERM, "Operation not permitted" },
+        { ENOENT, "No such file or directory" },
+        { ESRCH, "No such process" },
+        { EINTR, "Interrupted system call" },
+        { EIO, "Input/output error" },
+        { ENXIO, "Device not configured" },
+        { E2BIG, "Argument list too long" },
+        { ENOEXEC, "Exec format error" },
+        { EBADF, "Bad file descriptor" },
+        { ECHILD, "No child processes" },
+        { EAGAIN, "Resource temporarily unavailable" },
+        { ENOMEM, "Cannot allocate memory" },
+        { EACCES, "Permission denied" },
+        { EFAULT, "Bad address" },
+        { EBUSY, "Resource busy" },
+        { EEXIST, "File exists" },
+        { EXDEV, "Cross-device link" },
+        { ENODEV, "Operation not supported by device" },
+        { ENOTDIR, "Not a directory" },
+        { EISDIR, "Is a directory" },
+        { EINVAL, "Invalid argument" },
+        { ENFILE, "Too many open files in system" },
+        { EMFILE, "Too many open files" },
+        { ENOTTY, "Inappropriate ioctl for device" },
+        { ETXTBSY, "Text file busy" },
+        { EFBIG, "File too large" },
+        { ENOSPC, "No space left on device" },
+        { ESPIPE, "Illegal seek" },
+        { EROFS, "Read-only file system" },
+        { EMLINK, "Too many links" },
+        { EPIPE, "Broken pipe" },
+        { EDOM, "Numerical argument out of domain" },
+        { ERANGE, "Result too large" },
+        { EDEADLK, "Resource deadlock avoided" },
+        { ENAMETOOLONG, "File name too long" },
+        { ENOLCK, "No locks available" },
+        { ENOSYS, "Function not implemented" },
+        { ENOTEMPTY, "Directory not empty" },
+        { ELOOP, "Too many levels of symbolic links" },
+        { ENOMSG, "No message of desired type" },
+        { EIDRM, "Identifier removed" },
+        { ENOLINK, "Link has been severed" },
+        { EPROTO, "Protocol error" },
+        { EBADMSG, "Bad message" },
+        { EOVERFLOW, "Value too large to be stored in data type" },
+        { EILSEQ, "Illegal byte sequence" },
+        { ENOTSOCK, "Socket operation on non-socket" },
+        { EDESTADDRREQ, "Destination address required" },
+        { EMSGSIZE, "Message too long" },
+        { EPROTOTYPE, "Protocol wrong type for socket" },
+        { ENOPROTOOPT, "Protocol not available" },
+        { EPROTONOSUPPORT, "Protocol not supported" },
+        { ENOTSUP, "Operation not supported" },
+        { EAFNOSUPPORT, "Address family not supported by protocol family" },
+        { EADDRINUSE, "Address already in use" },
+        { EADDRNOTAVAIL, "Can't assign requested address" },
+        { ENETDOWN, "Network is down" },
+        { ENETUNREACH, "Network is unreachable" },
+        { ECONNABORTED, "Software caused connection abort" },
+        { ECONNRESET, "Connection reset by peer" },
+        { ENOBUFS, "No buffer space available" },
+        { EISCONN, "Socket is already connected" },
+        { ENOTCONN, "Socket is not connected" },
+        { ETIMEDOUT, "Operation timed out" },
+        { ECONNREFUSED, "Connection refused" },
+        { EHOSTUNREACH, "No route to host" },
+        { EALREADY, "Operation already in progress" },
+        { EINPROGRESS, "Operation now in progress" },
+        { ECANCELED, "Operation canceled" },
+    };
+    for (auto const& message : messages) {
+        if (message.number == error)
+            return const_cast<char*>(message.text);
     }
+    static char unknown[32];
+    snprintf(unknown, sizeof(unknown), "Unknown error: %d", error);
+    return unknown;
 }
 
 char const* strsignal(int signal)

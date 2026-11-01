@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/port.h>
 #include <sys/stat.h>
 #include <sys/vulture.h>
 #include <sys/wait.h>
@@ -111,6 +112,31 @@ pid_t gettid()
 ssize_t read(int fd, void* buffer, size_t count)
 {
     return check<ssize_t>(call(Syscall::read, fd, buffer, count));
+}
+
+int port_create(int fds[2], int flags)
+{
+    return check<int>(call(Syscall::port_create, fds, flags));
+}
+
+int port_make_send(int receive_right, int flags)
+{
+    return check<int>(call(Syscall::port_make_send, receive_right, flags));
+}
+
+int port_send(int send_right, struct vulture_port_message const* message, int flags)
+{
+    return check<int>(call(Syscall::port_send, send_right, message, flags));
+}
+
+int port_receive(int receive_right, struct vulture_port_received* received, int flags)
+{
+    return check<int>(call(Syscall::port_receive, receive_right, received, flags));
+}
+
+int port_call(int send_right, struct vulture_port_message const* message, struct vulture_port_received* answer, int flags)
+{
+    return check<int>(call(Syscall::port_call, send_right, message, answer, flags));
 }
 
 ssize_t pread(int fd, void* buffer, size_t count, off_t offset)
