@@ -23,6 +23,10 @@ vulture_add_cxx_options(
     -Wshadow
     -Wnon-virtual-dtor
     -Wimplicit-fallthrough
+    # Floating point gives the same bits on the host and in the OS (a tool and
+    # the system draw the same pixels), and square roots are one instruction.
+    -ffp-contract=off
+    -fno-math-errno
     -fno-exceptions
     -fno-rtti
     -nostdinc

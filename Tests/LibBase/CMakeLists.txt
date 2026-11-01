@@ -14,6 +14,7 @@ add_executable(TestLibBase
     TestFormat.cpp
     TestFunction.cpp
     TestIntrusiveList.cpp
+    TestMath.cpp
     TestOptional.cpp
     TestQuickSort.cpp
     TestSmartPointers.cpp
