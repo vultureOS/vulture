@@ -58,11 +58,6 @@ static void to_stat(vulture_stat const& source, struct stat* destination)
 
 extern "C" {
 
-pid_t fork()
-{
-    return check<pid_t>(call(Syscall::fork));
-}
-
 int execve(char const* path, char* const argv[], char* const envp[])
 {
     return check<int>(call(Syscall::execve, path, argv, envp));
@@ -330,7 +325,8 @@ int kill(pid_t pid, int signal)
 
 int raise(int signal)
 {
-    return kill(getpid(), signal);
+    // The calling thread takes it, so a crash report shows where abort() was.
+    return check<int>(call(Syscall::thread_kill, call(Syscall::gettid), signal));
 }
 
 void* mmap(void* address, size_t length, int protection, int flags, int fd, off_t offset)

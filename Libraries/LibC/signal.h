@@ -12,6 +12,8 @@
 
 __BEGIN_DECLS
 
+struct timespec;
+
 typedef unsigned long sigset_t;
 typedef int sig_atomic_t;
 typedef void (*sighandler_t)(int);
@@ -45,6 +47,12 @@ int sigismember(sigset_t const*, int signal);
 int sigsuspend(sigset_t const* mask);
 int sigpending(sigset_t* set);
 int killpg(pid_t group, int signal);
+int sigwait(sigset_t const* set, int* signal);
+int sigwaitinfo(sigset_t const* set, siginfo_t* info);
+int sigtimedwait(sigset_t const* set, siginfo_t* info, struct timespec const* timeout);
+
+typedef struct vulture_stack stack_t;
+int sigaltstack(stack_t const* stack, stack_t* old_stack);
 void psignal(int signal, char const* prefix);
 
 // Each signal's name without "SIG", in lower case ("hup"), as BSD has it.

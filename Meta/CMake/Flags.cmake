@@ -25,7 +25,6 @@ vulture_add_cxx_options(
     -Wimplicit-fallthrough
     -fno-exceptions
     -fno-rtti
-    -fno-threadsafe-statics
     -nostdinc
     -nostdinc++
     -fno-omit-frame-pointer)
@@ -37,7 +36,7 @@ include_directories(${VULTURE_SOURCE_ROOT} ${VULTURE_SOURCE_ROOT}/Libraries)
 if(VULTURE_PART STREQUAL "host")
     # Host tests link only libSystem's C functions (malloc, write, abort);
     # LibTest supplies the C++ runtime pieces.
-    vulture_add_cxx_options(-O1 -fsanitize=address,undefined -fno-sanitize-recover=all)
+    vulture_add_cxx_options(-O1 -fno-threadsafe-statics -fsanitize=address,undefined -fno-sanitize-recover=all)
     add_link_options(-fsanitize=address,undefined -nostdlib++)
     if(NOT CMAKE_HOST_APPLE)
         # Elsewhere the sanitizers' runtimes are linked in whole, and their
@@ -45,7 +44,7 @@ if(VULTURE_PART STREQUAL "host")
         add_link_options(-fno-sanitize-link-c++-runtime)
     endif()
 elseif(VULTURE_PART STREQUAL "uefi")
-    vulture_add_cxx_options(-O2 -ffreestanding -fno-stack-protector -mno-stack-arg-probe)
+    vulture_add_cxx_options(-O2 -ffreestanding -fno-threadsafe-statics -fno-stack-protector -mno-stack-arg-probe)
 elseif(VULTURE_PART STREQUAL "userland")
     # Programs and their libraries, running at EL0. They may use floating
     # point; frame pointers stay for crash reports. Everything is position
@@ -67,6 +66,7 @@ elseif(VULTURE_PART STREQUAL "target")
     vulture_add_cxx_options(
         -O2
         -ffreestanding
+        -fno-threadsafe-statics
         -fno-stack-protector
         -mgeneral-regs-only
         -mno-omit-leaf-frame-pointer

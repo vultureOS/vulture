@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "Lock.h"
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,8 +15,8 @@
 // Small blocks (up to 16 KiB with their header) come from size classes
 // carved out of 64 KiB chunks; larger ones are mappings of their own.
 // Every block starts with a 16-byte header, which keeps payloads 16-byte
-// aligned and lets free() catch bad and double frees. Not thread-safe yet
-// (processes have one thread).
+// aligned and lets free() catch bad and double frees. One lock guards the
+// free lists.
 
 namespace {
 
@@ -42,6 +43,7 @@ struct FreeBlock {
 };
 
 FreeBlock* s_free_lists[class_count];
+LibC::Lock s_lock;
 
 size_t class_for(size_t total)
 {
@@ -97,6 +99,7 @@ void* malloc(size_t size)
         return static_cast<char*>(memory) + header_size;
     }
     size_t size_class = class_for(total);
+    LibC::LockGuard guard(s_lock);
     if (!s_free_lists[size_class] && !refill(size_class)) {
         errno = ENOMEM;
         return nullptr;
@@ -124,10 +127,24 @@ void free(void* pointer)
     }
     if (header->size_class >= class_count)
         corrupted("corrupted block header", pointer);
+    LibC::LockGuard guard(s_lock);
+    // (Again, now that no other thread can be freeing it.)
+    if (header->magic != used_magic)
+        corrupted("double free", pointer);
     auto* block = reinterpret_cast<FreeBlock*>(header);
     block->header.magic = free_magic;
     block->next = s_free_lists[header->size_class];
     s_free_lists[header->size_class] = block;
+}
+
+void __malloc_fork_lock()
+{
+    s_lock.lock();
+}
+
+void __malloc_fork_unlock()
+{
+    s_lock.unlock();
 }
 
 void* calloc(size_t count, size_t size)

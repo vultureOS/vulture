@@ -70,6 +70,34 @@ int sigprocmask(int how, sigset_t const* set, sigset_t* old_set)
     return check(System::syscall(Syscall::sigprocmask, static_cast<unsigned long>(how), reinterpret_cast<unsigned long>(set), reinterpret_cast<unsigned long>(old_set)));
 }
 
+int sigtimedwait(sigset_t const* set, siginfo_t* info, struct timespec const* timeout)
+{
+    return check(System::syscall(Syscall::sigtimedwait, reinterpret_cast<unsigned long>(set), reinterpret_cast<unsigned long>(info), reinterpret_cast<unsigned long>(timeout)));
+}
+
+int sigwaitinfo(sigset_t const* set, siginfo_t* info)
+{
+    return sigtimedwait(set, info, nullptr);
+}
+
+int sigwait(sigset_t const* set, int* signal)
+{
+    for (;;) {
+        long result = System::syscall(Syscall::sigtimedwait, reinterpret_cast<unsigned long>(set), 0, 0);
+        if (result == -EINTR)
+            continue;
+        if (result < 0)
+            return static_cast<int>(-result);
+        *signal = static_cast<int>(result);
+        return 0;
+    }
+}
+
+int sigaltstack(stack_t const* stack, stack_t* old_stack)
+{
+    return check(System::syscall(Syscall::sigaltstack, reinterpret_cast<unsigned long>(stack), reinterpret_cast<unsigned long>(old_stack)));
+}
+
 int sigemptyset(sigset_t* set)
 {
     *set = 0;

@@ -372,7 +372,9 @@ int vfscanf(FILE* file, char const* format, va_list arguments)
     source.file = file;
     va_list copy;
     va_copy(copy, arguments);
+    flockfile(file);
     int result = scan(source, format, copy);
+    funlockfile(file);
     va_end(copy);
     return result;
 }

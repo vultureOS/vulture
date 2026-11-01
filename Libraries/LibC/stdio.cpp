@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "Lock.h"
+#include <LibSystem/ThreadPointer.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sched.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -33,12 +36,75 @@ struct FILE {
     // Opened by fopen/fdopen/popen: in the list flushed at exit.
     FILE* next;
     pid_t child; // popen()'s.
+    // Each stdio call holds this while it works (flockfile() holds it across
+    // calls: it may be taken again by the thread that has it).
+    LibC::Lock lock {};
+    void* lock_owner { nullptr };
+    unsigned lock_depth { 0 };
 };
 
 static FILE s_stdin { 0, Buffering::Line, false, false, 0, 0, 0, {}, {}, nullptr, 0 };
 static FILE s_stdout { 1, Buffering::Line, false, false, 0, 0, 0, {}, {}, nullptr, 0 };
 static FILE s_stderr { 2, Buffering::None, false, false, 0, 0, 0, {}, {}, nullptr, 0 };
 static FILE* s_open_files = nullptr;
+static LibC::Lock s_open_files_lock;
+
+static void* current_thread_identity()
+{
+    return System::thread_control_block();
+}
+
+static bool file_is_mine(FILE* file)
+{
+    return __atomic_load_n(&file->lock_owner, __ATOMIC_RELAXED) == current_thread_identity();
+}
+
+static void lock_file(FILE* file)
+{
+    if (!file_is_mine(file)) {
+        file->lock.lock();
+        __atomic_store_n(&file->lock_owner, current_thread_identity(), __ATOMIC_RELAXED);
+    }
+    ++file->lock_depth;
+}
+
+static bool try_lock_file(FILE* file)
+{
+    if (!file_is_mine(file)) {
+        if (!file->lock.try_lock())
+            return false;
+        __atomic_store_n(&file->lock_owner, current_thread_identity(), __ATOMIC_RELAXED);
+    }
+    ++file->lock_depth;
+    return true;
+}
+
+static void unlock_file(FILE* file)
+{
+    if (--file->lock_depth == 0) {
+        __atomic_store_n(&file->lock_owner, static_cast<void*>(nullptr), __ATOMIC_RELAXED);
+        file->lock.unlock();
+    }
+}
+
+namespace {
+
+class FileLocker {
+public:
+    explicit FileLocker(FILE* file)
+        : m_file(file)
+    {
+        lock_file(m_file);
+    }
+    ~FileLocker() { unlock_file(m_file); }
+    FileLocker(FileLocker const&) = delete;
+    FileLocker& operator=(FileLocker const&) = delete;
+
+private:
+    FILE* m_file;
+};
+
+}
 
 extern "C" {
 FILE* stdin = &s_stdin;
@@ -344,12 +410,69 @@ void emit_to_file(void* context, char const* data, size_t length)
 
 extern "C" {
 
+// Some thread may hold a file for long, reading a terminal say: that file
+// has to go without rather than this wait for it.
+static void flush_unless_held(FILE* file)
+{
+    for (int attempt = 0; attempt < 256; ++attempt) {
+        if (try_lock_file(file)) {
+            flush(file);
+            unlock_file(file);
+            return;
+        }
+        sched_yield();
+    }
+}
+
 void __stdio_flush_all()
 {
-    flush(stdout);
-    flush(stderr);
+    flush_unless_held(stdout);
+    flush_unless_held(stderr);
+    LibC::LockGuard guard(s_open_files_lock);
     for (FILE* file = s_open_files; file; file = file->next)
-        flush(file);
+        flush_unless_held(file);
+}
+
+void __stdio_fork_lock()
+{
+    s_open_files_lock.lock();
+}
+
+// In the child, the other threads are gone with the files they held.
+static void release_if_held_by_others(FILE* file)
+{
+    if (!file_is_mine(file)) {
+        file->lock.reset();
+        file->lock_owner = nullptr;
+        file->lock_depth = 0;
+    }
+}
+
+void __stdio_fork_unlock(int child)
+{
+    if (child) {
+        release_if_held_by_others(stdin);
+        release_if_held_by_others(stdout);
+        release_if_held_by_others(stderr);
+        for (FILE* file = s_open_files; file; file = file->next)
+            release_if_held_by_others(file);
+    }
+    s_open_files_lock.unlock();
+}
+
+void flockfile(FILE* file)
+{
+    lock_file(file);
+}
+
+int ftrylockfile(FILE* file)
+{
+    return try_lock_file(file) ? 0 : 1;
+}
+
+void funlockfile(FILE* file)
+{
+    unlock_file(file);
 }
 
 int vsnprintf(char* buffer, size_t size, char const* format_string, va_list arguments)
@@ -387,6 +510,7 @@ int sprintf(char* buffer, char const* format_string, ...)
 
 int vfprintf(FILE* file, char const* format_string, va_list arguments)
 {
+    FileLocker locker(file);
     Output out { emit_to_file, file, 0 };
     return format(out, format_string, arguments);
 }
@@ -426,11 +550,22 @@ int dprintf(int fd, char const* format_string, ...)
     return length;
 }
 
-int fputc(int character, FILE* file)
+int putc_unlocked(int character, FILE* file)
 {
     char c = static_cast<char>(character);
     put(file, &c, 1);
     return file->error ? EOF : static_cast<unsigned char>(c);
+}
+
+int putchar_unlocked(int character)
+{
+    return putc_unlocked(character, stdout);
+}
+
+int fputc(int character, FILE* file)
+{
+    FileLocker locker(file);
+    return putc_unlocked(character, file);
 }
 
 int putc(int character, FILE* file)
@@ -445,18 +580,21 @@ int putchar(int character)
 
 int fputs(char const* string, FILE* file)
 {
+    FileLocker locker(file);
     put(file, string, strlen(string));
     return file->error ? EOF : 0;
 }
 
 int puts(char const* string)
 {
+    FileLocker locker(stdout);
     fputs(string, stdout);
     return fputc('\n', stdout) == EOF ? EOF : 0;
 }
 
 size_t fwrite(void const* buffer, size_t size, size_t count, FILE* file)
 {
+    FileLocker locker(file);
     put(file, static_cast<char const*>(buffer), size * count);
     return file->error ? 0 : count;
 }
@@ -477,13 +615,28 @@ static bool fill(FILE* file)
     return true;
 }
 
+int getc_unlocked(FILE* file)
+{
+    if (file->read_position == file->read_length) {
+        // About to wait for someone at a terminal: show what they are
+        // answering.
+        if (file == stdin)
+            fflush(stdout);
+        if (!fill(file))
+            return EOF;
+    }
+    return static_cast<unsigned char>(file->read_buffer[file->read_position++]);
+}
+
+int getchar_unlocked()
+{
+    return getc_unlocked(stdin);
+}
+
 int fgetc(FILE* file)
 {
-    if (file == stdin)
-        flush(stdout);
-    if (file->read_position == file->read_length && !fill(file))
-        return EOF;
-    return static_cast<unsigned char>(file->read_buffer[file->read_position++]);
+    FileLocker locker(file);
+    return getc_unlocked(file);
 }
 
 int getc(FILE* file)
@@ -500,9 +653,10 @@ char* fgets(char* buffer, int size, FILE* file)
 {
     if (size <= 0)
         return nullptr;
+    FileLocker locker(file);
     int length = 0;
     while (length < size - 1) {
-        int character = fgetc(file);
+        int character = getc_unlocked(file);
         if (character == EOF)
             break;
         buffer[length++] = static_cast<char>(character);
@@ -520,8 +674,9 @@ size_t fread(void* buffer, size_t size, size_t count, FILE* file)
     auto* bytes = static_cast<char*>(buffer);
     size_t total = size * count;
     size_t done = 0;
+    FileLocker locker(file);
     while (done < total) {
-        int character = fgetc(file);
+        int character = getc_unlocked(file);
         if (character == EOF)
             break;
         bytes[done++] = static_cast<char>(character);
@@ -535,6 +690,7 @@ int fflush(FILE* file)
         __stdio_flush_all();
         return 0;
     }
+    FileLocker locker(file);
     return flush(file);
 }
 
@@ -573,6 +729,7 @@ FILE* fopen(char const* path, char const* mode)
     }
     file->fd = fd;
     file->buffering = Buffering::Full;
+    LibC::LockGuard guard(s_open_files_lock);
     file->next = s_open_files;
     s_open_files = file;
     return file;
@@ -580,6 +737,7 @@ FILE* fopen(char const* path, char const* mode)
 
 static void forget(FILE* file)
 {
+    LibC::LockGuard guard(s_open_files_lock);
     for (FILE** link = &s_open_files; *link; link = &(*link)->next) {
         if (*link == file) {
             *link = file->next;
@@ -590,9 +748,13 @@ static void forget(FILE* file)
 
 int fclose(FILE* file)
 {
-    int result = flush(file);
-    if (close(file->fd) < 0)
-        result = EOF;
+    int result;
+    {
+        FileLocker locker(file);
+        result = flush(file);
+        if (close(file->fd) < 0)
+            result = EOF;
+    }
     if (file != stdin && file != stdout && file != stderr) {
         forget(file);
         free(file);
@@ -613,6 +775,7 @@ FILE* fdopen(int fd, char const* mode)
     int saved = errno;
     file->buffering = isatty(fd) ? Buffering::Line : Buffering::Full;
     errno = saved;
+    LibC::LockGuard guard(s_open_files_lock);
     file->next = s_open_files;
     s_open_files = file;
     return file;
@@ -622,6 +785,7 @@ int setvbuf(FILE* file, char* buffer, int mode, size_t size)
 {
     (void)buffer;
     (void)size;
+    FileLocker locker(file);
     flush(file);
     file->buffering = mode == _IONBF ? Buffering::None : (mode == _IOLBF ? Buffering::Line : Buffering::Full);
     return 0;
@@ -641,6 +805,7 @@ int ungetc(int character, FILE* file)
 {
     if (character == EOF)
         return EOF;
+    FileLocker locker(file);
     // Back into the read buffer: room at the front, or make some.
     if (file->read_position > 0) {
         file->read_buffer[--file->read_position] = static_cast<char>(character);
@@ -657,12 +822,14 @@ int ungetc(int character, FILE* file)
 
 void clearerr(FILE* file)
 {
+    FileLocker locker(file);
     file->error = false;
     file->eof = false;
 }
 
 off_t ftello(FILE* file)
 {
+    FileLocker locker(file);
     off_t position = lseek(file->fd, 0, SEEK_CUR);
     if (position < 0)
         return -1;
@@ -676,6 +843,7 @@ long ftell(FILE* file)
 
 int fseeko(FILE* file, off_t offset, int origin)
 {
+    FileLocker locker(file);
     if (flush(file) == EOF)
         return -1;
     if (origin == SEEK_CUR)
@@ -692,6 +860,7 @@ int fseek(FILE* file, long offset, int origin)
 
 void rewind(FILE* file)
 {
+    FileLocker locker(file);
     (void)fseeko(file, 0, SEEK_SET);
     file->error = false;
 }
@@ -703,8 +872,9 @@ ssize_t getdelim(char** line, size_t* capacity, int delimiter, FILE* file)
         return -1;
     }
     size_t length = 0;
+    FileLocker locker(file);
     for (;;) {
-        int character = fgetc(file);
+        int character = getc_unlocked(file);
         if (character == EOF)
             break;
         if (length + 2 > *capacity) {

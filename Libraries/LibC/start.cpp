@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "Lock.h"
+#include <Kernel/API/POSIX/auxv.h>
+#include <Kernel/API/POSIX/memory.h>
+#include <LibELF/ELF.h>
 #include <LibSystem/Syscall.h>
+#include <LibSystem/ThreadPointer.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
@@ -26,10 +31,17 @@ extern "C" int main(int argc, char** argv, char** envp);
 
 extern "C" {
 
-int errno;
+thread_local int __libc_errno;
 char** environ;
 
 void __stdio_flush_all();
+void __pthread_initialize();
+void __libc_run_thread_exit_handlers();
+
+int* __error(void)
+{
+    return &__libc_errno;
+}
 }
 
 namespace {
@@ -43,12 +55,73 @@ struct ExitHandler {
 
 ExitHandler s_exit_handlers[max_exit_handlers];
 int s_exit_handler_count = 0;
+LibC::Lock s_exit_handlers_lock;
+
+// In a statically linked program there is no dyld to set up the first
+// thread's thread-local storage. The usual size needs no system call.
+System::ThreadLocalImage s_tls_image;
+alignas(64) u8 s_small_tls_image[512];
+alignas(64) u8 s_small_tls_block[512];
+
+void set_up_static_thread_local_storage(unsigned long* stack)
+{
+    int argc = static_cast<int>(stack[0]);
+    char** envp = reinterpret_cast<char**>(stack + 1) + argc + 1;
+    while (*envp)
+        ++envp;
+    auto const* auxiliary = reinterpret_cast<unsigned long const*>(envp + 1);
+    ELF::Elf64_Phdr const* headers = nullptr;
+    unsigned long header_count = 0;
+    for (; auxiliary[0] != AT_NULL; auxiliary += 2) {
+        if (auxiliary[0] == AT_PHDR)
+            headers = reinterpret_cast<ELF::Elf64_Phdr const*>(auxiliary[1]);
+        else if (auxiliary[0] == AT_PHNUM)
+            header_count = auxiliary[1];
+    }
+    ELF::Elf64_Phdr const* segment = nullptr;
+    for (unsigned long i = 0; headers && i < header_count; ++i) {
+        if (headers[i].p_type == ELF::PT_TLS)
+            segment = &headers[i];
+    }
+    unsigned long offset = sizeof(System::ThreadControlBlock);
+    unsigned long alignment = 16;
+    unsigned long size = offset;
+    if (segment) {
+        unsigned long segment_alignment = segment->p_align ? segment->p_align : 1;
+        offset += (segment->p_vaddr - offset) & (segment_alignment - 1);
+        size = offset + segment->p_memsz;
+        alignment = segment_alignment > alignment ? segment_alignment : alignment;
+    }
+    u8* image = s_small_tls_image;
+    u8* block = s_small_tls_block;
+    if (size > sizeof(s_small_tls_image) || alignment > 64) {
+        unsigned long room = (size * 2 + alignment * 2 + 4095) & ~4095ul;
+        long mapped = System::syscall(System::Syscall::mmap, 0, room, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, static_cast<unsigned long>(-1), 0);
+        if (mapped < 0)
+            __builtin_trap();
+        image = reinterpret_cast<u8*>(mapped);
+        block = reinterpret_cast<u8*>((static_cast<unsigned long>(mapped) + size + alignment - 1) & ~(alignment - 1));
+    }
+    if (segment) {
+        auto const* source = reinterpret_cast<u8 const*>(segment->p_vaddr);
+        for (unsigned long byte = 0; byte < segment->p_filesz; ++byte)
+            image[offset + byte] = source[byte];
+    }
+    for (unsigned long byte = 0; byte < size; ++byte)
+        block[byte] = image[byte];
+    s_tls_image = { image, size, alignment };
+    auto* control = reinterpret_cast<System::ThreadControlBlock*>(block);
+    control->image = &s_tls_image;
+    control->thread = nullptr;
+    System::set_thread_control_block(control);
+}
 
 }
 
 // Shared by atexit() and the C++ runtime's __cxa_atexit().
 extern "C" int __libc_register_exit_handler(void (*function)(void*), void* argument)
 {
+    LibC::LockGuard guard(s_exit_handlers_lock);
     if (s_exit_handler_count == max_exit_handlers)
         return -1;
     s_exit_handlers[s_exit_handler_count++] = { function, argument };
@@ -60,6 +133,7 @@ extern "C" int __libc_register_exit_handler(void (*function)(void*), void* argum
 // environment).
 extern "C" void __libc_initialize(int argc, char** argv, char** envp)
 {
+    __pthread_initialize();
     environ = envp;
     if (argc > 0 && argv && argv[0])
         setprogname(argv[0]);
@@ -73,6 +147,7 @@ extern "C" [[noreturn]] void __libc_start(unsigned long* stack)
     char** argv = reinterpret_cast<char**>(stack + 1);
     char** envp = argv + argc + 1;
     if (!_DYNAMIC) {
+        set_up_static_thread_local_storage(stack);
         __libc_initialize(argc, argv, envp);
         if (__init_array_start) {
             for (auto* constructor = __init_array_start; constructor != __init_array_end; ++constructor)
@@ -91,9 +166,17 @@ int atexit(void (*function)())
 
 void exit(int status)
 {
-    // In reverse order of registration, then destructors and buffers.
-    while (s_exit_handler_count > 0) {
-        auto handler = s_exit_handlers[--s_exit_handler_count];
+    // This thread's thread_local objects; then the exit handlers, in
+    // reverse order of registration; then destructors and buffers.
+    __libc_run_thread_exit_handlers();
+    for (;;) {
+        ExitHandler handler;
+        {
+            LibC::LockGuard guard(s_exit_handlers_lock);
+            if (s_exit_handler_count == 0)
+                break;
+            handler = s_exit_handlers[--s_exit_handler_count];
+        }
         handler.function(handler.argument);
     }
     if (!_DYNAMIC && __fini_array_start) {
@@ -121,6 +204,16 @@ void abort()
     raise(SIGABRT);
     // If SIGABRT was caught or ignored, end the process anyway.
     _exit(127);
+}
+
+void __exit_fork_lock()
+{
+    s_exit_handlers_lock.lock();
+}
+
+void __exit_fork_unlock(int)
+{
+    s_exit_handlers_lock.unlock();
 }
 
 void __assertion_failed(char const* expression, char const* file, unsigned line, char const* function)

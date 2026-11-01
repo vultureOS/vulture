@@ -11,7 +11,8 @@
 
 __BEGIN_DECLS
 
-// One per process for now; per thread once processes have several threads.
-extern int errno;
+// Each thread has its own, as on macOS.
+int* __error(void);
+#define errno (*__error())
 
 __END_DECLS
