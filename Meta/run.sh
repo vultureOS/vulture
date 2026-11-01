@@ -40,6 +40,8 @@
 #                       says, one step a line: "expect TEXT" waits for TEXT
 #                       (after what the last expect matched), "send TEXT"
 #                       types TEXT (with \r, \n, \t and \xHH escapes),
+#                       "type TEXT" types it on the keyboard instead (\r for
+#                       Return), "key KEYS" presses keys there (up, ctrl-c),
 #                       "pause SECONDS" waits (as a person would before ^Z);
 #                       blank lines and "#" comments are skipped. Succeeds
 #                       once every step is done (and any --expect found)
@@ -55,6 +57,8 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="$root_dir/build"
 boot_args=""
 accelerator="${VULTURE_ACCEL:-}"
+gpu_width="${VULTURE_GPU_WIDTH:-2560}"
+gpu_height="${VULTURE_GPU_HEIGHT:-1600}"
 gdb=0
 headless=0
 expectations=()
@@ -233,14 +237,16 @@ args=(
     -drive "if=pflash,format=raw,unit=0,readonly=on,file=$firmware_code"
     -drive "if=pflash,format=raw,unit=1,file=$vars_file"
     "${boot_disk_args[@]}"
-    # ramfb gives the firmware a linear framebuffer for the boot console; virtio-gpu
-    # only offers blit operations until vultureOS has its own driver (M8).
+    # ramfb gives the firmware a linear framebuffer for the boot console (and the
+    # text console); virtio-gpu only offers blit operations until the kernel's
+    # driver takes it, and is what the window server draws on.
     -device ramfb
+    -device "virtio-gpu-pci,id=gpu0,xres=$gpu_width,yres=$gpu_height"
     # Lets the firmware hand the kernel some entropy.
     -device virtio-rng-pci
-    -device qemu-xhci
-    -device usb-kbd
-    -device usb-tablet
+    # USB has no driver yet (M14). These reach the text console and the window server.
+    -device virtio-keyboard-pci
+    -device virtio-tablet-pci
     -nic none
 )
 
@@ -277,7 +283,7 @@ if [ -n "$chat_file" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
             "" | "#"*) ;;
-            "expect "* | "send "* | "pause "*) chat_steps+=("$line") ;;
+            "expect "* | "send "* | "pause "* | "type "* | "key "*) chat_steps+=("$line") ;;
             *) echo "run.sh: $chat_file: not a step: $line" >&2; exit 2 ;;
         esac
     done < "$chat_file"
@@ -296,6 +302,76 @@ if [ -n "$chat_file" ]; then
     exec 7<> "$run_dir/serial.in"
 fi
 
+# Presses keys on the virtual keyboard, through QMP: each argument one press,
+# with others held, as ctrl-c. (A chat step: "key up", "type some text\\r".)
+press_keys() {
+    local commands='{"execute":"qmp_capabilities"}' combo keys key
+    for combo in "$@"; do
+        keys=""
+        while [ -n "$combo" ]; do
+            key="${combo%%-*}"
+            if [ "$key" = "$combo" ]; then combo=""; else combo="${combo#*-}"; fi
+            keys="$keys${keys:+,}{\"type\":\"qcode\",\"data\":\"$key\"}"
+        done
+        commands="$commands
+{\"execute\":\"send-key\",\"arguments\":{\"keys\":[$keys],\"hold-time\":10}}"
+    done
+    printf '%s\n' "$commands" | nc -U -w 1 "$qmp_socket" > /dev/null || echo "run.sh: QMP failed" >&2
+}
+
+# The keys for one character of text, on a US keyboard.
+key_for() {
+    case "$1" in
+        [a-z0-9]) printf '%s' "$1" ;;
+        [A-Z]) printf 'shift-%s' "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" ;;
+        ' ') printf 'spc' ;;
+        -) printf 'minus' ;;
+        _) printf 'shift-minus' ;;
+        .) printf 'dot' ;;
+        ,) printf 'comma' ;;
+        /) printf 'slash' ;;
+        =) printf 'equal' ;;
+        +) printf 'shift-equal' ;;
+        ';') printf 'semicolon' ;;
+        :) printf 'shift-semicolon' ;;
+        "'") printf 'apostrophe' ;;
+        '"') printf 'shift-apostrophe' ;;
+        '|') printf 'shift-backslash' ;;
+        '>') printf 'shift-dot' ;;
+        '<') printf 'shift-comma' ;;
+        '!') printf 'shift-1' ;;
+        '?') printf 'shift-slash' ;;
+        '@') printf 'shift-2' ;;
+        '#') printf 'shift-3' ;;
+        '$') printf 'shift-4' ;;
+        '%') printf 'shift-5' ;;
+        '&') printf 'shift-7' ;;
+        '*') printf 'shift-8' ;;
+        '(') printf 'shift-9' ;;
+        ')') printf 'shift-0' ;;
+        *) echo "run.sh: no key for '$1'" >&2 ;;
+    esac
+}
+
+# Text at the keyboard; \\r presses Return.
+type_on_keyboard() {
+    local text="$1" presses=() character
+    while [ -n "$text" ]; do
+        case "$text" in
+            '\r'*)
+                presses+=(ret)
+                text="${text#??}"
+                ;;
+            *)
+                character="${text%"${text#?}"}"
+                text="${text#?}"
+                presses+=("$(key_for "$character")")
+                ;;
+        esac
+    done
+    press_keys "${presses[@]}"
+}
+
 # The chat: which step is next, and where in the log the last expected
 # text ended (byte offsets, so no locale may count characters instead).
 chat_index=0
@@ -312,13 +388,21 @@ advance_chat() {
                 printf '%b' "${step#send }" >&7
                 chat_index=$((chat_index + 1))
                 ;;
+            "type "*)
+                type_on_keyboard "${step#type }"
+                chat_index=$((chat_index + 1))
+                ;;
+            "key "*)
+                press_keys "${step#key }"
+                chat_index=$((chat_index + 1))
+                ;;
             "pause "*)
                 sleep "${step#pause }"
                 chat_index=$((chat_index + 1))
                 ;;
             "expect "*)
                 text="${step#expect }"
-                match="$(tail -c +$((chat_offset + 1)) "$log" | LC_ALL=C grep -boF -- "$text" | head -n 1)" || true
+                match="$(tail -c +$((chat_offset + 1)) "$log" | LC_ALL=C grep -aboF -- "$text" | head -n 1)" || true
                 [ -n "$match" ] || return 0
                 chat_offset=$((chat_offset + ${match%%:*} + $(printf '%s' "$text" | LC_ALL=C wc -c)))
                 chat_index=$((chat_index + 1))
@@ -362,7 +446,11 @@ if [ -n "$screenshot" ] && kill -0 "$qemu_pid" 2>/dev/null; then
         *) screenshot="$PWD/$screenshot" ;;
     esac
     # QEMU's machine protocol: negotiate capabilities, then dump the screen.
-    printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s","format":"png"}}\n' "$screenshot" |
+    if [ -n "${VULTURE_SCREENSHOT_DEVICE:-}" ]; then
+        printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s","format":"png","device":"%s"}}\n' "$screenshot" "$VULTURE_SCREENSHOT_DEVICE"
+    else
+        printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s","format":"png"}}\n' "$screenshot"
+    fi |
         nc -U -w 2 "$qmp_socket" > /dev/null || echo "run.sh: screenshot failed" >&2
 fi
 

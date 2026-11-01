@@ -21,6 +21,7 @@ set(tests
     interactive
     launchd
     fork
+    graphics
     hello
     libc
     libc-more
@@ -59,6 +60,7 @@ endforeach()
 target_link_libraries(test-eventloop PRIVATE LibCore LibJSON)
 target_link_libraries(test-ports PRIVATE LibIPC LibCore)
 target_link_libraries(test-bootstrap PRIVATE LibIPC)
+target_link_libraries(test-graphics PRIVATE LibIPC)
 target_link_libraries(test-services PRIVATE LibServices)
 target_link_libraries(test-threads PRIVATE LibIPC LibCore)
 vulture_compile_ipc(test-bootstrap Echo.ipc)

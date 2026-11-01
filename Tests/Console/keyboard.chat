@@ -1,0 +1,30 @@
+# The console, typed at through the keyboard rather than the serial line: a
+# login, shifted characters, an arrow key recalling history, ^C.
+
+expect login: 
+type vulture\r
+expect Password:
+type vulture\r
+expect Welcome to vultureOS.
+expect ~ % 
+
+type echo Typed-At_The.Keyboard 123 "quoted" | tr a-z A-Z\r
+expect TYPED-AT_THE.KEYBOARD 123 QUOTED
+expect ~ % 
+
+type echo history works\r
+expect history works
+expect ~ % 
+key up
+key ret
+expect history works
+expect ~ % 
+
+type sleep 30\r
+pause 1
+key ctrl-c
+expect ~ % 
+
+type sudo poweroff\r
+expect Password:
+type vulture\r

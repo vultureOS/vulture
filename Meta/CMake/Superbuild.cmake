@@ -172,7 +172,16 @@ add_custom_target(test-persistence
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-persistence)
+add_custom_target(test-keyboard
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+        --chat ${CMAKE_SOURCE_DIR}/Tests/Console/keyboard.chat
+        --wait-for-exit
+        --timeout 120
+    DEPENDS host uefi target boot-archive test-login
+    USES_TERMINAL
+    VERBATIM)
+
+add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-persistence)
 
 # M5's "done when": 100 power cuts at random moments while writing; each
 # must leave a disk that passes fsck and remounts with every committed
