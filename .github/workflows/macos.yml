@@ -1,0 +1,56 @@
+#
+# Copyright (c) 2022-2026, Krisna Pranav
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Builds vultureOS on macOS (Apple silicon) with Homebrew's LLVM 22 and runs
+# every test: the host unit tests, then vultureOS booted in QEMU (boot,
+# panic, kernel, userland and persistence tests). Hosted runners are virtual
+# machines without nested virtualization, so QEMU emulates (TCG).
+
+name: macOS
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "Documentation/**"]
+  pull_request:
+    paths-ignore: ["**.md", "Documentation/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test (Apple silicon)
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+      HOMEBREW_NO_ANALYTICS: 1
+      VULTURE_ACCEL: tcg
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Install LLVM 22, CMake, Ninja and QEMU
+        run: brew install llvm@22 lld@22 cmake ninja qemu
+
+      - name: Show the tools
+        run: |
+          "$(brew --prefix llvm@22)/bin/clang++" --version
+          "$(brew --prefix lld@22)/bin/ld.lld" --version
+          cmake --version | head -1
+          echo "ninja $(ninja --version)"
+          qemu-system-aarch64 --version | head -1
+
+      - name: Build
+        run: Meta/build.sh --build-dir build
+
+      - name: Test
+        run: ninja -C build check

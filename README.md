@@ -26,12 +26,29 @@ Next is M5, storage and vultureFS. See the [Roadmap](Documentation/Roadmap.md).
 
 ## Requirements
 
-macOS on Apple Silicon (QEMU then runs vultureOS with hardware
-virtualization), plus:
+macOS on Apple Silicon is the main development machine: QEMU then runs
+vultureOS with hardware virtualization (HVF).
 
 ```sh
 brew install llvm@22 lld@22 cmake ninja qemu
 ```
+
+Linux works too (Ubuntu 24.04 is tested). QEMU runs vultureOS with KVM on
+an AArch64 machine and emulates it (TCG, several times slower) elsewhere.
+Add LLVM 22 from [apt.llvm.org](https://apt.llvm.org), then:
+
+```sh
+sudo apt install clang-22 lld-22 llvm-22 libclang-rt-22-dev cmake ninja-build \
+    qemu-system-arm qemu-efi-aarch64
+```
+
+`Meta/build.sh` finds LLVM 22 in Homebrew's or apt.llvm.org's place
+(`VULTURE_LLVM_ROOT` and `VULTURE_LLD_ROOT` override that), and
+`Meta/run.sh` picks the firmware and accelerator for the machine
+(`VULTURE_ACCEL=tcg` forces emulation).
+
+Both are built and tested on every push by GitHub Actions
+([macOS](.github/workflows/macos.yml), [Linux](.github/workflows/linux.yml)).
 
 ## Build and run
 
