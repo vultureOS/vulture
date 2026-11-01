@@ -6,17 +6,14 @@
 
 #pragma once
 
+#include <LibBase/StdLibExtras.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// Small helpers shared by the command-line tools.
-
-template<typename T>
-constexpr T max(T a, T b) { return a < b ? b : a; }
-template<typename T>
-constexpr T min(T a, T b) { return a < b ? a : b; }
+// Small helpers shared by the command-line tools (min and max come from
+// LibBase).
 
 // "tool: what: strerror(errno)" to standard error.
 inline void warn(char const* tool, char const* what)

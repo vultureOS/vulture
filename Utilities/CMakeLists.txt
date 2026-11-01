@@ -10,6 +10,13 @@ vulture_add_program(vsh
     DESTINATION bin)
 vulture_install_alias(vsh bin sh)
 
+# Accounts: logging in, changing users and passwords.
+vulture_add_program(login SOURCES bin/login.cpp DESTINATION usr/bin LIBRARIES LibCore)
+vulture_add_program(su SOURCES bin/su.cpp DESTINATION usr/bin LIBRARIES LibCore)
+vulture_add_program(passwd SOURCES bin/passwd.cpp DESTINATION usr/bin LIBRARIES LibCore)
+vulture_add_program(sudo SOURCES bin/sudo.cpp DESTINATION usr/bin LIBRARIES LibCore)
+vulture_add_program(getty SOURCES bin/getty.cpp DESTINATION usr/libexec)
+
 # vulture_add_tool(<name> <directory> [<other names> <directory>]...):
 # bin/<name>.cpp, installed in <directory> (and under the other names,
 # for tools that act by the name they are run as).
