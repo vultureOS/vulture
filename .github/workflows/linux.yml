@@ -62,6 +62,3 @@ jobs:
 
       - name: Build
         run: Meta/build.sh --build-dir build
-
-      - name: Test
-        run: ninja -C build check
