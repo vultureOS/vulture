@@ -43,6 +43,8 @@
 #                       types TEXT (with \r, \n, \t and \xHH escapes),
 #                       "type TEXT" types it on the keyboard instead (\r for
 #                       Return), "key KEYS" presses keys there (up, ctrl-c),
+#                       "screenshot FILE" saves the screen there, with
+#                       $VULTURE_SCREENSHOT_PREFIX before it,
 #                       "pointer X Y" moves the pointer (0 to 32767 across the
 #                       screen), "button left down" presses a mouse button,
 #                       "pause SECONDS" waits (as a person would before ^Z);
@@ -297,7 +299,7 @@ if [ -n "$chat_file" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
             "" | "#"*) ;;
-            "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "button "*) chat_steps+=("$line") ;;
+            "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "button "* | "screenshot "*) chat_steps+=("$line") ;;
             *) echo "run.sh: $chat_file: not a step: $line" >&2; exit 2 ;;
         esac
     done < "$chat_file"
@@ -403,6 +405,22 @@ type_on_keyboard() {
     press_keys "${presses[@]}"
 }
 
+# Saves the screen as PNG: QEMU's machine protocol, negotiating capabilities and
+# then dumping it. (QEMU writes it as it gets around to it.)
+save_screen() {
+    local file="$1"
+    case "$file" in
+        /*) ;;
+        *) file="$PWD/$file" ;;
+    esac
+    if [ -n "${VULTURE_SCREENSHOT_DEVICE:-}" ]; then
+        printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s","format":"png","device":"%s"}}\n' "$file" "$VULTURE_SCREENSHOT_DEVICE"
+    else
+        printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s","format":"png"}}\n' "$file"
+    fi |
+        nc -U -w 1 "$qmp_socket" > /dev/null || echo "run.sh: screenshot failed" >&2
+}
+
 # The chat: which step is next, and where in the log the last expected
 # text ended (byte offsets, so no locale may count characters instead).
 chat_index=0
@@ -437,6 +455,10 @@ advance_chat() {
                 ;;
             "pause "*)
                 sleep "${step#pause }"
+                chat_index=$((chat_index + 1))
+                ;;
+            "screenshot "*)
+                save_screen "${VULTURE_SCREENSHOT_PREFIX:-}${step#screenshot }"
                 chat_index=$((chat_index + 1))
                 ;;
             "expect "*)
@@ -480,17 +502,7 @@ while true; do
 done
 
 if [ -n "$screenshot" ] && kill -0 "$qemu_pid" 2>/dev/null; then
-    case "$screenshot" in
-        /*) ;;
-        *) screenshot="$PWD/$screenshot" ;;
-    esac
-    # QEMU's machine protocol: negotiate capabilities, then dump the screen.
-    if [ -n "${VULTURE_SCREENSHOT_DEVICE:-}" ]; then
-        printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s","format":"png","device":"%s"}}\n' "$screenshot" "$VULTURE_SCREENSHOT_DEVICE"
-    else
-        printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s","format":"png"}}\n' "$screenshot"
-    fi |
-        nc -U -w 2 "$qmp_socket" > /dev/null || echo "run.sh: screenshot failed" >&2
+    save_screen "$screenshot"
 fi
 
 if [ "$kill_power" -eq 1 ] && kill -0 "$qemu_pid" 2>/dev/null; then

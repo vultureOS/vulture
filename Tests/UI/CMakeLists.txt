@@ -8,3 +8,4 @@
 # the jobs in usr/tests/ui.
 vulture_add_program(ui-scene SOURCES scene.cpp DESTINATION usr/tests LIBRARIES LibWindow LibText LibGfx LibIPC LibCore)
 install(DIRECTORY Jobs/ DESTINATION usr/tests/ui)
+install(DIRECTORY GalleryJobs/ DESTINATION usr/tests/gallery)

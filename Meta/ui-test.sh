@@ -58,5 +58,36 @@ for config in "scene-2x 2560 1600 still" "scene-1x 1280 800 still" "scene-dragge
         status=1
     fi
 done
+
+# The Widget Gallery on the real server: one boot walks through all of it, at each
+# scale, in both appearances.
+gallery_shots() {
+    grep '^screenshot ' "$source_dir/Tests/UI/gallery.chat" | cut -d' ' -f2
+}
+for config in "gallery-2x 2560 1600" "gallery-1x 1280 800"; do
+    read -r name width height <<< "$config"
+    rm -f "$out_dir/$name"-*.png
+    if ! VULTURE_GPU_WIDTH="$width" VULTURE_GPU_HEIGHT="$height" VULTURE_SCREENSHOT_DEVICE=gpu0 VULTURE_SCREENSHOT_PREFIX="$out_dir/$name-" \
+        "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --boot-args uigallery \
+        --chat "$source_dir/Tests/UI/gallery.chat" --timeout 240 > "$out_dir/$name.log" 2>&1; then
+        echo "ui-test: $name: the gallery did not get through; see $out_dir/$name.log" >&2
+        status=1
+        continue
+    fi
+    for shot in $(gallery_shots); do
+        # Written as QEMU gets around to it.
+        for _ in $(seq 1 50); do
+            [ -s "$out_dir/$name-$shot" ] && break
+            sleep 0.1
+        done
+        if [ "$update" -eq 1 ]; then
+            cp "$out_dir/$name-$shot" "$golden_dir/$name-$shot"
+        elif ! "$imgdiff" --output "$out_dir/$name-$shot-difference.png" "$golden_dir/$name-$shot" "$out_dir/$name-$shot"; then
+            echo "ui-test: $name-$shot: differs from the golden; see $out_dir/$name-$shot-difference.png" >&2
+            status=1
+        fi
+    done
+    [ "$update" -eq 1 ] && echo "ui-test: $name: updated"
+done
 [ "$status" -eq 0 ] && echo "ui-test: PASS" || echo "ui-test: FAIL" >&2
 exit "$status"

@@ -1,0 +1,110 @@
+# The Widget Gallery, every page in both appearances, and what comes over a window:
+# Meta/ui-test.sh compares each screenshot with Tests/UI/Golden.
+expect gallery: page 1, light
+key 1
+expect gallery: page 1, light
+screenshot page1-light.png
+key 2
+expect gallery: page 2, light
+screenshot page2-light.png
+key 3
+expect gallery: page 3, light
+screenshot page3-light.png
+# A click gives a field the keyboard: its ring, and typing on the real keyboard.
+pointer 8524 7372
+button left down
+pause 0.1
+button left up
+pause 0.5
+screenshot focus-light.png
+type hello
+pause 0.5
+screenshot typed-light.png
+# A click on the sidebar takes the keyboard back.
+pointer 2380 7026
+button left down
+pause 0.1
+button left up
+pause 0.5
+key 4
+expect gallery: page 4, light
+screenshot page4-light.png
+key 5
+expect gallery: page 5, light
+screenshot page5-light.png
+key 6
+expect gallery: page 6, light
+screenshot page6-light.png
+key 1
+expect gallery: page 1, light
+key m
+expect gallery: page 1, light
+screenshot menu-light.png
+key esc
+pause 0.5
+key s
+expect gallery: page 1, light
+screenshot alert-light.png
+key esc
+pause 0.5
+key p
+expect gallery: page 1, light
+screenshot popover-light.png
+key esc
+pause 0.5
+key o
+expect gallery: page 1, light
+screenshot open-light.png
+key esc
+pause 0.5
+key 6
+expect gallery: page 6, light
+key d
+expect gallery: page 6, dark
+key 1
+expect gallery: page 1, dark
+screenshot page1-dark.png
+key 2
+expect gallery: page 2, dark
+screenshot page2-dark.png
+key 3
+expect gallery: page 3, dark
+screenshot page3-dark.png
+key 4
+expect gallery: page 4, dark
+screenshot page4-dark.png
+key 5
+expect gallery: page 5, dark
+screenshot page5-dark.png
+key 6
+expect gallery: page 6, dark
+screenshot page6-dark.png
+key 1
+expect gallery: page 1, dark
+key m
+expect gallery: page 1, dark
+screenshot menu-dark.png
+key esc
+pause 0.5
+key s
+expect gallery: page 1, dark
+screenshot alert-dark.png
+key esc
+pause 0.5
+key p
+expect gallery: page 1, dark
+screenshot popover-dark.png
+key esc
+pause 0.5
+key o
+expect gallery: page 1, dark
+screenshot open-dark.png
+key esc
+pause 0.5
+key 6
+expect gallery: page 6, dark
+key 1
+expect gallery: page 1, dark
+key c
+expect gallery: page 1, dark
+screenshot colors-dark.png

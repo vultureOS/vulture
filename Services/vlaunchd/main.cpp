@@ -108,14 +108,16 @@ int main(int argc, char** argv)
         printf("vlaunchd: vultureOS userland is up (process %d)\n", getpid());
         return Launchd::run_storage_test(true);
     }
-    if (argc > 1 && strcmp(argv[1], "--ui-test") == 0) {
+    bool ui_test = argc > 1 && strcmp(argv[1], "--ui-test") == 0;
+    bool ui_gallery = argc > 1 && strcmp(argv[1], "--ui-gallery") == 0;
+    if (ui_test || ui_gallery) {
         printf("vlaunchd: vultureOS userland is up (process %d)\n", getpid());
         fflush(stdout);
         // The test's jobs alone, in a supervisor of their own: this process
         // only reaps, until the machine is switched off from outside.
         pid_t supervisor = fork();
         if (supervisor == 0) {
-            execl("/sbin/vlaunchd", "vlaunchd", "--directory", "/usr/tests/ui", nullptr);
+            execl("/sbin/vlaunchd", "vlaunchd", "--directory", ui_gallery ? "/usr/tests/gallery" : "/usr/tests/ui", nullptr);
             _exit(127);
         }
         for (;;)
