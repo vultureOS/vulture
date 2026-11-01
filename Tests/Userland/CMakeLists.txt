@@ -33,6 +33,7 @@ set(tests
     ports
     posix
     segfault
+    services
     shell
     signals
     terminals
@@ -57,6 +58,7 @@ endforeach()
 target_link_libraries(test-eventloop PRIVATE LibCore LibJSON)
 target_link_libraries(test-ports PRIVATE LibIPC LibCore)
 target_link_libraries(test-bootstrap PRIVATE LibIPC)
+target_link_libraries(test-services PRIVATE LibServices)
 vulture_compile_ipc(test-bootstrap Echo.ipc)
 # The service bootstrap.cpp starts through vlaunchd.
 vulture_add_program(echo-service SOURCES echo-service.cpp DESTINATION usr/tests LIBRARIES LibIPC)
