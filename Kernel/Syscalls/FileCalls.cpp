@@ -71,6 +71,28 @@ ErrorOr<FlatPtr> Process::sys_read(TrapFrame&, SyscallArguments const& arguments
     return TRY(description->read(IOBuffer::user(arguments.values[1]), arguments.values[2]));
 }
 
+ErrorOr<FlatPtr> Process::sys_pread(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto description = TRY(file(as_int(arguments.values[0])));
+    if (static_cast<i64>(arguments.values[3]) < 0)
+        return Error::from_errno(EINVAL);
+    if (!is_user_range(arguments.values[1], arguments.values[2]))
+        return Error::from_errno(EFAULT);
+    return TRY(description->read_at(IOBuffer::user(arguments.values[1]), arguments.values[2], arguments.values[3]));
+}
+
+ErrorOr<FlatPtr> Process::sys_pwrite(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto description = TRY(file(as_int(arguments.values[0])));
+    if (static_cast<i64>(arguments.values[3]) < 0)
+        return Error::from_errno(EINVAL);
+    if (arguments.values[2] == 0)
+        return 0;
+    if (!is_user_range(arguments.values[1], arguments.values[2]))
+        return Error::from_errno(EFAULT);
+    return TRY(description->write_at(IOBuffer::user(arguments.values[1]), arguments.values[2], arguments.values[3]));
+}
+
 ErrorOr<FlatPtr> Process::sys_write(TrapFrame&, SyscallArguments const& arguments)
 {
     auto description = TRY(file(as_int(arguments.values[0])));

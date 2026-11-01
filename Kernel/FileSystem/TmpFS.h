@@ -58,6 +58,7 @@ public:
     ErrorOr<void> set_times(i64 access_time, i64 modification_time) override;
 
 private:
+    void mark_modified();
     friend class TmpFS;
 
     struct Child {

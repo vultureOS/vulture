@@ -63,7 +63,7 @@ TmpFSInode::TmpFSInode(TmpFS& file_system, InodeIndex index, InodeType type, u32
     m_metadata.type = type;
     m_metadata.permissions = permissions;
     m_metadata.link_count = type == InodeType::Directory ? 2 : 1;
-    m_metadata.modification_time = Time::wall_clock_seconds();
+    mark_modified();
 }
 
 ErrorOr<NonnullRefPtr<TmpFSInode>> TmpFSInode::create(TmpFS& file_system, InodeType type, u32 permissions)
@@ -165,7 +165,7 @@ ErrorOr<size_t> TmpFSInode::write(u64 offset, size_t count, IOBuffer const& buff
         done += chunk;
         MutexLocker locker(tmpfs().lock());
         m_metadata.size = max<u64>(m_metadata.size, offset + done);
-        m_metadata.modification_time = Time::wall_clock_seconds();
+        mark_modified();
     }
     return done;
 }
@@ -182,7 +182,7 @@ ErrorOr<void> TmpFSInode::truncate(u64 size)
             __builtin_memset(physical_to_virtual(m_pages[size / page_size]) + size % page_size, 0, page_size - size % page_size);
     }
     m_metadata.size = size;
-    m_metadata.modification_time = Time::wall_clock_seconds();
+    mark_modified();
     return {};
 }
 
@@ -243,7 +243,7 @@ ErrorOr<NonnullRefPtr<Inode>> TmpFSInode::create_child(StringView name, InodeTyp
     TRY(m_children.try_append(Child { TRY(String::from_view(name)), inode }));
     if (type == InodeType::Directory)
         ++m_metadata.link_count;
-    m_metadata.modification_time = Time::wall_clock_seconds();
+    mark_modified();
     return NonnullRefPtr<Inode>(*inode);
 }
 
@@ -260,7 +260,7 @@ ErrorOr<void> TmpFSInode::remove_child(StringView name)
     else if (child->inode->m_metadata.link_count > 0)
         --child->inode->m_metadata.link_count;
     m_children.remove_all_matching([&](auto const& candidate) { return candidate.name == name; });
-    m_metadata.modification_time = Time::wall_clock_seconds();
+    mark_modified();
     return {};
 }
 
@@ -295,6 +295,15 @@ ErrorOr<void> TmpFSInode::set_owner(u32 uid, u32 gid)
     m_metadata.uid = uid;
     m_metadata.gid = gid;
     return {};
+}
+
+// Now, in seconds and in the nanoseconds stat() prefers (utimensat sets
+// them; every change must too, or stat() would keep the older time).
+void TmpFSInode::mark_modified()
+{
+    u64 now = Time::wall_clock_nanoseconds();
+    m_metadata.modification_time = static_cast<i64>(now / 1'000'000'000);
+    m_metadata.modification_time_ns = static_cast<i64>(now);
 }
 
 ErrorOr<void> TmpFSInode::set_times(i64 access_time, i64 modification_time)

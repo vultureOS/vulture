@@ -23,6 +23,9 @@ public:
 
     ErrorOr<size_t> read(IOBuffer const&, size_t count);
     ErrorOr<size_t> write(IOBuffer const&, size_t count);
+    // pread and pwrite: at `offset`, leaving the file offset as it is.
+    ErrorOr<size_t> read_at(IOBuffer const&, size_t count, u64 offset);
+    ErrorOr<size_t> write_at(IOBuffer const&, size_t count, u64 offset);
     ErrorOr<i64> seek(i64 offset, int origin);
     [[nodiscard]] ErrorOr<vulture_stat> stat() const;
     // getdents(): packed vulture_dirent records, as many as fit.

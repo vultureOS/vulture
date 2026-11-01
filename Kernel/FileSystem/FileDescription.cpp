@@ -105,6 +105,29 @@ ErrorOr<size_t> FileDescription::write(IOBuffer const& buffer, size_t count)
     return done;
 }
 
+ErrorOr<size_t> FileDescription::read_at(IOBuffer const& buffer, size_t count, u64 offset)
+{
+    if (!is_readable())
+        return Error::from_errno(EBADF);
+    if (m_pipe)
+        return Error::from_errno(ESPIPE);
+    auto metadata = m_inode->metadata();
+    if (metadata.type == InodeType::Directory)
+        return Error::from_errno(EISDIR);
+    if (metadata.type == InodeType::CharacterDevice)
+        return Error::from_errno(ESPIPE);
+    return m_inode->read(offset, count, buffer);
+}
+
+ErrorOr<size_t> FileDescription::write_at(IOBuffer const& buffer, size_t count, u64 offset)
+{
+    if (!is_writable())
+        return Error::from_errno(EBADF);
+    if (m_pipe || m_inode->metadata().type == InodeType::CharacterDevice)
+        return Error::from_errno(ESPIPE);
+    return m_inode->write(offset, count, buffer);
+}
+
 ErrorOr<i64> FileDescription::seek(i64 offset, int origin)
 {
     if (m_pipe || m_inode->metadata().type == InodeType::CharacterDevice)

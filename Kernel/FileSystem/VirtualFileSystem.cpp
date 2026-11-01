@@ -225,6 +225,9 @@ ErrorOr<NonnullRefPtr<FileDescription>> VirtualFileSystem::open(StringView path,
         return Error::from_errno(EEXIST);
     auto& inode = resolved.value().inode;
     auto metadata = inode->metadata();
+    // O_NOFOLLOW: a symbolic link at the end is an error, not a file.
+    if ((flags & O_NOFOLLOW) && metadata.type == InodeType::SymbolicLink)
+        return Error::from_errno(ELOOP);
     if ((flags & O_DIRECTORY) && metadata.type != InodeType::Directory)
         return Error::from_errno(ENOTDIR);
     if (metadata.type == InodeType::Directory && (flags & O_ACCMODE) != O_RDONLY)
