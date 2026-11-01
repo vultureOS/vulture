@@ -581,12 +581,8 @@ int builtin_exit(Shell& shell, Vector<String>& arguments)
             status = 2;
         }
     }
-    for (auto const& job : shell.jobs()) {
-        if (job->state == Job::State::Stopped && shell.is_interactive()) {
-            fprintf(stderr, "There are stopped jobs.\n");
-            break;
-        }
-    }
+    if (shell.warn_about_suspended_jobs())
+        return 1;
     shell.exit_shell(status & 0xff);
 }
 

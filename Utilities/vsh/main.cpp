@@ -264,23 +264,18 @@ int Shell::run_interactive()
 {
     load_history(*this);
     LineEditor editor(m_history, complete, this);
-    bool warned_about_jobs = false;
     for (;;) {
+        // Leaving with suspended jobs takes two tries in a row.
+        m_warned_on_previous_line = m_warned_about_jobs;
+        m_warned_about_jobs = false;
         reap_background_jobs();
         auto prompt = make_prompt(*this);
         auto line = editor.read_line(prompt.view());
         if (!line.has_value()) {
-            bool stopped = false;
-            for (auto const& job : m_jobs)
-                stopped = stopped || job->state == Job::State::Stopped;
-            if (stopped && !warned_about_jobs) {
-                fprintf(stderr, "vsh: you have stopped jobs.\n");
-                warned_about_jobs = true;
+            if (warn_about_suspended_jobs())
                 continue;
-            }
             exit_shell(m_last_status);
         }
-        warned_about_jobs = false;
         StringBuilder source;
         source.append(line->view());
         // Keep reading while the command is unfinished (an open quote,

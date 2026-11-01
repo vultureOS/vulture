@@ -14,7 +14,8 @@ namespace Shell {
 
 // Reads a line from the terminal with editing as in zsh or bash (emacs
 // keys): arrows, Home/End, ^A ^E ^B ^F ^K ^U ^W ^L ^D, Backspace and
-// Delete, history with up and down, and Tab completion.
+// Delete, history with up and down (or ^P and ^N), ^R to search the
+// history as zsh does, and Tab completion.
 class LineEditor {
 public:
     // The candidates for completing the word before the cursor (whose
@@ -33,6 +34,13 @@ private:
     void erase_before(size_t count);
     bool read_byte(char&);
 
+    // ^R: the "bck-i-search:" line under the one being edited.
+    void start_search();
+    void search_refresh();
+    // Finds the newest entry at or before `from` holding the query.
+    bool search_from(size_t from);
+    void end_search();
+
     Vector<String>& m_history;
     Completer m_completer;
     void* m_context;
@@ -41,6 +49,13 @@ private:
     Vector<char> m_buffer;
     size_t m_cursor { 0 };
     bool m_last_was_tab { false };
+    StringView m_newline { "\r\n"_sv };
+
+    bool m_searching { false };
+    bool m_search_failed { false };
+    Vector<char> m_query;
+    size_t m_match_index { 0 };
+    Vector<char> m_line_before_search;
 };
 
 }

@@ -8,6 +8,7 @@
 
 #include "Syntax.h"
 #include <LibBase/HashMap.h>
+#include <stdio.h>
 #include <sys/types.h>
 #include <termios.h>
 
@@ -32,6 +33,9 @@ struct Job {
     };
     State state { State::Running };
     bool background { false };
+    // The terminal's modes when it stopped, given back on fg.
+    struct termios modes {};
+    bool has_modes { false };
 };
 
 class Shell;
@@ -72,6 +76,10 @@ public:
     Job* find_job(StringView specification);
     int continue_job(Job&, bool foreground);
     void report_jobs(bool everything);
+    void print_job(Job const&, bool with_pid, FILE* = stderr);
+    // zsh's warning before leaving suspended jobs behind: true (and a
+    // warning) the first time in a row.
+    bool warn_about_suspended_jobs();
     [[nodiscard]] Optional<Builtin> builtin(StringView name) const;
     [[nodiscard]] bool has_function(StringView name) const { return m_functions.contains(name); }
     // A command's path, as PATH finds it.
@@ -147,6 +155,8 @@ private:
     pid_t m_shell_group { 0 };
     // $$: the shell's process, also in subshells.
     pid_t m_pid { 0 };
+    bool m_warned_about_jobs { false };
+    bool m_warned_on_previous_line { false };
     int m_terminal { -1 };
     struct termios m_terminal_modes {};
     bool m_in_child { false };

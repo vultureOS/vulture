@@ -607,14 +607,85 @@ private:
     bool m_failed { false };
 };
 
-void print_status_message(int status)
+// What zsh calls a signal in job messages ("segmentation fault").
+char const* signal_text(int signal)
 {
-    if (!WIFSIGNALED(status))
+    switch (signal) {
+    case SIGHUP:
+        return "hangup";
+    case SIGINT:
+        return "interrupt";
+    case SIGQUIT:
+        return "quit";
+    case SIGILL:
+        return "illegal hardware instruction";
+    case SIGTRAP:
+        return "trace trap";
+    case SIGABRT:
+        return "abort";
+    case SIGBUS:
+        return "bus error";
+    case SIGFPE:
+        return "floating point exception";
+    case SIGKILL:
+        return "killed";
+    case SIGUSR1:
+        return "user-defined signal 1";
+    case SIGSEGV:
+        return "segmentation fault";
+    case SIGUSR2:
+        return "user-defined signal 2";
+    case SIGPIPE:
+        return "broken pipe";
+    case SIGALRM:
+        return "alarm";
+    case SIGTERM:
+        return "terminated";
+    default:
+        return "signal";
+    }
+}
+
+// How a job is named in messages: its command, without a final "&".
+String job_text(StringView command)
+{
+    command = command.trim_whitespace();
+    if (command.ends_with('&') && !command.ends_with("&&"_sv))
+        command = command.substring_view(0, command.length() - 1).trim_whitespace();
+    return MUST(String::from_view(command));
+}
+
+// A job's state as zsh words it: "running", "suspended", "done",
+// "exit 1", "killed", "suspended (tty input)"...
+void state_text(Job const& job, char* text, size_t size)
+{
+    int status = job.status;
+    if (job.state == Job::State::Running) {
+        snprintf(text, size, "running");
+    } else if (job.state == Job::State::Stopped) {
+        int signal = WIFSTOPPED(status) ? WSTOPSIG(status) : SIGTSTP;
+        snprintf(text, size, "%s", signal == SIGTTIN ? "suspended (tty input)" : signal == SIGTTOU ? "suspended (tty output)" : signal == SIGSTOP ? "suspended (signal)" : "suspended");
+    } else if (WIFSIGNALED(status)) {
+        snprintf(text, size, "%s%s", signal_text(WTERMSIG(status)), WCOREDUMP(status) ? " (core dumped)" : "");
+    } else if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+        snprintf(text, size, "exit %d", WEXITSTATUS(status));
+    } else {
+        snprintf(text, size, "done");
+    }
+}
+
+// How zsh reports a foreground job that died of a signal (nothing for ^C
+// or a broken pipe): "vsh: segmentation fault  ./crash".
+void print_status_message(Job const& job)
+{
+    if (!WIFSIGNALED(job.status))
         return;
-    int signal = WTERMSIG(status);
+    int signal = WTERMSIG(job.status);
     if (signal == SIGINT || signal == SIGPIPE)
         return;
-    fprintf(stderr, "%s%s\n", strsignal(signal), WCOREDUMP(status) ? " (core dumped)" : "");
+    char text[64];
+    state_text(job, text, sizeof(text));
+    fprintf(stderr, "vsh: %-9s  %s\n", text, job.text.characters());
 }
 
 int exit_code(int status)
@@ -932,18 +1003,24 @@ int Shell::wait_for_job(Job& job)
         if (job.state == Job::State::Stopped)
             break;
     }
+    if (job.state == Job::State::Stopped && m_job_control && m_terminal >= 0)
+        job.has_modes = tcgetattr(m_terminal, &job.modes) == 0;
     take_terminal(m_shell_group);
     if (m_job_control && m_terminal >= 0)
         tcsetattr(m_terminal, TCSADRAIN, &m_terminal_modes);
     if (job.state == Job::State::Stopped) {
-        fprintf(stderr, "\n[%d]+  Stopped                 %s\n", job.id, job.text.characters());
+        // zsh: "vsh: suspended  sleep 30", under the "^Z" the terminal echoed.
+        char text[64];
+        state_text(job, text, sizeof(text));
+        fprintf(stderr, "\nvsh: %-9s  %s\n", text, job.text.characters());
         return exit_code(job.status);
     }
     int status = job.status;
-    forget_job(job);
     if (WIFSIGNALED(status) && WTERMSIG(status) == SIGINT && m_interactive)
         fputc('\n', stderr);
-    print_status_message(status);
+    if (m_interactive)
+        print_status_message(job);
+    forget_job(job);
     return exit_code(status);
 }
 
@@ -975,48 +1052,60 @@ void Shell::reap_background_jobs()
             finished_jobs.append(job.ptr());
     }
     for (auto* job : finished_jobs) {
-        if (m_interactive) {
-            if (WIFEXITED(job->status) && WEXITSTATUS(job->status) != 0)
-                fprintf(stderr, "[%d]+  Exit %d                  %s\n", job->id, WEXITSTATUS(job->status), job->text.characters());
-            else if (WIFSIGNALED(job->status))
-                fprintf(stderr, "[%d]+  %s  %s\n", job->id, strsignal(WTERMSIG(job->status)), job->text.characters());
-            else
-                fprintf(stderr, "[%d]+  Done                    %s\n", job->id, job->text.characters());
-        }
+        job->state = Job::State::Done;
+        if (m_interactive)
+            print_job(*job, false);
         forget_job(*job);
     }
+}
+
+// "[1]  + suspended  sleep 30", as zsh lists a job: "+" the current job
+// (the newest), "-" the one before; with `with_pid`, the process too.
+void Shell::print_job(Job const& job, bool with_pid, FILE* stream)
+{
+    char marker = ' ';
+    for (size_t i = 0; i < m_jobs.size(); ++i) {
+        if (m_jobs[i].ptr() == &job)
+            marker = i + 1 == m_jobs.size() ? '+' : (i + 2 == m_jobs.size() ? '-' : ' ');
+    }
+    char text[64];
+    state_text(job, text, sizeof(text));
+    if (with_pid)
+        fprintf(stream, "[%d]  %c %d %-9s  %s\n", job.id, marker, job.group, text, job.text.characters());
+    else
+        fprintf(stream, "[%d]  %c %-9s  %s\n", job.id, marker, text, job.text.characters());
 }
 
 void Shell::report_jobs(bool everything)
 {
     reap_background_jobs();
-    for (size_t i = 0; i < m_jobs.size(); ++i) {
-        auto& job = *m_jobs[i];
-        char marker = i + 1 == m_jobs.size() ? '+' : (i + 2 == m_jobs.size() ? '-' : ' ');
-        printf("[%d]%c  %-22s  %s%s\n", job.id, marker, job.state == Job::State::Stopped ? "Stopped" : "Running", job.text.characters(),
-            job.state == Job::State::Running ? " &" : "");
-        if (everything) {
-            for (pid_t pid : job.processes)
-                printf("      %d\n", pid);
-        }
-    }
+    for (auto& job : m_jobs)
+        print_job(*job, everything, stdout);
 }
 
 int Shell::continue_job(Job& job, bool foreground)
 {
+    // The terminal (as the job left it) is the job's before it runs again.
+    if (foreground) {
+        take_terminal(job.group);
+        if (job.has_modes && m_job_control && m_terminal >= 0)
+            tcsetattr(m_terminal, TCSADRAIN, &job.modes);
+    }
     if (m_job_control)
         kill(-job.group, SIGCONT);
     else
         for (pid_t pid : job.processes)
             kill(pid, SIGCONT);
     job.state = Job::State::Running;
-    if (foreground) {
-        printf("%s\n", job.text.characters());
-        fflush(stdout);
-        return wait_for_job(job);
+    // zsh: "[1]  + continued  sleep 30", for fg and bg alike.
+    if (m_interactive) {
+        char text[] = "continued";
+        char marker = m_jobs.size() > 0 && m_jobs.last().ptr() == &job ? '+' : '-';
+        fprintf(stderr, "[%d]  %c %-9s  %s\n", job.id, marker, text, job.text.characters());
     }
+    if (foreground)
+        return wait_for_job(job);
     job.background = true;
-    printf("[%d]+ %s &\n", job.id, job.text.characters());
     return 0;
 }
 
@@ -1174,6 +1263,20 @@ int Shell::run_file(char const* path, Vector<String> arguments)
     return status;
 }
 
+bool Shell::warn_about_suspended_jobs()
+{
+    if (!m_interactive || m_warned_on_previous_line)
+        return false;
+    bool suspended = false;
+    for (auto const& job : m_jobs)
+        suspended = suspended || job->state == Job::State::Stopped;
+    if (!suspended)
+        return false;
+    fprintf(stderr, "vsh: you have suspended jobs.\n");
+    m_warned_about_jobs = true;
+    return true;
+}
+
 [[noreturn]] void Shell::exit_shell(int status)
 {
     if (!m_in_child) {
@@ -1182,6 +1285,15 @@ int Shell::run_file(char const* path, Vector<String> arguments)
             String command = trap;
             m_traps[0] = {};
             run_source(command.view());
+        }
+        // As zsh: the jobs left behind get a hangup (and the suspended
+        // ones a continue, so they see it).
+        if (m_interactive) {
+            for (auto const& job : m_jobs) {
+                kill(-job->group, SIGHUP);
+                if (job->state == Job::State::Stopped)
+                    kill(-job->group, SIGCONT);
+            }
         }
     }
     fflush(stdout);
@@ -1228,7 +1340,7 @@ int Shell::execute(Node const& node)
             // a && b &: the whole list in one background process.
             auto job = MUST(try_make<Job>());
             job->id = m_jobs.is_empty() ? 1 : m_jobs.last()->id + 1;
-            job->text = node.text.is_empty() ? child.text : node.text;
+            job->text = job_text(node.text.is_empty() ? child.text.view() : node.text.view());
             job->background = true;
             pid_t pid = fork();
             if (pid == 0) {
@@ -1431,7 +1543,7 @@ int Shell::execute_pipeline(Node const& node, bool background)
     fflush(stderr);
     auto job = MUST(try_make<Job>());
     job->id = m_jobs.is_empty() ? 1 : m_jobs.last()->id + 1;
-    job->text = node.text;
+    job->text = job_text(node.text.view());
     job->background = background;
     int previous_read = -1;
     for (size_t i = 0; i < commands.size(); ++i) {

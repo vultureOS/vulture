@@ -81,6 +81,58 @@ void LineEditor::refresh()
     write_text(output.view());
 }
 
+void LineEditor::start_search()
+{
+    m_searching = true;
+    m_search_failed = false;
+    m_query.clear();
+    m_match_index = m_history.size();
+    m_line_before_search = m_buffer;
+    search_refresh();
+}
+
+void LineEditor::search_refresh()
+{
+    refresh();
+    StringBuilder output;
+    output.append(m_newline);
+    output.append("\x1b[K"_sv);
+    output.append(m_search_failed ? "failing bck-i-search: "_sv : "bck-i-search: "_sv);
+    output.append(StringView(m_query.begin(), m_query.size()));
+    output.append("_\x1b[A\r"_sv);
+    size_t column = m_prompt_width + m_cursor;
+    if (column > 0)
+        output.appendff("\x1b[{}C", column);
+    write_text(output.view());
+}
+
+bool LineEditor::search_from(size_t from)
+{
+    StringView query(m_query.begin(), m_query.size());
+    for (size_t i = min(from, m_history.size()); i-- > 0;) {
+        auto found = m_history[i].view().find(query);
+        if (!found.has_value())
+            continue;
+        m_match_index = i;
+        m_buffer.clear();
+        m_cursor = 0;
+        insert(m_history[i].view());
+        m_cursor = found.value();
+        m_search_failed = false;
+        return true;
+    }
+    m_search_failed = true;
+    return false;
+}
+
+void LineEditor::end_search()
+{
+    m_searching = false;
+    write_text(m_newline);
+    write_text("\x1b[K\x1b[A"_sv);
+    refresh();
+}
+
 void LineEditor::insert(StringView text)
 {
     for (char c : text)
@@ -148,7 +200,7 @@ void LineEditor::complete(bool listing)
     width += 2;
     size_t columns = max<size_t>(1, size.ws_col / width);
     StringBuilder listing_text;
-    listing_text.append("\r\n"_sv);
+    listing_text.append(m_newline);
     for (size_t i = 0; i < candidates.size(); ++i) {
         StringView name = candidates[i].view();
         if (auto slash = name.substring_view(0, name.length() - (name.ends_with('/') ? 1 : 0)).find_last('/'); slash.has_value())
@@ -156,7 +208,7 @@ void LineEditor::complete(bool listing)
         listing_text.append(name);
         bool end_of_row = (i + 1) % columns == 0 || i + 1 == candidates.size();
         if (end_of_row) {
-            listing_text.append("\r\n"_sv);
+            listing_text.append(m_newline);
         } else {
             for (size_t pad = name.length(); pad < width; ++pad)
                 listing_text.append(' ');
@@ -173,13 +225,20 @@ Optional<String> LineEditor::read_line(StringView prompt)
     m_buffer.clear();
     m_cursor = 0;
     m_last_was_tab = false;
+    m_searching = false;
 
     struct termios original;
     bool terminal = tcgetattr(STDIN_FILENO, &original) == 0;
+    // A new line: "\n" where the terminal adds the carriage return itself.
+    m_newline = terminal && (original.c_oflag & OPOST) && (original.c_oflag & ONLCR) ? "\n"_sv : "\r\n"_sv;
     if (terminal) {
+        // As zsh: no echo, no line editing or signals by the terminal; but
+        // Return still arrives as a newline, so a line typed ahead for the
+        // next program ends as it should.
         struct termios raw = original;
         raw.c_lflag &= ~(ICANON | ECHO | ISIG | IEXTEN);
-        raw.c_iflag &= ~(ICRNL | IXON);
+        raw.c_iflag &= ~IXON;
+        raw.c_iflag |= ICRNL;
         raw.c_cc[VMIN] = 1;
         raw.c_cc[VTIME] = 0;
         tcsetattr(STDIN_FILENO, TCSADRAIN, &raw);
@@ -200,21 +259,69 @@ Optional<String> LineEditor::read_line(StringView prompt)
         }
         bool was_tab = m_last_was_tab;
         m_last_was_tab = false;
+        if (m_searching) {
+            if (c == 0x12) { // ^R again: the next older match.
+                if (m_match_index > 0)
+                    search_from(m_match_index);
+                search_refresh();
+                continue;
+            }
+            if (c == 0x07) { // ^G: back to the line as it was.
+                m_buffer = m_line_before_search;
+                m_cursor = m_buffer.size();
+                end_search();
+                continue;
+            }
+            if (c == 0x7f || c == 0x08) {
+                if (!m_query.is_empty())
+                    m_query.take_last();
+                search_from(m_history.size());
+                search_refresh();
+                continue;
+            }
+            if (static_cast<u8>(c) >= 0x20) {
+                m_query.append(c);
+                // From the current match, which may still hold the longer query.
+                search_from(m_match_index + 1);
+                search_refresh();
+                continue;
+            }
+            // Anything else keeps the match and does what it does.
+            end_search();
+        }
         switch (c) {
+        case 0x12: // ^R
+            start_search();
+            break;
+        case 0x10: // ^P: as Up.
+        case 0x0e: // ^N: as Down.
+            if (c == 0x10 && history_index == 0)
+                break;
+            if (c == 0x0e && history_index >= m_history.size())
+                break;
+            if (history_index == m_history.size())
+                saved_line = MUST(String::from_view(StringView(m_buffer.begin(), m_buffer.size())));
+            history_index += c == 0x10 ? -1 : 1;
+            m_buffer.clear();
+            m_cursor = 0;
+            insert(history_index < m_history.size() ? m_history[history_index].view() : saved_line.view());
+            refresh();
+            break;
         case '\r':
         case '\n':
-            write_text("\r\n"_sv);
+            write_text(m_newline);
             result = MUST(String::from_view(StringView(m_buffer.begin(), m_buffer.size())));
             finished = true;
             break;
         case 0x03: // ^C: abandon the line.
-            write_text("^C\r\n"_sv);
+            write_text("^C"_sv);
+            write_text(m_newline);
             result = String {};
             finished = true;
             break;
         case 0x04: // ^D: end of input on an empty line, else delete.
             if (m_buffer.is_empty()) {
-                write_text("\r\n"_sv);
+                write_text(m_newline);
                 finished = true;
                 break;
             }
