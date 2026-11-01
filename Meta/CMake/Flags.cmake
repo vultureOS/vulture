@@ -48,7 +48,11 @@ elseif(VULTURE_PART STREQUAL "uefi")
     vulture_add_cxx_options(-O2 -ffreestanding -fno-stack-protector -mno-stack-arg-probe)
 elseif(VULTURE_PART STREQUAL "userland")
     # Programs and their libraries, running at EL0. They may use floating
-    # point; frame pointers stay for crash reports.
+    # point; frame pointers stay for crash reports. Everything is position
+    # independent: programs are PIE, libSystem is shared.
+    add_compile_options(-fPIC)
+    # Programs choose static or dynamic linking themselves (Userland.cmake).
+    string(REPLACE "-static" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
     vulture_add_cxx_options(
         -O2
         -fno-stack-protector

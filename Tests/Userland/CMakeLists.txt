@@ -39,7 +39,13 @@ set(tests
     crash-writer)
 
 foreach(test IN LISTS tests)
-    vulture_add_program(test-${test} SOURCES ${test}.cpp DESTINATION usr/tests)
+    # "hello" stays statically linked, so programs without dyld keep working.
+    if(test STREQUAL "hello")
+        set(linking STATIC)
+    else()
+        set(linking "")
+    endif()
+    vulture_add_program(test-${test} SOURCES ${test}.cpp DESTINATION usr/tests ${linking})
     set_target_properties(test-${test} PROPERTIES OUTPUT_NAME ${test})
 endforeach()
 

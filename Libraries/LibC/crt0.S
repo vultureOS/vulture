@@ -19,3 +19,12 @@ _start:
     bl __libc_start
     brk #0
 .size _start, . - _start
+
+// Each program (and each library) has its own: C++ destructors registered
+// with __cxa_atexit name the object they belong to by it.
+.data
+.balign 8
+.global __dso_handle
+.hidden __dso_handle
+__dso_handle:
+    .quad __dso_handle

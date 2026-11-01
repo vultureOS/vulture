@@ -24,3 +24,4 @@ set(CMAKE_RANLIB ${VULTURE_LLVM_ROOT}/bin/llvm-ranlib CACHE FILEPATH "Archive in
 
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 set(CMAKE_EXE_LINKER_FLAGS_INIT "--ld-path=${VULTURE_LLD_ROOT}/bin/ld.lld -nostdlib -static")
+set(CMAKE_SHARED_LINKER_FLAGS_INIT "--ld-path=${VULTURE_LLD_ROOT}/bin/ld.lld -nostdlib")

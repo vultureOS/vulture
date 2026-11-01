@@ -11,11 +11,16 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-using Constructor = void (*)();
+using Constructor = void (*)(int, char**, char**);
+using Destructor = void (*)();
 extern "C" Constructor __init_array_start[] __attribute__((weak));
 extern "C" Constructor __init_array_end[] __attribute__((weak));
-extern "C" Constructor __fini_array_start[] __attribute__((weak));
-extern "C" Constructor __fini_array_end[] __attribute__((weak));
+extern "C" Destructor __fini_array_start[] __attribute__((weak));
+extern "C" Destructor __fini_array_end[] __attribute__((weak));
+// Defined by the linker in a shared object (libSystem.B.dylib): there, the
+// dynamic linker runs every object's initializers and finalizers. In a
+// statically linked program it is not there, and this file runs them.
+extern "C" char _DYNAMIC[] __attribute__((weak, visibility("hidden")));
 
 extern "C" int main(int argc, char** argv, char** envp);
 
@@ -50,17 +55,29 @@ extern "C" int __libc_register_exit_handler(void (*function)(void*), void* argum
     return 0;
 }
 
+// The C library's own setup, before any other initializer (the dynamic
+// linker calls it, like every initializer, with the arguments and
+// environment).
+extern "C" void __libc_initialize(int argc, char** argv, char** envp)
+{
+    environ = envp;
+    if (argc > 0 && argv && argv[0])
+        setprogname(argv[0]);
+}
+
+__attribute__((section(".init_array.00001"), used)) static Constructor s_initialize = __libc_initialize;
+
 extern "C" [[noreturn]] void __libc_start(unsigned long* stack)
 {
     int argc = static_cast<int>(stack[0]);
     char** argv = reinterpret_cast<char**>(stack + 1);
-    environ = argv + argc + 1;
-    if (argc > 0 && argv[0])
-        setprogname(argv[0]);
-
-    if (__init_array_start) {
-        for (auto* constructor = __init_array_start; constructor != __init_array_end; ++constructor)
-            (*constructor)();
+    char** envp = argv + argc + 1;
+    if (!_DYNAMIC) {
+        __libc_initialize(argc, argv, envp);
+        if (__init_array_start) {
+            for (auto* constructor = __init_array_start; constructor != __init_array_end; ++constructor)
+                (*constructor)(argc, argv, envp);
+        }
     }
     exit(main(argc, argv, environ));
 }
@@ -79,7 +96,7 @@ void exit(int status)
         auto handler = s_exit_handlers[--s_exit_handler_count];
         handler.function(handler.argument);
     }
-    if (__fini_array_start) {
+    if (!_DYNAMIC && __fini_array_start) {
         for (auto* destructor = __fini_array_end; destructor != __fini_array_start;)
             (*--destructor)();
     }

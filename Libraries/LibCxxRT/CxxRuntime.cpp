@@ -17,8 +17,6 @@ extern "C" int __libc_register_exit_handler(void (*function)(void*), void* argum
 
 extern "C" {
 
-void* __dso_handle = nullptr;
-
 int __cxa_atexit(void (*destructor)(void*), void* object, void*)
 {
     return __libc_register_exit_handler(destructor, object);
