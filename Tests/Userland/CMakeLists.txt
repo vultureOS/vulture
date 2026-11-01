@@ -40,6 +40,7 @@ set(tests
     terminals
     threads
     time
+    toolkit
     tools
     volumes
     windows
@@ -64,6 +65,7 @@ target_link_libraries(test-bootstrap PRIVATE LibIPC)
 target_link_libraries(test-graphics PRIVATE LibIPC)
 target_link_libraries(test-services PRIVATE LibServices)
 target_link_libraries(test-windows PRIVATE LibWindow LibImage LibGfx LibIPC LibCore)
+target_link_libraries(test-toolkit PRIVATE LibUI LibImage)
 target_link_libraries(test-threads PRIVATE LibIPC LibCore)
 vulture_compile_ipc(test-bootstrap Echo.ipc)
 # The service bootstrap.cpp starts through vlaunchd.

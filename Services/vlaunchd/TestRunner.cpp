@@ -59,6 +59,7 @@ Test const s_tests[] = {
     { "/usr/tests/posix", 0, 0 },
     { "/usr/tests/graphics", 0, 0 },
     { "/usr/tests/windows", 0, 0 },
+    { "/usr/tests/toolkit", 0, 0 },
     { "/usr/tests/threads", 0, 0 },
     { "/usr/tests/ports", 0, 0 },
     { "/usr/tests/bootstrap", 0, 0 },
