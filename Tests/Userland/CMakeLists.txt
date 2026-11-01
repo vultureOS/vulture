@@ -25,9 +25,11 @@ set(tests
     permissions
     pipes
     segfault
+    shell
     signals
     terminals
     time
+    tools
     volumes
     # Not in init's test list: the storage crash and persistence tests run it.
     crash-writer)
