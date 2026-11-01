@@ -59,15 +59,22 @@ int ttyname_r(int fd, char* buffer, size_t size);
 
 ssize_t read(int fd, void* buffer, size_t count);
 ssize_t write(int fd, void const* buffer, size_t count);
+// At `offset`, leaving the file offset as it is.
+ssize_t pread(int fd, void* buffer, size_t count, off_t offset);
+ssize_t pwrite(int fd, void const* buffer, size_t count, off_t offset);
 int close(int fd);
 off_t lseek(int fd, off_t offset, int origin);
 int isatty(int fd);
 int dup(int fd);
 int dup2(int fd, int new_fd);
+// dup2, with O_CLOEXEC in `flags` setting close-on-exec on the new one.
+int dup3(int fd, int new_fd, int flags);
 int pipe(int fds[2]);
 int pipe2(int fds[2], int flags);
 int fsync(int fd);
+int fdatasync(int fd);
 int ftruncate(int fd, off_t length);
+int truncate(char const* path, off_t length);
 void sync(void);
 
 int unlink(char const* path);

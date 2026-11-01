@@ -399,4 +399,210 @@ char* ctime(time_t const* time)
     static char buffer[32];
     return ctime_r(time, buffer);
 }
+
+char* strptime(char const* text, char const* format, struct tm* broken)
+{
+    auto skip_space = [&]() {
+        while (isspace(static_cast<unsigned char>(*text)))
+            ++text;
+    };
+    // A number of at most `digits` digits in [low, high].
+    auto number = [&](int digits, int low, int high, int& out) {
+        skip_space();
+        bool negative = false;
+        if (low < 0 && (*text == '-' || *text == '+')) {
+            negative = *text == '-';
+            ++text;
+        }
+        if (!isdigit(static_cast<unsigned char>(*text)))
+            return false;
+        int value = 0;
+        for (int i = 0; i < digits && isdigit(static_cast<unsigned char>(*text)); ++i)
+            value = value * 10 + (*text++ - '0');
+        if (negative)
+            value = -value;
+        if (value < low || value > high)
+            return false;
+        out = value;
+        return true;
+    };
+    // A name from `names`, whole or its first three letters, any case.
+    auto name = [&](char const* const* names, int count, int& out) {
+        skip_space();
+        for (int i = 0; i < count; ++i) {
+            size_t full = strlen(names[i]);
+            if (strncasecmp(text, names[i], full) == 0) {
+                text += full;
+                out = i;
+                return true;
+            }
+        }
+        for (int i = 0; i < count; ++i) {
+            if (strncasecmp(text, names[i], 3) == 0) {
+                text += 3;
+                out = i;
+                return true;
+            }
+        }
+        return false;
+    };
+    int hour12 = -1;
+    bool pm = false, has_pm = false;
+    for (; *format; ++format) {
+        if (isspace(static_cast<unsigned char>(*format))) {
+            skip_space();
+            continue;
+        }
+        if (*format != '%') {
+            if (*text++ != *format)
+                return nullptr;
+            continue;
+        }
+        char conversion = *++format;
+        if (conversion == 'E' || conversion == 'O')
+            conversion = *++format;
+        int value = 0;
+        switch (conversion) {
+        case '%':
+            skip_space();
+            if (*text++ != '%')
+                return nullptr;
+            break;
+        case 'a':
+        case 'A':
+            if (!name(s_weekdays, 7, value))
+                return nullptr;
+            broken->tm_wday = value;
+            break;
+        case 'b':
+        case 'B':
+        case 'h':
+            if (!name(s_months, 12, value))
+                return nullptr;
+            broken->tm_mon = value;
+            break;
+        case 'c':
+            if (!(text = strptime(text, "%a %b %e %H:%M:%S %Y", broken)))
+                return nullptr;
+            break;
+        case 'C':
+            if (!number(2, 0, 99, value))
+                return nullptr;
+            broken->tm_year = value * 100 - 1900 + (broken->tm_year + 1900) % 100;
+            break;
+        case 'd':
+        case 'e':
+            if (!number(2, 1, 31, value))
+                return nullptr;
+            broken->tm_mday = value;
+            break;
+        case 'D':
+            if (!(text = strptime(text, "%m/%d/%y", broken)))
+                return nullptr;
+            break;
+        case 'F':
+            if (!(text = strptime(text, "%Y-%m-%d", broken)))
+                return nullptr;
+            break;
+        case 'H':
+            if (!number(2, 0, 23, value))
+                return nullptr;
+            broken->tm_hour = value;
+            break;
+        case 'I':
+            if (!number(2, 1, 12, value))
+                return nullptr;
+            hour12 = value;
+            break;
+        case 'j':
+            if (!number(3, 1, 366, value))
+                return nullptr;
+            broken->tm_yday = value - 1;
+            break;
+        case 'm':
+            if (!number(2, 1, 12, value))
+                return nullptr;
+            broken->tm_mon = value - 1;
+            break;
+        case 'M':
+            if (!number(2, 0, 59, value))
+                return nullptr;
+            broken->tm_min = value;
+            break;
+        case 'n':
+        case 't':
+            skip_space();
+            break;
+        case 'p':
+            skip_space();
+            if (strncasecmp(text, "AM", 2) == 0) {
+                pm = false;
+            } else if (strncasecmp(text, "PM", 2) == 0) {
+                pm = true;
+            } else {
+                return nullptr;
+            }
+            has_pm = true;
+            text += 2;
+            break;
+        case 'r':
+            if (!(text = strptime(text, "%I:%M:%S %p", broken)))
+                return nullptr;
+            break;
+        case 'R':
+            if (!(text = strptime(text, "%H:%M", broken)))
+                return nullptr;
+            break;
+        case 'S':
+            if (!number(2, 0, 60, value))
+                return nullptr;
+            broken->tm_sec = value;
+            break;
+        case 'T':
+            if (!(text = strptime(text, "%H:%M:%S", broken)))
+                return nullptr;
+            break;
+        case 'y':
+            // 69-99: the 1900s; 00-68: the 2000s, as POSIX says.
+            if (!number(2, 0, 99, value))
+                return nullptr;
+            broken->tm_year = value < 69 ? value + 100 : value;
+            break;
+        case 'Y':
+            if (!number(4, 0, 9999, value))
+                return nullptr;
+            broken->tm_year = value - 1900;
+            break;
+        case 'z': {
+            skip_space();
+            if (*text == 'Z') {
+                ++text;
+                break;
+            }
+            if (*text != '+' && *text != '-')
+                return nullptr;
+            ++text;
+            for (int i = 0; i < 4; ++i) {
+                if (!isdigit(static_cast<unsigned char>(*text)))
+                    return nullptr;
+                ++text;
+            }
+            break;
+        }
+        case 'Z':
+            skip_space();
+            while (isalpha(static_cast<unsigned char>(*text)))
+                ++text;
+            break;
+        default:
+            return nullptr;
+        }
+    }
+    if (hour12 >= 0)
+        broken->tm_hour = hour12 % 12 + (has_pm && pm ? 12 : 0);
+    else if (has_pm && pm && broken->tm_hour < 12)
+        broken->tm_hour += 12;
+    return const_cast<char*>(text);
+}
+
 }

@@ -113,6 +113,16 @@ ssize_t read(int fd, void* buffer, size_t count)
     return check<ssize_t>(call(Syscall::read, fd, buffer, count));
 }
 
+ssize_t pread(int fd, void* buffer, size_t count, off_t offset)
+{
+    return check<ssize_t>(call(Syscall::pread, fd, buffer, count, offset));
+}
+
+ssize_t pwrite(int fd, void const* buffer, size_t count, off_t offset)
+{
+    return check<ssize_t>(call(Syscall::pwrite, fd, buffer, count, offset));
+}
+
 ssize_t write(int fd, void const* buffer, size_t count)
 {
     return check<ssize_t>(call(Syscall::write, fd, buffer, count));

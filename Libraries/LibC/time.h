@@ -55,6 +55,10 @@ struct tm* localtime_r(time_t const*, struct tm*);
 time_t mktime(struct tm*);
 time_t timegm(struct tm*);
 size_t strftime(char* buffer, size_t size, char const* format, struct tm const*);
+// The reverse of strftime for the common conversions (%a %A %b %B %h %c
+// %C %d %e %D %H %I %j %m %M %n %t %p %r %R %S %T %y %Y %z %Z %%); where
+// parsing stopped, or nothing if the text does not match.
+char* strptime(char const* text, char const* format, struct tm*);
 char* asctime(struct tm const*);
 char* asctime_r(struct tm const*, char* buffer);
 char* ctime(time_t const*);

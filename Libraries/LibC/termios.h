@@ -32,6 +32,7 @@ int tcgetattr(int fd, struct termios*);
 int tcsetattr(int fd, int action, struct termios const*);
 int tcflush(int fd, int queue);
 int tcdrain(int fd);
+int tcsendbreak(int fd, int duration);
 void cfmakeraw(struct termios*);
 speed_t cfgetispeed(struct termios const*);
 speed_t cfgetospeed(struct termios const*);

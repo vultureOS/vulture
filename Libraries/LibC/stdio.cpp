@@ -609,7 +609,10 @@ FILE* fdopen(int fd, char const* mode)
         return nullptr;
     }
     file->fd = fd;
+    // (Opening a file is no reason for errno to change.)
+    int saved = errno;
     file->buffering = isatty(fd) ? Buffering::Line : Buffering::Full;
+    errno = saved;
     file->next = s_open_files;
     s_open_files = file;
     return file;

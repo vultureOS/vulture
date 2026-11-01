@@ -119,14 +119,11 @@ pid_t tcgetsid(int fd)
     return session;
 }
 
+// 1, or 0 with errno ENOTTY (or EBADF), as macOS's does.
 int isatty(int fd)
 {
     struct termios settings;
-    int saved = errno;
-    bool result = tcgetattr(fd, &settings) == 0;
-    if (!result && errno == ENOTTY)
-        errno = saved;
-    return result;
+    return tcgetattr(fd, &settings) == 0;
 }
 
 int posix_openpt(int flags)
@@ -134,9 +131,16 @@ int posix_openpt(int flags)
     return open("/dev/ptmx", flags);
 }
 
+// Pseudo-terminals are ready as made; this checks that `fd` is a master.
 int grantpt(int fd)
 {
-    return isatty(fd) || errno != ENOTTY ? 0 : -1;
+    unsigned number = 0;
+    if (ioctl(fd, TIOCGPTN, &number) < 0) {
+        if (errno == ENOTTY)
+            errno = EINVAL;
+        return -1;
+    }
+    return 0;
 }
 
 int unlockpt(int fd)

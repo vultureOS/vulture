@@ -18,8 +18,10 @@ add_library(LibC STATIC
     malloc.cpp
     pwd.cpp
     regex.cpp
+    resource.cpp
     setjmp.S
     signal.cpp
+    spawn.cpp
     start.cpp
     stdio.cpp
     scanf.cpp

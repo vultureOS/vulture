@@ -285,4 +285,44 @@ int daemon(int stay_in_directory, int keep_output)
     }
     return 0;
 }
+
+int dup3(int fd, int new_fd, int flags)
+{
+    if (fd == new_fd || (flags & ~O_CLOEXEC)) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (dup2(fd, new_fd) < 0)
+        return -1;
+    if ((flags & O_CLOEXEC) && fcntl(new_fd, F_SETFD, FD_CLOEXEC) < 0)
+        return -1;
+    return new_fd;
+}
+
+// The file's data and its size are all one flush here.
+int fdatasync(int fd)
+{
+    return fsync(fd);
+}
+
+int truncate(char const* path, off_t length)
+{
+    int fd = open(path, O_WRONLY | O_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    int result = ftruncate(fd, length);
+    int saved = errno;
+    close(fd);
+    errno = saved;
+    return result;
+}
+
+int tcsendbreak(int fd, int)
+{
+    // A break means nothing to our terminals; but it must be one.
+    if (!isatty(fd))
+        return -1;
+    return 0;
+}
+
 }
