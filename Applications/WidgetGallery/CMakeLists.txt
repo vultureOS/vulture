@@ -5,7 +5,9 @@
 #
 
 # Every control of pranaUI, in a window: what the golden tests look at.
-vulture_add_program(WidgetGallery
+vulture_add_application(WidgetGallery
     SOURCES main.cpp
-    DESTINATION Applications/WidgetGallery.app/Contents/MacOS
-    LIBRARIES LibUI)
+    NAME "Widget Gallery"
+    IDENTIFIER com.vulture.WidgetGallery
+    ICON WidgetGallery
+    LIBRARIES LibDesktop)

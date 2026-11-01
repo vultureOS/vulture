@@ -619,7 +619,7 @@ int main(int argc, char** argv)
         if (strcmp(argv[i], "--still") == 0)
             still = true;
     }
-    auto app_or_error = Application::create("Widget Gallery"_sv);
+    auto app_or_error = Application::create("Widget Gallery"_sv, "com.vulture.WidgetGallery"_sv);
     if (app_or_error.is_error()) {
         fprintf(stderr, "WidgetGallery: cannot reach the window server\n");
         return 1;
