@@ -548,13 +548,12 @@ void Compositor::draw_body(ServerWindow const& window, IntRect clip)
         draw_nine_slice(shape->outline, frame, m_theme.outline, clip, frame.inflated(-1), shape->corner_extent);
 }
 
-void Compositor::apply_material(ServerWindow const& window, IntRect region, MaterialStyle const& style, IntRect area)
+void Compositor::render_material(MaterialStyle const& style, IntRect area, Bitmap& result)
 {
     auto& framebuffer = m_screen.framebuffer();
     float sigma = style.blur * static_cast<float>(m_screen.scale());
     int reduction = reduction_for(sigma);
     int reach = static_cast<int>(Math::ceil(sigma * 3)) + reduction * 2;
-    (void)region;
 
     // What to read, on a grid of the reduction, so the same pixels come out
     // whichever part is being redrawn: nothing shimmers as things move.
@@ -590,12 +589,9 @@ void Compositor::apply_material(ServerWindow const& window, IntRect region, Mate
     adjust_saturation(*small, small->rect(), style.saturation);
 
     // Back up: bilinear (a row between two small rows, then across it), then the
-    // tint, then into the screen.
-    auto frame = device_frame(window);
+    // tint. Into the screen comes later, once all of them are done: they read it.
     Pixel tint = style.tint.to_pixel();
-    Vector<Pixel> row_buffer;
     Vector<Pixel> between;
-    MUST(row_buffer.try_resize(static_cast<size_t>(area.width)));
     MUST(between.try_resize(static_cast<size_t>(small_width)));
     int half = reduction / 2;
     u32 step = 256u / static_cast<u32>(reduction);
@@ -609,6 +605,7 @@ void Compositor::apply_material(ServerWindow const& window, IntRect region, Mate
         for (int x = 0; x < small_width; ++x)
             between[static_cast<size_t>(x)] = narrowed((widened(top[x]) * (256 - fraction_y) + widened(bottom[x]) * fraction_y + 128u) >> 8);
 
+        auto* row_buffer = result.scanline(y - area.y);
         int position_x = max(area.x - grid_left - half, 0);
         int offset = position_x % reduction;
         int column = position_x / reduction;
@@ -619,15 +616,22 @@ void Compositor::apply_material(ServerWindow const& window, IntRect region, Mate
             int run = min(reduction - offset, area.width - written);
             for (int i = 0; i < run; ++i) {
                 u32 fraction_x = static_cast<u32>(offset + i) * step;
-                row_buffer[static_cast<size_t>(written + i)] = narrowed((left * (256 - fraction_x) + right * fraction_x + 128u) >> 8);
+                row_buffer[written + i] = narrowed((left * (256 - fraction_x) + right * fraction_x + 128u) >> 8);
             }
             written += run;
             offset = 0;
             ++column;
         }
-        blend_row_solid(row_buffer.data(), tint, area.width);
-        blend_row_in_window(framebuffer.scanline(y) + area.x, row_buffer.data(), area.x - frame.x, y - frame.y, area.width, frame.size(), window.is_bare() ? nullptr : window.shape);
+        blend_row_solid(row_buffer, tint, area.width);
     }
+}
+
+void Compositor::place_material(ServerWindow const& window, IntRect area, Bitmap const& result)
+{
+    auto& framebuffer = m_screen.framebuffer();
+    auto frame = device_frame(window);
+    for (int y = area.y; y < area.bottom(); ++y)
+        blend_row_in_window(framebuffer.scanline(y) + area.x, result.scanline(y - area.y), area.x - frame.x, y - frame.y, area.width, frame.size(), window.is_bare() ? nullptr : window.shape);
 }
 
 void Compositor::render()
@@ -646,9 +650,9 @@ void Compositor::render()
     struct MaterialJob {
         Compositor* compositor;
         ServerWindow const* window;
-        IntRect region;
         MaterialStyle const* style;
         IntRect area;
+        RefPtr<Bitmap> result;
     };
     for (auto* window : m_windows) {
         if (!window->visible)
@@ -665,13 +669,23 @@ void Compositor::render()
                 auto const& style = m_theme.materials[static_cast<int>(material.material)];
                 for (auto const& rect : rects) {
                     auto area = region.intersected(rect);
-                    if (!area.is_empty())
-                        jobs.append(MaterialJob { this, window, region, &style, area });
+                    if (area.is_empty())
+                        continue;
+                    auto result = Bitmap::create(area.size());
+                    if (!result.is_error())
+                        jobs.append(MaterialJob { this, window, &style, area, result.release_value() });
                 }
             }
+            // All from what is below, none reading what another wrote, whichever
+            // thread gets there first; and only then into the screen.
             m_workers.run(jobs.size(), [](void* context, size_t index) {
                 auto const& job = static_cast<MaterialJob const*>(context)[index];
-                job.compositor->apply_material(*job.window, job.region, *job.style, job.area);
+                job.compositor->render_material(*job.style, job.area, *job.result);
+            },
+                jobs.data());
+            m_workers.run(jobs.size(), [](void* context, size_t index) {
+                auto const& job = static_cast<MaterialJob const*>(context)[index];
+                job.compositor->place_material(*job.window, job.area, *job.result);
             },
                 jobs.data());
         }

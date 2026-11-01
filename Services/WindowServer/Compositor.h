@@ -106,7 +106,9 @@ private:
     void draw_shadow(ServerWindow const&, Gfx::IntRect clip);
     void draw_body(ServerWindow const&, Gfx::IntRect clip);
     void draw_nine_slice(NineSlice const&, Gfx::IntRect target, Gfx::Color, Gfx::IntRect clip, Gfx::IntRect hole, int hole_corner);
-    void apply_material(ServerWindow const&, Gfx::IntRect region, MaterialStyle const&, Gfx::IntRect area);
+    // What shows through a material here (it reads the screen), and then putting it there.
+    void render_material(MaterialStyle const&, Gfx::IntRect area, Gfx::Bitmap& result);
+    void place_material(ServerWindow const&, Gfx::IntRect area, Gfx::Bitmap const& result);
 
     // Blends a row of pixels into the screen through the window's rounded
     // corners. x is the first column to draw, in device pixels from the frame's
