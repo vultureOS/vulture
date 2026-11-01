@@ -305,7 +305,7 @@ void post_input_event(u16 type, u16 code, i32 value)
         }
     }
     if (queued)
-        note_poll_change();
+        notify_pollers();
     if (to_console)
         note_console_key(code, value);
 }
