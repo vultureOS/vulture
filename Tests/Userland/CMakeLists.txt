@@ -29,6 +29,7 @@ set(tests
     memory
     permissions
     pipes
+    ports
     posix
     segfault
     shell
@@ -53,3 +54,4 @@ endforeach()
 
 # The tests of libraries above LibC.
 target_link_libraries(test-eventloop PRIVATE LibCore LibJSON)
+target_link_libraries(test-ports PRIVATE LibCore)
