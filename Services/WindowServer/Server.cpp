@@ -73,12 +73,14 @@ Server::Server(Core::EventLoop& loop, Screen& screen, Theme& theme, Compositor& 
     , m_title_face(move(title_face))
 {
     m_title_font = adopt_own(*new Text::Font(m_title_face, theme.title_font_size, static_cast<float>(screen.scale()), m_atlas));
+    m_compositor.set_overlay_font(m_title_font.ptr());
     auto points = screen.points();
     m_pointer = { points.width / 2, points.height / 2 };
 }
 
 void Server::start()
 {
+    apply_wallpaper();
     schedule_frame();
 }
 
@@ -231,7 +233,11 @@ void Server::remove_client(Client& client)
             remove_window(*m_windows[i - 1]);
     }
     m_loop.unwatch(client.watch);
+    m_hotkeys.remove_all_matching([&](auto const& hotkey) { return hotkey.client == &client; });
+    if (m_active_application == &client)
+        m_active_application = nullptr;
     m_clients.remove_all_matching([&](auto const& owned) { return owned.ptr() == &client; });
+    shell_state_changed();
     schedule_frame();
 }
 
@@ -266,18 +272,23 @@ void Server::remove_window(ServerWindow& window)
         else if (m_drag->target == &window)
             m_drag->target = nullptr;
     }
+    m_genies.remove_all_matching([&](auto const& genie) { return genie.window == &window; });
+    m_thumbnails.remove_all_matching([&](auto const& thumbnail) { return thumbnail.window == &window; });
+    if (m_mission_control_chosen == &window)
+        m_mission_control_chosen = nullptr;
     m_windows.remove_all_matching([&](auto* other) { return other == &window; });
     delete &window;
     // The next window down takes over.
     if (!m_active)
         activate_frontmost();
+    shell_state_changed();
 }
 
 void Server::activate_frontmost()
 {
     for (size_t i = m_windows.size(); i > 0; --i) {
         auto* window = m_windows[i - 1];
-        if (window->visible && !window->is_popup() && !window->is_bare()) {
+        if (window->visible && window->can_become_key()) {
             activate(window);
             return;
         }
@@ -304,14 +315,17 @@ WindowServerEndpoint::CreateWindowAnswer Server::create_window(IPC::Sender const
     window->flags = flags;
     window->shape = m_compositor.default_shape();
     window->level = (flags & Window::WindowPopup) ? Window::LevelPopup : Window::LevelNormal;
+    window->space = m_space;
     insert_by_level(*window);
     answer.window = window->id;
     if (!(flags & Window::WindowHidden)) {
-        window->visible = true;
-        if (!window->is_popup())
+        window->shown_by_client = true;
+        update_visibility(*window);
+        if (window->can_become_key())
             activate(window);
         m_compositor.invalidate_window(*window);
     }
+    shell_state_changed();
     schedule_frame();
     return answer;
 }
@@ -344,7 +358,7 @@ void Server::set_frame(IPC::Sender const& sender, u32 id, i32 x, i32 y, i32 widt
 void Server::activate(IPC::Sender const& sender, u32 id)
 {
     auto* window = window_of(sender, id);
-    if (window && window->visible && !window->is_popup())
+    if (window && window->visible && window->can_become_key())
         activate(window);
 }
 
@@ -436,6 +450,7 @@ i32 Server::set_appearance(IPC::Sender const&, String name)
         return ENOMEM;
     for (auto* window : m_windows)
         window->chrome_is_stale = true;
+    apply_wallpaper();
     for (auto& client : m_clients) {
         IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::AppearanceChanged));
         encoder.encode(m_appearance.view());
@@ -482,26 +497,24 @@ void Server::accept_drop(IPC::Sender const& sender, u32 id, bool accepted)
 void Server::show(IPC::Sender const& sender, u32 id, bool visible)
 {
     auto* window = window_of(sender, id);
-    if (!window || window->visible == visible)
+    if (!window || window->shown_by_client == visible)
         return;
-    window->visible = visible;
+    window->shown_by_client = visible;
+    window->minimized = false;
+    if (visible)
+        window->space = window->is_on_every_space() ? window->space : m_space;
+    update_visibility(*window);
     m_compositor.invalidate_window(*window);
     if (visible) {
-        if (window->is_popup())
-            raise(*window);
-        else
+        // The session's first window ends the boot screen.
+        if (m_boot_screen && window->can_become_key())
+            m_boot_finishing = true;
+        if (window->can_become_key())
             activate(window);
-    } else {
-        if (m_grab == window)
-            m_grab = nullptr;
-        if (m_hovered == window)
-            m_hovered = nullptr;
-        if (m_active == window) {
-            window->active = false;
-            m_active = nullptr;
-            activate_frontmost();
-        }
+        else
+            raise(*window);
     }
+    shell_state_changed();
     schedule_frame();
 }
 
@@ -558,14 +571,16 @@ void Server::present(IPC::Sender const& sender, u32 id, u32 buffer, i32 x, i32 y
 void Server::set_materials(IPC::Sender const& sender, u32 id, Vector<i32> regions)
 {
     auto* window = window_of(sender, id);
-    if (!window || regions.size() % 5 != 0)
+    if (!window || regions.size() % 6 != 0)
         return;
+    if (window->visible)
+        m_compositor.invalidate_window(*window);
     window->materials.clear();
-    for (size_t i = 0; i < regions.size(); i += 5) {
+    for (size_t i = 0; i < regions.size(); i += 6) {
         i32 material = regions[i + 4];
         if (material < 0 || material >= static_cast<i32>(Material::Count))
             continue;
-        window->materials.append(MaterialRegion { { regions[i], regions[i + 1], regions[i + 2], regions[i + 3] }, static_cast<Material>(material) });
+        window->materials.append(MaterialRegion { { regions[i], regions[i + 1], regions[i + 2], regions[i + 3] }, static_cast<Material>(material), max(regions[i + 5], 0) });
     }
     if (window->visible)
         m_compositor.invalidate_window(*window);
@@ -610,9 +625,10 @@ void Server::activate(ServerWindow* window)
         return;
     }
     if (m_active) {
+        // Its shadow shrinks: all it covered while it was big, before it is small.
+        m_compositor.invalidate_window(*m_active);
         m_active->active = false;
         m_active->chrome_is_stale = true;
-        // Its shadow shrinks: what it covered, while it was big, too.
         m_compositor.invalidate_window(*m_active);
         if (m_active->client) {
             IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Activated));
@@ -627,6 +643,10 @@ void Server::activate(ServerWindow* window)
         window->chrome_is_stale = true;
         raise(*window);
         m_compositor.invalidate_window(*window);
+        if (window->client && !window->client->application_name.is_empty() && m_active_application != window->client) {
+            m_active_application = window->client;
+            shell_state_changed();
+        }
         if (window->client) {
             IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Activated));
             encoder.encode(window->id);
@@ -700,6 +720,11 @@ void Server::move_window_to(ServerWindow& window, IntRect frame)
 
 ServerWindow* Server::window_at(IntPoint point)
 {
+    auto takes_pointer = [&](ServerWindow const& window) {
+        if (window.input_region.is_empty())
+            return true;
+        return window.input_region.translated(window.frame.x, window.frame.y).contains(point);
+    };
     for (size_t i = m_windows.size(); i > 0; --i) {
         auto* window = m_windows[i - 1];
         if (!window->visible)
@@ -707,7 +732,7 @@ ServerWindow* Server::window_at(IntPoint point)
         if (m_drag && m_drag->image == window)
             continue;
         auto bounds = window->is_resizable() ? window->frame.inflated(resize_grab) : window->frame;
-        if (bounds.contains(point))
+        if (bounds.contains(point) && takes_pointer(*window))
             return window;
     }
     return nullptr;
@@ -935,6 +960,11 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
         schedule_frame();
         return;
     }
+    if (m_mission_control && mission_control_pointer(point, pressed)) {
+        update_cursor();
+        schedule_frame();
+        return;
+    }
     if (m_grab) {
         auto& grab = *m_grab;
         if (moved)
@@ -1005,17 +1035,9 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
                         encoder.encode(m_gesture_window->id);
                         send_to(*m_gesture_window->client, encoder);
                     } else if (button == WindowButton::Minimize) {
-                        // Into the Dock, once there is one; out of sight until then.
-                        m_gesture_window->visible = false;
-                        m_compositor.invalidate_window(*m_gesture_window);
-                        m_gesture_window->active = false;
-                        m_active = nullptr;
-                        activate_frontmost();
+                        minimize_window(*m_gesture_window);
                     } else if (button == WindowButton::Zoom) {
-                        auto screen_points = m_screen.points();
-                        move_window_to(*m_gesture_window, { 0, 0, screen_points.width, screen_points.height });
-                        send_moved(*m_gesture_window);
-                        send_resized(*m_gesture_window);
+                        zoom_window(*m_gesture_window);
                     }
                 }
             } else if (m_gesture == Gesture::ContentPress) {
@@ -1030,8 +1052,10 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
 
     if (pressed && m_gesture == Gesture::None) {
         auto* window = window_at(point);
-        if (!window || !window->is_popup())
+        if (window && window->can_become_key())
             activate(window);
+        else if (!window)
+            activate(nullptr);
         if (window) {
             m_gesture_window = window;
             m_gesture_start = point;
@@ -1174,6 +1198,8 @@ void Server::key_changed(u16 code, int value)
         m_modifiers = value ? (m_modifiers | modifier) : (m_modifiers & ~modifier);
     if (code == VULTURE_KEY_CAPSLOCK && value == 1)
         m_modifiers ^= Window::ModifierCapsLock;
+    if (value == 1 && handle_hotkey(code))
+        return;
     if (!m_active || !m_active->client)
         return;
     char text[2] = {};

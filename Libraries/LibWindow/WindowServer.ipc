@@ -38,7 +38,7 @@ endpoint WindowServer
 
     // Parts of the window with a material behind them (where its pixels are
     // not opaque, the blurred backdrop shows): x, y, width, height (points, from
-    // the window's top-left), material, for each.
+    // the window's top-left), material and corner radius (points), for each.
     set_materials(u32 window, Vector<i32> regions) =|
 
     // While pressed in the window: drags this data, with `image` (another of its
@@ -46,6 +46,38 @@ endpoint WindowServer
     // hear `drag`; if the last one says accept_drop(true), it gets the data.
     begin_drag(u32 window, u32 image, String type, ByteBuffer data) =|
     accept_drop(u32 window, bool accepted) =|
+
+    // Who this program is, for the Dock and the menu bar: an application, as opposed to
+    // a part of the desktop itself. Its menus, as JSON (see LibUI's Application).
+    set_application(String name, String identifier) =|
+    set_menus(String menus) =|
+
+    // The desktop's own: hearing of every application and window (shell_state), telling
+    // applications what to do, and what they may not do for themselves.
+    subscribe_shell() =|
+    choose_menu_item(i32 pid, u32 item) =|
+    activate_application(i32 pid) =|
+    hide_application(i32 pid, bool hidden) =|
+    quit_application(i32 pid) =|
+    // Its own: as the yellow and green lights do.
+    minimize(u32 window) =|
+    zoom(u32 window) =|
+    // Any window: brought back if minimized, brought to its space, and made active.
+    activate_window(u32 window) =|
+    // Where minimized windows go to (points on the screen): where the Dock has them.
+    set_minimize_target(i32 x, i32 y) =|
+    // What a zoomed window must leave clear, in points from each edge.
+    set_work_area(i32 top, i32 left, i32 bottom, i32 right) =|
+    // The system-wide keys: this client hears them, and nobody else.
+    register_hotkey(u16 code, u32 modifiers) =|
+    // Where pointer events land, in points from its top-left: elsewhere they go to what
+    // is below. An odd-shaped window's, as the Dock's.
+    set_input_region(u32 window, i32 x, i32 y, i32 width, i32 height) =|
+    // By name: see /System/Library/Themes/Wallpapers.json.
+    set_wallpaper(String name) => (i32 error)
+    // Spaces, and all windows spread out over them.
+    set_mission_control(bool shown) =|
+    switch_space(i32 space) =|
 
     // For tests and tools: only root may. As if the pointer moved here (points).
     inject_pointer(i32 x, i32 y, u32 buttons) =|
@@ -71,4 +103,10 @@ endpoint WindowClient
     drag(u32 window, u8 phase, i32 x, i32 y, String type, ByteBuffer data) =|
     // To the window it started from.
     drag_finished(u32 window, bool accepted) =|
+    // What the program's menu bar says it has chosen. Asked to quit.
+    menu_item_chosen(u32 item) =|
+    quit_requested() =|
+    // To the desktop: all applications and windows, as JSON, whenever any change.
+    shell_state(String json) =|
+    hotkey(u16 code, u32 modifiers) =|
 }

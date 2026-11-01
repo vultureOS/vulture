@@ -30,11 +30,17 @@ enum WindowFlags : u32 {
     // the traffic lights, over the client's pixels, and hands presses on to it (see
     // begin_move, for those that should move the window).
     WindowUnifiedTitle = 1 << 5,
+    // Though bare, it may be active and take the keyboard: Spotlight, Launchpad, and the
+    // desktop's own window.
+    WindowCanBecomeKey = 1 << 6,
+    // On every space.
+    WindowSticky = 1 << 7,
 };
 
 // Where a window sits among others (set_level): higher is in front. Popups start
 // at Popup; the rest, at Normal.
 enum WindowLevel : i32 {
+    LevelDesktop = -100,
     LevelNormal = 0,
     LevelDock = 50,
     LevelMenuBar = 60,

@@ -53,6 +53,26 @@ struct Theme {
     ShadowStyle shadow_inactive;
     ShadowStyle shadow_popup;
     MaterialStyle materials[static_cast<int>(Window::Material::Count)];
+    // Motion and the desktop's overlays.
+    float minimize_seconds { 0 };
+    float space_slide_seconds { 0 };
+    float mission_control_seconds { 0 };
+    float mission_control_bar { 0 };
+    float mission_control_padding { 0 };
+    float mission_control_tile_width { 0 };
+    float mission_control_tile_height { 0 };
+    float mission_control_tile_radius { 0 };
+    Gfx::Color mission_control_dim;
+    Gfx::Color mission_control_tile;
+    Gfx::Color mission_control_tile_active;
+    Gfx::Color mission_control_highlight;
+    float boot_seconds { 0 };
+    float boot_bar_width { 0 };
+    float boot_bar_height { 0 };
+    float boot_logo { 0 };
+    Gfx::Color boot_background;
+    Gfx::Color boot_foreground;
+    Gfx::Color boot_track;
 };
 
 [[nodiscard]] ErrorOr<Theme> load_theme(StringView path);

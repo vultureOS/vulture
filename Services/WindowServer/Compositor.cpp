@@ -103,7 +103,7 @@ ErrorOr<void> Compositor::render_wallpaper()
     // An original wallpaper, from the theme's colors: a diagonal gradient under
     // soft rolling shapes.
     Painter painter(*wallpaper);
-    auto const& colors = m_theme.wallpaper;
+    auto const& colors = m_wallpaper_colors.is_empty() ? m_theme.wallpaper : m_wallpaper_colors;
     Vector<GradientStop> stops;
     for (size_t i = 0; i < colors.size(); ++i)
         stops.append(GradientStop { colors.size() > 1 ? static_cast<float>(i) / static_cast<float>(colors.size() - 1) : 0, colors[i] });
@@ -245,7 +245,7 @@ NineSlice const& Compositor::shadow_slice_of(ServerWindow const& window) const
 IntRect Compositor::device_frame(ServerWindow const& window) const
 {
     int scale = m_screen.scale();
-    return { window.frame.x * scale, window.frame.y * scale, window.frame.width * scale, window.frame.height * scale };
+    return { window.frame.x * scale + window.slide_x, window.frame.y * scale, window.frame.width * scale, window.frame.height * scale };
 }
 
 IntRect Compositor::window_bounds(ServerWindow const& window) const
@@ -263,6 +263,30 @@ IntRect Compositor::window_bounds(ServerWindow const& window) const
 void Compositor::invalidate_window(ServerWindow const& window)
 {
     invalidate(window_bounds(window));
+}
+
+bool Compositor::invalidate_reporting(IntRect area)
+{
+    area = area.intersected(m_screen.framebuffer().rect());
+    if (area.is_empty())
+        return false;
+    int left = area.x / tile_size;
+    int right = (area.right() - 1) / tile_size;
+    int top = area.y / tile_size;
+    int bottom = (area.bottom() - 1) / tile_size;
+    bool changed = false;
+    for (int y = top; y <= bottom && !changed; ++y) {
+        u8 const* row = m_dirty.data() + static_cast<size_t>(y) * static_cast<size_t>(m_tiles_across);
+        for (int x = left; x <= right; ++x) {
+            if (!row[x]) {
+                changed = true;
+                break;
+            }
+        }
+    }
+    if (changed)
+        invalidate(area);
+    return changed;
 }
 
 void Compositor::invalidate(IntRect area)
@@ -332,26 +356,30 @@ void Compositor::grow_damage_for_materials()
     // screen only holds that where it is being redrawn this frame (elsewhere it
     // holds the finished picture, this very window and those above it included).
     // So if anything changed within reach, all of the material is redone, and all
-    // that it reads is drawn again. From the top down: a material lower down may
-    // read what this one's reading makes dirty.
-    for (size_t index = m_windows.size(); index > 0; --index) {
-        auto const& window = *m_windows[index - 1];
-        if (!window.visible || window.materials.is_empty())
-            continue;
-        auto frame = device_frame(window);
-        auto rects = dirty_rects();
-        for (auto const& material : window.materials) {
-            IntRect region { frame.x + material.rect.x * scale, frame.y + material.rect.y * scale, material.rect.width * scale, material.rect.height * scale };
-            region = region.intersected(frame);
-            if (region.is_empty())
+    // that it reads is drawn again. Which may make dirty what another material must
+    // have whole, above it or below: so round again, until nothing more comes of it.
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (size_t index = m_windows.size(); index > 0; --index) {
+            auto const& window = *m_windows[index - 1];
+            if (!window.visible || window.materials.is_empty())
                 continue;
-            auto const& style = m_theme.materials[static_cast<int>(material.material)];
-            float sigma = style.blur * static_cast<float>(scale);
-            auto around = region.inflated(static_cast<int>(Math::ceil(sigma * 3)) + reduction_for(sigma) * 2);
-            for (auto const& rect : rects) {
-                if (around.intersects(rect)) {
-                    invalidate(around);
-                    break;
+            auto frame = device_frame(window);
+            auto rects = dirty_rects();
+            for (auto const& material : window.materials) {
+                IntRect region { frame.x + material.rect.x * scale, frame.y + material.rect.y * scale, material.rect.width * scale, material.rect.height * scale };
+                region = region.intersected(frame);
+                if (region.is_empty())
+                    continue;
+                auto const& style = m_theme.materials[static_cast<int>(material.material)];
+                float sigma = style.blur * static_cast<float>(scale);
+                auto around = region.inflated(static_cast<int>(Math::ceil(sigma * 3)) + reduction_for(sigma) * 2);
+                for (auto const& rect : rects) {
+                    if (around.intersects(rect)) {
+                        if (invalidate_reporting(around))
+                            grew = true;
+                        break;
+                    }
                 }
             }
         }
@@ -626,12 +654,210 @@ void Compositor::render_material(MaterialStyle const& style, IntRect area, Bitma
     }
 }
 
-void Compositor::place_material(ServerWindow const& window, IntRect area, Bitmap const& result)
+void Compositor::place_material(ServerWindow const& window, IntRect area, Bitmap const& result, IntRect region, int radius)
 {
     auto& framebuffer = m_screen.framebuffer();
     auto frame = device_frame(window);
-    for (int y = area.y; y < area.bottom(); ++y)
-        blend_row_in_window(framebuffer.scanline(y) + area.x, result.scanline(y - area.y), area.x - frame.x, y - frame.y, area.width, frame.size(), window.is_bare() ? nullptr : window.shape);
+    if (radius <= 0) {
+        for (int y = area.y; y < area.bottom(); ++y)
+            blend_row_in_window(framebuffer.scanline(y) + area.x, result.scanline(y - area.y), area.x - frame.x, y - frame.y, area.width, frame.size(), window.is_bare() ? nullptr : window.shape);
+        return;
+    }
+    // Its own rounded corners: rows near the top and bottom start and end further in,
+    // with the edge's pixel covered as far as the circle goes.
+    auto r = static_cast<float>(radius);
+    for (int y = area.y; y < area.bottom(); ++y) {
+        int from_top = y - region.y;
+        int from_bottom = region.bottom() - 1 - y;
+        int nearest = min(from_top, from_bottom);
+        float inset = 0;
+        if (nearest < radius) {
+            float dy = r - (static_cast<float>(nearest) + 0.5f);
+            inset = r - static_cast<float>(Math::square_root(static_cast<double>(r * r - dy * dy)));
+        }
+        int whole = static_cast<int>(inset);
+        auto const* source = result.scanline(y - area.y);
+        auto* row = framebuffer.scanline(y);
+        int start = region.x + whole;
+        int end = region.right() - whole;
+        if (start >= end)
+            continue;
+        auto put = [&](int from, int to, u32 opacity) {
+            from = max(from, area.x);
+            to = min(to, area.right());
+            if (from >= to)
+                return;
+            if (opacity >= 255)
+                blend_row(row + from, source + (from - area.x), to - from);
+            else
+                blend_row_opacity(row + from, source + (from - area.x), opacity, to - from);
+        };
+        if (inset > 0) {
+            auto edge = static_cast<u32>((1 - (inset - static_cast<float>(whole))) * 255);
+            put(start, start + 1, edge);
+            put(end - 1, end, edge);
+            put(start + 1, end - 1, 255);
+        } else {
+            put(start, end, 255);
+        }
+    }
+}
+
+void Compositor::set_overlays(Vector<Overlay> overlays)
+{
+    m_overlays = move(overlays);
+}
+
+void Compositor::set_dim(Color color)
+{
+    m_dim = color;
+}
+
+void Compositor::set_wallpaper_colors(Vector<Color> colors)
+{
+    m_wallpaper_colors = move(colors);
+    if (!render_wallpaper().is_error())
+        invalidate_all();
+}
+
+ErrorOr<NonnullRefPtr<Bitmap>> Compositor::snapshot(ServerWindow const& window) const
+{
+    auto frame = device_frame(window);
+    auto picture = TRY(Bitmap::create(frame.size()));
+    auto const* surface = window.shown_surface();
+    Pixel background = m_theme.window_background.to_pixel();
+    auto const* chrome = window.is_titled() ? window.chrome.ptr() : nullptr;
+    auto const* shape = window.is_bare() ? nullptr : window.shape;
+    Vector<Pixel> fill;
+    MUST(fill.try_resize(static_cast<size_t>(frame.width)));
+    for (auto& pixel : fill)
+        pixel = background;
+    for (int y = 0; y < frame.height; ++y) {
+        auto* row = picture->scanline(y);
+        bool in_chrome = chrome && y < chrome->height();
+        bool under_chrome = in_chrome && !window.is_unified();
+        blend_row_in_window(row, fill.data(), 0, y, frame.width, frame.size(), shape);
+        if (!under_chrome && surface && y < surface->height())
+            blend_row_in_window(row, surface->scanline(y), 0, y, min(surface->width(), frame.width), frame.size(), shape);
+        if (in_chrome)
+            blend_row_in_window(row, chrome->scanline(y), 0, y, min(chrome->width(), frame.width), frame.size(), shape);
+    }
+    return picture;
+}
+
+void Compositor::draw_overlays(Vector<IntRect> const& rects)
+{
+    auto& framebuffer = m_screen.framebuffer();
+    float scale = static_cast<float>(m_screen.scale());
+    for (auto const& rect : rects) {
+        Painter painter(framebuffer);
+        painter.clip_rect(rect.to<float>());
+        if (m_dim.alpha)
+            painter.fill_rect(rect.to<float>(), m_dim);
+        for (auto const& overlay : m_overlays) {
+            switch (overlay.kind) {
+            case Overlay::Kind::Tile: {
+                FloatRect shape { overlay.rect.x * scale, overlay.rect.y * scale, overlay.rect.width * scale, overlay.rect.height * scale };
+                painter.fill_rounded_rect(shape, overlay.radius * scale, overlay.color);
+                if (!overlay.label.is_empty() && m_overlay_font) {
+                    float text_width = m_overlay_font->width_of(overlay.label.view());
+                    FloatPoint at { shape.x + (shape.width - text_width) / 2, shape.y + shape.height / 2 + m_overlay_font->cap_height() / 2 };
+                    at.y = static_cast<float>(Math::round(static_cast<double>(at.y)));
+                    m_overlay_font->draw(painter, at, overlay.label.view(), Color { 255, 255, 255, 255 });
+                }
+                break;
+            }
+            case Overlay::Kind::Logo: {
+                // Wings, swept up into a V: original, and simple enough for any size.
+                FloatRect shape { overlay.rect.x * scale, overlay.rect.y * scale, overlay.rect.width * scale, overlay.rect.height * scale };
+                auto at = [&](float x, float y) { return FloatPoint { shape.x + x * shape.width, shape.y + y * shape.height }; };
+                Path path;
+                path.move_to(at(0.02f, 0.14f));
+                path.cubic_to(at(0.16f, 0.30f), at(0.30f, 0.34f), at(0.40f, 0.42f));
+                path.line_to(at(0.50f, 0.96f));
+                path.line_to(at(0.60f, 0.42f));
+                path.cubic_to(at(0.70f, 0.34f), at(0.84f, 0.30f), at(0.98f, 0.14f));
+                path.cubic_to(at(0.90f, 0.52f), at(0.72f, 0.62f), at(0.60f, 0.70f));
+                path.line_to(at(0.50f, 0.96f));
+                path.line_to(at(0.40f, 0.70f));
+                path.cubic_to(at(0.28f, 0.62f), at(0.10f, 0.52f), at(0.02f, 0.14f));
+                path.close();
+                painter.fill_path(path, overlay.color);
+                break;
+            }
+            case Overlay::Kind::Thumbnail: {
+                if (!overlay.picture)
+                    break;
+                FloatRect shape { overlay.rect.x * scale, overlay.rect.y * scale, overlay.rect.width * scale, overlay.rect.height * scale };
+                if (overlay.shadow) {
+                    for (int i = 0; i < 6; ++i) {
+                        auto grown = static_cast<float>(6 - i) * 3;
+                        painter.fill_rounded_rect({ shape.x - grown, shape.y - grown / 2, shape.width + grown * 2, shape.height + grown * 2 }, overlay.radius * scale + grown, Color { 0, 0, 0, 8 });
+                    }
+                }
+                painter.draw_bitmap(*overlay.picture, shape);
+                break;
+            }
+            case Overlay::Kind::Genie: {
+                if (!overlay.picture)
+                    break;
+                // Rows between a top and bottom that race down to the target: the bottom
+                // first; each narrowed the more the nearer it has come.
+                FloatRect from { overlay.rect.x * scale, overlay.rect.y * scale, overlay.rect.width * scale, overlay.rect.height * scale };
+                FloatPoint to { overlay.target.x * scale, overlay.target.y * scale };
+                float t = clamp(overlay.progress, 0.0f, 1.0f);
+                float bottom_t = min(t * 1.6f, 1.0f);
+                float top_t = t * t;
+                float bottom = from.bottom() + (to.y - from.bottom()) * bottom_t;
+                float top = from.y + (to.y - from.y) * top_t;
+                float span = bottom - top;
+                if (span < 1)
+                    break;
+                int first = max(static_cast<int>(top), rect.y);
+                int last = min(static_cast<int>(bottom) + 1, rect.bottom());
+                float funnel = max(to.y - from.y, 1.0f);
+                float tip = 8 * scale;
+                auto const& picture = *overlay.picture;
+                for (int y = first; y < last; ++y) {
+                    float v = (static_cast<float>(y) + 0.5f - top) / span;
+                    if (v < 0 || v >= 1)
+                        continue;
+                    int source_y = min(static_cast<int>(v * static_cast<float>(picture.height())), picture.height() - 1);
+                    float along = clamp((static_cast<float>(y) - from.y) / funnel, 0.0f, 1.0f);
+                    float squeeze = along * along * (3 - 2 * along) * min(t * 2.2f, 1.0f);
+                    float width = from.width + (tip - from.width) * squeeze;
+                    float center = (from.x + from.width / 2) + (to.x - (from.x + from.width / 2)) * squeeze;
+                    int left = static_cast<int>(center - width / 2);
+                    int columns = static_cast<int>(width);
+                    if (columns <= 0)
+                        continue;
+                    auto const* source = picture.scanline(source_y);
+                    auto* out = framebuffer.scanline(y);
+                    int start = max(left, rect.x);
+                    int end = min(left + columns, rect.right());
+                    u32 step = (static_cast<u32>(picture.width()) << 16) / static_cast<u32>(columns);
+                    u32 position = static_cast<u32>(start - left) * step;
+                    for (int x = start; x < end; ++x) {
+                        Pixel pixel = source[min(position >> 16, static_cast<u32>(picture.width() - 1))];
+                        position += step;
+                        u32 alpha = pixel_alpha(pixel);
+                        if (alpha == 255) {
+                            out[x] = pixel;
+                        } else if (alpha) {
+                            u32 inverse = 255 - alpha;
+                            Pixel under = out[x];
+                            out[x] = make_pixel(static_cast<u8>(pixel_red(pixel) + divide_by_255(pixel_red(under) * inverse)),
+                                static_cast<u8>(pixel_green(pixel) + divide_by_255(pixel_green(under) * inverse)),
+                                static_cast<u8>(pixel_blue(pixel) + divide_by_255(pixel_blue(under) * inverse)),
+                                static_cast<u8>(alpha + divide_by_255(pixel_alpha(under) * inverse)));
+                        }
+                    }
+                }
+                break;
+            }
+            }
+        }
+    }
 }
 
 void Compositor::render()
@@ -653,9 +879,22 @@ void Compositor::render()
         MaterialStyle const* style;
         IntRect area;
         RefPtr<Bitmap> result;
+        IntRect region;
+        int radius;
+    };
+    bool overlays_drawn = false;
+    auto draw_overlays_now = [&] {
+        overlays_drawn = true;
+        if (m_overlays.is_empty() && m_dim.alpha == 0)
+            return;
+        draw_layers(layers.data(), layers.size(), pieces);
+        layers.clear();
+        draw_overlays(rects);
     };
     for (auto* window : m_windows) {
-        if (!window->visible)
+        if (!overlays_drawn && window->level >= Window::LevelDock)
+            draw_overlays_now();
+        if (!window->visible || (m_hides_normal_windows && window->level == Window::LevelNormal))
             continue;
         layers.append(Layer { LayerKind::Shadow, window });
         if (!window->materials.is_empty()) {
@@ -673,7 +912,7 @@ void Compositor::render()
                         continue;
                     auto result = Bitmap::create(area.size());
                     if (!result.is_error())
-                        jobs.append(MaterialJob { this, window, &style, area, result.release_value() });
+                        jobs.append(MaterialJob { this, window, &style, area, result.release_value(), region, material.radius * scale });
                 }
             }
             // All from what is below, none reading what another wrote, whichever
@@ -685,12 +924,14 @@ void Compositor::render()
                 jobs.data());
             m_workers.run(jobs.size(), [](void* context, size_t index) {
                 auto const& job = static_cast<MaterialJob const*>(context)[index];
-                job.compositor->place_material(*job.window, job.area, *job.result);
+                job.compositor->place_material(*job.window, job.area, *job.result, job.region, job.radius);
             },
                 jobs.data());
         }
         layers.append(Layer { LayerKind::Body, window });
     }
+    if (!overlays_drawn)
+        draw_overlays_now();
     draw_layers(layers.data(), layers.size(), pieces);
     u64 composed = now_microseconds();
 

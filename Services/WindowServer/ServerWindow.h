@@ -20,6 +20,7 @@ struct WindowShape;
 struct MaterialRegion {
     Gfx::IntRect rect; // Points, from the window's top-left.
     Window::Material material { Window::Material::Sidebar };
+    int radius { 0 }; // Points.
 };
 
 // A traffic light.
@@ -36,7 +37,17 @@ struct ServerWindow {
     String title;
     Gfx::IntRect frame; // Points.
     u32 flags { 0 };
+    // Shown on screen now: follows from what is below, by update_visibility.
     bool visible { false };
+    bool shown_by_client { false };
+    bool minimized { false };
+    int space { 0 };
+    // Where it is drawn differs from its frame by this, in pixels, as spaces slide.
+    int slide_x { 0 };
+    // What it was before it was zoomed.
+    Gfx::IntRect zoom_restore;
+    // Where clicks land, in points from its top-left; the whole of it, if empty.
+    Gfx::IntRect input_region;
     bool active { false };
     int level { Window::LevelNormal };
     WindowShape const* shape { nullptr };
@@ -66,6 +77,10 @@ struct ServerWindow {
     [[nodiscard]] bool is_resizable() const { return flags & Window::WindowResizable; }
     [[nodiscard]] bool is_popup() const { return flags & Window::WindowPopup; }
     [[nodiscard]] bool is_unified() const { return flags & Window::WindowUnifiedTitle; }
+    [[nodiscard]] bool can_become_key() const { return !is_popup() && (!is_bare() || (flags & Window::WindowCanBecomeKey)); }
+    [[nodiscard]] bool is_on_every_space() const { return (flags & Window::WindowSticky) || level != Window::LevelNormal; }
+    // On the Dock's and Mission Control's minds: a window of an application's own.
+    [[nodiscard]] bool is_document_window() const { return is_titled() && !is_popup(); }
     [[nodiscard]] Gfx::Bitmap const* shown_surface() const { return has_presented ? buffers[shown_buffer].ptr() : nullptr; }
 };
 

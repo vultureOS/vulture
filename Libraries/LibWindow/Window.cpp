@@ -86,6 +86,30 @@ void Connection::drag_finished(IPC::Sender const&, u32 id, bool accepted)
         window->on_drag_finished(accepted);
 }
 
+void Connection::menu_item_chosen(IPC::Sender const&, u32 item)
+{
+    if (on_menu_item_chosen)
+        on_menu_item_chosen(item);
+}
+
+void Connection::quit_requested(IPC::Sender const&)
+{
+    if (on_quit_requested)
+        on_quit_requested();
+}
+
+void Connection::shell_state(IPC::Sender const&, String json)
+{
+    if (on_shell_state)
+        on_shell_state(json.view());
+}
+
+void Connection::hotkey(IPC::Sender const&, u16 code, u32 modifiers)
+{
+    if (on_hotkey)
+        on_hotkey(code, modifiers);
+}
+
 void Connection::key(IPC::Sender const&, u32 id, bool pressed, u16 code, u32 modifiers, String text)
 {
     if (auto* window = window_with_id(id); window && window->on_key)
@@ -256,6 +280,21 @@ void Window::set_title_bar_height(int height)
     (void)m_connection.server().set_title_bar(m_id, height);
 }
 
+void Window::set_input_region(Gfx::IntRect region)
+{
+    (void)m_connection.server().set_input_region(m_id, region.x, region.y, region.width, region.height);
+}
+
+void Window::minimize()
+{
+    (void)m_connection.server().minimize(m_id);
+}
+
+void Window::zoom()
+{
+    (void)m_connection.server().zoom(m_id);
+}
+
 void Window::begin_move()
 {
     (void)m_connection.server().begin_move(m_id);
@@ -298,6 +337,7 @@ void Window::set_materials(Span<MaterialRegion const> regions)
         flat.append(regions[i].rect.width);
         flat.append(regions[i].rect.height);
         flat.append(static_cast<i32>(regions[i].material));
+        flat.append(regions[i].radius);
     }
     (void)m_connection.server().set_materials(m_id, flat);
 }

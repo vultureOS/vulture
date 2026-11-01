@@ -22,6 +22,13 @@ struct Client {
     pid_t pid { 0 };
     IPC::Port events;
     int watch { 0 };
+    // An application, if it said so: the Dock and menu bar show those.
+    String application_name;
+    String application_identifier;
+    String menus;
+    bool hidden { false };
+    // Hears of everything (the Dock, the menu bar).
+    bool is_shell { false };
 };
 
 // The service: clients and their windows, the window manager (stacking, focus,
@@ -29,6 +36,9 @@ struct Client {
 class Server final : public WindowServerStub {
 public:
     Server(Core::EventLoop&, Screen&, Theme&, Compositor&, Vector<ServerWindow*>& windows, NonnullRefPtr<Text::Typeface> title_face, StringView appearance);
+
+    // A progress bar on an empty screen until the first window of the session shows.
+    void show_boot_screen();
 
     void watch_input(int fd);
     void set_up_cursor();
@@ -55,6 +65,23 @@ private:
     i32 set_surface(IPC::Sender const&, u32 window, IPC::Port memory, i32 width, i32 height) override;
     void present(IPC::Sender const&, u32 window, u32 buffer, i32 x, i32 y, i32 width, i32 height) override;
     void set_materials(IPC::Sender const&, u32 window, Vector<i32> regions) override;
+    void set_application(IPC::Sender const&, String name, String identifier) override;
+    void set_menus(IPC::Sender const&, String menus) override;
+    void subscribe_shell(IPC::Sender const&) override;
+    void choose_menu_item(IPC::Sender const&, i32 pid, u32 item) override;
+    void activate_application(IPC::Sender const&, i32 pid) override;
+    void hide_application(IPC::Sender const&, i32 pid, bool hidden) override;
+    void quit_application(IPC::Sender const&, i32 pid) override;
+    void activate_window(IPC::Sender const&, u32 window) override;
+    void minimize(IPC::Sender const&, u32 window) override;
+    void zoom(IPC::Sender const&, u32 window) override;
+    void set_minimize_target(IPC::Sender const&, i32 x, i32 y) override;
+    void set_work_area(IPC::Sender const&, i32 top, i32 left, i32 bottom, i32 right) override;
+    void register_hotkey(IPC::Sender const&, u16 code, u32 modifiers) override;
+    i32 set_wallpaper(IPC::Sender const&, String name) override;
+    void set_mission_control(IPC::Sender const&, bool shown) override;
+    void set_input_region(IPC::Sender const&, u32 window, i32 x, i32 y, i32 width, i32 height) override;
+    void switch_space(IPC::Sender const&, i32 space) override;
     void inject_pointer(IPC::Sender const&, i32 x, i32 y, u32 buttons) override;
     WindowServerEndpoint::StatisticsAnswer statistics(IPC::Sender const&) override;
     WindowServerEndpoint::CaptureAnswer capture(IPC::Sender const&) override;
@@ -82,6 +109,29 @@ private:
     [[nodiscard]] int resize_edges_at(ServerWindow const&, Gfx::IntPoint point) const;
     void render_chrome(ServerWindow&);
     void invalidate_title_bar(ServerWindow&);
+
+    // The desktop: Shell.cpp.
+    [[nodiscard]] Client* client_with_pid(i32 pid);
+    void update_visibility(ServerWindow&);
+    void update_all_visibility();
+    void shell_state_changed();
+    void send_shell_state();
+    void minimize_window(ServerWindow&);
+    void restore_window(ServerWindow&);
+    void zoom_window(ServerWindow&);
+    void activate_client(Client&);
+    void cycle_applications(bool backward);
+    [[nodiscard]] bool handle_hotkey(u16 code);
+    void go_to_space(int space, bool animated);
+    void enter_mission_control();
+    void leave_mission_control(ServerWindow* to_activate);
+    void layout_mission_control();
+    void update_mission_control_overlays();
+    [[nodiscard]] bool mission_control_pointer(Gfx::IntPoint, u32 pressed);
+    void start_animating();
+    void animation_tick();
+    void apply_wallpaper();
+    void update_boot_overlays();
 
     // Input.
     void read_input();
@@ -145,6 +195,60 @@ private:
 
     bool m_frame_scheduled { false };
     u64 m_next_frame_time { 0 };
+
+    // The desktop.
+    Client* m_active_application { nullptr };
+    bool m_shell_state_pending { false };
+    Gfx::IntPoint m_minimize_target { 0, 0 };
+    int m_work_top { 0 };
+    int m_work_left { 0 };
+    int m_work_bottom { 0 };
+    int m_work_right { 0 };
+    String m_wallpaper_name;
+    struct Hotkey {
+        u16 code;
+        u32 modifiers;
+        Client* client;
+    };
+    Vector<Hotkey> m_hotkeys;
+
+    struct Genie {
+        ServerWindow* window { nullptr };
+        RefPtr<Gfx::Bitmap> picture;
+        Gfx::FloatRect from;
+        Gfx::FloatPoint to;
+        double started { 0 };
+        // Backwards: out of the Dock.
+        bool restoring { false };
+    };
+    Vector<Genie> m_genies;
+    int m_animation_timer { -1 };
+
+    int m_space { 0 };
+    int m_space_count { 1 };
+    // A slide between spaces.
+    bool m_sliding { false };
+    int m_slide_from { 0 };
+    double m_slide_started { 0 };
+
+    struct Thumbnail {
+        ServerWindow* window { nullptr };
+        RefPtr<Gfx::Bitmap> picture;
+        Gfx::FloatRect home;
+        Gfx::FloatRect spread;
+    };
+    Vector<Thumbnail> m_thumbnails;
+    bool m_mission_control { false };
+    bool m_mission_control_leaving { false };
+    ServerWindow* m_mission_control_chosen { nullptr };
+    double m_mission_control_started { 0 };
+    int m_mission_control_hover { -1 };
+    int m_mission_control_hover_space { -1 };
+
+    bool m_boot_screen { false };
+    double m_boot_started { 0 };
+    bool m_boot_finishing { false };
+    double m_boot_finished_at { 0 };
 };
 
 }

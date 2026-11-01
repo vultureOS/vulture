@@ -35,6 +35,10 @@ public:
     [[nodiscard]] StringView appearance() const { return m_appearance.view(); }
 
     Function<void(StringView)> on_appearance_change;
+    Function<void(u32)> on_menu_item_chosen;
+    Function<void()> on_quit_requested;
+    Function<void(StringView)> on_shell_state;
+    Function<void(u16, u32)> on_hotkey;
 
 private:
     friend class Window;
@@ -46,6 +50,10 @@ private:
     void appearance_changed(IPC::Sender const&, String name) override;
     void drag(IPC::Sender const&, u32 window, u8 phase, i32 x, i32 y, String type, Vector<u8> data) override;
     void drag_finished(IPC::Sender const&, u32 window, bool accepted) override;
+    void menu_item_chosen(IPC::Sender const&, u32 item) override;
+    void quit_requested(IPC::Sender const&) override;
+    void shell_state(IPC::Sender const&, String json) override;
+    void hotkey(IPC::Sender const&, u16 code, u32 modifiers) override;
     void key(IPC::Sender const&, u32 window, bool pressed, u16 code, u32 modifiers, String text) override;
     void resized(IPC::Sender const&, u32 window, i32 width, i32 height) override;
     void close_requested(IPC::Sender const&, u32 window) override;
@@ -119,9 +127,13 @@ public:
     void set_cursor(CursorShape);
     void begin_drag(Window& image, StringView type, ReadonlyBytes data);
     void accept_drop(bool);
+    void set_input_region(Gfx::IntRect);
+    void minimize();
+    void zoom();
     struct MaterialRegion {
         Gfx::IntRect rect;
         Material material;
+        int radius { 0 };
     };
     void set_materials(Span<MaterialRegion const>);
 

@@ -56,6 +56,7 @@ int main(int argc, char** argv)
     char const* theme_path = "/System/Library/Themes/Light.json";
     char const* appearance = "Light";
     bool with_input = true;
+    bool boot_screen = false;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--theme") == 0 && i + 1 < argc) {
             theme_path = argv[++i];
@@ -64,8 +65,10 @@ int main(int argc, char** argv)
             theme_path = strcmp(appearance, "Dark") == 0 ? "/System/Library/Themes/Dark.json" : "/System/Library/Themes/Light.json";
         } else if (strcmp(argv[i], "--no-input") == 0) {
             with_input = false;
+        } else if (strcmp(argv[i], "--boot-screen") == 0) {
+            boot_screen = true;
         } else {
-            fprintf(stderr, "usage: WindowServer [--appearance Light|Dark] [--theme FILE] [--no-input]\n");
+            fprintf(stderr, "usage: WindowServer [--appearance Light|Dark] [--theme FILE] [--no-input] [--boot-screen]\n");
             return 64;
         }
     }
@@ -117,5 +120,7 @@ int main(int argc, char** argv)
     auto pixels = screen.value()->pixels();
     os_log(log, "Starting: %dx%d at %dx", pixels.width, pixels.height, screen.value()->scale());
     server.start();
+    if (boot_screen)
+        server.show_boot_screen();
     return loop.exec();
 }

@@ -10,7 +10,11 @@
 #include "ServerWindow.h"
 #include "Theme.h"
 #include "WorkerPool.h"
+#include <LibBase/OwnPtr.h>
+#include <LibBase/String.h>
+#include <LibBase/Vector.h>
 #include <LibGfx/Bitmap.h>
+#include <LibText/Font.h>
 
 namespace WindowServer {
 
@@ -62,6 +66,41 @@ public:
     [[nodiscard]] bool has_damage() const { return m_any_dirty; }
     void render();
 
+    // What is drawn in place of windows, while they move through a shape they cannot
+    // have: between the normal windows and those above. All on one thread, by painter.
+    struct Overlay {
+        enum class Kind : u8 {
+            // Scaled into a rectangle, with rounded corners.
+            Thumbnail,
+            // Narrowing toward a point below, as a window going into the Dock.
+            Genie,
+            // A rounded rectangle, of a color.
+            Tile,
+            // The system's mark.
+            Logo,
+        };
+        Kind kind { Kind::Thumbnail };
+        RefPtr<Gfx::Bitmap> picture;
+        Gfx::FloatRect rect;
+        // For a genie: from 0 (where it was) to 1 (gone).
+        float progress { 0 };
+        Gfx::FloatPoint target;
+        Gfx::Color color;
+        float radius { 0 };
+        String label;
+        bool shadow { false };
+    };
+    void set_overlays(Vector<Overlay>);
+    void set_dim(Gfx::Color);
+    [[nodiscard]] Gfx::Color dim() const { return m_dim; }
+    void set_overlay_font(Text::Font* font) { m_overlay_font = font; }
+    // A picture of a window as it now is, title bar and all.
+    [[nodiscard]] ErrorOr<NonnullRefPtr<Gfx::Bitmap>> snapshot(ServerWindow const&) const;
+    // Hides the windows below the Dock's level, for Mission Control.
+    void set_hides_normal_windows(bool hides) { m_hides_normal_windows = hides; }
+    // A wallpaper by its colors.
+    void set_wallpaper_colors(Vector<Gfx::Color> colors);
+
     [[nodiscard]] u64 frames() const { return m_frames; }
     [[nodiscard]] u64 compose_microseconds() const { return m_compose_microseconds; }
     [[nodiscard]] u64 flush_microseconds() const { return m_flush_microseconds; }
@@ -91,6 +130,7 @@ private:
     };
 
     ErrorOr<void> render_wallpaper();
+    void draw_overlays(Vector<Gfx::IntRect> const& rects);
     ErrorOr<NineSlice> make_shadow(WindowShape const&, ShadowStyle const&);
     ErrorOr<NineSlice> make_outline(WindowShape const&);
     ErrorOr<void> make_shape(WindowShape&);
@@ -98,6 +138,8 @@ private:
     [[nodiscard]] NineSlice const& shadow_slice_of(ServerWindow const&) const;
 
     void grow_damage_for_materials();
+    // Whether that made any part dirty that was not.
+    bool invalidate_reporting(Gfx::IntRect);
     [[nodiscard]] Vector<Gfx::IntRect> dirty_rects() const;
     [[nodiscard]] Vector<Gfx::IntRect> pieces_of(Vector<Gfx::IntRect> const&) const;
     void draw_layers(Layer const*, size_t count, Vector<Gfx::IntRect> const& pieces);
@@ -108,7 +150,7 @@ private:
     void draw_nine_slice(NineSlice const&, Gfx::IntRect target, Gfx::Color, Gfx::IntRect clip, Gfx::IntRect hole, int hole_corner);
     // What shows through a material here (it reads the screen), and then putting it there.
     void render_material(MaterialStyle const&, Gfx::IntRect area, Gfx::Bitmap& result);
-    void place_material(ServerWindow const&, Gfx::IntRect area, Gfx::Bitmap const& result);
+    void place_material(ServerWindow const&, Gfx::IntRect area, Gfx::Bitmap const& result, Gfx::IntRect region, int radius);
 
     // Blends a row of pixels into the screen through the window's rounded
     // corners. x is the first column to draw, in device pixels from the frame's
@@ -120,6 +162,11 @@ private:
     Vector<ServerWindow*> const& m_windows;
     WorkerPool m_workers;
     RefPtr<Gfx::Bitmap> m_wallpaper;
+    Vector<Gfx::Color> m_wallpaper_colors;
+    Vector<Overlay> m_overlays;
+    Gfx::Color m_dim { 0, 0, 0, 0 };
+    bool m_hides_normal_windows { false };
+    Text::Font* m_overlay_font { nullptr };
     Vector<NonnullOwnPtr<WindowShape>> m_shapes;
 
     int m_tiles_across { 0 };
