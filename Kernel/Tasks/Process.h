@@ -136,6 +136,8 @@ private:
     RefPtr<KernelBuffer> m_executable;
     // The canonical working directory.
     String m_cwd;
+    // exec() of a "#!" script nests at most this deep.
+    u32 m_interpreter_depth { 0 };
 
     struct FileDescriptor {
         RefPtr<FileDescription> description;

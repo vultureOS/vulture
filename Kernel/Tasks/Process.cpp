@@ -212,7 +212,7 @@ ErrorOr<NonnullRefPtr<Process>> Process::create_init(StringView path, Span<Strin
         auto* init = static_cast<InitArguments*>(argument);
         auto& self = Thread::current();
         auto& frame = self.user_trap_frame();
-        StringView const environment[] = { "PATH=/bin:/usr/bin:/sbin"_sv, "HOME=/"_sv };
+        StringView const environment[] = { "PATH=/usr/bin:/bin:/usr/sbin:/sbin"_sv, "HOME=/var/root"_sv };
         auto result = self.process()->exec(StringView(init->path), { init->arguments, init->argument_count }, environment, frame);
         if (result.is_error()) {
             FixedStringBuilder<128> reason;
@@ -340,6 +340,36 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
 {
     auto resolved = TRY(VirtualFileSystem::resolve(path, m_cwd.view()));
     auto executable = TRY(read_executable(*resolved.inode));
+
+    // A script: "#!interpreter [argument]" runs the interpreter with the
+    // script's path (and the original arguments after argv[0]).
+    auto bytes = executable->bytes();
+    if (bytes.size() >= 2 && bytes[0] == '#' && bytes[1] == '!') {
+        if (m_interpreter_depth >= 2)
+            return Error::from_errno(ELOOP);
+        size_t end = 2;
+        while (end < bytes.size() && end < 256 && bytes[end] != '\n')
+            ++end;
+        StringView line { reinterpret_cast<char const*>(bytes.data()) + 2, end - 2 };
+        line = line.trim_whitespace();
+        auto space = line.find(' ');
+        StringView interpreter = space.has_value() ? line.substring_view(0, space.value()) : line;
+        StringView argument = space.has_value() ? line.substring_view(space.value() + 1).trim_whitespace() : StringView {};
+        if (interpreter.is_empty())
+            return Error::from_errno(ENOEXEC);
+        Vector<StringView> new_arguments;
+        TRY(new_arguments.try_append(interpreter));
+        if (!argument.is_empty())
+            TRY(new_arguments.try_append(argument));
+        TRY(new_arguments.try_append(path));
+        for (size_t i = 1; i < arguments.size(); ++i)
+            TRY(new_arguments.try_append(arguments[i]));
+        ++m_interpreter_depth;
+        auto result = exec(interpreter, { new_arguments.begin(), new_arguments.size() }, environment, frame);
+        --m_interpreter_depth;
+        return result;
+    }
+
     auto image_or_error = ELF::Image::parse(executable->bytes());
     if (image_or_error.is_error())
         return Error::from_errno(ENOEXEC);
