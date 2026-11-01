@@ -1,0 +1,42 @@
+{
+    "wallpaper" : [ "#1e3c72", "#2a5298", "#7f5fa8", "#d98a7a" ],
+    "window" : {
+        "cornerRadius" : 10,
+        "background" : "#ffffff",
+        "titleBar" : {
+            "height" : 28,
+            "background" : "#ececec",
+            "backgroundInactive" : "#f6f6f6",
+            "separator" : "#00000026",
+            "text" : "#000000d9",
+            "textInactive" : "#00000042",
+            "fontSize" : 13
+        },
+        "trafficLights" : {
+            "diameter" : 12,
+            "spacing" : 8,
+            "inset" : 8,
+            "close" : "#ff5f57",
+            "closeBorder" : "#e0443e",
+            "minimize" : "#febc2e",
+            "minimizeBorder" : "#dea123",
+            "zoom" : "#28c840",
+            "zoomBorder" : "#1aab29",
+            "inactive" : "#dcdcdc",
+            "inactiveBorder" : "#c8c8c8",
+            "glyph" : "#00000099"
+        },
+        "outline" : "#00000033",
+        "shadow" : {
+            "active" : { "blur" : 22, "offsetY" : 16, "color" : "#00000059" },
+            "inactive" : { "blur" : 10, "offsetY" : 6, "color" : "#00000033" }
+        }
+    },
+    "materials" : {
+        "menuBar" : { "blur" : 20, "saturation" : 1.8, "tint" : "#f5f5f5a6" },
+        "popover" : { "blur" : 24, "saturation" : 1.8, "tint" : "#f0f0f0bf" },
+        "sidebar" : { "blur" : 24, "saturation" : 1.6, "tint" : "#ebebebb3" },
+        "hud" : { "blur" : 24, "saturation" : 1.5, "tint" : "#28282899" },
+        "underWindow" : { "blur" : 30, "saturation" : 1.8, "tint" : "#f5f5f58c" }
+    }
+}

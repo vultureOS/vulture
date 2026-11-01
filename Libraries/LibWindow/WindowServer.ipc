@@ -1,0 +1,45 @@
+// PranaWindowServer (com.vulture.windowserver): windows, in points; surfaces and
+// damage, in pixels (points times the screen's scale).
+endpoint WindowServer
+{
+    // A client's first message: where its events go. Answers the screen's size
+    // in points, and its scale.
+    connect(Port events) => (i32 error, i32 width, i32 height, i32 scale)
+
+    create_window(String title, i32 x, i32 y, i32 width, i32 height, u32 flags) => (i32 error, u32 window)
+    destroy_window(u32 window) =|
+    set_title(u32 window, String title) =|
+    set_frame(u32 window, i32 x, i32 y, i32 width, i32 height) =|
+    show(u32 window, bool visible) =|
+
+    // The window's pixels: shared memory holding two buffers of this size, one
+    // after the other, premultiplied BGRA. One is shown; the client draws in
+    // the other, then presents it.
+    set_surface(u32 window, Port memory, i32 width, i32 height) => (i32 error)
+    // This buffer is now the one shown; this rectangle of it changed. Once it
+    // is on screen the client hears `presented`, and may use the other.
+    present(u32 window, u32 buffer, i32 x, i32 y, i32 width, i32 height) =|
+
+    // Parts of the window with a material behind them (where its pixels are
+    // not opaque, the blurred backdrop shows): x, y, width, height (points, from
+    // the window's top-left), material, for each.
+    set_materials(u32 window, Vector<i32> regions) =|
+
+    // For tests and tools: only root may. As if the pointer moved here (points).
+    inject_pointer(i32 x, i32 y, u32 buttons) =|
+    statistics() => (u64 frames, u64 compose_microseconds, u64 flush_microseconds, u64 pixels)
+    // The screen as it is now, as a PNG.
+    capture() => (i32 error, ByteBuffer png)
+}
+
+endpoint WindowClient
+{
+    // kind: see <LibWindow/Protocol.h>. Position in points from the window's
+    // top-left.
+    mouse(u32 window, u8 kind, i32 x, i32 y, u32 buttons, i32 wheel_x, i32 wheel_y) =|
+    key(u32 window, bool pressed, u16 code, u32 modifiers, String text) =|
+    resized(u32 window, i32 width, i32 height) =|
+    close_requested(u32 window) =|
+    activated(u32 window, bool active) =|
+    presented(u32 window) =|
+}
