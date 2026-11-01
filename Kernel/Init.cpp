@@ -13,6 +13,8 @@
 #include <Kernel/Bus/PCI/PCI.h>
 #include <Kernel/Console/BootScreen.h>
 #include <Kernel/Console/TextConsole.h>
+#include <Kernel/Devices/Graphics/Graphics.h>
+#include <Kernel/Devices/Input/Input.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Debug/Panic.h>
 #include <Kernel/Debug/Symbols.h>
@@ -249,6 +251,8 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     auto devices = must("devfs"_sv, DevFS::create());
     must("devices"_sv, create_basic_devices());
     must("terminals"_sv, create_terminals());
+    initialize_graphics();
+    initialize_input();
     initialize_storage();
     if (!mount_root_file_system(boot_info)) {
         dmesgln("Userland: no root disk and no boot archive, so no init");

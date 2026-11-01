@@ -21,7 +21,7 @@ namespace Kernel {
 namespace {
 
 // /dev/console: the screen (serial port and framebuffer, through the
-// kernel log) and the serial port's input.
+// kernel log), the serial port's input and the keyboard's (Devices/Input).
 class ConsoleTTY final : public TTY {
 public:
     ConsoleTTY()
@@ -349,6 +349,12 @@ ErrorOr<void> create_terminals()
     else
         dmesgln("Console: no serial input");
     return {};
+}
+
+void queue_console_input(u8 byte)
+{
+    if (s_console)
+        s_console->queue_input(byte);
 }
 
 TTY& console_tty()

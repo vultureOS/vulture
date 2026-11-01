@@ -15,5 +15,7 @@ namespace Kernel {
 ErrorOr<void> create_terminals();
 
 [[nodiscard]] TTY& console_tty();
+// Something typed at the console (safe from any context).
+void queue_console_input(u8);
 
 }

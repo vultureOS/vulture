@@ -29,6 +29,9 @@ add_executable(Kernel
     Debug/KernelLog.cpp
     Debug/Panic.cpp
     Debug/Symbols.cpp
+    Devices/Graphics/VirtIOGPU.cpp
+    Devices/Input/Input.cpp
+    Devices/Input/VirtIOInput.cpp
     Devices/Serial/PL011.cpp
     Devices/Storage/BlockDevice.cpp
     Devices/Storage/NVMeDevice.cpp
