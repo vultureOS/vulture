@@ -10,6 +10,7 @@
 #include <LibGfx/Filter.h>
 #include <LibGfx/Painter.h>
 #include <LibGfx/Rasterizer.h>
+#include <errno.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -84,10 +85,13 @@ ErrorOr<void> Compositor::initialize()
     TRY(m_dirty.try_resize(static_cast<size_t>(m_tiles_across) * static_cast<size_t>(m_tiles_down)));
     memset(m_dirty.data(), 0, m_dirty.size());
     TRY(render_wallpaper());
-    TRY(make_corner_mask());
-    m_shadow_active = TRY(make_shadow(m_theme.shadow_active));
-    m_shadow_inactive = TRY(make_shadow(m_theme.shadow_inactive));
-    m_outline = TRY(make_outline());
+    auto* shape = new (Base::nothrow) WindowShape;
+    if (!shape)
+        return Error::from_errno(ENOMEM);
+    auto owned = adopt_own(*shape);
+    shape->follows_theme = true;
+    TRY(make_shape(*shape));
+    m_shapes.append(move(owned));
     invalidate_all();
     return {};
 }
@@ -129,32 +133,63 @@ ErrorOr<void> Compositor::render_wallpaper()
     return {};
 }
 
-ErrorOr<void> Compositor::make_corner_mask()
+ErrorOr<void> Compositor::make_shape(WindowShape& shape)
 {
-    float radius = m_theme.corner_radius * static_cast<float>(m_screen.scale());
+    if (shape.follows_theme)
+        shape.radius = static_cast<int>(m_theme.corner_radius);
+    float radius = static_cast<float>(shape.radius) * static_cast<float>(m_screen.scale());
     // The extent of a continuous corner along an edge, in radii, rounded up.
-    m_corner_extent = static_cast<int>(Math::ceil(radius * 1.52866483f)) + 1;
-    auto mask = TRY(AlphaMask::create({ m_corner_extent, m_corner_extent }));
+    shape.corner_extent = static_cast<int>(Math::ceil(radius * 1.52866483f)) + 1;
+    auto mask = TRY(AlphaMask::create({ shape.corner_extent, shape.corner_extent }));
     Path corner;
-    auto far = static_cast<float>(m_corner_extent * 4);
+    auto far = static_cast<float>(shape.corner_extent * 4);
     corner.add_continuous_rounded_rect({ 0, 0, far, far }, radius);
-    Rasterizer rasterizer({ 0, 0, m_corner_extent, m_corner_extent });
+    Rasterizer rasterizer({ 0, 0, shape.corner_extent, shape.corner_extent });
     rasterizer.add_path(corner);
     rasterizer.rasterize(FillRule::NonZero, [&](int y, int x, int count, u8 const* coverage) {
         memcpy(mask->scanline(y) + x, coverage, static_cast<size_t>(count));
     });
-    m_corner = move(mask);
+    shape.corner = move(mask);
+    shape.shadow_active = TRY(make_shadow(shape, m_theme.shadow_active));
+    shape.shadow_inactive = TRY(make_shadow(shape, m_theme.shadow_inactive));
+    shape.shadow_popup = TRY(make_shadow(shape, m_theme.shadow_popup));
+    shape.outline = TRY(make_outline(shape));
     return {};
 }
 
-ErrorOr<NineSlice> Compositor::make_shadow(ShadowStyle const& style)
+ErrorOr<WindowShape const*> Compositor::shape_with_radius(int points)
+{
+    for (auto& shape : m_shapes) {
+        if (!shape->follows_theme && shape->radius == points)
+            return shape.ptr();
+    }
+    auto* shape = new (Base::nothrow) WindowShape;
+    if (!shape)
+        return Error::from_errno(ENOMEM);
+    auto owned = adopt_own(*shape);
+    shape->radius = points;
+    TRY(make_shape(*shape));
+    m_shapes.append(move(owned));
+    return shape;
+}
+
+ErrorOr<void> Compositor::theme_changed()
+{
+    TRY(render_wallpaper());
+    for (auto& shape : m_shapes)
+        TRY(make_shape(*shape));
+    invalidate_all();
+    return {};
+}
+
+ErrorOr<NineSlice> Compositor::make_shadow(WindowShape const& window_shape, ShadowStyle const& style)
 {
     float scale = static_cast<float>(m_screen.scale());
     float sigma = style.blur * scale;
-    float radius = m_theme.corner_radius * scale;
+    float radius = static_cast<float>(window_shape.radius) * scale;
     NineSlice slice;
     slice.margin = static_cast<int>(Math::ceil(sigma * 3));
-    slice.inset = slice.margin * 2 + m_corner_extent + 2;
+    slice.inset = slice.margin * 2 + window_shape.corner_extent + 2;
     int size = slice.inset * 2 + 4;
     auto mask = TRY(AlphaMask::create({ size, size }));
     Path shape;
@@ -171,12 +206,12 @@ ErrorOr<NineSlice> Compositor::make_shadow(ShadowStyle const& style)
     return slice;
 }
 
-ErrorOr<NineSlice> Compositor::make_outline()
+ErrorOr<NineSlice> Compositor::make_outline(WindowShape const& shape)
 {
-    float radius = m_theme.corner_radius * static_cast<float>(m_screen.scale());
+    float radius = static_cast<float>(shape.radius) * static_cast<float>(m_screen.scale());
     NineSlice slice;
     slice.margin = 0;
-    slice.inset = m_corner_extent + 2;
+    slice.inset = shape.corner_extent + 2;
     int size = slice.inset * 2 + 4;
     auto mask = TRY(AlphaMask::create({ size, size }));
     Path ring;
@@ -193,6 +228,20 @@ ErrorOr<NineSlice> Compositor::make_outline()
     return slice;
 }
 
+ShadowStyle const& Compositor::shadow_style_of(ServerWindow const& window) const
+{
+    if (window.is_popup())
+        return m_theme.shadow_popup;
+    return window.active ? m_theme.shadow_active : m_theme.shadow_inactive;
+}
+
+NineSlice const& Compositor::shadow_slice_of(ServerWindow const& window) const
+{
+    if (window.is_popup())
+        return window.shape->shadow_popup;
+    return window.active ? window.shape->shadow_active : window.shape->shadow_inactive;
+}
+
 IntRect Compositor::device_frame(ServerWindow const& window) const
 {
     int scale = m_screen.scale();
@@ -204,8 +253,8 @@ IntRect Compositor::window_bounds(ServerWindow const& window) const
     auto frame = device_frame(window);
     if (window.is_bare())
         return frame;
-    auto const& style = window.active ? m_theme.shadow_active : m_theme.shadow_inactive;
-    auto const& slice = window.active ? m_shadow_active : m_shadow_inactive;
+    auto const& style = shadow_style_of(window);
+    auto const& slice = shadow_slice_of(window);
     int offset = static_cast<int>(style.offset_y * static_cast<float>(m_screen.scale()));
     auto shadow = frame.inflated(slice.margin).translated(0, offset);
     return shadow.united(frame);
@@ -409,23 +458,23 @@ void Compositor::draw_shadow(ServerWindow const& window, IntRect clip)
 {
     if (window.is_bare())
         return;
-    auto const& style = window.active ? m_theme.shadow_active : m_theme.shadow_inactive;
-    auto const& slice = window.active ? m_shadow_active : m_shadow_inactive;
+    auto const& style = shadow_style_of(window);
+    auto const& slice = shadow_slice_of(window);
     auto frame = device_frame(window);
     int offset = static_cast<int>(style.offset_y * static_cast<float>(m_screen.scale()));
-    draw_nine_slice(slice, frame.inflated(slice.margin).translated(0, offset), style.color, clip, frame, m_corner_extent);
+    draw_nine_slice(slice, frame.inflated(slice.margin).translated(0, offset), style.color, clip, frame, window.shape->corner_extent);
 }
 
-void Compositor::blend_row_in_window(Pixel* destination, Pixel const* source, int x, int y, int count, IntSize frame_size, bool bare) const
+void Compositor::blend_row_in_window(Pixel* destination, Pixel const* source, int x, int y, int count, IntSize frame_size, WindowShape const* shape) const
 {
-    int extent = m_corner_extent;
-    bool corner_row = !bare && (y < extent || y >= frame_size.height - extent);
+    int extent = shape ? shape->corner_extent : 0;
+    bool corner_row = shape && (y < extent || y >= frame_size.height - extent);
     if (!corner_row) {
         blend_row(destination, source, count);
         return;
     }
     int mask_y = y < extent ? y : frame_size.height - 1 - y;
-    u8 const* mask_row = m_corner->scanline(mask_y);
+    u8 const* mask_row = shape->corner->scanline(mask_y);
     int end = x + count;
     // The left corner, the middle, and the right corner, mirrored.
     int left_end = min(end, extent);
@@ -454,7 +503,7 @@ void Compositor::draw_body(ServerWindow const& window, IntRect clip)
     auto area = frame.intersected(clip);
     if (area.is_empty())
         return;
-    bool bare = window.is_bare();
+    auto const* shape = window.is_bare() ? nullptr : window.shape;
     IntSize frame_size = frame.size();
     auto const* surface = window.shown_surface();
     Pixel background = m_theme.window_background.to_pixel();
@@ -471,30 +520,32 @@ void Compositor::draw_body(ServerWindow const& window, IntRect clip)
         // (No background under a surface: where it is clear, a material shows.)
         // (The title bar covers it all, and blending both through a rounded
         // corner would let the client's pixels show at the edge.)
-        bool under_chrome = chrome && row_in_frame < chrome->height();
+        // (A unified title bar, though, is drawn by the client, and goes over it.)
+        bool in_chrome = chrome && row_in_frame < chrome->height();
+        bool under_chrome = in_chrome && !window.is_unified();
         int covered_to = area.width;
         if (under_chrome) {
             covered_to = area.width;
         } else if (surface && row_in_frame < surface->height()) {
             covered_to = clamp(surface->width() - x_in_frame, 0, area.width);
             if (covered_to > 0)
-                blend_row_in_window(destination, surface->scanline(row_in_frame) + x_in_frame, x_in_frame, row_in_frame, covered_to, frame_size, bare);
+                blend_row_in_window(destination, surface->scanline(row_in_frame) + x_in_frame, x_in_frame, row_in_frame, covered_to, frame_size, shape);
         } else {
             covered_to = 0;
         }
         for (int done = covered_to; done < area.width;) {
             int chunk = min(area.width - done, static_cast<int>(array_size(fill)));
-            blend_row_in_window(destination + done, fill, x_in_frame + done, row_in_frame, chunk, frame_size, bare);
+            blend_row_in_window(destination + done, fill, x_in_frame + done, row_in_frame, chunk, frame_size, shape);
             done += chunk;
         }
-        if (under_chrome) {
+        if (in_chrome) {
             int width = min(area.width, chrome->width() - x_in_frame);
             if (width > 0)
-                blend_row_in_window(destination, chrome->scanline(row_in_frame) + x_in_frame, x_in_frame, row_in_frame, width, frame_size, bare);
+                blend_row_in_window(destination, chrome->scanline(row_in_frame) + x_in_frame, x_in_frame, row_in_frame, width, frame_size, shape);
         }
     }
-    if (!bare)
-        draw_nine_slice(m_outline, frame, m_theme.outline, clip, frame.inflated(-1), m_corner_extent);
+    if (shape)
+        draw_nine_slice(shape->outline, frame, m_theme.outline, clip, frame.inflated(-1), shape->corner_extent);
 }
 
 void Compositor::apply_material(ServerWindow const& window, IntRect region, MaterialStyle const& style, IntRect area)
@@ -575,7 +626,7 @@ void Compositor::apply_material(ServerWindow const& window, IntRect region, Mate
             ++column;
         }
         blend_row_solid(row_buffer.data(), tint, area.width);
-        blend_row_in_window(framebuffer.scanline(y) + area.x, row_buffer.data(), area.x - frame.x, y - frame.y, area.width, frame.size(), window.is_bare());
+        blend_row_in_window(framebuffer.scanline(y) + area.x, row_buffer.data(), area.x - frame.x, y - frame.y, area.width, frame.size(), window.is_bare() ? nullptr : window.shape);
     }
 }
 

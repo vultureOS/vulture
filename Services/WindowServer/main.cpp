@@ -25,7 +25,7 @@
 // with shadows, rounded corners and translucent materials, and sends the keyboard
 // and the pointer to whichever they belong to.
 //
-//   WindowServer [--theme FILE] [--no-input]
+//   WindowServer [--appearance Light|Dark] [--theme FILE] [--no-input]
 
 using namespace WindowServer;
 
@@ -54,14 +54,18 @@ int main(int argc, char** argv)
 {
     signal(SIGPIPE, SIG_IGN);
     char const* theme_path = "/System/Library/Themes/Light.json";
+    char const* appearance = "Light";
     bool with_input = true;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--theme") == 0 && i + 1 < argc) {
             theme_path = argv[++i];
+        } else if (strcmp(argv[i], "--appearance") == 0 && i + 1 < argc) {
+            appearance = argv[++i];
+            theme_path = strcmp(appearance, "Dark") == 0 ? "/System/Library/Themes/Dark.json" : "/System/Library/Themes/Light.json";
         } else if (strcmp(argv[i], "--no-input") == 0) {
             with_input = false;
         } else {
-            fprintf(stderr, "usage: WindowServer [--theme FILE] [--no-input]\n");
+            fprintf(stderr, "usage: WindowServer [--appearance Light|Dark] [--theme FILE] [--no-input]\n");
             return 64;
         }
     }
@@ -77,7 +81,7 @@ int main(int argc, char** argv)
         fprintf(stderr, "WindowServer: /dev/gpu0: %s\n", strerror(screen.error().code()));
         return 1;
     }
-    auto font_file = read_whole_file("/System/Library/Fonts/Inter-SemiBold.ttf");
+    auto font_file = read_whole_file("/System/Library/Fonts/Inter-Bold.ttf");
     if (font_file.is_error()) {
         fprintf(stderr, "WindowServer: no system font\n");
         return 1;
@@ -100,7 +104,7 @@ int main(int argc, char** argv)
         fprintf(stderr, "WindowServer: out of memory\n");
         return 1;
     }
-    Server server(loop, *screen.value(), theme.value(), compositor, windows, title_face.release_value());
+    Server server(loop, *screen.value(), theme.value(), compositor, windows, title_face.release_value(), StringView(appearance));
     server.set_up_cursor();
     if (with_input) {
         int input = open("/dev/input", O_RDONLY | O_CLOEXEC);

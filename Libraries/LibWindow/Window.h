@@ -32,13 +32,20 @@ public:
     [[nodiscard]] WindowServerProxy& server() { return m_server; }
     [[nodiscard]] Gfx::IntSize screen_size() const { return m_screen_size; }
     [[nodiscard]] int scale() const { return m_scale; }
+    [[nodiscard]] StringView appearance() const { return m_appearance.view(); }
+
+    Function<void(StringView)> on_appearance_change;
 
 private:
     friend class Window;
 
-    Connection(WindowServerProxy, Gfx::IntSize screen, int scale);
+    Connection(WindowServerProxy, Gfx::IntSize screen, int scale, String appearance);
 
-    void mouse(IPC::Sender const&, u32 window, u8 kind, i32 x, i32 y, u32 buttons, i32 wheel_x, i32 wheel_y) override;
+    void mouse(IPC::Sender const&, u32 window, u8 kind, i32 x, i32 y, u32 buttons, u32 modifiers, i32 wheel_x, i32 wheel_y) override;
+    void moved(IPC::Sender const&, u32 window, i32 x, i32 y) override;
+    void appearance_changed(IPC::Sender const&, String name) override;
+    void drag(IPC::Sender const&, u32 window, u8 phase, i32 x, i32 y, String type, Vector<u8> data) override;
+    void drag_finished(IPC::Sender const&, u32 window, bool accepted) override;
     void key(IPC::Sender const&, u32 window, bool pressed, u16 code, u32 modifiers, String text) override;
     void resized(IPC::Sender const&, u32 window, i32 width, i32 height) override;
     void close_requested(IPC::Sender const&, u32 window) override;
@@ -51,6 +58,7 @@ private:
     OwnPtr<IPC::Listener> m_listener;
     Gfx::IntSize m_screen_size;
     int m_scale { 1 };
+    String m_appearance;
     Vector<Window*> m_windows;
 };
 
@@ -58,6 +66,7 @@ struct MouseEvent {
     MouseKind kind { MouseKind::Moved };
     Gfx::IntPoint position;
     u32 buttons { 0 };
+    u32 modifiers { 0 };
     int wheel_x { 0 };
     int wheel_y { 0 };
 };
@@ -69,6 +78,13 @@ struct KeyEvent {
     String text;
 };
 
+struct DragEvent {
+    DragPhase phase { DragPhase::Moved };
+    Gfx::IntPoint position;
+    StringView type;
+    ReadonlyBytes data;
+};
+
 class Window final {
 public:
     [[nodiscard]] static ErrorOr<NonnullOwnPtr<Window>> create(Connection&, StringView title, Gfx::IntRect frame, u32 flags);
@@ -76,6 +92,9 @@ public:
 
     [[nodiscard]] u32 id() const { return m_id; }
     [[nodiscard]] Gfx::IntSize size() const { return m_size; }
+    [[nodiscard]] Gfx::IntPoint position() const { return m_position; }
+    [[nodiscard]] Gfx::IntRect frame() const { return { m_position.x, m_position.y, m_size.width, m_size.height }; }
+    [[nodiscard]] Connection& connection() { return m_connection; }
 
     // What to draw on, in pixels: the buffer not on screen. It holds what was
     // last presented.
@@ -90,6 +109,16 @@ public:
     void set_title(StringView);
     void set_frame(Gfx::IntRect);
     void show(bool visible = true);
+    void activate();
+    void set_level(int);
+    // In points; negative for the theme's.
+    void set_corner_radius(int);
+    void set_title_bar_height(int);
+    void begin_move();
+    void grab_pointer(bool);
+    void set_cursor(CursorShape);
+    void begin_drag(Window& image, StringView type, ReadonlyBytes data);
+    void accept_drop(bool);
     struct MaterialRegion {
         Gfx::IntRect rect;
         Material material;
@@ -99,19 +128,24 @@ public:
     Function<void(MouseEvent const&)> on_mouse;
     Function<void(KeyEvent const&)> on_key;
     Function<void(Gfx::IntSize)> on_resize;
+    Function<void(Gfx::IntPoint)> on_move;
+    Function<void(DragEvent const&)> on_drag;
+    Function<void(bool accepted)> on_drag_finished;
     Function<void()> on_close;
     Function<void(bool)> on_activation;
 
 private:
     friend class Connection;
 
-    Window(Connection&, u32 id, Gfx::IntSize);
+    Window(Connection&, u32 id, Gfx::IntRect);
     ErrorOr<void> make_surface(Gfx::IntSize points);
     void release_surface();
 
     Connection& m_connection;
     u32 m_id;
     Gfx::IntSize m_size;
+    Gfx::IntPoint m_position;
+    CursorShape m_cursor { CursorShape::Arrow };
     void* m_memory { nullptr };
     size_t m_memory_size { 0 };
     RefPtr<Gfx::Bitmap> m_buffers[2];

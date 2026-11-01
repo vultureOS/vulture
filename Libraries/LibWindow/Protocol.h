@@ -23,6 +23,44 @@ enum WindowFlags : u32 {
     WindowHidden = 1 << 2,
     // No corners, shadow or chrome: a bare surface (the menu bar, the Dock).
     WindowBare = 1 << 3,
+    // Above ordinary windows, and never active: menus, popovers, tool tips. Its
+    // owner gets no keyboard through it; it keeps the keys of its active window.
+    WindowPopup = 1 << 4,
+    // A title bar the client draws itself, as a toolbar does: the server adds only
+    // the traffic lights, over the client's pixels, and hands presses on to it (see
+    // begin_move, for those that should move the window).
+    WindowUnifiedTitle = 1 << 5,
+};
+
+// Where a window sits among others (set_level): higher is in front. Popups start
+// at Popup; the rest, at Normal.
+enum WindowLevel : i32 {
+    LevelNormal = 0,
+    LevelDock = 50,
+    LevelMenuBar = 60,
+    LevelPopup = 100,
+    LevelDragImage = 200,
+};
+
+enum class CursorShape : i32 {
+    Arrow,
+    IBeam,
+    PointingHand,
+    ResizeLeftRight,
+    ResizeUpDown,
+    ResizeDiagonalDown,
+    ResizeDiagonalUp,
+    OpenHand,
+    ClosedHand,
+    Crosshair,
+    Count,
+};
+
+enum class DragPhase : u8 {
+    Entered,
+    Moved,
+    Left,
+    Dropped,
 };
 
 enum class MouseKind : u8 {

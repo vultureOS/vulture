@@ -37,6 +37,9 @@ struct Theme {
     Gfx::Color title_bar_background;
     Gfx::Color title_bar_background_inactive;
     Gfx::Color title_bar_separator;
+    // A point's worth of light along the window's top edge.
+    Gfx::Color title_bar_highlight;
+    Gfx::Color title_bar_highlight_inactive;
     Gfx::Color title_text;
     Gfx::Color title_text_inactive;
     float title_font_size { 0 };
@@ -48,6 +51,7 @@ struct Theme {
     Gfx::Color outline;
     ShadowStyle shadow_active;
     ShadowStyle shadow_inactive;
+    ShadowStyle shadow_popup;
     MaterialStyle materials[static_cast<int>(Window::Material::Count)];
 };
 

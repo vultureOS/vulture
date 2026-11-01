@@ -22,6 +22,19 @@ struct NineSlice {
     int inset { 0 };  // From the mask's edge to where it stops changing.
 };
 
+// A window's outline, and all that follows from it, at one corner radius.
+struct WindowShape {
+    int radius { 0 }; // Points. The theme's, if `follows_theme`.
+    bool follows_theme { false };
+    // The top-left corner's coverage; the others are it mirrored.
+    RefPtr<Gfx::AlphaMask> corner;
+    int corner_extent { 0 };
+    NineSlice outline;
+    NineSlice shadow_active;
+    NineSlice shadow_inactive;
+    NineSlice shadow_popup;
+};
+
 // Draws the screen, from the bottom up, wherever something changed: only there.
 // The screen is a grid of tiles, each dirty or not; each layer draws over the
 // dirty tiles on all the worker threads at once. A material needs what is below it
@@ -32,6 +45,12 @@ public:
     Compositor(Screen&, Theme const&, Vector<ServerWindow*> const& windows_bottom_to_top);
 
     [[nodiscard]] ErrorOr<void> initialize();
+    // The theme object changed: everything drawn from it is made anew, and shown.
+    [[nodiscard]] ErrorOr<void> theme_changed();
+
+    // Lives as long as this does (and changes with the theme).
+    [[nodiscard]] WindowShape const* default_shape() const { return m_shapes[0].ptr(); }
+    [[nodiscard]] ErrorOr<WindowShape const*> shape_with_radius(int points);
 
     void invalidate(Gfx::IntRect pixels);
     void invalidate_all();
@@ -72,9 +91,11 @@ private:
     };
 
     ErrorOr<void> render_wallpaper();
-    ErrorOr<NineSlice> make_shadow(ShadowStyle const&);
-    ErrorOr<NineSlice> make_outline();
-    ErrorOr<void> make_corner_mask();
+    ErrorOr<NineSlice> make_shadow(WindowShape const&, ShadowStyle const&);
+    ErrorOr<NineSlice> make_outline(WindowShape const&);
+    ErrorOr<void> make_shape(WindowShape&);
+    [[nodiscard]] ShadowStyle const& shadow_style_of(ServerWindow const&) const;
+    [[nodiscard]] NineSlice const& shadow_slice_of(ServerWindow const&) const;
 
     void grow_damage_for_materials();
     [[nodiscard]] Vector<Gfx::IntRect> dirty_rects() const;
@@ -90,19 +111,14 @@ private:
     // Blends a row of pixels into the screen through the window's rounded
     // corners. x is the first column to draw, in device pixels from the frame's
     // left; y the row, from its top.
-    void blend_row_in_window(Gfx::Pixel* destination, Gfx::Pixel const* source, int x, int y, int count, Gfx::IntSize frame_size, bool bare) const;
+    void blend_row_in_window(Gfx::Pixel* destination, Gfx::Pixel const* source, int x, int y, int count, Gfx::IntSize frame_size, WindowShape const*) const;
 
     Screen& m_screen;
     Theme const& m_theme;
     Vector<ServerWindow*> const& m_windows;
     WorkerPool m_workers;
     RefPtr<Gfx::Bitmap> m_wallpaper;
-    NineSlice m_shadow_active;
-    NineSlice m_shadow_inactive;
-    NineSlice m_outline;
-    // The top-left corner's coverage; the others are it mirrored.
-    RefPtr<Gfx::AlphaMask> m_corner;
-    int m_corner_extent { 0 };
+    Vector<NonnullOwnPtr<WindowShape>> m_shapes;
 
     int m_tiles_across { 0 };
     int m_tiles_down { 0 };

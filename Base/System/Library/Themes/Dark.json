@@ -1,15 +1,17 @@
 {
     "wallpaper" : [ "#0b1020", "#1a1f3a", "#2e2150", "#3a2a3a" ],
     "window" : {
-        "cornerRadius" : 10,
-        "background" : "#1e1e1e",
+        "cornerRadius" : 12,
+        "background" : "#282828",
         "titleBar" : {
             "height" : 28,
-            "background" : "#323232",
+            "background" : "#282828",
             "backgroundInactive" : "#282828",
-            "separator" : "#00000066",
-            "text" : "#ffffffd9",
-            "textInactive" : "#ffffff42",
+            "highlight" : "#3e3e3e",
+            "highlightInactive" : "#3e3e3e",
+            "separator" : "#000000",
+            "text" : "#ffffffd8",
+            "textInactive" : "#414141",
             "fontSize" : 13
         },
         "trafficLights" : {
@@ -17,19 +19,20 @@
             "spacing" : 8,
             "inset" : 8,
             "close" : "#ff5f57",
-            "closeBorder" : "#e0443e",
+            "closeBorder" : "#e05851",
             "minimize" : "#febc2e",
-            "minimizeBorder" : "#dea123",
+            "minimizeBorder" : "#dfa72e",
             "zoom" : "#28c840",
-            "zoomBorder" : "#1aab29",
-            "inactive" : "#4a4a4a",
-            "inactiveBorder" : "#3a3a3a",
+            "zoomBorder" : "#29b13d",
+            "inactive" : "#4c4c4c",
+            "inactiveBorder" : "#4c4c4c",
             "glyph" : "#00000099"
         },
         "outline" : "#ffffff24",
         "shadow" : {
             "active" : { "blur" : 22, "offsetY" : 16, "color" : "#00000080" },
-            "inactive" : { "blur" : 10, "offsetY" : 6, "color" : "#00000059" }
+            "inactive" : { "blur" : 10, "offsetY" : 6, "color" : "#00000059" },
+            "popup" : { "blur" : 12, "offsetY" : 6, "color" : "#00000080" }
         }
     },
     "materials" : {

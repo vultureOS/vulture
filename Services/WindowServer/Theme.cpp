@@ -114,6 +114,8 @@ ErrorOr<Theme> load_theme(StringView path)
     theme.title_bar_background = TRY(color_in(*title, "background"_sv));
     theme.title_bar_background_inactive = TRY(color_in(*title, "backgroundInactive"_sv));
     theme.title_bar_separator = TRY(color_in(*title, "separator"_sv));
+    theme.title_bar_highlight = TRY(color_in(*title, "highlight"_sv));
+    theme.title_bar_highlight_inactive = TRY(color_in(*title, "highlightInactive"_sv));
     theme.title_text = TRY(color_in(*title, "text"_sv));
     theme.title_text_inactive = TRY(color_in(*title, "textInactive"_sv));
     theme.title_font_size = TRY(number_in(*title, "fontSize"_sv));
@@ -133,6 +135,7 @@ ErrorOr<Theme> load_theme(StringView path)
     auto const* shadow = TRY(object_in(*window, "shadow"_sv));
     theme.shadow_active = TRY(shadow_in(*shadow, "active"_sv));
     theme.shadow_inactive = TRY(shadow_in(*shadow, "inactive"_sv));
+    theme.shadow_popup = TRY(shadow_in(*shadow, "popup"_sv));
     auto const* materials = TRY(object_in(root, "materials"_sv));
     using Window::Material;
     theme.materials[static_cast<int>(Material::MenuBar)] = TRY(material_in(*materials, "menuBar"_sv));

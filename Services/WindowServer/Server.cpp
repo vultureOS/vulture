@@ -5,6 +5,7 @@
  */
 
 #include "Server.h"
+#include "Cursors.h"
 #include <Kernel/API/POSIX/input.h>
 #include <LibBase/Math.h>
 #include <LibGfx/Painter.h>
@@ -62,10 +63,11 @@ constexpr KeyPair us_layout[] = {
 
 }
 
-Server::Server(Core::EventLoop& loop, Screen& screen, Theme const& theme, Compositor& compositor, Vector<ServerWindow*>& windows, NonnullRefPtr<Text::Typeface> title_face)
+Server::Server(Core::EventLoop& loop, Screen& screen, Theme& theme, Compositor& compositor, Vector<ServerWindow*>& windows, NonnullRefPtr<Text::Typeface> title_face, StringView appearance)
     : m_loop(loop)
     , m_screen(screen)
     , m_theme(theme)
+    , m_appearance(MUST(String::from_view(appearance)))
     , m_compositor(compositor)
     , m_windows(windows)
     , m_title_face(move(title_face))
@@ -88,28 +90,40 @@ void Server::watch_input(int fd)
 
 void Server::set_up_cursor()
 {
-    // An original arrow: the shape every pointer has, drawn here at the scale.
-    float scale = static_cast<float>(m_screen.scale());
-    auto image = MUST(Bitmap::create({ 64, 64 }));
-    Painter painter(*image);
-    painter.scale(scale, scale);
-    painter.translate(1.5f, 1);
-    Path arrow;
-    arrow.move_to({ 0, 0 });
-    arrow.line_to({ 0, 15 });
-    arrow.line_to({ 3.6f, 11.6f });
-    arrow.line_to({ 6.2f, 17.4f });
-    arrow.line_to({ 8.8f, 16.2f });
-    arrow.line_to({ 6.2f, 10.6f });
-    arrow.line_to({ 11, 10.6f });
-    arrow.close();
-    StrokeStyle outline;
-    outline.width = 1.5f;
-    outline.join = LineJoin::Round;
-    painter.stroke_path(arrow, outline, Color::from_rgb(0xffffff));
-    painter.fill_path(arrow, Color::from_rgb(0x000000));
-    m_screen.set_cursor(*image, { static_cast<int>(1.5f * scale), static_cast<int>(scale) });
+    auto cursor = make_cursor(m_cursor_shape, m_screen.scale());
+    m_screen.set_cursor(*cursor.image, cursor.hot_spot);
     m_screen.move_cursor({ m_pointer.x * m_screen.scale(), m_pointer.y * m_screen.scale() });
+}
+
+void Server::update_cursor()
+{
+    using Window::CursorShape;
+    CursorShape wanted = CursorShape::Arrow;
+    int edges = 0;
+    if (m_drag) {
+        wanted = CursorShape::ClosedHand;
+    } else if (m_gesture == Gesture::Resizing) {
+        edges = m_gesture_edges;
+    } else if (m_gesture == Gesture::ContentPress && m_gesture_window) {
+        wanted = m_gesture_window->cursor;
+    } else if (m_grab) {
+        wanted = m_grab->cursor;
+    } else if (auto* window = window_at(m_pointer)) {
+        edges = resize_edges_at(*window, m_pointer);
+        wanted = window->cursor;
+    }
+    if (edges) {
+        bool horizontal = edges & (edge_left | edge_right);
+        bool vertical = edges & (edge_top | edge_bottom);
+        if (horizontal && vertical)
+            wanted = ((edges & edge_left) != 0) == ((edges & edge_top) != 0) ? CursorShape::ResizeDiagonalDown : CursorShape::ResizeDiagonalUp;
+        else
+            wanted = horizontal ? CursorShape::ResizeLeftRight : CursorShape::ResizeUpDown;
+    }
+    if (wanted == m_cursor_shape)
+        return;
+    m_cursor_shape = wanted;
+    set_up_cursor();
 }
 
 // --- Frames ---
@@ -187,6 +201,7 @@ WindowServerEndpoint::ConnectAnswer Server::connect(IPC::Sender const& sender, I
     answer.width = points.width;
     answer.height = points.height;
     answer.scale = m_screen.scale();
+    answer.appearance = MUST(String::from_view(m_appearance.view()));
     if (!events.is_valid()) {
         answer.error = EINVAL;
         return answer;
@@ -243,15 +258,28 @@ void Server::remove_window(ServerWindow& window)
         m_gesture_window = nullptr;
         m_gesture = Gesture::None;
     }
+    if (m_grab == &window)
+        m_grab = nullptr;
+    if (m_drag) {
+        if (m_drag->source == &window || m_drag->image == &window)
+            m_drag = nullptr;
+        else if (m_drag->target == &window)
+            m_drag->target = nullptr;
+    }
     m_windows.remove_all_matching([&](auto* other) { return other == &window; });
     delete &window;
     // The next window down takes over.
-    if (!m_active) {
-        for (size_t i = m_windows.size(); i > 0; --i) {
-            if (m_windows[i - 1]->visible) {
-                activate(m_windows[i - 1]);
-                break;
-            }
+    if (!m_active)
+        activate_frontmost();
+}
+
+void Server::activate_frontmost()
+{
+    for (size_t i = m_windows.size(); i > 0; --i) {
+        auto* window = m_windows[i - 1];
+        if (window->visible && !window->is_popup() && !window->is_bare()) {
+            activate(window);
+            return;
         }
     }
 }
@@ -274,11 +302,14 @@ WindowServerEndpoint::CreateWindowAnswer Server::create_window(IPC::Sender const
     window->title = move(title);
     window->frame = { x, y, width, height };
     window->flags = flags;
-    m_windows.append(window);
+    window->shape = m_compositor.default_shape();
+    window->level = (flags & Window::WindowPopup) ? Window::LevelPopup : Window::LevelNormal;
+    insert_by_level(*window);
     answer.window = window->id;
     if (!(flags & Window::WindowHidden)) {
         window->visible = true;
-        activate(window);
+        if (!window->is_popup())
+            activate(window);
         m_compositor.invalidate_window(*window);
     }
     schedule_frame();
@@ -310,6 +341,144 @@ void Server::set_frame(IPC::Sender const& sender, u32 id, i32 x, i32 y, i32 widt
     move_window_to(*window, { x, y, width, height });
 }
 
+void Server::activate(IPC::Sender const& sender, u32 id)
+{
+    auto* window = window_of(sender, id);
+    if (window && window->visible && !window->is_popup())
+        activate(window);
+}
+
+void Server::set_level(IPC::Sender const& sender, u32 id, i32 level)
+{
+    auto* window = window_of(sender, id);
+    if (!window || window->level == level)
+        return;
+    window->level = level;
+    m_windows.remove_all_matching([&](auto* other) { return other == window; });
+    insert_by_level(*window);
+    m_compositor.invalidate_window(*window);
+    schedule_frame();
+}
+
+void Server::set_corner_radius(IPC::Sender const& sender, u32 id, i32 radius)
+{
+    auto* window = window_of(sender, id);
+    if (!window || radius > 64)
+        return;
+    auto shape = radius < 0 ? ErrorOr<WindowShape const*>(m_compositor.default_shape()) : m_compositor.shape_with_radius(radius);
+    if (shape.is_error())
+        return;
+    m_compositor.invalidate_window(*window);
+    window->shape = shape.value();
+    m_compositor.invalidate_window(*window);
+    schedule_frame();
+}
+
+void Server::set_title_bar(IPC::Sender const& sender, u32 id, i32 height)
+{
+    auto* window = window_of(sender, id);
+    if (!window || height < 0 || height > 512)
+        return;
+    // Over the old height as well as the new.
+    invalidate_title_bar(*window);
+    window->title_bar_override = height;
+    invalidate_title_bar(*window);
+}
+
+void Server::begin_move(IPC::Sender const& sender, u32 id)
+{
+    auto* window = window_of(sender, id);
+    if (window && m_gesture == Gesture::ContentPress && m_gesture_window == window)
+        m_gesture = Gesture::Moving;
+}
+
+void Server::grab_pointer(IPC::Sender const& sender, u32 id, bool grab)
+{
+    auto* window = window_of(sender, id);
+    if (!window)
+        return;
+    if (!grab) {
+        if (m_grab == window)
+            m_grab = nullptr;
+        return;
+    }
+    m_grab = window;
+    m_gesture = Gesture::None;
+    m_gesture_window = nullptr;
+}
+
+void Server::set_cursor(IPC::Sender const& sender, u32 id, i32 shape)
+{
+    auto* window = window_of(sender, id);
+    if (!window || shape < 0 || shape >= static_cast<i32>(Window::CursorShape::Count))
+        return;
+    window->cursor = static_cast<Window::CursorShape>(shape);
+    update_cursor();
+}
+
+i32 Server::set_appearance(IPC::Sender const&, String name)
+{
+    char const* path = nullptr;
+    if (name.view() == "Light"_sv)
+        path = "/System/Library/Themes/Light.json";
+    else if (name.view() == "Dark"_sv)
+        path = "/System/Library/Themes/Dark.json";
+    else
+        return EINVAL;
+    if (m_appearance.view() == name.view())
+        return 0;
+    auto theme = load_theme(StringView(path));
+    if (theme.is_error())
+        return theme.error().is_errno() ? theme.error().code() : EINVAL;
+    m_theme = theme.release_value();
+    m_appearance = move(name);
+    if (m_compositor.theme_changed().is_error())
+        return ENOMEM;
+    for (auto* window : m_windows)
+        window->chrome_is_stale = true;
+    for (auto& client : m_clients) {
+        IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::AppearanceChanged));
+        encoder.encode(m_appearance.view());
+        send_to(*client, encoder);
+    }
+    schedule_frame();
+    return 0;
+}
+
+void Server::begin_drag(IPC::Sender const& sender, u32 id, u32 image_id, String type, Vector<u8> data)
+{
+    auto* window = window_of(sender, id);
+    auto* image = window_of(sender, image_id);
+    if (!window || !image || m_drag)
+        return;
+    bool pressed_here = (m_gesture == Gesture::ContentPress && m_gesture_window == window) || m_grab == window;
+    if (!pressed_here)
+        return;
+    auto* drag = new (Base::nothrow) Drag;
+    if (!drag)
+        return;
+    drag->source = window;
+    drag->image = image;
+    drag->image_offset = { image->frame.x - m_pointer.x, image->frame.y - m_pointer.y };
+    drag->type = move(type);
+    drag->data = move(data);
+    m_drag = adopt_own(*drag);
+    m_gesture = Gesture::None;
+    m_gesture_window = nullptr;
+    if (m_grab == window)
+        m_grab = nullptr;
+    image->level = Window::LevelDragImage;
+    m_windows.remove_all_matching([&](auto* other) { return other == image; });
+    insert_by_level(*image);
+    update_cursor();
+}
+
+void Server::accept_drop(IPC::Sender const& sender, u32 id, bool accepted)
+{
+    if (auto* window = window_of(sender, id))
+        window->accepts_drop = accepted;
+}
+
 void Server::show(IPC::Sender const& sender, u32 id, bool visible)
 {
     auto* window = window_of(sender, id);
@@ -318,14 +487,19 @@ void Server::show(IPC::Sender const& sender, u32 id, bool visible)
     window->visible = visible;
     m_compositor.invalidate_window(*window);
     if (visible) {
-        activate(window);
-    } else if (m_active == window) {
-        m_active = nullptr;
-        for (size_t i = m_windows.size(); i > 0; --i) {
-            if (m_windows[i - 1]->visible) {
-                activate(m_windows[i - 1]);
-                break;
-            }
+        if (window->is_popup())
+            raise(*window);
+        else
+            activate(window);
+    } else {
+        if (m_grab == window)
+            m_grab = nullptr;
+        if (m_hovered == window)
+            m_hovered = nullptr;
+        if (m_active == window) {
+            window->active = false;
+            m_active = nullptr;
+            activate_frontmost();
         }
     }
     schedule_frame();
@@ -468,9 +642,45 @@ void Server::raise(ServerWindow& window)
     if (!m_windows.is_empty() && m_windows.last() == &window)
         return;
     m_windows.remove_all_matching([&](auto* other) { return other == &window; });
-    m_windows.append(&window);
+    insert_by_level(window);
     m_compositor.invalidate_window(window);
     schedule_frame();
+}
+
+void Server::insert_by_level(ServerWindow& window)
+{
+    // In front of its own level, behind any higher.
+    size_t at = m_windows.size();
+    while (at > 0 && m_windows[at - 1]->level > window.level)
+        --at;
+    m_windows.insert(at, &window);
+}
+
+void Server::send_moved(ServerWindow& window)
+{
+    if (!window.client)
+        return;
+    IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Moved));
+    encoder.encode(window.id);
+    encoder.encode(static_cast<i32>(window.frame.x));
+    encoder.encode(static_cast<i32>(window.frame.y));
+    send_to(*window.client, encoder);
+}
+
+void Server::send_resized(ServerWindow& window)
+{
+    if (!window.client)
+        return;
+    IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Resized));
+    encoder.encode(window.id);
+    encoder.encode(static_cast<i32>(window.frame.width));
+    encoder.encode(static_cast<i32>(window.frame.height));
+    send_to(*window.client, encoder);
+}
+
+int Server::title_bar_height(ServerWindow const& window) const
+{
+    return window.title_bar_override > 0 ? window.title_bar_override : m_theme.title_bar_height;
 }
 
 void Server::move_window_to(ServerWindow& window, IntRect frame)
@@ -494,6 +704,8 @@ ServerWindow* Server::window_at(IntPoint point)
         auto* window = m_windows[i - 1];
         if (!window->visible)
             continue;
+        if (m_drag && m_drag->image == window)
+            continue;
         auto bounds = window->is_resizable() ? window->frame.inflated(resize_grab) : window->frame;
         if (bounds.contains(point))
             return window;
@@ -508,7 +720,7 @@ WindowButton Server::button_at(ServerWindow const& window, IntPoint point) const
     float x = static_cast<float>(point.x - window.frame.x);
     float y = static_cast<float>(point.y - window.frame.y);
     float diameter = m_theme.traffic_light_diameter;
-    float center_y = static_cast<float>(m_theme.title_bar_height) / 2;
+    float center_y = static_cast<float>(title_bar_height(window)) / 2;
     WindowButton const buttons[3] = { WindowButton::Close, WindowButton::Minimize, WindowButton::Zoom };
     for (int i = 0; i < 3; ++i) {
         float center_x = m_theme.traffic_light_inset + diameter / 2 + static_cast<float>(i) * (diameter + m_theme.traffic_light_spacing);
@@ -543,7 +755,7 @@ void Server::invalidate_title_bar(ServerWindow& window)
     if (!window.visible || !window.is_titled())
         return;
     auto frame = m_compositor.device_frame(window);
-    m_compositor.invalidate({ frame.x, frame.y, frame.width, m_theme.title_bar_height * m_screen.scale() });
+    m_compositor.invalidate({ frame.x, frame.y, frame.width, title_bar_height(window) * m_screen.scale() });
     schedule_frame();
 }
 
@@ -551,7 +763,7 @@ void Server::render_chrome(ServerWindow& window)
 {
     window.chrome_is_stale = false;
     int scale = m_screen.scale();
-    IntSize size { window.frame.width * scale, m_theme.title_bar_height * scale };
+    IntSize size { window.frame.width * scale, title_bar_height(window) * scale };
     if (!window.chrome || window.chrome->size() != size) {
         auto bitmap = Bitmap::create(size);
         if (bitmap.is_error())
@@ -559,11 +771,15 @@ void Server::render_chrome(ServerWindow& window)
         window.chrome = bitmap.release_value();
     }
     auto& bitmap = *window.chrome;
-    bitmap.clear(window.active ? m_theme.title_bar_background : m_theme.title_bar_background_inactive);
+    bool unified = window.is_unified();
+    bitmap.clear(unified ? Color { 0, 0, 0, 0 } : (window.active ? m_theme.title_bar_background : m_theme.title_bar_background_inactive));
     Painter painter(bitmap);
     auto scale_f = static_cast<float>(scale);
-    // The separator under it: one device pixel.
-    painter.fill_rect({ 0, static_cast<float>(size.height - 1), static_cast<float>(size.width), 1 }, m_theme.title_bar_separator);
+    if (!unified) {
+        // A point of light along the top, and the separator under it: a point too.
+        painter.fill_rect({ 0, 0, static_cast<float>(size.width), scale_f }, window.active ? m_theme.title_bar_highlight : m_theme.title_bar_highlight_inactive);
+        painter.fill_rect({ 0, static_cast<float>(size.height) - scale_f, static_cast<float>(size.width), scale_f }, m_theme.title_bar_separator);
+    }
 
     // The traffic lights: colored when active, or when the pointer is over
     // them; their glyphs only then.
@@ -612,6 +828,9 @@ void Server::render_chrome(ServerWindow& window)
         painter.stroke_path(glyph, stroke, m_theme.traffic_light_glyph);
     }
 
+    // A client's own title bar has its own title.
+    if (unified)
+        return;
     // The title, centered (and clear of the lights, however narrow the window).
     auto run = m_title_font->shape(window.title.view());
     float lights_end = (m_theme.traffic_light_inset + 3 * m_theme.traffic_light_diameter + 2 * m_theme.traffic_light_spacing + 8) * scale_f;
@@ -691,6 +910,7 @@ void Server::send_mouse(ServerWindow& window, MouseKind kind, IntPoint point, u3
     encoder.encode(static_cast<i32>(point.x - window.frame.x));
     encoder.encode(static_cast<i32>(point.y - window.frame.y));
     encoder.encode(buttons);
+    encoder.encode(m_modifiers);
     encoder.encode(static_cast<i32>(wheel_x));
     encoder.encode(static_cast<i32>(wheel_y));
     send_to(*window.client, encoder);
@@ -709,6 +929,25 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
     if (moved)
         m_screen.move_cursor({ point.x * m_screen.scale(), point.y * m_screen.scale() });
 
+    if (m_drag) {
+        drag_pointer_changed(point, released);
+        update_cursor();
+        schedule_frame();
+        return;
+    }
+    if (m_grab) {
+        auto& grab = *m_grab;
+        if (moved)
+            send_mouse(grab, MouseKind::Moved, point, buttons);
+        if (pressed)
+            send_mouse(grab, MouseKind::Pressed, point, buttons);
+        if (released)
+            send_mouse(grab, MouseKind::Released, point, buttons);
+        update_cursor();
+        schedule_frame();
+        return;
+    }
+
     switch (m_gesture) {
     case Gesture::Moving:
         if (m_gesture_window && moved) {
@@ -716,6 +955,7 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
             // The title bar stays reachable.
             frame.y = max(frame.y, 0);
             move_window_to(*m_gesture_window, frame);
+            send_moved(*m_gesture_window);
         }
         break;
     case Gesture::Resizing:
@@ -737,14 +977,11 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
             } else if (m_gesture_edges & edge_bottom) {
                 frame.height = max(frame.height + dy, minimum_height);
             }
+            bool origin_changed = frame.x != m_gesture_window->frame.x || frame.y != m_gesture_window->frame.y;
             move_window_to(*m_gesture_window, frame);
-            if (m_gesture_window->client) {
-                IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Resized));
-                encoder.encode(m_gesture_window->id);
-                encoder.encode(static_cast<i32>(frame.width));
-                encoder.encode(static_cast<i32>(frame.height));
-                send_to(*m_gesture_window->client, encoder);
-            }
+            if (origin_changed)
+                send_moved(*m_gesture_window);
+            send_resized(*m_gesture_window);
         }
         break;
     case Gesture::ContentPress:
@@ -771,23 +1008,14 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
                         // Into the Dock, once there is one; out of sight until then.
                         m_gesture_window->visible = false;
                         m_compositor.invalidate_window(*m_gesture_window);
+                        m_gesture_window->active = false;
                         m_active = nullptr;
-                        for (size_t i = m_windows.size(); i > 0; --i) {
-                            if (m_windows[i - 1]->visible) {
-                                activate(m_windows[i - 1]);
-                                break;
-                            }
-                        }
+                        activate_frontmost();
                     } else if (button == WindowButton::Zoom) {
                         auto screen_points = m_screen.points();
                         move_window_to(*m_gesture_window, { 0, 0, screen_points.width, screen_points.height });
-                        if (m_gesture_window->client) {
-                            IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Resized));
-                            encoder.encode(m_gesture_window->id);
-                            encoder.encode(static_cast<i32>(screen_points.width));
-                            encoder.encode(static_cast<i32>(screen_points.height));
-                            send_to(*m_gesture_window->client, encoder);
-                        }
+                        send_moved(*m_gesture_window);
+                        send_resized(*m_gesture_window);
                     }
                 }
             } else if (m_gesture == Gesture::ContentPress) {
@@ -802,14 +1030,15 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
 
     if (pressed && m_gesture == Gesture::None) {
         auto* window = window_at(point);
-        activate(window);
+        if (!window || !window->is_popup())
+            activate(window);
         if (window) {
             m_gesture_window = window;
             m_gesture_start = point;
             m_gesture_frame = window->frame;
             auto button = button_at(*window, point);
             int edges = resize_edges_at(*window, point);
-            bool in_title_bar = window->is_titled() && point.y < window->frame.y + m_theme.title_bar_height;
+            bool in_title_bar = window->is_titled() && !window->is_unified() && point.y < window->frame.y + title_bar_height(*window);
             if (button != WindowButton::None) {
                 m_gesture = Gesture::ButtonPress;
                 window->pressed_button = button;
@@ -848,7 +1077,7 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
             float top = static_cast<float>(window->frame.y);
             float diameter = m_theme.traffic_light_diameter;
             float group_right = static_cast<float>(window->frame.x) + m_theme.traffic_light_inset + 3 * diameter + 2 * m_theme.traffic_light_spacing;
-            float group_top = top + (static_cast<float>(m_theme.title_bar_height) - diameter) / 2;
+            float group_top = top + (static_cast<float>(title_bar_height(*window)) - diameter) / 2;
             bool over = static_cast<float>(point.x) >= static_cast<float>(window->frame.x) + m_theme.traffic_light_inset
                 && static_cast<float>(point.x) < group_right && static_cast<float>(point.y) >= group_top && static_cast<float>(point.y) < group_top + diameter;
             if (over != window->lights_hovered) {
@@ -857,12 +1086,64 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
             }
         }
     }
+    update_cursor();
     schedule_frame();
+}
+
+void Server::send_drag(ServerWindow& window, Window::DragPhase phase, IntPoint point, bool with_data)
+{
+    if (!window.client || !m_drag)
+        return;
+    IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Drag));
+    encoder.encode(window.id);
+    encoder.encode(static_cast<u8>(phase));
+    encoder.encode(static_cast<i32>(point.x - window.frame.x));
+    encoder.encode(static_cast<i32>(point.y - window.frame.y));
+    encoder.encode(m_drag->type.view());
+    if (with_data)
+        encoder.encode(m_drag->data.span());
+    else
+        encoder.encode(ReadonlyBytes {});
+    send_to(*window.client, encoder);
+}
+
+void Server::drag_pointer_changed(IntPoint point, u32 released)
+{
+    auto& drag = *m_drag;
+    move_window_to(*drag.image, drag.image->frame.size().is_empty() ? drag.image->frame : IntRect { point.x + drag.image_offset.x, point.y + drag.image_offset.y, drag.image->frame.width, drag.image->frame.height });
+    auto* over = window_at(point);
+    if (over != drag.target) {
+        if (drag.target)
+            send_drag(*drag.target, Window::DragPhase::Left, point, false);
+        drag.target = over;
+        if (over) {
+            over->accepts_drop = false;
+            send_drag(*over, Window::DragPhase::Entered, point, false);
+        }
+    } else if (over) {
+        send_drag(*over, Window::DragPhase::Moved, point, false);
+    }
+    if (!released)
+        return;
+    bool accepted = drag.target && drag.target->accepts_drop;
+    if (accepted)
+        send_drag(*drag.target, Window::DragPhase::Dropped, point, true);
+    else if (drag.target)
+        send_drag(*drag.target, Window::DragPhase::Left, point, false);
+    auto* source = drag.source;
+    m_drag = nullptr;
+    if (source && source->client) {
+        IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::DragFinished));
+        encoder.encode(source->id);
+        encoder.encode(accepted);
+        send_to(*source->client, encoder);
+    }
 }
 
 void Server::wheel_moved(int x, int y)
 {
-    if (auto* window = window_at(m_pointer))
+    auto* window = m_grab ? m_grab : window_at(m_pointer);
+    if (window)
         send_mouse(*window, MouseKind::Wheel, m_pointer, m_buttons, x, y);
 }
 

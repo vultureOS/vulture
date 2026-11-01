@@ -15,10 +15,11 @@
 
 namespace Window {
 
-Connection::Connection(WindowServerProxy server, Gfx::IntSize screen, int scale)
+Connection::Connection(WindowServerProxy server, Gfx::IntSize screen, int scale, String appearance)
     : m_server(move(server))
     , m_screen_size(screen)
     , m_scale(scale)
+    , m_appearance(move(appearance))
 {
 }
 
@@ -30,7 +31,7 @@ ErrorOr<NonnullOwnPtr<Connection>> Connection::connect(Core::EventLoop& loop)
     auto answer = TRY(server.connect(move(events.send)));
     if (answer.error)
         return Error::from_errno(answer.error);
-    auto* connection = new (Base::nothrow) Connection(move(server), { answer.width, answer.height }, answer.scale);
+    auto* connection = new (Base::nothrow) Connection(move(server), { answer.width, answer.height }, answer.scale, move(answer.appearance));
     if (!connection)
         return Error::from_errno(ENOMEM);
     auto owned = adopt_own(*connection);
@@ -50,10 +51,39 @@ Window* Connection::window_with_id(u32 id)
     return nullptr;
 }
 
-void Connection::mouse(IPC::Sender const&, u32 id, u8 kind, i32 x, i32 y, u32 buttons, i32 wheel_x, i32 wheel_y)
+void Connection::mouse(IPC::Sender const&, u32 id, u8 kind, i32 x, i32 y, u32 buttons, u32 modifiers, i32 wheel_x, i32 wheel_y)
 {
     if (auto* window = window_with_id(id); window && window->on_mouse)
-        window->on_mouse({ static_cast<MouseKind>(kind), { x, y }, buttons, wheel_x, wheel_y });
+        window->on_mouse({ static_cast<MouseKind>(kind), { x, y }, buttons, modifiers, wheel_x, wheel_y });
+}
+
+void Connection::moved(IPC::Sender const&, u32 id, i32 x, i32 y)
+{
+    auto* window = window_with_id(id);
+    if (!window)
+        return;
+    window->m_position = { x, y };
+    if (window->on_move)
+        window->on_move({ x, y });
+}
+
+void Connection::appearance_changed(IPC::Sender const&, String name)
+{
+    m_appearance = move(name);
+    if (on_appearance_change)
+        on_appearance_change(m_appearance.view());
+}
+
+void Connection::drag(IPC::Sender const&, u32 id, u8 phase, i32 x, i32 y, String type, Vector<u8> data)
+{
+    if (auto* window = window_with_id(id); window && window->on_drag)
+        window->on_drag({ static_cast<DragPhase>(phase), { x, y }, type.view(), data.span() });
+}
+
+void Connection::drag_finished(IPC::Sender const&, u32 id, bool accepted)
+{
+    if (auto* window = window_with_id(id); window && window->on_drag_finished)
+        window->on_drag_finished(accepted);
 }
 
 void Connection::key(IPC::Sender const&, u32 id, bool pressed, u16 code, u32 modifiers, String text)
@@ -93,10 +123,11 @@ void Connection::presented(IPC::Sender const&, u32 id)
         window->m_waiting_for_present = false;
 }
 
-Window::Window(Connection& connection, u32 id, Gfx::IntSize size)
+Window::Window(Connection& connection, u32 id, Gfx::IntRect frame)
     : m_connection(connection)
     , m_id(id)
-    , m_size(size)
+    , m_size(frame.size())
+    , m_position(frame.origin())
 {
 }
 
@@ -105,7 +136,7 @@ ErrorOr<NonnullOwnPtr<Window>> Window::create(Connection& connection, StringView
     auto answer = TRY(connection.server().create_window(title, frame.x, frame.y, frame.width, frame.height, flags));
     if (answer.error)
         return Error::from_errno(answer.error);
-    auto* window = new (Base::nothrow) Window(connection, answer.window, frame.size());
+    auto* window = new (Base::nothrow) Window(connection, answer.window, frame);
     if (!window)
         return Error::from_errno(ENOMEM);
     auto owned = adopt_own(*window);
@@ -193,6 +224,61 @@ void Window::set_title(StringView title)
 void Window::set_frame(Gfx::IntRect frame)
 {
     (void)m_connection.server().set_frame(m_id, frame.x, frame.y, frame.width, frame.height);
+    m_position = frame.origin();
+    if (frame.size() == m_size)
+        return;
+    // Pixels for the new size, as when the window manager resizes it.
+    m_size = frame.size();
+    release_surface();
+    (void)make_surface(m_size);
+}
+
+void Window::activate()
+{
+    (void)m_connection.server().activate(m_id);
+}
+
+void Window::set_level(int level)
+{
+    (void)m_connection.server().set_level(m_id, level);
+}
+
+void Window::set_corner_radius(int radius)
+{
+    (void)m_connection.server().set_corner_radius(m_id, radius);
+}
+
+void Window::set_title_bar_height(int height)
+{
+    (void)m_connection.server().set_title_bar(m_id, height);
+}
+
+void Window::begin_move()
+{
+    (void)m_connection.server().begin_move(m_id);
+}
+
+void Window::grab_pointer(bool grab)
+{
+    (void)m_connection.server().grab_pointer(m_id, grab);
+}
+
+void Window::set_cursor(CursorShape shape)
+{
+    if (shape == m_cursor)
+        return;
+    m_cursor = shape;
+    (void)m_connection.server().set_cursor(m_id, static_cast<i32>(shape));
+}
+
+void Window::begin_drag(Window& image, StringView type, ReadonlyBytes data)
+{
+    (void)m_connection.server().begin_drag(m_id, image.id(), type, data);
+}
+
+void Window::accept_drop(bool accepted)
+{
+    (void)m_connection.server().accept_drop(m_id, accepted);
 }
 
 void Window::show(bool visible)

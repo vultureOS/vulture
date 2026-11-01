@@ -15,6 +15,7 @@
 namespace WindowServer {
 
 struct Client;
+struct WindowShape;
 
 struct MaterialRegion {
     Gfx::IntRect rect; // Points, from the window's top-left.
@@ -37,6 +38,12 @@ struct ServerWindow {
     u32 flags { 0 };
     bool visible { false };
     bool active { false };
+    int level { Window::LevelNormal };
+    WindowShape const* shape { nullptr };
+    Window::CursorShape cursor { Window::CursorShape::Arrow };
+    // In points; 0 for the theme's.
+    int title_bar_override { 0 };
+    bool accepts_drop { false };
 
     // The client's memory, mapped here, and the two buffers in it.
     void* memory { nullptr };
@@ -57,6 +64,8 @@ struct ServerWindow {
     [[nodiscard]] bool is_bare() const { return flags & Window::WindowBare; }
     [[nodiscard]] bool is_titled() const { return flags & Window::WindowTitled; }
     [[nodiscard]] bool is_resizable() const { return flags & Window::WindowResizable; }
+    [[nodiscard]] bool is_popup() const { return flags & Window::WindowPopup; }
+    [[nodiscard]] bool is_unified() const { return flags & Window::WindowUnifiedTitle; }
     [[nodiscard]] Gfx::Bitmap const* shown_surface() const { return has_presented ? buffers[shown_buffer].ptr() : nullptr; }
 };
 

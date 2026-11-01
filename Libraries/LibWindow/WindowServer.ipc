@@ -3,14 +3,30 @@
 endpoint WindowServer
 {
     // A client's first message: where its events go. Answers the screen's size
-    // in points, and its scale.
-    connect(Port events) => (i32 error, i32 width, i32 height, i32 scale)
+    // in points, its scale, and the appearance ("Light" or "Dark").
+    connect(Port events) => (i32 error, i32 width, i32 height, i32 scale, String appearance)
 
     create_window(String title, i32 x, i32 y, i32 width, i32 height, u32 flags) => (i32 error, u32 window)
     destroy_window(u32 window) =|
     set_title(u32 window, String title) =|
     set_frame(u32 window, i32 x, i32 y, i32 width, i32 height) =|
     show(u32 window, bool visible) =|
+    // Makes it the active window, in front.
+    activate(u32 window) =|
+    set_level(u32 window, i32 level) =|
+    // In points; negative for the theme's.
+    set_corner_radius(u32 window, i32 radius) =|
+    // In points; how far down the title bar reaches (0 for the theme's height).
+    set_title_bar(u32 window, i32 height) =|
+    // While pressed in the window: the rest of this press moves the window.
+    begin_move(u32 window) =|
+    // Every pointer event goes to this window until it lets go, wherever the pointer
+    // is (a menu closing on a click elsewhere). Ends any press underway.
+    grab_pointer(u32 window, bool grab) =|
+    // The pointer's shape while over this window: see <LibWindow/Protocol.h>.
+    set_cursor(u32 window, i32 shape) =|
+    // "Light" or "Dark", for everyone.
+    set_appearance(String name) => (i32 error)
 
     // The window's pixels: shared memory holding two buffers of this size, one
     // after the other, premultiplied BGRA. One is shown; the client draws in
@@ -25,6 +41,12 @@ endpoint WindowServer
     // the window's top-left), material, for each.
     set_materials(u32 window, Vector<i32> regions) =|
 
+    // While pressed in the window: drags this data, with `image` (another of its
+    // windows) following the pointer, until the button is let go. Windows under it
+    // hear `drag`; if the last one says accept_drop(true), it gets the data.
+    begin_drag(u32 window, u32 image, String type, ByteBuffer data) =|
+    accept_drop(u32 window, bool accepted) =|
+
     // For tests and tools: only root may. As if the pointer moved here (points).
     inject_pointer(i32 x, i32 y, u32 buttons) =|
     statistics() => (u64 frames, u64 compose_microseconds, u64 flush_microseconds, u64 pixels)
@@ -36,10 +58,17 @@ endpoint WindowClient
 {
     // kind: see <LibWindow/Protocol.h>. Position in points from the window's
     // top-left.
-    mouse(u32 window, u8 kind, i32 x, i32 y, u32 buttons, i32 wheel_x, i32 wheel_y) =|
+    mouse(u32 window, u8 kind, i32 x, i32 y, u32 buttons, u32 modifiers, i32 wheel_x, i32 wheel_y) =|
     key(u32 window, bool pressed, u16 code, u32 modifiers, String text) =|
     resized(u32 window, i32 width, i32 height) =|
+    // By the window manager. (Where its owner put it, it knows.)
+    moved(u32 window, i32 x, i32 y) =|
     close_requested(u32 window) =|
     activated(u32 window, bool active) =|
     presented(u32 window) =|
+    appearance_changed(String name) =|
+    // phase: see <LibWindow/Protocol.h>. The data comes only with Dropped.
+    drag(u32 window, u8 phase, i32 x, i32 y, String type, ByteBuffer data) =|
+    // To the window it started from.
+    drag_finished(u32 window, bool accepted) =|
 }
