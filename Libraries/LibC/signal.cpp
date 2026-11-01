@@ -111,3 +111,8 @@ int sigismember(sigset_t const* set, int signal)
     return (*set >> signal) & 1;
 }
 }
+
+char const* const sys_signame[NSIG] = {
+    "zero", "hup", "int", "quit", "ill", "trap", "abrt", "bus", "fpe", "kill", "usr1", "segv", "usr2", "pipe", "alrm", "term",
+    "stkflt", "chld", "cont", "stop", "tstp", "ttin", "ttou", "urg", "xcpu", "xfsz", "vtalrm", "prof", "winch", "io", "pwr", "sys",
+};

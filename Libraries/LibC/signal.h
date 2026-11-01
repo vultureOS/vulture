@@ -47,4 +47,7 @@ int sigpending(sigset_t* set);
 int killpg(pid_t group, int signal);
 void psignal(int signal, char const* prefix);
 
+// Each signal's name without "SIG", in lower case ("hup"), as BSD has it.
+extern char const* const sys_signame[NSIG];
+
 __END_DECLS

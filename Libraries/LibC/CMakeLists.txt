@@ -17,6 +17,7 @@ add_library(LibC STATIC
     locale.cpp
     malloc.cpp
     pwd.cpp
+    regex.cpp
     setjmp.S
     signal.cpp
     start.cpp
