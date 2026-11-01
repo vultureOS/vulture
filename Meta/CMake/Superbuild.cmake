@@ -8,8 +8,22 @@
 
 include(ExternalProject)
 
-set(VULTURE_LLVM_ROOT "/opt/homebrew/opt/llvm@22" CACHE PATH "LLVM 22 installation providing clang")
-set(VULTURE_LLD_ROOT "/opt/homebrew/opt/lld@22" CACHE PATH "LLD 22 installation providing ld.lld and lld-link")
+# LLVM 22 where Homebrew (Apple silicon or Intel) or apt.llvm.org puts it.
+set(vulture_default_llvm_root "/opt/homebrew/opt/llvm@22")
+set(vulture_default_lld_root "/opt/homebrew/opt/lld@22")
+foreach(candidate /opt/homebrew/opt /usr/local/opt)
+    if(EXISTS ${candidate}/llvm@22/bin/clang++)
+        set(vulture_default_llvm_root ${candidate}/llvm@22)
+        set(vulture_default_lld_root ${candidate}/lld@22)
+        break()
+    endif()
+endforeach()
+if(NOT EXISTS ${vulture_default_llvm_root}/bin/clang++ AND EXISTS /usr/lib/llvm-22/bin/clang++)
+    set(vulture_default_llvm_root /usr/lib/llvm-22)
+    set(vulture_default_lld_root /usr/lib/llvm-22)
+endif()
+set(VULTURE_LLVM_ROOT ${vulture_default_llvm_root} CACHE PATH "LLVM 22 installation providing clang")
+set(VULTURE_LLD_ROOT ${vulture_default_lld_root} CACHE PATH "LLD 22 installation providing ld.lld and lld-link")
 
 set(VULTURE_ESP_DIR ${CMAKE_BINARY_DIR}/esp)
 

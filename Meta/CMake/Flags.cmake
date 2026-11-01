@@ -39,6 +39,11 @@ if(VULTURE_PART STREQUAL "host")
     # LibTest supplies the C++ runtime pieces.
     vulture_add_cxx_options(-O1 -fsanitize=address,undefined -fno-sanitize-recover=all)
     add_link_options(-fsanitize=address,undefined -nostdlib++)
+    if(NOT CMAKE_HOST_APPLE)
+        # Elsewhere the sanitizers' runtimes are linked in whole, and their
+        # C++ parts would bring a second operator new beside LibTest's.
+        add_link_options(-fno-sanitize-link-c++-runtime)
+    endif()
 elseif(VULTURE_PART STREQUAL "uefi")
     vulture_add_cxx_options(-O2 -ffreestanding -fno-stack-protector -mno-stack-arg-probe)
 elseif(VULTURE_PART STREQUAL "userland")

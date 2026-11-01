@@ -39,8 +39,21 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-llvm_root="${VULTURE_LLVM_ROOT:-/opt/homebrew/opt/llvm@22}"
-lld_root="${VULTURE_LLD_ROOT:-/opt/homebrew/opt/lld@22}"
+# LLVM 22 where Homebrew (Apple silicon or Intel) or apt.llvm.org puts it,
+# unless VULTURE_LLVM_ROOT and VULTURE_LLD_ROOT say otherwise.
+find_first() {
+    local tool="$1" candidate
+    shift
+    for candidate in "$@"; do
+        if [ -x "$candidate/bin/$tool" ]; then
+            echo "$candidate"
+            return
+        fi
+    done
+    echo "$1"
+}
+llvm_root="${VULTURE_LLVM_ROOT:-$(find_first clang++ /opt/homebrew/opt/llvm@22 /usr/local/opt/llvm@22 /usr/lib/llvm-22)}"
+lld_root="${VULTURE_LLD_ROOT:-$(find_first ld.lld /opt/homebrew/opt/lld@22 /usr/local/opt/lld@22 /usr/lib/llvm-22)}"
 
 # Name every missing tool at once, with the command that installs it.
 missing=()
@@ -50,7 +63,12 @@ command -v ninja > /dev/null || missing+=(ninja)
 [ -x "$lld_root/bin/ld.lld" ] || missing+=(lld@22)
 command -v "${QEMU:-qemu-system-aarch64}" > /dev/null || missing+=(qemu)
 if [ ${#missing[@]} -gt 0 ]; then
-    echo "build.sh: missing ${missing[*]}; install with: brew install ${missing[*]}" >&2
+    if [ "$(uname -s)" = "Darwin" ]; then
+        echo "build.sh: missing ${missing[*]}; install with: brew install ${missing[*]}" >&2
+    else
+        echo "build.sh: missing ${missing[*]}; on Debian or Ubuntu, add LLVM 22 from https://apt.llvm.org, then:" >&2
+        echo "  sudo apt install clang-22 lld-22 llvm-22 libclang-rt-22-dev cmake ninja-build qemu-system-arm qemu-efi-aarch64" >&2
+    fi
     exit 1
 fi
 

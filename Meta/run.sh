@@ -10,12 +10,15 @@
 #
 #   --build-dir DIR     build directory (default: <repo>/build)
 #   --boot-args TEXT    kernel command line, e.g. "-v" for a verbose boot
-#   --tcg               software emulation instead of Apple Hypervisor (HVF)
+#   --tcg               software emulation (TCG) instead of the hypervisor
+#                       (HVF on macOS, KVM on AArch64 Linux), which is
+#                       otherwise used where there is one
 #   --gdb               wait for a debugger on localhost:1234
 #   --headless          no window; the serial console is captured and printed
 #   --expect TEXT       with --headless: TEXT must appear on the console
 #                       (repeatable; succeeds once all have appeared)
-#   --timeout SECONDS   with --headless: give up after SECONDS (default: 60)
+#   --timeout SECONDS   with --headless: give up after SECONDS (default: 60;
+#                       times VULTURE_TCG_TIMEOUT_SCALE, default 8, with TCG)
 #   --wait-for-exit     with --headless: keep running until the guest powers
 #                       off by itself; fail if it has not by the timeout
 #   --screenshot FILE   with --headless: save the screen as PNG once the
@@ -33,13 +36,18 @@
 #   --kill              with --headless: once the expected text appears, cut
 #                       the power (SIGKILL) instead of shutting QEMU down
 #   --kill-delay SECONDS  with --kill: wait this long first (may be fractional)
+#
+# Environment: QEMU (the emulator), VULTURE_ACCEL (hvf, kvm or tcg),
+# VULTURE_FIRMWARE_CODE and VULTURE_FIRMWARE_VARS (the UEFI firmware and its
+# variable store template; found under Homebrew's or Debian's names
+# otherwise), VULTURE_TCG_TIMEOUT_SCALE.
 
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="$root_dir/build"
 boot_args=""
-accelerator="hvf"
+accelerator="${VULTURE_ACCEL:-}"
 gdb=0
 headless=0
 expectations=()
@@ -74,14 +82,55 @@ while [ $# -gt 0 ]; do
         --kill) kill_power=1; shift ;;
         --kill-delay) kill_delay="$2"; shift 2 ;;
         --) shift; extra_args=("$@"); break ;;
-        -h|--help) sed -n '8,37p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '8,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "run.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
 done
 
 qemu="${QEMU:-qemu-system-aarch64}"
-firmware_dir="${VULTURE_FIRMWARE_DIR:-/opt/homebrew/share/qemu}"
 esp_dir="$build_dir/esp"
+
+# The hypervisor where there is one: HVF on an Apple silicon Mac that offers
+# it (not inside most virtual machines, CI runners included), KVM on AArch64
+# Linux; software emulation (TCG) everywhere else.
+if [ -z "$accelerator" ]; then
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-arm64)
+            if [ "$(sysctl -n kern.hv_support 2>/dev/null)" = "1" ]; then accelerator="hvf"; else accelerator="tcg"; fi ;;
+        Linux-aarch64)
+            if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then accelerator="kvm"; else accelerator="tcg"; fi ;;
+        *) accelerator="tcg" ;;
+    esac
+fi
+# Emulated, everything takes several times as long.
+if [ "$accelerator" = "tcg" ]; then
+    timeout_seconds=$((timeout_seconds * ${VULTURE_TCG_TIMEOUT_SCALE:-8}))
+fi
+
+# The UEFI firmware for QEMU's virt machine and the template of its variable
+# store: QEMU's own copies (Homebrew, or a QEMU built from source), or the
+# AAVMF ones Debian and Ubuntu package (qemu-efi-aarch64).
+firmware_code="${VULTURE_FIRMWARE_CODE:-}"
+firmware_vars="${VULTURE_FIRMWARE_VARS:-}"
+if [ -z "$firmware_code" ] || [ -z "$firmware_vars" ]; then
+    for candidate in \
+        "${VULTURE_FIRMWARE_DIR:-/nonexistent}/edk2-aarch64-code.fd:${VULTURE_FIRMWARE_DIR:-/nonexistent}/edk2-arm-vars.fd" \
+        "/opt/homebrew/share/qemu/edk2-aarch64-code.fd:/opt/homebrew/share/qemu/edk2-arm-vars.fd" \
+        "/usr/local/share/qemu/edk2-aarch64-code.fd:/usr/local/share/qemu/edk2-arm-vars.fd" \
+        "/usr/share/qemu/edk2-aarch64-code.fd:/usr/share/qemu/edk2-arm-vars.fd" \
+        "/usr/share/AAVMF/AAVMF_CODE.fd:/usr/share/AAVMF/AAVMF_VARS.fd"; do
+        if [ -f "${candidate%%:*}" ] && [ -f "${candidate#*:}" ]; then
+            firmware_code="${candidate%%:*}"
+            firmware_vars="${candidate#*:}"
+            break
+        fi
+    done
+fi
+if [ -z "$firmware_code" ] || [ ! -f "$firmware_code" ] || [ ! -f "$firmware_vars" ]; then
+    echo "run.sh: no AArch64 UEFI firmware found; install QEMU (brew install qemu, or apt install qemu-efi-aarch64)" >&2
+    echo "        or set VULTURE_FIRMWARE_CODE and VULTURE_FIRMWARE_VARS" >&2
+    exit 1
+fi
 state_dir="$build_dir/qemu"
 kernels_dir="$esp_dir/System/Library/Kernels"
 
@@ -102,7 +151,7 @@ fi
 # The firmware keeps its settings (boot order etc.) in a writable variable store.
 mkdir -p "$state_dir"
 if [ ! -f "$state_dir/efivars.fd" ]; then
-    cp "$firmware_dir/edk2-arm-vars.fd" "$state_dir/efivars.fd"
+    cp "$firmware_vars" "$state_dir/efivars.fd"
 fi
 vars_file="$state_dir/efivars.fd"
 
@@ -172,7 +221,7 @@ args=(
     -machine virt,gic-version=3,acpi=off
     -smp 8
     -m 4G
-    -drive "if=pflash,format=raw,unit=0,readonly=on,file=$firmware_dir/edk2-aarch64-code.fd"
+    -drive "if=pflash,format=raw,unit=0,readonly=on,file=$firmware_code"
     -drive "if=pflash,format=raw,unit=1,file=$vars_file"
     "${boot_disk_args[@]}"
     # ramfb gives the firmware a linear framebuffer for the boot console; virtio-gpu
@@ -186,11 +235,11 @@ args=(
     -nic none
 )
 
-if [ "$accelerator" = "hvf" ]; then
-    args+=(-accel hvf -cpu host)
-else
-    args+=(-accel tcg,thread=multi -cpu max)
-fi
+case "$accelerator" in
+    hvf | kvm) args+=(-accel "$accelerator" -cpu host) ;;
+    tcg) args+=(-accel tcg,thread=multi -cpu max) ;;
+    *) echo "run.sh: unknown accelerator '$accelerator' (hvf, kvm or tcg)" >&2; exit 2 ;;
+esac
 
 if [ "$gdb" -eq 1 ]; then
     args+=(-s -S)
