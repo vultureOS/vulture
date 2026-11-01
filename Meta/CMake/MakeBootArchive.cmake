@@ -13,29 +13,42 @@ file(GLOB_RECURSE files LIST_DIRECTORIES true RELATIVE ${ROOT} ${ROOT}/*)
 string(REPLACE "[" "<open-bracket>" files "${files}")
 string(REPLACE "]" "<close-bracket>" files "${files}")
 
-# Directories whose mode is not 0755, as macOS has them.
-set(directory_modes
+# Entries whose mode is not the usual one (0755 for directories and
+# programs, 0644 for other files), as macOS has them.
+set(special_modes
     "tmp=1777"
     "var/tmp=1777"
     "Users/Shared=1777"
-    "var/root=750")
+    "var/root=750"
+    "var/db/sudo=700"
+    "etc/master.passwd=600"
+    "usr/bin/login=4555"
+    "usr/bin/passwd=4555"
+    "usr/bin/su=4755"
+    "usr/bin/sudo=4755")
 
-# Directories go in as "path/<tab>mode", files as "path".
+# Directories go in as "path/<tab>mode", files as "path" or
+# "path<tab>mode".
 set(entries "")
 foreach(path IN LISTS files)
+    set(mode "")
+    foreach(special IN LISTS special_modes)
+        string(REPLACE "=" ";" pair "${special}")
+        list(GET pair 0 special_path)
+        list(GET pair 1 special_mode)
+        if(path STREQUAL special_path)
+            set(mode ${special_mode})
+        endif()
+    endforeach()
     if(IS_DIRECTORY ${ROOT}/${path})
-        set(mode 755)
-        foreach(special IN LISTS directory_modes)
-            string(REPLACE "=" ";" pair "${special}")
-            list(GET pair 0 special_path)
-            list(GET pair 1 special_mode)
-            if(path STREQUAL special_path)
-                set(mode ${special_mode})
-            endif()
-        endforeach()
+        if(mode STREQUAL "")
+            set(mode 755)
+        endif()
         list(APPEND entries "${path}/\t${mode}")
-    else()
+    elseif(mode STREQUAL "")
         list(APPEND entries "${path}")
+    else()
+        list(APPEND entries "${path}\t${mode}")
     endif()
 endforeach()
 list(SORT entries)

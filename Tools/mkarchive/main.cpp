@@ -6,13 +6,14 @@
 
 #include <LibArchive/Tar.h>
 #include <LibBase/Format.h>
+#include <LibBase/Optional.h>
 
 // mkarchive OUTPUT ROOT FILE... | mkarchive OUTPUT ROOT @LIST
 //
 // Packs files (paths relative to ROOT) into a ustar boot archive, adding
 // each parent directory once. ELF files become executable (0755), others
-// readable (0644). A path ending in "/" is a directory, optionally
-// followed by a tab and its octal mode (0755 if not). The build runs it
+// readable (0644). A path ending in "/" is a directory (0755). Either may
+// be followed by a tab and the octal mode it should have instead. The build runs it
 // with the root filesystem's list, one entry per line in LIST (names like
 // "[" do not survive a CMake list).
 
@@ -96,17 +97,19 @@ static bool add_directory_once(Archive::TarWriter& writer, StringView path, u32 
 
 static int add_file(Archive::TarWriter& writer, StringView root, StringView relative)
 {
-    // A directory: "path/" or "path/<tab>mode".
-    u32 directory_mode = 0755;
+    // "path", "path/" (a directory), either with "<tab>mode".
+    Optional<u32> given_mode;
     for (size_t i = 0; i < relative.length(); ++i) {
         if (relative[i] != '\t')
             continue;
-        directory_mode = 0;
+        u32 mode = 0;
         for (size_t j = i + 1; j < relative.length() && relative[j] >= '0' && relative[j] <= '7'; ++j)
-            directory_mode = directory_mode * 8 + static_cast<u32>(relative[j] - '0');
+            mode = mode * 8 + static_cast<u32>(relative[j] - '0');
+        given_mode = mode;
         relative = relative.substring_view(0, i);
         break;
     }
+    u32 directory_mode = given_mode.value_or(0755);
     bool is_directory = relative.length() > 1 && relative[relative.length() - 1] == '/';
     if (is_directory)
         relative = relative.substring_view(0, relative.length() - 1);
@@ -142,7 +145,7 @@ static int add_file(Archive::TarWriter& writer, StringView root, StringView rela
 
     ReadonlyBytes bytes { data, static_cast<size_t>(size) };
     bool is_elf = bytes.size() >= 4 && bytes[0] == 0x7f && bytes[1] == 'E' && bytes[2] == 'L' && bytes[3] == 'F';
-    auto result = writer.add_file(relative, is_elf ? 0755 : 0644, bytes);
+    auto result = writer.add_file(relative, given_mode.value_or(is_elf ? 0755 : 0644), bytes);
     free(data);
     if (result.is_error())
         return fail("{}: {}", relative, result.error());

@@ -1,0 +1,4 @@
+root:*:0:0::0:0:System Administrator:/var/root:/bin/sh
+daemon:*:1:1::0:0:System Services:/var/root:/usr/bin/false
+nobody:*:4294967294:4294967294::0:0:Unprivileged User:/var/empty:/usr/bin/false
+vulture:$pbkdf2-sha512$45000$7a16801d43d2ae1ce128e2b851b8d672$89a0ee3c88aabca16661d9d51804c52cf194f89179c98366568bf15d0e87a8b6c50586b80a808a3fe74bb85121abf1cd8792d928e1cd1d5604ca6e982252c97f:501:20::0:0:Vulture User:/Users/vulture:/bin/vsh
