@@ -11,10 +11,12 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/port.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -122,6 +124,111 @@ Supervisor::Supervisor(Core::EventLoop& loop)
     : m_loop(loop)
 {
     m_loop.on_signal(SIGCHLD, [this] { reap(); });
+    // Our bootstrap port becomes everyone's we start.
+    auto bootstrap = IPC::create_port();
+    if (bootstrap.is_error()) {
+        log("Could not make the bootstrap port: %s", strerror(bootstrap.error().code()));
+        return;
+    }
+    if (bootstrap_port_set(bootstrap.value().send.fd()) < 0)
+        log("Could not set the bootstrap port: %s", strerror(errno));
+    m_bootstrap = adopt_own(*new (Base::nothrow) IPC::Listener(m_loop, move(bootstrap.value().receive), [this](IPC::ReceivedMessage& message) {
+        if (auto result = handle(message); result.is_error())
+            log("Bootstrap: a malformed message from process %d", message.sender.pid);
+    }));
+}
+
+Supervisor::Service* Supervisor::find_service(StringView name)
+{
+    for (auto& service : m_services) {
+        if (service->name.view() == name)
+            return service.ptr();
+    }
+    return nullptr;
+}
+
+void Supervisor::watch_for_demand(Service& service)
+{
+    if (service.watch || !service.job || !service.receive.is_valid() || m_stopping)
+        return;
+    Service* pointer = &service;
+    service.watch = m_loop.watch(service.receive.fd(), Core::EventLoop::Interest::Read, [this, pointer] {
+        m_loop.unwatch(pointer->watch);
+        pointer->watch = 0;
+        Job& job = *pointer->job;
+        if (job.pid || job.restart_timer || m_stopping)
+            return;
+        // On demand, but no more often than the throttle allows.
+        u64 since = now_milliseconds() - job.last_started_at;
+        u64 throttle = static_cast<u64>(job.throttle_interval) * 1000;
+        if (job.runs > 0 && since < throttle) {
+            Job* waiting = &job;
+            job.restart_timer = m_loop.add_timer(throttle - since, false, [this, waiting] { spawn(*waiting); });
+            return;
+        }
+        spawn(job);
+    });
+}
+
+void Supervisor::stop_watching(Job& job)
+{
+    for (auto& service : m_services) {
+        if (service->job == &job && service->watch) {
+            m_loop.unwatch(service->watch);
+            service->watch = 0;
+        }
+    }
+}
+
+BootstrapEndpoint::LookUpAnswer Supervisor::look_up(IPC::Sender const&, String name)
+{
+    auto* service = find_service(name.view());
+    if (!service)
+        return { ENOENT, {} };
+    // A registered service whose port is gone is gone too.
+    if (!service->job) {
+        struct pollfd poller { service->send.fd(), POLLOUT, 0 };
+        if (poll(&poller, 1, 0) == 1 && (poller.revents & POLLHUP)) {
+            m_services.remove_all_matching([&](auto const& candidate) { return candidate.ptr() == service; });
+            return { ENOENT, {} };
+        }
+    }
+    auto copy = service->send.duplicate();
+    if (copy.is_error())
+        return { copy.error().code(), {} };
+    return { 0, copy.release_value() };
+}
+
+BootstrapEndpoint::CheckInAnswer Supervisor::check_in(IPC::Sender const& sender, String name)
+{
+    auto* service = find_service(name.view());
+    if (!service || !service->receive.is_valid())
+        return { ENOENT, {} };
+    if (!service->job || service->job->pid != sender.pid)
+        return { EPERM, {} };
+    auto copy = service->receive.duplicate();
+    if (copy.is_error())
+        return { copy.error().code(), {} };
+    return { 0, copy.release_value() };
+}
+
+i32 Supervisor::register_service(IPC::Sender const&, String name, IPC::Port service_port)
+{
+    if (find_service(name.view())) {
+        // Taken, unless by a registered service that is gone.
+        Supervisor::Service* existing = find_service(name.view());
+        struct pollfd poller { existing->send.fd(), POLLOUT, 0 };
+        if (existing->job || !(poll(&poller, 1, 0) == 1 && (poller.revents & POLLHUP)))
+            return EEXIST;
+        m_services.remove_all_matching([&](auto const& candidate) { return candidate.ptr() == existing; });
+    }
+    if (!service_port.is_valid())
+        return EINVAL;
+    auto* service = new (Base::nothrow) Service { move(name), {}, move(service_port), nullptr, 0 };
+    if (!service)
+        return ENOMEM;
+    m_services.append(adopt_own(*service));
+    return 0;
 }
 
 void Supervisor::load_file(char const* path)
@@ -159,6 +266,20 @@ void Supervisor::load_file(char const* path)
             return;
         }
     }
+    // Its services exist from now on; messages to them wait for the job.
+    for (auto const& name : job->mach_services) {
+        if (find_service(name.view())) {
+            log("(%s) The service %s is provided already", job->label.characters(), name.characters());
+            continue;
+        }
+        auto port = IPC::create_port();
+        if (port.is_error()) {
+            log("(%s) Could not make the port for %s", job->label.characters(), name.characters());
+            continue;
+        }
+        auto* service = new (Base::nothrow) Service { name, move(port.value().receive), move(port.value().send), job.ptr(), 0 };
+        m_services.append(adopt_own(*service));
+    }
     m_jobs.append(move(job));
 }
 
@@ -187,6 +308,9 @@ void Supervisor::load_directory(char const* directory)
 
 void Supervisor::start()
 {
+    // Services whose jobs wait for demand.
+    for (auto& service : m_services)
+        watch_for_demand(*service);
     for (auto& job : m_jobs) {
         Job* pointer = job.ptr();
         // KeepAlive of any kind implies RunAtLoad: whether to run again
@@ -218,6 +342,7 @@ void Supervisor::spawn(Job& job)
     job.started_at = now_milliseconds();
     job.last_started_at = job.started_at;
     ++job.runs;
+    stop_watching(job);
 }
 
 void Supervisor::reap()
@@ -247,8 +372,16 @@ void Supervisor::job_ended(Job& job, int status)
         log("(%s[%d]) %s", job.label.characters(), job.pid, text);
     job.pid = 0;
     job.last_status = status;
-    if (m_stopping || !job.should_restart_after(status))
+    if (m_stopping)
         return;
+    if (!job.should_restart_after(status)) {
+        // Until a message comes for one of its services.
+        for (auto& service : m_services) {
+            if (service->job == &job)
+                watch_for_demand(*service);
+        }
+        return;
+    }
     // Not more often than ThrottleInterval allows.
     u64 ran_for = now_milliseconds() - job.started_at;
     u64 throttle = static_cast<u64>(job.throttle_interval) * 1000;
@@ -266,6 +399,8 @@ void Supervisor::job_ended(Job& job, int status)
 void Supervisor::stop_everything(Function<void()> then)
 {
     m_stopping = true;
+    for (auto& job : m_jobs)
+        stop_watching(*job);
     m_after_stopping = move(then);
     for (auto& job : m_jobs) {
         if (job->restart_timer)

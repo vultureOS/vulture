@@ -76,6 +76,12 @@ OwnPtr<Job> Job::from_plist(JSON::Value const& plist, char const*& error)
     job->standard_in = optional_string(plist, "StandardInPath"_sv);
     job->standard_out = optional_string(plist, "StandardOutPath"_sv);
     job->standard_error = optional_string(plist, "StandardErrorPath"_sv);
+    if (auto const* services = plist.get_object("MachServices"_sv)) {
+        for (size_t i = 0; i < services->size(); ++i) {
+            if (services->at(i).is_boolean() && services->at(i).as_boolean())
+                job->mach_services.append(MUST(String::from_view(services->key_at(i))));
+        }
+    }
     if (auto const* variables = plist.get_object("EnvironmentVariables"_sv)) {
         for (size_t i = 0; i < variables->size(); ++i) {
             if (!variables->at(i).is_string())

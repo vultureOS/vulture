@@ -8,4 +8,4 @@
 vulture_add_program(vlaunchd
     SOURCES Job.cpp Log.cpp Supervisor.cpp TestRunner.cpp main.cpp
     DESTINATION sbin
-    LIBRARIES LibCore LibJSON)
+    LIBRARIES LibIPC LibCore LibJSON)

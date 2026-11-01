@@ -34,6 +34,10 @@ namespace Launchd {
 //   StandardInPath, StandardOutPath, StandardErrorPath  (/dev/null)
 //   Umask                 its file creation mask
 //   ExitTimeOut           seconds between SIGTERM and SIGKILL when stopped (20)
+//   MachServices          { "name": true, ... }: services the job provides.
+//                         Found through the bootstrap port; the job is
+//                         started when a message arrives for one, and
+//                         takes its receive right with check_in
 struct Job {
     enum class KeepAlive {
         Never,
@@ -61,6 +65,7 @@ struct Job {
     Optional<String> standard_out;
     Optional<String> standard_error;
     Optional<mode_t> umask;
+    Vector<String> mach_services;
 
     // While it runs.
     pid_t pid { 0 };
