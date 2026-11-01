@@ -1,0 +1,25 @@
+// Notifications: notifyd (com.vulture.notifyd) tells everyone who asked
+// whenever a name is posted (notify.h).
+endpoint Notify
+{
+    post(String name) =|
+
+    // Each post of `name` sends `token` to `port`, a NotifyClient endpoint.
+    register_port(String name, Port port, i32 token) => (i32 error)
+    // Each post of `name` writes `token` (4 bytes, big-endian, as macOS's
+    // notify_register_file_descriptor does) to `file`, a pipe's write end.
+    register_file(String name, Port file, i32 token) => (i32 error)
+    // The caller's registration `token`.
+    cancel(i32 token) =|
+
+    // A name's state: a number anyone may set and read.
+    set_state(String name, u64 state) => (i32 error)
+    get_state(String name) => (u64 state)
+    // How many times `name` has been posted.
+    post_count(String name) => (u64 count)
+}
+
+endpoint NotifyClient
+{
+    notification(i32 token, String name) =|
+}

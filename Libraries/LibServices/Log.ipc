@@ -1,0 +1,30 @@
+// The unified log: logd (com.vulture.logd) keeps what programs log with
+// os_log, and shows it to `log`.
+//
+// Types are os_log's: 0 default, 1 info, 2 debug, 16 error, 17 fault.
+// Levels choose among them as `log` does: 0 (default) shows default,
+// error and fault entries; 1 adds info, 2 adds debug.
+endpoint Log
+{
+    // One entry: when (microseconds since 1970) and on which thread the
+    // sender logged it. The kernel vouches for the sender's process;
+    // `process`, its name, is used only once it has gone.
+    log(u64 time, u64 thread, String process, u8 type, String subsystem, String category, String message) =|
+
+    // The entries since `since` (microseconds since 1970; 0: all logd
+    // has) at `level`, oldest first, as `log show` prints them; from
+    // process `pid` (0: any) named `process` ("": any). `counts`: how many
+    // of each type, in the order default, info, debug, error, fault. (As
+    // many of the most recent as fit in an answer.)
+    show(u64 since, u8 level, i32 pid, String process) => (Vector<String> lines, Vector<u32> counts)
+
+    // From now on, every entry at `level` (and from `pid` / `process`, as
+    // for show) goes to `sink`, a LogStream endpoint, as `log stream`
+    // prints it.
+    stream(Port sink, u8 level, i32 pid, String process) => (bool accepted)
+}
+
+endpoint LogStream
+{
+    entry(String line) =|
+}

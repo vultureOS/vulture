@@ -1,0 +1,12 @@
+// System configuration: configd (com.vulture.SystemConfiguration.configd)
+// keeps the machine's names (ComputerName, HostName, LocalHostName), as
+// scutil shows and sets them.
+endpoint Configuration
+{
+    get(String key) => (bool found, String value)
+    // Only root may set; EPERM otherwise, EINVAL for a value that is not
+    // a valid name for the key.
+    set(String key, String value) => (i32 error)
+    remove(String key) => (i32 error)
+    keys() => (Vector<String> keys)
+}

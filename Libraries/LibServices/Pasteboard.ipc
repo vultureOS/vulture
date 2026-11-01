@@ -1,0 +1,14 @@
+// The pasteboard: pboard (com.vulture.pasteboard) holds what was copied,
+// by type ("public.utf8-plain-text"), for pbcopy and pbpaste. Each user
+// has their own boards; "general" is the one copy and paste use ("find"
+// holds the text last searched for, as on macOS).
+endpoint Pasteboard
+{
+    // Replaces everything on `board` with this one item.
+    set(String board, String type, ByteBuffer data) => (i32 error, u64 change_count)
+    get(String board, String type) => (bool found, ByteBuffer data)
+    // Every type on `board` now.
+    types(String board) => (Vector<String> types)
+    clear(String board) => (u64 change_count)
+    change_count(String board) => (u64 change_count)
+}
