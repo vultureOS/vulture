@@ -1,0 +1,43 @@
+# A text login on the console, as a person does it (Meta/run.sh --chat):
+# logging in, a pipeline, a job suspended with ^Z and brought back with fg,
+# logging out (vlaunchd starts getty again), logging in again, and powering
+# off with sudo.
+
+expect login: 
+send vulture\r
+expect Password:
+send vulture\r
+expect Welcome to vultureOS.
+expect vulture@vulture ~ % 
+
+send ls -l /System/Library | grep Kernels | wc -l\r
+expect        1
+expect vulture@vulture ~ % 
+
+send sleep 30\r
+pause 1
+send \x1a
+expect vsh: suspended  sleep 30
+expect vulture@vulture ~ % 
+send jobs\r
+expect [1]  + suspended  sleep 30
+expect vulture@vulture ~ % 
+send fg\r
+expect [1]  + continued  sleep 30
+pause 1
+send \x03
+expect vulture@vulture ~ % 
+
+send exit\r
+expect login: 
+send vulture\r
+expect Password:
+send vulture\r
+expect Last login: 
+expect  on console
+expect vulture@vulture ~ % 
+
+send sudo poweroff\r
+expect Password:
+send vulture\r
+expect vlaunchd: powering off

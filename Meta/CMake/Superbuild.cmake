@@ -144,6 +144,19 @@ add_custom_target(test-userland
     USES_TERMINAL
     VERBATIM)
 
+# A text login on the console, typed over the serial line: vlaunchd starts
+# getty, login lets the user in, the shell runs a pipeline and a job
+# suspended and continued; logging out brings getty back; sudo poweroff
+# shuts down through vlaunchd.
+add_custom_target(test-login
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+        --chat ${CMAKE_SOURCE_DIR}/Tests/Console/login.chat
+        --wait-for-exit
+        --timeout 120
+    DEPENDS host uefi target boot-archive test-userland
+    USES_TERMINAL
+    VERBATIM)
+
 # Storage: files written by one boot are there for the next; vultureFS
 # checked with fsck.vfs after each.
 add_custom_target(test-persistence
@@ -152,7 +165,7 @@ add_custom_target(test-persistence
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-persistence)
+add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-persistence)
 
 # M5's "done when": 100 power cuts at random moments while writing; each
 # must leave a disk that passes fsck and remounts with every committed

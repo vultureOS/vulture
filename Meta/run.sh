@@ -36,6 +36,13 @@
 #   --kill              with --headless: once the expected text appears, cut
 #                       the power (SIGKILL) instead of shutting QEMU down
 #   --kill-delay SECONDS  with --kill: wait this long first (may be fractional)
+#   --chat FILE         with --headless: type at the serial console as FILE
+#                       says, one step a line: "expect TEXT" waits for TEXT
+#                       (after what the last expect matched), "send TEXT"
+#                       types TEXT (with \r, \n, \t and \xHH escapes),
+#                       "pause SECONDS" waits (as a person would before ^Z);
+#                       blank lines and "#" comments are skipped. Succeeds
+#                       once every step is done (and any --expect found)
 #
 # Environment: QEMU (the emulator), VULTURE_ACCEL (hvf, kvm or tcg),
 # VULTURE_FIRMWARE_CODE and VULTURE_FIRMWARE_VARS (the UEFI firmware and its
@@ -61,6 +68,7 @@ fresh_disk=0
 disk_interface="virtio-blk-pci,drive=root"
 kill_power=0
 kill_delay=0
+chat_file=""
 extra_args=()
 
 while [ $# -gt 0 ]; do
@@ -82,7 +90,8 @@ while [ $# -gt 0 ]; do
         --kill) kill_power=1; shift ;;
         --kill-delay) kill_delay="$2"; shift 2 ;;
         --) shift; extra_args=("$@"); break ;;
-        -h|--help) sed -n '8,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --chat) chat_file="$2"; shift 2 ;;
+        -h|--help) sed -n '8,50p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "run.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -254,10 +263,69 @@ log="$run_dir/serial.log"
 : > "$log"
 qmp_socket="$run_dir/qmp.sock"
 rm -f "$qmp_socket"
-"$qemu" "${args[@]}" -display none -monitor none -serial "file:$log" -qmp "unix:$qmp_socket,server=on,wait=off" \
+
+# The serial console: a file, or, to type at it (--chat), a pair of FIFOs
+# (QEMU's "pipe" backend) whose output is copied into the log.
+serial_args=(-serial "file:$log")
+reader_pid=""
+chat_steps=()
+if [ -n "$chat_file" ]; then
+    if [ ! -f "$chat_file" ]; then
+        echo "run.sh: $chat_file is missing" >&2
+        exit 2
+    fi
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            "" | "#"*) ;;
+            "expect "* | "send "* | "pause "*) chat_steps+=("$line") ;;
+            *) echo "run.sh: $chat_file: not a step: $line" >&2; exit 2 ;;
+        esac
+    done < "$chat_file"
+    mkfifo "$run_dir/serial.in" "$run_dir/serial.out"
+    cat "$run_dir/serial.out" >> "$log" &
+    reader_pid=$!
+    serial_args=(-serial "pipe:$run_dir/serial")
+fi
+
+"$qemu" "${args[@]}" -display none -monitor none "${serial_args[@]}" -qmp "unix:$qmp_socket,server=on,wait=off" \
     ${extra_args[@]+"${extra_args[@]}"} &
 qemu_pid=$!
-trap 'kill "$qemu_pid" 2>/dev/null || true; rm -rf "$run_dir"' EXIT
+trap 'kill "$qemu_pid" ${reader_pid:+"$reader_pid"} 2>/dev/null || true; rm -rf "$run_dir"' EXIT
+if [ -n "$chat_file" ]; then
+    # Read and write, so opening never waits for QEMU.
+    exec 7<> "$run_dir/serial.in"
+fi
+
+# The chat: which step is next, and where in the log the last expected
+# text ended (byte offsets, so no locale may count characters instead).
+chat_index=0
+chat_offset=0
+chat_done() {
+    [ "$chat_index" -ge ${#chat_steps[@]} ]
+}
+advance_chat() {
+    local step text match
+    while ! chat_done; do
+        step="${chat_steps[$chat_index]}"
+        case "$step" in
+            "send "*)
+                printf '%b' "${step#send }" >&7
+                chat_index=$((chat_index + 1))
+                ;;
+            "pause "*)
+                sleep "${step#pause }"
+                chat_index=$((chat_index + 1))
+                ;;
+            "expect "*)
+                text="${step#expect }"
+                match="$(tail -c +$((chat_offset + 1)) "$log" | LC_ALL=C grep -boF -- "$text" | head -n 1)" || true
+                [ -n "$match" ] || return 0
+                chat_offset=$((chat_offset + ${match%%:*} + $(printf '%s' "$text" | LC_ALL=C wc -c)))
+                chat_index=$((chat_index + 1))
+                ;;
+        esac
+    done
+}
 
 # True once every expected text is in the log.
 all_found() {
@@ -275,7 +343,10 @@ while true; do
         exited_by_itself=1
         break
     fi
-    if [ "$wait_for_exit" -eq 0 ] && [ ${#expectations[@]} -gt 0 ] && all_found; then
+    if [ ${#chat_steps[@]} -gt 0 ]; then
+        advance_chat
+    fi
+    if [ "$wait_for_exit" -eq 0 ] && { [ ${#expectations[@]} -gt 0 ] || [ ${#chat_steps[@]} -gt 0 ]; } && all_found && chat_done; then
         break
     fi
     if [ "$SECONDS" -ge "$deadline" ]; then
@@ -302,6 +373,14 @@ if [ "$kill_power" -eq 1 ] && kill -0 "$qemu_pid" 2>/dev/null; then
 fi
 kill "$qemu_pid" 2>/dev/null || true
 wait "$qemu_pid" 2>/dev/null || true
+if [ -n "$reader_pid" ]; then
+    # The copy ends with QEMU's end of the pipe.
+    wait "$reader_pid" 2>/dev/null || true
+fi
+# What the guest said last, before it powered off, counts too.
+if [ ${#chat_steps[@]} -gt 0 ]; then
+    advance_chat
+fi
 
 # Show the console without the firmware's terminal control sequences.
 sed -e $'s/\x1b\\[[0-9;?=]*[A-Za-z]//g' -e $'s/\r//g' "$log"
@@ -315,10 +394,18 @@ if [ "$wait_for_exit" -eq 1 ]; then
         status=1
     fi
 fi
-if [ ${#expectations[@]} -eq 0 ]; then
+if [ ${#chat_steps[@]} -gt 0 ]; then
+    if chat_done; then
+        echo "run.sh: chat: all ${#chat_steps[@]} steps done"
+    else
+        echo "run.sh: chat: stuck at step $((chat_index + 1)) of ${#chat_steps[@]}: ${chat_steps[$chat_index]}" >&2
+        status=1
+    fi
+fi
+if [ ${#expectations[@]} -eq 0 ] && [ ${#chat_steps[@]} -eq 0 ]; then
     exit "$status"
 fi
-for text in "${expectations[@]}"; do
+for text in ${expectations[@]+"${expectations[@]}"}; do
     if grep -qF -- "$text" "$log"; then
         echo "run.sh: found \"$text\""
     else
