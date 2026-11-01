@@ -133,6 +133,8 @@ public:
     Function<void(bool accepted)> on_drag_finished;
     Function<void()> on_close;
     Function<void(bool)> on_activation;
+    // What was last presented is on screen: the other buffer is free to draw on.
+    Function<void()> on_presented;
 
 private:
     friend class Connection;

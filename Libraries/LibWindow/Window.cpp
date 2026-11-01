@@ -119,8 +119,11 @@ void Connection::activated(IPC::Sender const&, u32 id, bool active)
 
 void Connection::presented(IPC::Sender const&, u32 id)
 {
-    if (auto* window = window_with_id(id))
+    if (auto* window = window_with_id(id)) {
         window->m_waiting_for_present = false;
+        if (window->on_presented)
+            window->on_presented();
+    }
 }
 
 Window::Window(Connection& connection, u32 id, Gfx::IntRect frame)

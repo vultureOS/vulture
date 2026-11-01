@@ -41,5 +41,224 @@
         "sidebar" : { "blur" : 24, "saturation" : 1.6, "tint" : "#ebebebb3" },
         "hud" : { "blur" : 24, "saturation" : 1.5, "tint" : "#28282899" },
         "underWindow" : { "blur" : 30, "saturation" : 1.8, "tint" : "#f5f5f58c" }
+    },
+    "ui" : {
+        "comboFace" : {
+            "fill" : "#ffffff",
+            "outer" : [ 0.5, 1, 0.5, 0.08, 0, 1, 0, 0.045, 0, 0.5, 0, 0.13 ],
+            "inner" : [ ],
+            "soft" : 0
+        },
+        "comboFaceDisabled" : {
+            "fill" : "#ffffff80",
+            "outer" : [ 1, 1, 1, 0.03, 0, 0.5, 0, 0.1 ],
+            "inner" : [ ],
+            "soft" : 0.12
+        },
+        "segmentedTrack" : {
+            "fill" : "#0000000d",
+            "outer" : [ 1, 1.5, 1, 0.03, 0.5, 0.5, 0.5, 0.04, 0, 1, 0, 0.01 ],
+            "inner" : [ ],
+            "soft" : 0
+        },
+        "windowBackground" : "#f6f6f6",
+        "underPageBackground" : "#969696e5",
+        "accent" : "#007aff",
+        "label" : "#000000d8",
+        "secondaryLabel" : "#0000007f",
+        "tertiaryLabel" : "#00000042",
+        "quaternaryLabel" : "#00000019",
+        "placeholder" : "#0000003f",
+        "separator" : "#00000019",
+        "focus" : "#0067f47f",
+        "textBackground" : "#ffffff",
+        "controlBackground" : "#ffffff",
+        "text" : "#000000",
+        "selectedText" : "#b3d7ff",
+        "selectedTextInactive" : "#dcdcdc",
+        "selectedContent" : "#0064e1",
+        "selectedContentInactive" : "#dcdcdc",
+        "selectedContentText" : "#ffffff",
+        "alternatingRow" : "#f4f5f5",
+        "grid" : "#e6e6e6",
+        "link" : "#0068da",
+        "controlText" : "#060606",
+        "fieldText" : "#000000d8",
+        "controlTextDisabled" : "#0000006f",
+        "controlTextDefault" : "#ffffff",
+        "controlSymbol" : "#262626",
+        "system" : {
+            "red" : "#ff3b30",
+            "orange" : "#ff9500",
+            "yellow" : "#ffcc00",
+            "green" : "#28cd41",
+            "mint" : "#00c7be",
+            "teal" : "#59adc4",
+            "cyan" : "#55bef0",
+            "blue" : "#007aff",
+            "indigo" : "#5856d6",
+            "purple" : "#af52de",
+            "pink" : "#ff2d55",
+            "brown" : "#a2845e",
+            "gray" : "#8e8e93"
+        },
+        "bezel" : {
+            "fill" : "#ffffff",
+            "outer" : [ 2, 2, 2, 0.008, 1.5, 2, 1.5, 0.008, 1, 2, 1, 0.015, 1, 1.5, 1, 0.028, 0.5, 0.5, 0.5, 0.009, 0, 0, 1, 0.023, 0, 1, 0, 0.165 ],
+            "inner" : [ ],
+            "soft" : 0.12
+        },
+        "bezelPressed" : {
+            "fill" : "#f0f0f0",
+            "outer" : [ 2, 2, 2, 0.008, 1.5, 2, 1.5, 0.008, 1, 2, 1, 0.015, 1, 1.5, 1, 0.028, 0.5, 0.5, 0.5, 0.009, 0, 0, 1, 0.023, 0, 1, 0, 0.165 ],
+            "inner" : [ ],
+            "soft" : 0.12
+        },
+        "bezelDisabled" : {
+            "fill" : "#ffffff80",
+            "outer" : [ 1, 1.5, 1, 0.02, 0.5, 1, 0.5, 0.03 ],
+            "inner" : [ ],
+            "soft" : 0.12
+        },
+        "bezelAccent" : {
+            "fillTop" : "#2791ff",
+            "fillBottom" : "#017bff",
+            "outer" : [ 2, 2, 2, 0.008, 1.5, 2, 1.5, 0.008, 1, 2, 1, 0.015, 0, 1.5, 0, 0.028, 0.5, 0.5, 0.5, 0.006, 0, 0, 1, 0.024, 0, 1, 0, 0.137, 0, 0.5, 0, 0.1 ],
+            "inner" : [ ],
+            "soft" : 0.12
+        },
+        "bezelAccentPressed" : {
+            "fillTop" : "#1a7ae6",
+            "fillBottom" : "#0069e0",
+            "outer" : [ 2, 2, 2, 0.008, 1.5, 2, 1.5, 0.008, 1, 2, 1, 0.015, 0, 1.5, 0, 0.028, 0.5, 0.5, 0.5, 0.006, 0, 0, 1, 0.024, 0, 1, 0, 0.137, 0, 0.5, 0, 0.1 ],
+            "inner" : [ ],
+            "soft" : 0.12
+        },
+        "texturedBorder" : "#0000000d",
+        "texturedFill" : "#00000002",
+        "texturedPressed" : "#0000001a",
+        "disclosureSymbol" : "#00000059",
+        "checkbox" : {
+            "fill" : "#ffffff",
+            "outer" : [ ],
+            "inner" : [ 1, 1, 1, 0.16, 2, 1.5, 1.5, 0.031, 2, 0, 0, 0.05 ],
+            "soft" : 0.12
+        },
+        "checkboxDisabled" : {
+            "fill" : "#ffffff80",
+            "outer" : [ ],
+            "inner" : [ 1, 1, 1, 0.08 ],
+            "soft" : 0.12
+        },
+        "checkboxMark" : "#ffffff",
+        "checkboxMarkInactive" : "#000000b2",
+        "radio" : {
+            "fill" : "#ffffff",
+            "outer" : [ ],
+            "inner" : [ 1, 1, 1, 0.16, 2, 1.5, 1.5, 0.031, 2, 0, 0, 0.05 ],
+            "soft" : 0.12
+        },
+        "switch" : {
+            "track" : "#0000001a",
+            "trackOn" : "#1485ff",
+            "trackOnInactive" : "#b4b4b4",
+            "trackEdge" : "#00000004",
+            "knob" : "#ffffff",
+            "trackTop" : "#0000000a"
+        },
+        "knob" : {
+            "fill" : "#ffffff",
+            "outer" : [ 1, 2, 1, 0.02, 0.5, 1.5, 0.5, 0.06, 0.5, 0.5, 0.5, 0.14 ],
+            "inner" : [ ],
+            "soft" : 0
+        },
+        "segmented" : { "track" : "#0000000d", "trackRim" : "#00000006", "divider" : "#00000020" },
+        "slider" : {
+            "track" : "#0000000d",
+            "trackEdge" : "#00000009",
+            "fill" : "#0a82ff",
+            "fillInactive" : "#b4b4b4",
+            "tick" : "#00000026"
+        },
+        "sliderKnob" : {
+            "fill" : "#ffffff",
+            "outer" : [ 1.5, 2.5, 1.5, 0.012, 1, 2, 1, 0.015, 0.5, 1.5, 0.5, 0.055 ],
+            "inner" : [ ],
+            "soft" : 0
+        },
+        "fieldBorder" : { "top" : "#00000033", "side" : "#00000033", "bottom" : "#00000080" },
+        "search" : { "symbol" : "#00000099", "clear" : "#00000040" },
+        "progress" : { "track" : "#0000000d", "trackEdge" : "#00000006", "fill" : "#0a82ff", "spinner" : "#00000090" },
+        "colorWell" : { "swatchBorder" : "#555555" },
+        "box" : { "fill" : "#00000004", "border" : "#00000010" },
+        "level" : {
+            "track" : "#0000000d",
+            "border" : "#00000033",
+            "normal" : "#34c759",
+            "warning" : "#ffcc00",
+            "critical" : "#ff3b30"
+        },
+        "scroller" : {
+            "overlayKnob" : "#00000080",
+            "overlayTrack" : "#00000000",
+            "legacyTrack" : "#fafafa",
+            "legacyKnob" : "#c2c2c2",
+            "legacyBorder" : "#e8e8e8"
+        },
+        "tableHeader" : { "fill" : "#ffffff", "border" : "#e5e5e5", "divider" : "#e5e5e5", "text" : "#000000d8" },
+        "tabs" : { "fill" : "#0000000a", "border" : "#0000000c" },
+        "menu" : {
+            "tint" : "#f6f6f6e0",
+            "text" : "#000000d8",
+            "disabled" : "#00000042",
+            "selection" : "#007aff",
+            "selectedText" : "#ffffff",
+            "separator" : "#00000019",
+            "shortcut" : "#00000080",
+            "border" : "#00000033"
+        },
+        "tooltip" : { "background" : "#f6f6f6" },
+        "toolbar" : {
+            "fill" : "#fbfbfb",
+            "separator" : "#d0d0d0",
+            "hover" : "#0000000f",
+            "pressed" : "#00000019",
+            "symbol" : "#000000b3"
+        },
+        "sidebar" : {
+            "selection" : "#0000001a",
+            "selectionActive" : "#0000001a",
+            "text" : "#000000d8",
+            "section" : "#00000080",
+            "icon" : "#007aff"
+        },
+        "sheet" : { "fill" : "#f6f6f6", "scrim" : "#00000000" },
+        "alert" : { "fill" : "#f6f6f6e0" },
+        "popover" : { "tint" : "#f6f6f6e0" },
+        "fieldFace" : {
+            "fill" : "#ffffff",
+            "outer" : [ 1, 1, 1, 0.08, 0.5, 0.5, 0.5, 0.08, 0, 1, 0, 0.275, 0, 0.5, 0, 0.06 ],
+            "inner" : [ 0.5, 0.5, 0.5, 0.008, 0, 0.5, 0, 0.02 ],
+            "soft" : 0.12
+        },
+        "fieldFaceDisabled" : {
+            "fill" : "#ffffff80",
+            "outer" : [ 1, 1, 1, 0.04, 0.5, 0.5, 0.5, 0.04, 0, 1, 0, 0.14 ],
+            "inner" : [ ],
+            "soft" : 0.12
+        },
+        "popupArrow" : { "fillTop" : "#2791ff", "fillBottom" : "#017bff", "symbol" : "#ffffff" },
+        "checkboxMini" : {
+            "fill" : "#ffffff",
+            "outer" : [ ],
+            "inner" : [ 1, 1, 1, 0.16, 2, 1.5, 1.5, 0.031, 2, 0, 0, 0.05 ],
+            "soft" : 0.12
+        },
+        "radioMini" : {
+            "fill" : "#ffffff",
+            "outer" : [ ],
+            "inner" : [ 1, 1, 1, 0.16, 2, 1.5, 1.5, 0.031, 2, 0, 0, 0.05 ],
+            "soft" : 0.12
+        }
     }
 }

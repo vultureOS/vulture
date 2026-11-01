@@ -1,0 +1,144 @@
+{
+    "animation" : { "standard" : 0.25, "windowResize" : 0.35, "scrollSeconds" : 0.2 },
+    "window" : { "titleBarHeight" : 28, "toolbarExpanded" : 44, "toolbarUnified" : 52, "toolbarCompact" : 38, "cornerRadius" : 12 },
+    "mouse" : { "doubleClickSeconds" : 0.5, "doubleClickDistance" : 4, "dragDistance" : 3 },
+    "scroll" : { "pointsPerNotch" : 12, "momentumDecay" : 6, "rubberBandResistance" : 0.55, "rubberBandResponse" : 0.3 },
+    "tooltip" : { "delayMilliseconds" : 1000, "padding" : 6, "height" : 19, "radius" : 3 },
+    "focus" : { "width" : 3 },
+    "fonts" : {
+        "body" : { "size" : 13, "weight" : 0 },
+        "small" : { "size" : 11, "weight" : 0 },
+        "mini" : { "size" : 9, "weight" : 0 },
+        "label" : { "size" : 10, "weight" : 0 },
+        "menu" : { "size" : 13, "weight" : 0 },
+        "toolTips" : { "size" : 11, "weight" : 0 },
+        "controlContent" : { "size" : 12, "weight" : 0 },
+        "largeTitle" : { "size" : 26, "weight" : 0 },
+        "title1" : { "size" : 22, "weight" : 0 },
+        "title2" : { "size" : 17, "weight" : 0 },
+        "title3" : { "size" : 15, "weight" : 0 },
+        "headline" : { "size" : 13, "weight" : 3 },
+        "subheadline" : { "size" : 11, "weight" : 0 },
+        "callout" : { "size" : 12, "weight" : 0 },
+        "footnote" : { "size" : 10, "weight" : 0 },
+        "caption" : { "size" : 10, "weight" : 0 }
+    },
+    "control" : {
+        "regular" : { "fontSize" : 13 },
+        "large" : { "fontSize" : 13 },
+        "small" : { "fontSize" : 11 },
+        "mini" : { "fontSize" : 9 }
+    },
+    "button" : {
+        "regular" : { "height" : 20, "radius" : 5, "padding" : 10.35, "baseline" : 14 },
+        "large" : { "height" : 28, "radius" : 6, "padding" : 10.35, "baseline" : 18 },
+        "small" : { "height" : 16, "radius" : 4, "padding" : 8.07, "baseline" : 12 },
+        "mini" : { "height" : 13, "radius" : 3, "padding" : 7.4, "baseline" : 9 },
+        "circleSize" : 20,
+        "circleSymbol" : 16,
+        "chevronSymbol" : 12,
+        "texturedPadding" : 7.5,
+        "disclosureSize" : 13,
+        "disclosureOffset" : 1,
+        "symbolWeight" : 1.6
+    },
+    "checkbox" : {
+        "regular" : { "size" : 14, "radius" : 3.5, "gap" : 6, "baseline" : 11 },
+        "large" : { "size" : 16, "radius" : 4, "gap" : 6, "baseline" : 12 },
+        "small" : { "size" : 12, "radius" : 3, "gap" : 5, "baseline" : 9.5 },
+        "mini" : { "size" : 10, "radius" : 2.5, "gap" : 4, "baseline" : 8 },
+        "markWeight" : 2.2
+    },
+    "radio" : { "dotRatio" : 0.43 },
+    "switch" : {
+        "regular" : { "width" : 38, "height" : 22, "knob" : 20 },
+        "large" : { "width" : 38, "height" : 22, "knob" : 20 },
+        "small" : { "width" : 32, "height" : 18, "knob" : 16 },
+        "mini" : { "width" : 26, "height" : 15, "knob" : 13 },
+        "knobInset" : 1
+    },
+    "segmented" : {
+        "regular" : { "height" : 22, "radius" : 5, "padding" : 6.56, "baseline" : 15, "thumbInset" : 1 },
+        "large" : { "height" : 30, "radius" : 6, "padding" : 7.56, "baseline" : 19, "thumbInset" : 1 },
+        "small" : { "height" : 18, "radius" : 4, "padding" : 5.9, "baseline" : 13, "thumbInset" : 1 },
+        "mini" : { "height" : 15, "radius" : 3, "padding" : 4.9, "baseline" : 11, "thumbInset" : 1 }
+    },
+    "popup" : {
+        "regular" : { "height" : 20, "radius" : 5, "paddingLeft" : 8.5, "arrowSize" : 16, "arrowInset" : 2, "arrowRadius" : 3.5, "extra" : 32.18, "baseline" : 14 },
+        "large" : { "height" : 28, "radius" : 6, "paddingLeft" : 8.5, "arrowSize" : 16, "arrowInset" : 2, "arrowRadius" : 3.5, "extra" : 40.18, "baseline" : 18 },
+        "small" : { "height" : 16, "radius" : 4, "paddingLeft" : 6.5, "arrowSize" : 13, "arrowInset" : 1.5, "arrowRadius" : 3, "extra" : 25, "baseline" : 12 },
+        "mini" : { "height" : 13, "radius" : 3, "paddingLeft" : 5, "arrowSize" : 10, "arrowInset" : 1.5, "arrowRadius" : 2.5, "extra" : 22, "baseline" : 9.5 }
+    },
+    "stepper" : {
+        "regular" : { "width" : 13, "height" : 20, "radius" : 4 },
+        "large" : { "width" : 13, "height" : 20, "radius" : 4 },
+        "small" : { "width" : 11, "height" : 16, "radius" : 3.5 },
+        "mini" : { "width" : 9, "height" : 13, "radius" : 3 },
+        "repeatDelayMilliseconds" : 400,
+        "repeatMilliseconds" : 100
+    },
+    "slider" : {
+        "regular" : { "height" : 20, "knob" : 19.5, "track" : 4 },
+        "large" : { "height" : 20, "knob" : 19.5, "track" : 4 },
+        "small" : { "height" : 16, "knob" : 15.5, "track" : 4 },
+        "mini" : { "height" : 13, "knob" : 12.5, "track" : 4 },
+        "tickKnobWidth" : 8,
+        "tickPad" : 3,
+        "tickLength" : 8,
+        "tickWidth" : 2
+    },
+    "field" : {
+        "regular" : { "height" : 21, "padding" : 4, "baseline" : 15, "faceTop" : 0 },
+        "large" : { "height" : 21, "padding" : 4, "baseline" : 15, "faceTop" : 0 },
+        "small" : { "height" : 19, "padding" : 4, "baseline" : 14, "faceTop" : 1 },
+        "mini" : { "height" : 15, "padding" : 4, "baseline" : 11, "faceTop" : 2 },
+        "roundedHeight" : 22,
+        "roundedRadius" : 3.5,
+        "roundedPadding" : 11,
+        "roundedBaseline" : 16,
+        "caretWidth" : 1,
+        "caretBlinkMilliseconds" : 530
+    },
+    "search" : {
+        "regular" : { "height" : 22, "radius" : 3.5, "textLeft" : 26, "iconLeft" : 4, "iconSize" : 18, "baseline" : 16, "faceTop" : 0 },
+        "large" : { "height" : 30, "radius" : 5, "textLeft" : 28, "iconLeft" : 5, "iconSize" : 20, "baseline" : 20, "faceTop" : 0 },
+        "small" : { "height" : 19, "radius" : 3, "textLeft" : 23, "iconLeft" : 3, "iconSize" : 16, "baseline" : 14, "faceTop" : 1 },
+        "mini" : { "height" : 17, "radius" : 3, "textLeft" : 19, "iconLeft" : 3, "iconSize" : 13, "baseline" : 12, "faceTop" : 2 }
+    },
+    "combo" : {
+        "regular" : { "height" : 20, "radius" : 5, "arrow" : 16, "padding" : 8, "baseline" : 14 },
+        "large" : { "height" : 20, "radius" : 5, "arrow" : 16, "padding" : 8, "baseline" : 14 },
+        "small" : { "height" : 16, "radius" : 4, "arrow" : 13, "padding" : 6, "baseline" : 12 },
+        "mini" : { "height" : 13, "radius" : 3, "arrow" : 10, "padding" : 5, "baseline" : 9.5 }
+    },
+    "progress" : {
+        "regular" : { "height" : 18, "bar" : 6 },
+        "large" : { "height" : 18, "bar" : 6 },
+        "small" : { "height" : 12, "bar" : 3 },
+        "mini" : { "height" : 12, "bar" : 3 },
+        "spinnerRegular" : 32,
+        "spinnerSmall" : 16,
+        "spinnerSpokes" : 8,
+        "spinnerWeight" : 0.1,
+        "spinnerInner" : 0.25,
+        "spinnerStepMilliseconds" : 80
+    },
+    "separator" : { "thickness" : 1 },
+    "colorWell" : { "width" : 38, "height" : 24, "radius" : 5, "swatchInsetX" : 3, "swatchInsetY" : 3, "swatchRadius" : 1.5 },
+    "box" : { "radius" : 5, "titleBaseline" : 11, "titleLeft" : 11, "titleHeight" : 12, "contentInset" : 10 },
+    "level" : { "height" : 16, "radius" : 2 },
+    "scroller" : { "overlay" : 16, "legacy" : 15, "overlaySmall" : 14, "knob" : 7, "knobHover" : 11, "knobLegacy" : 9, "minimumKnob" : 20, "fadeDelayMilliseconds" : 800, "fadeSeconds" : 0.3 },
+    "split" : { "thin" : 1, "thick" : 9, "pane" : 10 },
+    "table" : { "rowHeight" : 24, "headerHeight" : 28, "intercellWidth" : 17, "outlineIndent" : 13, "disclosureSize" : 13, "cellPadding" : 8, "selectionInset" : 10, "selectionRadius" : 5, "headerFontSize" : 11, "headerPadding" : 10 },
+    "tabs" : { "insetLeft" : 10, "insetTop" : 33, "insetRight" : 10, "insetBottom" : 13, "minimumWidth" : 64, "minimumHeight" : 36, "radius" : 5, "buttonHeight" : 22 },
+    "menu" : { "rowHeight" : 22, "separatorHeight" : 11, "padding" : 5, "radius" : 6, "selectionInset" : 5, "selectionRadius" : 4, "textLeft" : 21, "textRight" : 10, "shortcutGap" : 32, "minimumWidth" : 57, "checkLeft" : 7, "checkSize" : 12, "submenuOverlap" : 4 },
+    "toolbar" : { "itemSize" : 28, "symbolSize" : 16, "spacing" : 8, "paddingLeft" : 80, "paddingRight" : 12, "radius" : 5 },
+    "sidebar" : { "topPadding" : 8, "rowHeight" : 28, "rowInset" : 10, "rowRadius" : 5, "sectionHeight" : 28, "iconSize" : 16, "iconGap" : 6, "textLeft" : 16, "width" : 200 },
+    "sheet" : { "radius" : 12, "topMargin" : 0 },
+    "alert" : { "width" : 260, "height" : 202, "padding" : 20, "iconSize" : 64, "buttonHeight" : 28, "buttonSpacing" : 8, "radius" : 12, "spacing" : 10 },
+    "popover" : { "radius" : 10, "arrow" : 7, "padding" : 12 },
+    "panel" : { "width" : 560, "height" : 380, "rowHeight" : 24, "sidebarWidth" : 150 },
+    "colorPanel" : { "width" : 240, "height" : 320, "wheel" : 180 },
+    "fontPanel" : { "width" : 420, "height" : 300 },
+    "collection" : { "itemWidth" : 96, "itemHeight" : 96, "spacing" : 8, "radius" : 6, "iconSize" : 48 }
+}
