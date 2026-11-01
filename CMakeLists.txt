@@ -57,6 +57,7 @@ elseif(VULTURE_PART STREQUAL "userland")
     include(Meta/CMake/Userland.cmake)
     add_subdirectory(Libraries/LibBase)
     add_subdirectory(Libraries/LibC)
+    add_subdirectory(Libraries/LibCore)
     add_subdirectory(Libraries/LibCrypto)
     add_subdirectory(Libraries/LibCxxRT)
     add_subdirectory(Services)
@@ -71,7 +72,7 @@ elseif(VULTURE_PART STREQUAL "userland")
             System/Library/CoreServices System/Library/Frameworks System/Library/LaunchDaemons System/Library/LaunchAgents
             Users Users/Shared Volumes dev tmp
             usr/local usr/local/bin usr/share
-            var var/root var/log var/run var/tmp var/db)
+            var var/root var/log var/run var/tmp var/db var/db/sudo)
         install(DIRECTORY DESTINATION ${directory})
     endforeach()
 else()
