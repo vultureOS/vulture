@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/port.h>
 #include <unistd.h>
 
@@ -54,6 +55,32 @@ ErrorOr<PortPair> create_port()
     return PortPair { Port(fds[0]), Port(fds[1]) };
 }
 
+Region& Region::operator=(Region&& other)
+{
+    if (this != &other) {
+        if (m_address)
+            munmap(m_address, m_size);
+        m_address = exchange(other.m_address, nullptr);
+        m_size = exchange(other.m_size, 0);
+    }
+    return *this;
+}
+
+Region::~Region()
+{
+    if (m_address)
+        munmap(m_address, m_size);
+}
+
+ErrorOr<Region> Region::create(size_t size)
+{
+    size_t rounded = (size + 4095) & ~static_cast<size_t>(4095);
+    void* address = mmap(nullptr, rounded, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (address == MAP_FAILED)
+        return Error::from_errno(errno);
+    return Region(address, rounded);
+}
+
 Encoder::Encoder(u32 magic, u32 id)
     : m_id(id)
 {
@@ -76,6 +103,18 @@ void Encoder::encode(StringView text)
 void Encoder::encode(ReadonlyBytes bytes)
 {
     encode(static_cast<u32>(bytes.size()));
+    if (bytes.size() > out_of_line_threshold) {
+        // Out of line. (Without memory for it, the bytes stay inline, and
+        // a message too big for that fails to send.)
+        auto region = Region::create(bytes.size());
+        if (!region.is_error() && m_regions.size() < VULTURE_PORT_MAX_REGIONS) {
+            memcpy(region.value().data(), bytes.data(), bytes.size());
+            encode(static_cast<u32>(m_regions.size()));
+            m_regions.append(region.release_value());
+            return;
+        }
+        encode(static_cast<u32>(0xffffffff));
+    }
     append(bytes.data(), bytes.size());
 }
 
@@ -129,6 +168,17 @@ ErrorOr<void> Decoder::decode(Vector<u8>& value)
 {
     u32 length = 0;
     TRY(decode(length));
+    if (length > out_of_line_threshold) {
+        u32 index = 0;
+        TRY(decode(index));
+        if (index != 0xffffffff) {
+            if (index >= m_message.regions.size() || m_message.regions[index].size() < length)
+                return Error::from_errno(EBADMSG);
+            TRY(value.try_resize(length));
+            memcpy(value.data(), m_message.regions[index].data(), length);
+            return {};
+        }
+    }
     if (length > m_message.bytes.size() - m_position)
         return Error::from_errno(EBADMSG);
     TRY(value.try_resize(length));
@@ -158,11 +208,14 @@ namespace {
 // the room grows.
 constexpr size_t initial_capacity = 512;
 
-// The message for the kernel, its descriptors moved there (closed here
-// once sent).
+// The message for the kernel. It shares the encoder's descriptors and
+// memory (copy-on-write) rather than taking them: the encoder closes and
+// unmaps its own once the message is gone, sent or not, so nothing here
+// has to work out what the kernel took.
 struct Outgoing {
     vulture_port_message message {};
     int fds[VULTURE_PORT_MAX_RIGHTS];
+    vulture_port_region regions[VULTURE_PORT_MAX_REGIONS];
 
     explicit Outgoing(Encoder& encoder)
     {
@@ -175,40 +228,43 @@ struct Outgoing {
             fds[i] = rights[i].fd();
         message.rights = fds;
         message.right_count = static_cast<unsigned>(rights.size());
-        if (!rights.is_empty())
-            message.flags = VULTURE_PORT_MOVE;
+        auto& memory = encoder.regions();
+        for (size_t i = 0; i < memory.size() && i < VULTURE_PORT_MAX_REGIONS; ++i)
+            regions[i] = { memory[i].data(), memory[i].size() };
+        message.regions = regions;
+        message.region_count = static_cast<unsigned>(memory.size());
     }
 };
 
-// What the kernel took (it closes moved descriptors once the message is
-// sent) is no longer ours to close.
-void forget_sent_rights(Encoder& encoder)
-{
-    for (auto& right : encoder.rights()) {
-        if (right.is_valid() && fcntl(right.fd(), F_GETFD) < 0 && errno == EBADF)
-            (void)right.release();
-    }
-}
+// Where the kernel puts a received message's descriptors and memory.
+struct Incoming {
+    int rights[VULTURE_PORT_MAX_RIGHTS];
+    vulture_port_region regions[VULTURE_PORT_MAX_REGIONS];
+};
 
 // A received message's parts into `message`.
-ErrorOr<void> adopt(ReceivedMessage& message, vulture_port_received const& received, int const* rights)
+ErrorOr<void> adopt(ReceivedMessage& message, vulture_port_received const& received, Incoming const& incoming)
 {
     TRY(message.bytes.try_resize(received.size));
     message.id = received.id;
     for (unsigned i = 0; i < received.right_count; ++i)
-        TRY(message.rights.try_append(Port(rights[i])));
+        TRY(message.rights.try_append(Port(incoming.rights[i])));
+    for (unsigned i = 0; i < received.region_count; ++i)
+        TRY(message.regions.try_append(Region(incoming.regions[i].address, incoming.regions[i].size)));
     message.reply = Port(received.reply);
     message.sender = { received.sender_pid, received.sender_uid, received.sender_gid };
     return {};
 }
 
-void prepare(vulture_port_received& received, ReceivedMessage& message, int* rights)
+void prepare(vulture_port_received& received, ReceivedMessage& message, Incoming& incoming)
 {
     received = {};
     received.bytes = message.bytes.data();
     received.capacity = message.bytes.size();
-    received.rights = rights;
+    received.rights = incoming.rights;
     received.right_capacity = VULTURE_PORT_MAX_RIGHTS;
+    received.regions = incoming.regions;
+    received.region_capacity = VULTURE_PORT_MAX_REGIONS;
     received.reply = -1;
 }
 
@@ -219,11 +275,8 @@ ErrorOr<void> send(Port const& send_right, Encoder& encoder, bool nonblocking)
     if (encoder.rights().size() > VULTURE_PORT_MAX_RIGHTS)
         return Error::from_errno(EMSGSIZE);
     Outgoing outgoing(encoder);
-    int result = port_send(send_right.fd(), &outgoing.message, nonblocking ? VULTURE_PORT_NONBLOCK : 0);
-    int error = errno;
-    forget_sent_rights(encoder);
-    if (result < 0)
-        return Error::from_errno(error);
+    if (port_send(send_right.fd(), &outgoing.message, nonblocking ? VULTURE_PORT_NONBLOCK : 0) < 0)
+        return Error::from_errno(errno);
     return {};
 }
 
@@ -234,12 +287,11 @@ ErrorOr<ReceivedMessage> call(Port const& send_right, Encoder& encoder)
     Outgoing outgoing(encoder);
     ReceivedMessage message;
     TRY(message.bytes.try_resize(initial_capacity));
-    int rights[VULTURE_PORT_MAX_RIGHTS];
+    Incoming incoming;
     vulture_port_received received;
-    prepare(received, message, rights);
+    prepare(received, message, incoming);
     int result = port_call(send_right.fd(), &outgoing.message, &received, 0);
     int error = errno;
-    forget_sent_rights(encoder);
     if (result < 0) {
         // Too big: the answer waits on the port we were given.
         if (error == EMSGSIZE && received.reply >= 0) {
@@ -248,7 +300,7 @@ ErrorOr<ReceivedMessage> call(Port const& send_right, Encoder& encoder)
         }
         return Error::from_errno(error);
     }
-    TRY(adopt(message, received, rights));
+    TRY(adopt(message, received, incoming));
     return message;
 }
 
@@ -256,10 +308,10 @@ ErrorOr<ReceivedMessage> receive(Port const& receive_right, bool nonblocking)
 {
     ReceivedMessage message;
     TRY(message.bytes.try_resize(initial_capacity));
-    int rights[VULTURE_PORT_MAX_RIGHTS];
+    Incoming incoming;
     for (;;) {
         vulture_port_received received;
-        prepare(received, message, rights);
+        prepare(received, message, incoming);
         if (port_receive(receive_right.fd(), &received, nonblocking ? VULTURE_PORT_NONBLOCK : 0) < 0) {
             // Too big: the message waits while we make room.
             if (errno == EMSGSIZE && received.size > message.bytes.size()) {
@@ -268,7 +320,7 @@ ErrorOr<ReceivedMessage> receive(Port const& receive_right, bool nonblocking)
             }
             return Error::from_errno(errno);
         }
-        TRY(adopt(message, received, rights));
+        TRY(adopt(message, received, incoming));
         return message;
     }
 }

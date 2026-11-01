@@ -17,11 +17,50 @@
 // endpoint's magic number, then each argument: integers little-endian,
 // strings and byte buffers as a 32-bit length and the bytes, vectors as a
 // 32-bit count and the elements, ports and files as their index among the
-// message's descriptors.
+// message's descriptors. A byte buffer bigger than out_of_line_threshold
+// goes out of line: its length, then its index among the message's
+// regions (memory the kernel shares copy-on-write rather than copying).
 
 namespace IPC {
 
 constexpr u32 answer_bit = 0x8000'0000;
+constexpr size_t out_of_line_threshold = 16 * 1024;
+
+// Page-aligned memory mapped here, unmapped when this is dropped.
+class Region {
+public:
+    Region() = default;
+    Region(void* address, size_t size)
+        : m_address(address)
+        , m_size(size)
+    {
+    }
+    Region(Region&& other)
+        : m_address(exchange(other.m_address, nullptr))
+        , m_size(exchange(other.m_size, 0))
+    {
+    }
+    Region& operator=(Region&&);
+    Region(Region const&) = delete;
+    Region& operator=(Region const&) = delete;
+    ~Region();
+
+    // Anonymous memory for at least `size` bytes.
+    static ErrorOr<Region> create(size_t size);
+
+    [[nodiscard]] u8* data() const { return static_cast<u8*>(m_address); }
+    [[nodiscard]] size_t size() const { return m_size; }
+    // No longer ours to unmap (the kernel took it).
+    void forget()
+    {
+        m_address = nullptr;
+        m_size = 0;
+    }
+
+private:
+    void* m_address { nullptr };
+    size_t m_size { 0 };
+};
 
 // Who sent a message, as the kernel vouches.
 struct Sender {
@@ -63,6 +102,7 @@ public:
     // For send() and call().
     [[nodiscard]] Vector<u8> const& bytes() const { return m_bytes; }
     [[nodiscard]] Vector<Port>& rights() { return m_rights; }
+    [[nodiscard]] Vector<Region>& regions() { return m_regions; }
 
 private:
     void append(void const*, size_t);
@@ -70,12 +110,14 @@ private:
     u32 m_id;
     Vector<u8> m_bytes;
     Vector<Port> m_rights;
+    Vector<Region> m_regions;
 };
 
 struct ReceivedMessage {
     u32 id { 0 };
     Vector<u8> bytes;
     Vector<Port> rights;
+    Vector<Region> regions;
     Port reply; // For an answer, when the sender waits for one.
     Sender sender;
 };
