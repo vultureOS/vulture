@@ -27,9 +27,13 @@ set(VULTURE_LLD_ROOT ${vulture_default_lld_root} CACHE PATH "LLD 22 installation
 
 set(VULTURE_ESP_DIR ${CMAKE_BINARY_DIR}/esp)
 
-# vulture_add_part(<part> TOOLCHAIN <name> [INSTALL_DIR <dir>])
+# vulture_add_part(<part> TOOLCHAIN <name> [INSTALL_DIR <dir>] [DEPENDS <parts...>])
 function(vulture_add_part part)
-    cmake_parse_arguments(PARSE_ARGV 1 arg "" "TOOLCHAIN;INSTALL_DIR" "")
+    cmake_parse_arguments(PARSE_ARGV 1 arg "" "TOOLCHAIN;INSTALL_DIR" "DEPENDS")
+    set(depends_args "")
+    if(arg_DEPENDS)
+        set(depends_args DEPENDS ${arg_DEPENDS})
+    endif()
 
     if(arg_INSTALL_DIR)
         set(install_args INSTALL_DIR ${arg_INSTALL_DIR})
@@ -50,12 +54,14 @@ function(vulture_add_part part)
             -DCMAKE_TOOLCHAIN_FILE=${CMAKE_SOURCE_DIR}/Meta/CMake/Toolchain/${arg_TOOLCHAIN}.cmake
             -DVULTURE_LLVM_ROOT=${VULTURE_LLVM_ROOT}
             -DVULTURE_LLD_ROOT=${VULTURE_LLD_ROOT}
+            -DVULTURE_HOST_TOOLS=${CMAKE_BINARY_DIR}/host/Tools
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
             ${install_prefix}
         BUILD_ALWAYS ON
         USES_TERMINAL_CONFIGURE ON
         USES_TERMINAL_BUILD ON
         USES_TERMINAL_INSTALL ON
+        ${depends_args}
         ${install_args})
 endfunction()
 
@@ -67,7 +73,8 @@ vulture_add_part(uefi TOOLCHAIN vulture-uefi-aarch64 INSTALL_DIR ${VULTURE_ESP_D
 # Programs install into the root filesystem staging tree, which is packed
 # into the boot archive the kernel mounts as /.
 set(VULTURE_ROOT_DIR ${CMAKE_BINARY_DIR}/root)
-vulture_add_part(userland TOOLCHAIN vulture-aarch64 INSTALL_DIR ${VULTURE_ROOT_DIR})
+# It needs the host's ipcc for its IPC endpoints.
+vulture_add_part(userland TOOLCHAIN vulture-aarch64 INSTALL_DIR ${VULTURE_ROOT_DIR} DEPENDS host)
 
 # The root also has the kernel where macOS keeps it (the loader boots the
 # copy on the ESP), without its debug information.

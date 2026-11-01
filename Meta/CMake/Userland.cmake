@@ -55,3 +55,24 @@ function(vulture_install_alias program directory alias)
     get_target_property(installed ${program} VULTURE_INSTALLED_FILE)
     install(PROGRAMS ${installed} DESTINATION ${directory} RENAME ${alias})
 endfunction()
+
+# vulture_compile_ipc(<target> <file.ipc>...)
+#
+# Runs ipcc (built by the host part) on each endpoint description, making
+# <file>Endpoint.h in the target's build directory, which its sources (and
+# those of what links it) can include as <file>Endpoint.h.
+function(vulture_compile_ipc target)
+    foreach(source IN LISTS ARGN)
+        get_filename_component(stem ${source} NAME_WE)
+        get_filename_component(input ${source} ABSOLUTE)
+        set(output ${CMAKE_CURRENT_BINARY_DIR}/${stem}Endpoint.h)
+        add_custom_command(
+            OUTPUT ${output}
+            COMMAND ${VULTURE_HOST_TOOLS}/ipcc/ipcc ${input} ${output}
+            DEPENDS ${input} ${VULTURE_HOST_TOOLS}/ipcc/ipcc
+            COMMENT "ipcc ${source}"
+            VERBATIM)
+        target_sources(${target} PRIVATE ${output})
+    endforeach()
+    target_include_directories(${target} PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+endfunction()

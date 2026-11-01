@@ -1,0 +1,15 @@
+// The name service, as launchd's bootstrap server: vlaunchd answers on
+// every process's bootstrap port. Errors are errno values (0: none).
+endpoint Bootstrap
+{
+    // A send right to the service `name` (ENOENT if there is none).
+    look_up(String name) => (i32 error, Port service)
+
+    // The service's receive right, for the job vlaunchd started to serve
+    // it (EPERM for anyone else).
+    check_in(String name) => (i32 error, Port service)
+
+    // A service of a process's own, by a send right to it (EEXIST if the
+    // name is taken).
+    register_service(String name, Port service) => (i32 error)
+}
