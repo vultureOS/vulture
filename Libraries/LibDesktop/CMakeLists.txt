@@ -9,5 +9,5 @@
 add_library(LibDesktop STATIC
     Desktop.cpp)
 vulture_compile_ipc(LibDesktop Finder.ipc Notifications.ipc Search.ipc Session.ipc)
-target_link_libraries(LibDesktop PUBLIC LibUI LibImage LibJSON LibIPC LibCore)
+target_link_libraries(LibDesktop PUBLIC LibUI LibImage LibJSON LibIPC LibCore LibServices)
 target_include_directories(LibDesktop PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

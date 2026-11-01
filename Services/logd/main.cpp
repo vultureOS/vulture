@@ -11,6 +11,7 @@
 #include <LibIPC/Listener.h>
 #include <LogEndpoint.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -246,12 +247,43 @@ private:
             entry.time = static_cast<u64>(now.tv_sec) * 1'000'000 + static_cast<u64>(now.tv_nsec) / 1000;
         }
         publish(entry);
+        show_on_console(entry);
         if (m_entries.size() < kept_entries) {
             m_entries.append(move(entry));
         } else {
             m_entries[m_first] = move(entry);
             m_first = (m_first + 1) % kept_entries;
         }
+    }
+
+    // Booted with "debug": everything, at every level, as it arrives, shorter than
+    // `log` prints it (the same entries are in `log show`).
+    void show_on_console(Entry const& entry)
+    {
+        if (!getenv("VULTURE_DEBUG"))
+            return;
+        static int const console = open("/dev/console", O_WRONLY | O_NOCTTY | O_CLOEXEC);
+        if (console < 0)
+            return;
+        auto seconds = static_cast<time_t>(entry.time / 1'000'000);
+        struct tm broken {};
+        gmtime_r(&seconds, &broken);
+        StringBuilder line;
+        line.appendff("log: {:02}:{:02}:{:02}.{:03} ", broken.tm_hour, broken.tm_min, broken.tm_sec, (entry.time % 1'000'000) / 1000);
+        line.append(type_name(entry.type));
+        line.appendff(" {}[{}]", entry.process.view(), entry.pid);
+        if (!entry.subsystem.is_empty()) {
+            line.append(" ["_sv);
+            line.append(entry.subsystem.view());
+            line.append(":"_sv);
+            line.append(entry.category.view());
+            line.append("]"_sv);
+        }
+        line.append(" "_sv);
+        line.append(entry.message.view());
+        line.append("\n"_sv);
+        auto text = line.view();
+        (void)write(console, text.characters_without_null_termination(), text.length());
     }
 
     // To every stream that wants it. A stream that has gone (or cannot

@@ -10,6 +10,7 @@
 #include <LibCore/EventLoop.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/reboot.h>
 #include <sys/wait.h>
@@ -96,6 +97,13 @@ int main(int argc, char** argv)
 {
     if (getpid() != 1)
         return run_as_supervisor(argc, argv);
+    // From the kernel's "debug" flag: last on the line, whatever else there is.
+    if (argc > 1 && strcmp(argv[argc - 1], "--debug") == 0) {
+        Launchd::set_debug_logging(true);
+        // Every job gets it, and what they start: logd and programs ask for it.
+        setenv("VULTURE_DEBUG", "1", 1);
+        --argc;
+    }
     if (argc > 1 && strcmp(argv[1], "--test") == 0) {
         printf("vlaunchd: vultureOS userland is up (process %d)\n", getpid());
         return Launchd::run_tests();
@@ -124,5 +132,11 @@ int main(int argc, char** argv)
         for (;;)
             (void)waitpid(-1, nullptr, 0);
     }
-    return run_as_process_one(argc > 1 && strcmp(argv[1], "--gui") == 0);
+    bool graphical = argc > 1 && strcmp(argv[1], "--gui") == 0;
+    // Nothing to draw on: the text console is all there can be.
+    if (graphical && access("/dev/gpu0", F_OK) != 0) {
+        printf("vlaunchd: no display for a desktop: staying on the text console\n");
+        graphical = false;
+    }
+    return run_as_process_one(graphical);
 }

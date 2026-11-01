@@ -278,7 +278,7 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
 
     // Boot flags that make vlaunchd run tests: "utest" the userland tests,
     // "crashtest" and "persisttest" the storage tests.
-    StringView init_arguments[2] = { "/sbin/vlaunchd"_sv, {} };
+    StringView init_arguments[3] = { "/sbin/vlaunchd"_sv, {}, {} };
     size_t argument_count = 1;
     if (arguments.has_flag("utest"_sv))
         init_arguments[argument_count++] = "--test"_sv;
@@ -292,8 +292,14 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
         init_arguments[argument_count++] = "--ui-gallery"_sv;
     else if (arguments.has_flag("uidesktop"_sv))
         init_arguments[argument_count++] = "--ui-desktop"_sv;
-    else if (arguments.has_flag("gui"_sv))
+    else if (!arguments.has_flag("console"_sv))
+        // The desktop, unless asked for the text console: what an image must do, having
+        // no boot arguments. (vlaunchd falls back on the console if there is no screen.)
         init_arguments[argument_count++] = "--gui"_sv;
+    if (arguments.has_flag("debug"_sv)) {
+        Process::set_tracing(true);
+        init_arguments[argument_count++] = "--debug"_sv;
+    }
     (void)must("starting init"_sv, Process::create_init("/sbin/vlaunchd"_sv, Span<StringView const>(init_arguments, argument_count)));
 }
 

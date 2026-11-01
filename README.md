@@ -34,7 +34,7 @@ a text login on the console.
   with its own signal mask and alternate stack.
 - PranaWindowServer composes windows at 60 fps at 2560×1600, with shadows,
   continuous corners, blurred materials and traffic lights, drawing and setting
-  type with our own rasterizer and font engine (`Meta/run.sh --gui`).
+  type with our own rasterizer and font engine (`Meta/run.sh`).
 - Every push is built on macOS and Linux by GitHub Actions; `ninja check`
   runs the unit tests, the kernel tests, 36 userland suites (among them our
   [POSIX conformance subset](Documentation/POSIX.md): 208 requirements), a
@@ -74,7 +74,9 @@ Both are built on every push by GitHub Actions
 
 ```sh
 Meta/build.sh             # configure (first time) and build everything
-Meta/run.sh               # boot in QEMU
+Meta/run.sh               # boot to the desktop, in QEMU's window
+Meta/run_debug.sh         # the same, with what the system is doing in this terminal
+Meta/run_console.sh       # boot to the text console instead
 Meta/build.sh --check     # build, then run every test
 ```
 
@@ -98,8 +100,17 @@ ninja -C build check      # unit tests + headless boot, crash and kernel tests
 - `ninja -C build test-crash` cuts the power 100 times while files are
   being written. After each cut `fsck.vfs` must pass and nothing committed
   may be lost.
-- `Meta/run.sh --gui` boots to the window server (with a sample scene, for now);
-  without it you get the text console, which you can type at in QEMU's window.
+- `Meta/run.sh` boots to the desktop and keeps the terminal quiet: log in as `vulture`,
+  password `vulture`. What the system prints goes to `build/qemu/console.log`.
+- `Meta/run_debug.sh` boots the same desktop and shows what is going on in the terminal:
+  the kernel's log, every process forked, exec'd and ended, every launchd job, and the
+  unified log at every level (windows made and destroyed, applications launched,
+  sessions begun). The terminal is also the serial console, so you can log in there and
+  run `ps` or `log show`. It is all kept in `build/qemu/debug.log`, and what QEMU notices
+  the guest doing wrong in `build/qemu/qemu.log`. It takes `run.sh`'s options, such as
+  `--gdb`.
+- `Meta/run_console.sh` boots to the text console, which you can type at in QEMU's
+  window or in the terminal.
 - `Meta/run.sh --boot-args -v` boots verbosely.
 - `Meta/run.sh --help` lists the other options, such as software emulation
   (`--tcg`), waiting for a debugger (`--gdb`) and saving a screenshot.

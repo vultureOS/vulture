@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <os/log.h>
 #include <Desktop.h>
 #include <LibCore/Account.h>
 #include <LibIPC/Bootstrap.h>
@@ -106,6 +107,12 @@ private:
     bool m_is_restart;
 };
 
+os_log_t session_log()
+{
+    static os_log_t const log = os_log_create("com.vulture.loginwindow", "session");
+    return log;
+}
+
 // The session's programs, run as the person who logged in.
 class Session final : public SessionStub {
 public:
@@ -129,6 +136,7 @@ public:
             spawn(account, program);
         m_running = true;
         printf("loginwindow: session started\n");
+        os_log(session_log(), "Session started for %.*s", static_cast<int>(account.name().length()), account.name().characters_without_null_termination());
         fflush(stdout);
     }
 

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <os/log.h>
 #include "Server.h"
 #include "Cursors.h"
 #include <Kernel/API/POSIX/input.h>
@@ -20,6 +21,16 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+namespace {
+
+os_log_t server_log()
+{
+    static os_log_t const log = os_log_create("com.vulture.windowserver", "clients");
+    return log;
+}
+
+}
 
 namespace WindowServer {
 
@@ -228,6 +239,7 @@ WindowServerEndpoint::ConnectAnswer Server::connect(IPC::Sender const& sender, I
 
 void Server::remove_client(Client& client)
 {
+    os_log_info(server_log(), "A client is gone: %s", client.application_name.is_empty() ? "(not an application)" : client.application_name.characters());
     for (size_t i = m_windows.size(); i > 0; --i) {
         if (m_windows[i - 1]->client == &client)
             remove_window(*m_windows[i - 1]);
@@ -297,6 +309,7 @@ void Server::activate_frontmost()
 
 WindowServerEndpoint::CreateWindowAnswer Server::create_window(IPC::Sender const& sender, String title, i32 x, i32 y, i32 width, i32 height, u32 flags)
 {
+    os_log_debug(server_log(), "Process %d creates \"%s\": %dx%d at %d,%d, flags %#x", sender.pid, title.characters(), width, height, x, y, flags);
     WindowServerEndpoint::CreateWindowAnswer answer {};
     auto* client = client_of(sender);
     if (!client || width <= 0 || height <= 0 || width > 16384 || height > 16384) {
@@ -332,6 +345,7 @@ WindowServerEndpoint::CreateWindowAnswer Server::create_window(IPC::Sender const
 
 void Server::destroy_window(IPC::Sender const& sender, u32 id)
 {
+    os_log_debug(server_log(), "Process %d destroys window %u", sender.pid, id);
     if (auto* window = window_of(sender, id)) {
         remove_window(*window);
         schedule_frame();

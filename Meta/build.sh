@@ -94,5 +94,6 @@ if [ ${#targets[@]} -eq 0 ]; then
     fi
     echo
     echo "Built vultureOS. Boot it with: $run_hint"
+    echo "(Meta/run_debug.sh shows what it is doing; Meta/run_console.sh boots to the text console.)"
     echo "  (add --boot-args -v for a verbose boot, --help for more)"
 fi

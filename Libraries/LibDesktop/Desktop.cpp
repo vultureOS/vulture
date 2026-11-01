@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <os/log.h>
 #include "Desktop.h"
 #include <LibIPC/Bootstrap.h>
 #include <LibImage/Image.h>
@@ -200,6 +201,8 @@ ErrorOr<pid_t> launch(AppInfo const& application, Span<StringView const> argumen
         execv(argv[0], argv.data());
         _exit(127);
     }
+    static os_log_t const log = os_log_create("com.vulture.desktop", "launch");
+    os_log_info(log, "Launched %s as process %d", application.name.characters(), child);
     return child;
 }
 

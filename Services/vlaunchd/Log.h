@@ -14,4 +14,10 @@ namespace Launchd {
 void open_log(char const* path);
 [[gnu::format(printf, 1, 2)]] void log(char const* format, ...);
 
+// Booted with "debug": messages go to the console as well, and those below are made.
+void set_debug_logging(bool);
+[[nodiscard]] bool debug_logging();
+// What is too ordinary for the log otherwise: jobs starting and ending as they should.
+[[gnu::format(printf, 1, 2)]] void debug(char const* format, ...);
+
 }

@@ -27,6 +27,37 @@ void open_log(char const* path)
         s_log_fd = fd;
 }
 
+static bool s_debug_logging { false };
+
+void set_debug_logging(bool debug)
+{
+    s_debug_logging = debug;
+}
+
+bool debug_logging()
+{
+    return s_debug_logging;
+}
+
+void debug(char const* format, ...)
+{
+    if (!s_debug_logging)
+        return;
+    char line[1024];
+    int length = snprintf(line, sizeof(line), "vlaunchd: ");
+    va_list arguments;
+    va_start(arguments, format);
+    int written = vsnprintf(line + length, sizeof(line) - static_cast<size_t>(length) - 1, format, arguments);
+    va_end(arguments);
+    if (written <= 0)
+        return;
+    size_t total = static_cast<size_t>(length) + static_cast<size_t>(written);
+    if (total > sizeof(line) - 2)
+        total = sizeof(line) - 2;
+    line[total++] = '\n';
+    (void)write(STDOUT_FILENO, line, total);
+}
+
 void log(char const* format, ...)
 {
     char line[1024];
@@ -47,6 +78,8 @@ void log(char const* format, ...)
         length += static_cast<size_t>(written) < sizeof(line) - length - 1 ? static_cast<size_t>(written) : sizeof(line) - length - 2;
     line[length++] = '\n';
     (void)write(s_log_fd, line, length);
+    if (s_debug_logging)
+        (void)write(STDOUT_FILENO, line, length);
 }
 
 }

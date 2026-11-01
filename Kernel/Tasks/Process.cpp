@@ -152,6 +152,18 @@ void Process::describe(vulture_process_info& info)
     __builtin_memcpy(info.name, m_name, length);
 }
 
+static bool s_tracing { false };
+
+void Process::set_tracing(bool tracing)
+{
+    s_tracing = tracing;
+}
+
+bool Process::is_tracing()
+{
+    return s_tracing;
+}
+
 Vector<NonnullRefPtr<Process>> Process::all()
 {
     Vector<NonnullRefPtr<Process>> processes;
@@ -611,6 +623,9 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
         Arch::set_current_user_thread_pointer(0);
     }
 
+    if (s_tracing)
+        dmesgln("process: {} execs {} (user {})", m_pid, path, m_credentials.euid);
+
     m_executable = executable;
     m_executable_bias = program.bias;
     m_interpreter = interpreter;
@@ -656,6 +671,8 @@ void Process::child_state_changed()
 
 void Process::terminate(int status)
 {
+    if (s_tracing)
+        dmesgln("process: {} ({}) ends with status {:#x}", m_pid, StringView(m_name, m_name_length), status);
     VERIFY(this == current());
     end_other_threads();
     if (this == s_init) {

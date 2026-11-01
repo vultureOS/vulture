@@ -77,8 +77,11 @@ void describe_end(int status, char* text, size_t size)
     open_standard(job.standard_out, STDOUT_FILENO, O_WRONLY | O_CREAT | O_APPEND);
     open_standard(job.standard_error, STDERR_FILENO, O_WRONLY | O_CREAT | O_APPEND);
 
+    bool debug_logging = getenv("VULTURE_DEBUG");
     clearenv();
     setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin", 1);
+    if (debug_logging)
+        setenv("VULTURE_DEBUG", "1", 1);
     if (job.user_name.has_value()) {
         auto account = Core::Account::from_name(job.user_name->view());
         if (account.is_error()) {
@@ -341,6 +344,7 @@ void Supervisor::spawn(Job& job)
     if (pid == 0)
         become_job(job);
     job.pid = pid;
+    debug("(%s[%d]) Started: %s", job.label.characters(), pid, job.program.characters());
     job.started_at = now_milliseconds();
     job.last_started_at = job.started_at;
     ++job.runs;
@@ -372,6 +376,8 @@ void Supervisor::job_ended(Job& job, int status)
     describe_end(status, text, sizeof(text));
     if (text[0] && !m_stopping)
         log("(%s[%d]) %s", job.label.characters(), job.pid, text);
+    else
+        debug("(%s[%d]) Exited normally", job.label.characters(), job.pid);
     job.pid = 0;
     job.last_status = status;
     if (m_stopping)

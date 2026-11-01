@@ -83,6 +83,9 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
             child->m_signal_actions[signal] = m_signal_actions[signal];
     }
 
+    if (is_tracing())
+        dmesgln("process: {} ({}) forks {}", m_pid, name(), child->pid());
+
     auto thread = TRY(Thread::create(name(), [](void*) {
         Arch::return_to_user(Thread::current().user_trap_frame());
     },

@@ -64,7 +64,7 @@ ExternalProject over the same source tree and adds these targets:
 | Target | What it does |
 |---|---|
 | `ninja -C build` | Builds every part and merges `build/compile_commands.json` for editors |
-| `ninja -C build run` | Boots in QEMU with a window (`Meta/run.sh`) |
+| `ninja -C build run` | Boots to the desktop in QEMU's window (`Meta/run.sh`; `Meta/run_debug.sh` for logs in the terminal, `Meta/run_console.sh` for the text console) |
 | `ninja -C build test-host` | Runs host unit tests through CTest |
 | `ninja -C build test-boot` | Boots headless; the kernel must print its memory map and finish booting |
 | `ninja -C build test-panic` | Boots with `fault=data-abort`; the panic report must decode the fault and symbolize the backtrace |
@@ -72,6 +72,8 @@ ExternalProject over the same source tree and adds these targets:
 | `ninja -C build test-userland` | Boots with `utest`: `/sbin/vlaunchd --test` runs the programs in `/usr/tests`, prints `userland: PASS`, and powers off |
 | `ninja -C build test-login` | Boots normally and logs in on the console over the serial line (`Meta/run.sh --chat Tests/Console/login.chat`), then powers off with `sudo` |
 | `ninja -C build test-persistence` | Three boots in a row on one disk, each finding what the last committed |
+| `ninja -C build test-desktop-boot` | Boots with no flags, as an image does: the desktop's login window must come up |
+| `ninja -C build test-debug-boot` | Boots with `debug`: processes, launchd's jobs and the unified log must all reach the console |
 | `ninja -C build check` | All of the above tests |
 | `ninja -C build test-crash` | 100 power cuts while writing; fsck clean after each (not part of `check`) |
 | `ninja -C build test-soak` | 1000 threads ping-ponging for 60 s (not part of `check`) |
@@ -92,6 +94,8 @@ Kernel command line words:
 | `ktest`, `ktest=PREFIX` | Run the in-kernel tests (those whose `suite.name` starts with PREFIX), then power off |
 | `ktest-seconds=N` | How long soak tests run (default 2) |
 | `utest` | Start `/sbin/vlaunchd --test`, which runs the userland tests and powers off |
+| `console` | Stay on the text console, with no desktop. Without it the system boots to the desktop (or to the console, if there is no display) |
+| `debug` | Log what the system is doing on the console: processes forked, exec'd and ended, launchd's jobs, and the unified log at every level |
 | `fault=KIND` | End the boot with a deliberate crash: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (in a timer interrupt) or `processor` (on processor 1) | Kernel code that does not touch hardware (such as
 `Kernel/BootArguments.cpp`) is compiled into host tests too; see
 `Tests/Kernel`.

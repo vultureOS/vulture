@@ -8,9 +8,18 @@
 #
 #   Meta/run.sh [options] [-- extra QEMU arguments]
 #
+# With no options, the desktop in QEMU's window and nothing in this terminal (what the
+# system says goes to <build>/qemu/console.log). Meta/run_debug.sh is that with all of
+# it here; Meta/run_console.sh boots to the text console instead.
+#
 #   --build-dir DIR     build directory (default: <repo>/build)
 #   --boot-args TEXT    kernel command line, e.g. "-v" for a verbose boot
-#   --gui               boot to the window server, and show its display
+#   --gui               boot to the desktop: the default, but with --headless
+#   --console           boot to the text console (in the window and this terminal)
+#   --debug             show what the system is doing in this terminal: the kernel, every
+#                       process and job started and ended, the unified log at every
+#                       level. A log-in prompt too. Kept in <build>/qemu/debug.log, with
+#                       what QEMU notices the guest doing wrong in <build>/qemu/qemu.log
 #   --tcg               software emulation (TCG) instead of the hypervisor
 #                       (HVF on macOS, KVM on AArch64 Linux), which is
 #                       otherwise used where there is one
@@ -61,7 +70,8 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="$root_dir/build"
 boot_args=""
-gui=0
+gui=""
+debug=0
 accelerator="${VULTURE_ACCEL:-}"
 gpu_width="${VULTURE_GPU_WIDTH:-2560}"
 gpu_height="${VULTURE_GPU_HEIGHT:-1600}"
@@ -86,6 +96,8 @@ while [ $# -gt 0 ]; do
         --build-dir) build_dir="$2"; shift 2 ;;
         --boot-args) boot_args="$2"; shift 2 ;;
         --gui) gui=1; shift ;;
+        --console) gui=0; shift ;;
+        --debug) debug=1; shift ;;
         --tcg) accelerator="tcg"; shift ;;
         --gdb) gdb=1; shift ;;
         --headless) headless=1; shift ;;
@@ -102,10 +114,18 @@ while [ $# -gt 0 ]; do
         --kill-delay) kill_delay="$2"; shift 2 ;;
         --) shift; extra_args=("$@"); break ;;
         --chat) chat_file="$2"; shift 2 ;;
-        -h|--help) sed -n '8,50p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '8,64p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "run.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
 done
+
+# The desktop, for a person; the console, for what scripts talk to, unless they say.
+if [ -z "$gui" ]; then
+    if [ "$headless" -eq 1 ]; then gui=0; else gui=1; fi
+fi
+if [ -n "$image" ] && { [ "$debug" -eq 1 ] || [ "$gui" -eq 0 ]; }; then
+    echo "run.sh: an image has no boot arguments: it boots to the desktop, without debug logs" >&2
+fi
 
 qemu="${QEMU:-qemu-system-aarch64}"
 esp_dir="$build_dir/esp"
@@ -162,8 +182,12 @@ for required in "$esp_dir/EFI/BOOT/BOOTAA64.EFI" "$kernels_dir/vulture"; do
 done
 
 # VultureBoot passes the contents of boot-args to the kernel as its command line.
-if [ "$gui" -eq 1 ]; then
-    boot_args="${boot_args:+$boot_args }gui"
+# (The kernel boots to the desktop unless told otherwise, as an image must.)
+if [ "$gui" -eq 0 ]; then
+    boot_args="${boot_args:+$boot_args }console"
+fi
+if [ "$debug" -eq 1 ]; then
+    boot_args="${boot_args:+$boot_args }debug"
 fi
 if [ -n "$boot_args" ]; then
     printf '%s\n' "$boot_args" > "$kernels_dir/boot-args"
@@ -278,6 +302,19 @@ if [ "$gdb" -eq 1 ]; then
 fi
 
 if [ "$headless" -eq 0 ]; then
+    mkdir -p "$state_dir"
+    if [ "$debug" -eq 1 ]; then
+        echo "run.sh: debug logs follow, and are kept in $state_dir/debug.log (QEMU's own in qemu.log)." >&2
+        echo "run.sh: this terminal is the serial console too: log in here for ps, log show, and so on." >&2
+        exec "$qemu" "${args[@]}" -d guest_errors,unimp -D "$state_dir/qemu.log" \
+            -chardev "stdio,id=console,signal=on,logfile=$state_dir/debug.log" -serial chardev:console \
+            ${extra_args[@]+"${extra_args[@]}"}
+    fi
+    if [ "$gui" -eq 1 ]; then
+        echo "run.sh: vultureOS is starting in QEMU's window. Log in as vulture, password vulture." >&2
+        echo "run.sh: its console output goes to $state_dir/console.log; Meta/run_debug.sh shows it all here." >&2
+        exec "$qemu" "${args[@]}" -serial "file:$state_dir/console.log" ${extra_args[@]+"${extra_args[@]}"}
+    fi
     exec "$qemu" "${args[@]}" -serial stdio ${extra_args[@]+"${extra_args[@]}"}
 fi
 
@@ -370,6 +407,14 @@ key_for() {
         "'") printf 'apostrophe' ;;
         '"') printf 'shift-apostrophe' ;;
         '|') printf 'shift-backslash' ;;
+        '\') printf 'backslash' ;;
+        '[') printf 'bracket_left' ;;
+        ']') printf 'bracket_right' ;;
+        '{') printf 'shift-bracket_left' ;;
+        '}') printf 'shift-bracket_right' ;;
+        '`') printf 'grave_accent' ;;
+        '~') printf 'shift-grave_accent' ;;
+        '^') printf 'shift-6' ;;
         '>') printf 'shift-dot' ;;
         '<') printf 'shift-comma' ;;
         '!') printf 'shift-1' ;;
@@ -403,6 +448,9 @@ type_on_keyboard() {
         esac
     done
     press_keys "${presses[@]}"
+    # QEMU takes them in its own time, each held 10 ms and let go: it is not finished
+    # typing for a while yet, and the next step must not overtake it.
+    sleep "$(awk "BEGIN { print ${#presses[@]} * 0.03 }")"
 }
 
 # Saves the screen as PNG: QEMU's machine protocol, negotiating capabilities and

@@ -63,6 +63,10 @@ public:
     [[nodiscard]] ProcessID parent_pid() const;
     [[nodiscard]] StringView name() const { return { m_name, m_name_length }; }
     [[nodiscard]] AddressSpace* address_space() { return m_address_space.ptr(); }
+
+    // "debug" on the kernel command line: the kernel log says what every process does.
+    static void set_tracing(bool);
+    [[nodiscard]] static bool is_tracing();
     [[nodiscard]] bool is_zombie() const { return m_zombie.load(MemoryOrder::Acquire); }
     // Job control: the process group and session.
     [[nodiscard]] ProcessID pgid() const { return m_pgid.load(); }
