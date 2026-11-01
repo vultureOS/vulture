@@ -32,13 +32,16 @@ a text login on the console.
   `pbpaste`).
 - Processes have threads: `pthread_*`, `thread_local`, futexes, each thread
   with its own signal mask and alternate stack.
+- PranaWindowServer composes windows at 60 fps at 2560×1600, with shadows,
+  continuous corners, blurred materials and traffic lights, drawing and setting
+  type with our own rasterizer and font engine (`Meta/run.sh --gui`).
 - Every push is built on macOS and Linux by GitHub Actions; `ninja check`
-  runs the unit tests, the kernel tests, 34 userland suites (among them our
+  runs the unit tests, the kernel tests, 36 userland suites (among them our
   [POSIX conformance subset](Documentation/POSIX.md): 208 requirements), a
-  console login typed over the serial line, and the storage tests.
+  console login typed over the serial line and on the keyboard, golden screenshots
+  of the window server, and the storage tests.
 
-Next is M8, graphics and the window server. See the
-[Roadmap](Documentation/Roadmap.md).
+Next is M9, pranaUI. See the [Roadmap](Documentation/Roadmap.md).
 
 ## Requirements
 
@@ -95,6 +98,8 @@ ninja -C build check      # unit tests + headless boot, crash and kernel tests
 - `ninja -C build test-crash` cuts the power 100 times while files are
   being written. After each cut `fsck.vfs` must pass and nothing committed
   may be lost.
+- `Meta/run.sh --gui` boots to the window server (with a sample scene, for now);
+  without it you get the text console, which you can type at in QEMU's window.
 - `Meta/run.sh --boot-args -v` boots verbosely.
 - `Meta/run.sh --help` lists the other options, such as software emulation
   (`--tcg`), waiting for a debugger (`--gdb`) and saving a screenshot.

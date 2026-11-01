@@ -23,6 +23,15 @@ the system font is Inter (SIL OFL).
    `ninja test-ui` fails on any regression (max channel difference ≤ 2, ≤ 0.1%
    of pixels).
 
+## Where this stands
+
+Tokens and golden tests exist (M8): `Base/System/Library/Themes/{Light,Dark}.json` drive
+the window server, and `ninja test-ui` compares its output with
+`Tests/UI/Golden` at 1x and 2x. Step 1 has not been done: nothing has been measured
+against a real Mac yet, so the values are estimates, and a passing golden shows
+that nothing changed, not that it matches macOS. Calibrating them, with the Widget
+Gallery of M9, is what "pixel-perfect" still needs.
+
 ## Starting tokens
 
 All values are approximate (≈) and get calibrated in step 1. Units are points;

@@ -134,13 +134,14 @@ Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page
                Time (timer queues) · Tests (ktest) · Library (C++ runtime) · Init.cpp
 Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem (libSystem.B.dylib) · LibDyld (dyld)
                LibCore (event loop, accounts) · LibCrypto · LibIPC · LibJSON · LibServices · LibDeviceTree · LibELF · LibVultureFS · LibTest
-               LibGfx, LibUI (pranaUI) … later
-Services/      vlaunchd (process 1, M6); logd · notifyd · configd · pboard (M7); PranaWindowServer · Dock …  (M8+)
+               LibGfx (drawing) · LibText (fonts) · LibImage · LibCompress · LibWindow (windows, for programs)
+               LibUI (pranaUI) … later
+Services/      vlaunchd (process 1, M6); logd · notifyd · configd · pboard (M7); WindowServer (M8); Dock …  (M10+)
 Applications/  Finder · Terminal · TextEdit · Preview · SystemSettings · WidgetGallery …              (M9+)
 Utilities/     vsh and the command-line tools (bin/), login and accounts                               (M6)
 Base/          root filesystem skeleton, themes, fonts, icons, wallpapers, sounds                    (M5+)
 Tests/         host unit tests, kernel tests, userland suites (Userland; posix.cpp is the POSIX subset),
-               the console login (Console/login.chat), UI golden tests later
+               the console (Console/*.chat), golden screenshots (UI; ninja test-ui)
 Documentation/ these documents
 ```
 
@@ -276,6 +277,24 @@ macOS-style at the top, real Unix underneath:
   (`notify(3)`), configd (ComputerName, LocalHostName and HostName in
   `/Library/Preferences/SystemConfiguration/preferences.plist`; it names the
   machine) and pboard (each user's pasteboards).
+- **Graphics and input (M8).** `/dev/gpu0` (virtio-gpu): a framebuffer in ordinary
+  memory to `mmap`, shown rectangle by rectangle when flushed, and a cursor on a plane
+  of its own. `/dev/input` (virtio-input): one reader at a time gets every key and
+  pointer event; while there is none, keys type at `/dev/console` on a US layout, so
+  the text login works from QEMU's window as well as the serial line.
+  `shared_memory_create` makes a nameless file to map in several processes; window
+  surfaces are these, sent through a port.
+- **PranaWindowServer (M8).** A vlaunchd job for the graphical session (the boot flag
+  `gui`). Clients draw in two buffers they share with it and present one; `LibWindow`
+  is their side. The compositor draws directly in the framebuffer, on a fixed 60 Hz
+  beat: the screen is 32-pixel tiles, dirty or not, and each layer (wallpaper, then each
+  window's shadow and body) is drawn over the dirty ones, in bands, on up to 8 threads.
+  Shadows are nine-sliced blurred masks; corners are continuous, from one mask mirrored.
+  A material (vibrancy) is a blur of what is below, at up to 1/8 size, then saturation
+  and a tint, so what is below must be finished first: it splits the frame, and
+  whatever it reads is redrawn with it. The server draws title bars and traffic
+  lights over the client's pixels, moves and resizes windows, and sends pointer and
+  keyboard events on. Every look comes from a theme file.
 - **Filesystems (M5).**
   - **VFS.** Paths resolve one component at a time across a mount table.
     Open files are shared by `dup` and `fork`.

@@ -19,7 +19,7 @@ See [Architecture](Architecture.md) for the design behind these steps.
 | **M5 Storage + vultureFS** | ✅ 2026-10-31 | VFS (mount table, path walk across mounts and symbolic links), shared open files, pipes, devfs, tmpfs; PCIe ECAM with INTx routing; virtio-pci transport, virtio-blk and NVMe; MBR and GPT; FAT12/16/32 (read-only, the ESP at `/Volumes/EFI`); a page cache shared by `read`, `write` and `mmap` (private and shared file mappings); **vultureFS v1** (copy-on-write B+tree, CRC-32C metadata, alternating superblocks, crash-safe checkpoints, orphans) as the root; `Tools/mkvfs`, `fsck.vfs`, `mkimage` (GPT + FAT32 ESP + vultureFS) | Root on vultureFS persists across reboots; 100 forced kills mid-write always remount clean and pass fsck. Verified by `ninja check` (`test-persistence`: three boots, each finding what the last committed) and `ninja test-crash` (100 QEMU power cuts at random moments while writing and fsyncing: fsck clean after every cut, every committed file intact) |
 | **M6 Unix userland** | ✅ 2026-11-01 | Process groups, sessions and job control; TTY layer (line discipline, termios, foreground groups), the console's input, pseudo-terminals; ANSI text console; users, groups and credentials (set-ID programs), permissions; `poll`, `sysctl`, `uname`, `getrandom`, `pread`/`pwrite` and more; **vlaunchd** as process 1 (JSON plists with launchd's keys: RunAtLoad, KeepAlive, ThrottleInterval, StartInterval, UserName, ...; restart policy; orphan reaping; clean shutdown); **vsh** (the POSIX shell language, pipes, redirects, globs, here-documents, functions, job control, history with ^R, completion, scripts, zsh's prompt and messages); about 70 command-line tools with macOS's options and output; `login`, `su`, `passwd`, `sudo`, `getty` (PBKDF2-SHA512 hashes in `/etc/master.passwd`); **dyld** + `libSystem.B.dylib` (every program position independent and dynamically linked, the library's pages shared through the page cache; a prelinked shared cache is left for later); LibCore (event loop, accounts), LibJSON, LibCrypto (SHA-2, HMAC, PBKDF2); CI on macOS and Linux | Text login, `ls -l /System/Library \| grep Kernels \| wc -l`, Ctrl-Z/`fg`; our POSIX conformance subset passes. Verified by `ninja check`: `test-login` (a console login typed over the serial line: the pipeline, a job suspended and continued, logging out and in again, `sudo poweroff`) and `test-userland` (30 suites, among them `posix`: 208 of 208 requirements, see [POSIX](POSIX.md)) |
 | **M7 IPC + services** | ✅ 2026-11-01 | Kernel ports with direct handoff; LibIPC + `ipcc` IDL compiler; logd + `log`, notifyd, configd, pasteboard; name lookup via vlaunchd; threads (futexes, per-thread signals, ELF TLS, pthreads) | IPC round trip within budget; `log stream` shows multiple services |
-| **M8 Graphics + PranaWindowServer** | | virtio-gpu 2D + virtio-input; LibGfx (AA path rasterizer, strokes, rounded rects, gradients, blur, transforms, SIMD, tiles); LibText (TrueType/OpenType, glyph atlas, subpixel positioning); LibImage (inflate, PNG, JPEG, `.vicns`); WindowServer (shared-memory surfaces, damage compositing, shadows, vibrancy, input routing, window management, 2x) | 10 client windows with shadows and blur at 60 fps at 2560×1600 while dragging; golden screenshot passes |
+| **M8 Graphics + PranaWindowServer** | ✅ 2026-11-01 | virtio-gpu 2D + virtio-input, which also types at the text console; LibGfx (AA path rasterizer, strokes, rounded rects, gradients, blur, transforms, SIMD, tiles); LibText (TrueType/OpenType, glyph atlas, subpixel positioning); LibImage (inflate, PNG, JPEG, `.vicns`); WindowServer (shared-memory surfaces, damage compositing, shadows, vibrancy, input routing, window management, 2x) | 10 client windows with shadows and blur at 60 fps at 2560×1600 while dragging; golden screenshot passes |
 | **M9 pranaUI** | | App/Window/View, responder chain, layout, LibAnimation, appearance (light/dark, accent, materials), the full control set, scrolling, drag & drop, accessibility tree, declarative builder layer | Widget Gallery within ±1 px of the measured metrics; light/dark × 1x/2x golden tests pass |
 | **M10 Desktop** | | LoginWindow, menu bar, Dock, Finder, Spotlight + Indexer, Mission Control/Spaces, Launchpad, Notification + Control Center, wallpapers, System Settings, boot progress screen | Scripted UI walkthrough passes with golden screenshots |
 | **M11 Apps + audio** | | Terminal, TextEdit, Preview, Calculator, Activity Monitor, Console, Disk Utility, Archive Utility, Software Center; virtio-sound + AudioServer + UI sounds | Each app's UI test passes; sound plays through QEMU |
@@ -47,7 +47,7 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
 | Null syscall | < 150 ns | |
 | Context switch | < 1 µs | 173 ns (M3, yield between two threads on one processor) |
 | IPC round trip | < 3 µs | 0.84 µs (M7, call and answer between two processes; 4.6 µs through a generated proxy to a vlaunchd-started service) |
-| Window drag at 2560×1600 | 60 fps | |
+| Window drag at 2560×1600 | 60 fps | 59.2–59.7 fps (M8; 10 windows, 5 with blur; 16.7 ms beat, 8–9 ms of work per frame; beats with no pointer movement draw nothing) |
 | Input to photon | ≤ 1 frame | |
 | TextEdit cold launch | < 300 ms | |
 
@@ -151,3 +151,29 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
   - Version 1 limits volumes to 28 GiB (224 bitmap blocks named in the
     superblock). Snapshots, clones, xattrs, ACLs and the sealed System
     volume come later (M13 seals System).
+- **M8:**
+  - Coverage is each pixel's exact area in the shape, from signed areas summed
+    along the row, not samples. The accumulating sum saturates where shapes overlap,
+    so a stroke's outline goes through the exact inner corner, rather than a pivot
+    point whose small overlaps brightened edges by a few levels.
+  - Curves are flattened to a fortieth of a pixel: at a tenth, the polygons sat
+    inside a circle by enough to show as 20 levels of 255 at its edge.
+  - A material's blur reads what is below it, but the framebuffer holds that only
+    where it is being redrawn. Anything within blur reach of a material therefore
+    redoes all of it, and redraws all it reads. Redrawing less left the picture
+    depending on the order changes came in, which the golden test showed at once
+    (the same scene, 13 levels apart between boots).
+  - The drag benchmark's first run gave 54 fps at 16 ms of work a frame. Most of the
+    work went to per-pixel code for materials, and to waking 7 threads for each layer
+    (an interprocessor interrupt each, and those trap under HVF): workers now spin
+    for 200 us between jobs. That made it 8 ms and still 54 fps, as frames were timed
+    from the last one and timers fire 2-4 ms late under HVF. On a fixed beat, as a
+    display's refresh is, a late frame takes that time from the wait for the next.
+  - Injected pointer events passed every test while the real pointer did nothing:
+    the input device told pollers nothing had changed but never woke them. The
+    golden test now drags a window with QEMU's tablet device, through /dev/input.
+  - QEMU's virtio-gpu writes no response for commands on the cursor queue.
+  - The look is not yet calibrated: the theme's values are starting estimates from
+    what macOS is known to use, not measurements of it (see
+    [Design System](DesignSystem.md)). Goldens catch regressions, not distance from
+    macOS.

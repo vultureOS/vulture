@@ -58,7 +58,7 @@ Numbers are positions in `Syscalls.def`: only ever append to it.
 | `fstat`, `stat`, `lstat` | fd or path, `vulture_stat*` | |
 | `pipe` | fds*, flags | |
 | `poll` | pollfd*, count, milliseconds | Files, pipes, terminals |
-| `ioctl` | fd, request, argument | Terminals: termios, window size, foreground group, controlling terminal, pseudo-terminals |
+| `ioctl` | fd, request, argument | Terminals: termios, window size, foreground group, controlling terminal, pseudo-terminals. `/dev/gpu0`: mode, flush, cursor |
 | `mkdir`, `rmdir`, `unlink`, `rename`, `link`, `symlink`, `readlink` | | |
 | `getcwd`, `chdir`, `getdents` | | |
 | `fsync`, `ftruncate`, `sync` | | |
@@ -67,13 +67,14 @@ Numbers are positions in `Syscalls.def`: only ever append to it.
 | `getuid`, `geteuid`, `getgid`, `getegid`, `setuid`, `setgid`, `seteuid`, `setegid`, `getgroups`, `setgroups` | | Set-ID programs run as the file's owner and group |
 | `mmap` | address, length, protection, flags, fd, offset | Anonymous and file mappings, private or shared; writable and executable at once is refused (W^X) |
 | `munmap`, `mprotect` | address, length (, protection) | |
+| `shared_memory_create` | size, flags | A file with no name, to `mmap(MAP_SHARED)` in several processes |
 | `sched_yield`, `clock_gettime`, `nanosleep` | | |
 | `uname`, `getrandom`, `sysctl` | | `sysctl` by name: `kern.*` (including `kern.proc.all`, every process), `hw.*`, `vfs.mounts` |
 | `reboot` | how | Root: restart or power off (vlaunchd does it, after stopping every job) |
 | `power_off` | | Process 1 only, for the test boots |
 
 The shared constants and structures (errno values, signal numbers, `mmap`
-flags, `vulture_stat`, the signal frame, ports, threads) are in
+flags, `vulture_stat`, the signal frame, ports, threads, graphics, input) are in
 [`Kernel/API/POSIX/`](../Kernel/API/POSIX).
 
 ## Signal delivery
