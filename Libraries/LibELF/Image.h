@@ -40,6 +40,16 @@ public:
     // The address of a symbol by exact name.
     [[nodiscard]] Optional<u64> find_symbol_address(StringView name) const;
 
+    // The address a file offset is loaded at, and the other way round
+    // (both within some PT_LOAD segment's file bytes).
+    [[nodiscard]] Optional<u64> address_of_offset(u64 offset) const;
+    [[nodiscard]] Optional<u64> offset_of_address(u64 address) const;
+    // Whether a PT_LOAD segment covers `address` (in memory).
+    [[nodiscard]] bool contains_address(u64 address) const;
+
+    // A shared library's name for itself (DT_SONAME), if it has one.
+    [[nodiscard]] Optional<StringView> soname() const;
+
 private:
     Image() = default;
 

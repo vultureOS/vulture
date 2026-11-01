@@ -81,6 +81,62 @@ ReadonlyBytes Image::segment_data(Elf64_Phdr const& segment) const
     return m_file.slice(segment.p_offset, segment.p_filesz);
 }
 
+Optional<u64> Image::address_of_offset(u64 offset) const
+{
+    for (auto const& segment : m_program_headers) {
+        if (segment.p_type == PT_LOAD && offset >= segment.p_offset && offset < segment.p_offset + segment.p_filesz)
+            return segment.p_vaddr + (offset - segment.p_offset);
+    }
+    return {};
+}
+
+Optional<u64> Image::offset_of_address(u64 address) const
+{
+    for (auto const& segment : m_program_headers) {
+        if (segment.p_type == PT_LOAD && address >= segment.p_vaddr && address < segment.p_vaddr + segment.p_filesz)
+            return segment.p_offset + (address - segment.p_vaddr);
+    }
+    return {};
+}
+
+bool Image::contains_address(u64 address) const
+{
+    for (auto const& segment : m_program_headers) {
+        if (segment.p_type == PT_LOAD && address >= segment.p_vaddr && address < segment.p_vaddr + segment.p_memsz)
+            return true;
+    }
+    return false;
+}
+
+Optional<StringView> Image::soname() const
+{
+    for (auto const& segment : m_program_headers) {
+        if (segment.p_type != PT_DYNAMIC)
+            continue;
+        auto data = segment_data(segment);
+        auto const* entries = reinterpret_cast<Elf64_Dyn const*>(data.data());
+        size_t count = data.size() / sizeof(Elf64_Dyn);
+        Optional<u64> strings, name;
+        for (size_t i = 0; i < count && entries[i].d_tag != DT_NULL; ++i) {
+            if (entries[i].d_tag == DT_STRTAB)
+                strings = entries[i].d_val;
+            else if (entries[i].d_tag == DT_SONAME)
+                name = entries[i].d_val;
+        }
+        if (!strings.has_value() || !name.has_value())
+            return {};
+        auto offset = offset_of_address(strings.value() + name.value());
+        if (!offset.has_value() || offset.value() >= m_file.size())
+            return {};
+        auto const* start = reinterpret_cast<char const*>(m_file.data() + offset.value());
+        size_t length = 0;
+        while (offset.value() + length < m_file.size() && start[length] != '\0')
+            ++length;
+        return StringView { start, length };
+    }
+    return {};
+}
+
 StringView Image::symbol_name(Elf64_Sym const& symbol) const
 {
     if (symbol.st_name >= m_string_table.size())

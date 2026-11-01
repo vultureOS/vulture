@@ -34,6 +34,11 @@ constexpr Elf64_Half EM_X86_64 = 62;
 constexpr Elf64_Half EM_AARCH64 = 183;
 
 constexpr Elf64_Word PT_LOAD = 1;
+constexpr Elf64_Word PT_DYNAMIC = 2;
+constexpr Elf64_Word PT_INTERP = 3;
+constexpr Elf64_Word PT_PHDR = 6;
+constexpr Elf64_Word PT_TLS = 7;
+constexpr Elf64_Word PT_GNU_RELRO = 0x6474e552;
 
 constexpr Elf64_Word PF_X = 1;
 constexpr Elf64_Word PF_W = 2;
@@ -46,7 +51,52 @@ constexpr u8 STT_NOTYPE = 0;
 constexpr u8 STT_OBJECT = 1;
 constexpr u8 STT_FUNC = 2;
 
+constexpr u8 STT_TLS = 6;
+constexpr u8 STT_GNU_IFUNC = 10;
+
+constexpr u8 STB_LOCAL = 0;
+constexpr u8 STB_GLOBAL = 1;
+constexpr u8 STB_WEAK = 2;
+
+constexpr Elf64_Half SHN_UNDEF = 0;
+
 constexpr u8 elf64_st_type(u8 info) { return info & 0xf; }
+constexpr u8 elf64_st_bind(u8 info) { return info >> 4; }
+
+// The dynamic section's tags (those the dynamic linker reads).
+constexpr i64 DT_NULL = 0;
+constexpr i64 DT_NEEDED = 1;
+constexpr i64 DT_PLTRELSZ = 2;
+constexpr i64 DT_HASH = 4;
+constexpr i64 DT_STRTAB = 5;
+constexpr i64 DT_SYMTAB = 6;
+constexpr i64 DT_RELA = 7;
+constexpr i64 DT_RELASZ = 8;
+constexpr i64 DT_RELAENT = 9;
+constexpr i64 DT_STRSZ = 10;
+constexpr i64 DT_SYMENT = 11;
+constexpr i64 DT_INIT = 12;
+constexpr i64 DT_FINI = 13;
+constexpr i64 DT_SONAME = 14;
+constexpr i64 DT_RUNPATH = 29;
+constexpr i64 DT_JMPREL = 23;
+constexpr i64 DT_INIT_ARRAY = 25;
+constexpr i64 DT_FINI_ARRAY = 26;
+constexpr i64 DT_INIT_ARRAYSZ = 27;
+constexpr i64 DT_FINI_ARRAYSZ = 28;
+constexpr i64 DT_FLAGS = 30;
+constexpr i64 DT_TEXTREL = 22;
+
+// AArch64 relocations.
+constexpr u32 R_AARCH64_NONE = 0;
+constexpr u32 R_AARCH64_ABS64 = 257;
+constexpr u32 R_AARCH64_COPY = 1024;
+constexpr u32 R_AARCH64_GLOB_DAT = 1025;
+constexpr u32 R_AARCH64_JUMP_SLOT = 1026;
+constexpr u32 R_AARCH64_RELATIVE = 1027;
+
+constexpr u32 elf64_r_sym(u64 info) { return static_cast<u32>(info >> 32); }
+constexpr u32 elf64_r_type(u64 info) { return static_cast<u32>(info & 0xffffffff); }
 
 struct Elf64_Ehdr {
     u8 e_ident[EI_NIDENT];
@@ -98,9 +148,22 @@ struct Elf64_Sym {
     Elf64_Xword st_size;
 };
 
+struct Elf64_Dyn {
+    i64 d_tag;
+    u64 d_val; // Or an address (d_ptr): the same bits.
+};
+
+struct Elf64_Rela {
+    Elf64_Addr r_offset;
+    u64 r_info;
+    i64 r_addend;
+};
+
 static_assert(sizeof(Elf64_Ehdr) == 64);
 static_assert(sizeof(Elf64_Phdr) == 56);
 static_assert(sizeof(Elf64_Shdr) == 64);
 static_assert(sizeof(Elf64_Sym) == 24);
+static_assert(sizeof(Elf64_Dyn) == 16);
+static_assert(sizeof(Elf64_Rela) == 24);
 
 }
