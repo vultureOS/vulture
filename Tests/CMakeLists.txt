@@ -5,6 +5,7 @@
 #
 
 add_subdirectory(Kernel)
+add_subdirectory(LibAnimation)
 add_subdirectory(LibArchive)
 add_subdirectory(LibBase)
 add_subdirectory(LibCompress)
