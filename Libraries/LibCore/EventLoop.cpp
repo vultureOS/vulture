@@ -5,6 +5,7 @@
  */
 
 #include <LibCore/EventLoop.h>
+#include <LibBase/Atomic.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -16,10 +17,13 @@ namespace Core {
 
 namespace {
 
-EventLoop* s_current = nullptr;
+// Each thread has its own loop, if it wants one.
+thread_local EventLoop* s_current = nullptr;
 
-// The pipe signals come through: the handler writes the signal's number.
+// The pipe signals come through: the handler writes the signal's number. One
+// loop reads it: the first that asked for a signal.
 int s_wake_pipe[2] = { -1, -1 };
+Atomic<EventLoop*> s_signal_loop { nullptr };
 struct sigaction s_previous_actions[NSIG];
 bool s_caught[NSIG];
 
@@ -44,16 +48,20 @@ EventLoop::EventLoop()
 {
     VERIFY(!s_current);
     s_current = this;
-    if (s_wake_pipe[0] < 0) {
+    [[maybe_unused]] static bool const pipe_is_made = [] {
         VERIFY(pipe2(s_wake_pipe, O_CLOEXEC | O_NONBLOCK) == 0);
-    }
+        return true;
+    }();
 }
 
 EventLoop::~EventLoop()
 {
-    for (int signal = 1; signal < NSIG; ++signal) {
-        if (s_caught[signal])
-            restore_signal(signal);
+    if (s_signal_loop.load() == this) {
+        for (int signal = 1; signal < NSIG; ++signal) {
+            if (s_caught[signal])
+                restore_signal(signal);
+        }
+        s_signal_loop.store(nullptr);
     }
     s_current = nullptr;
 }
@@ -121,6 +129,9 @@ void EventLoop::restore_signal(int signal)
 int EventLoop::on_signal(int signal, Function<void()> callback)
 {
     VERIFY(signal > 0 && signal < NSIG);
+    EventLoop* expected = nullptr;
+    if (!s_signal_loop.compare_exchange_strong(expected, this))
+        VERIFY(expected == this);
     int id = m_next_id++;
     m_signal_handlers.append(adopt_own(*new (Base::nothrow) SignalHandler { id, signal, move(callback) }));
     if (!s_caught[signal])
@@ -255,7 +266,7 @@ void EventLoop::pump(bool wait)
 
     Vector<pollfd> pollers;
     Vector<int> ids;
-    pollers.append({ s_wake_pipe[0], POLLIN, 0 });
+    pollers.append({ s_signal_loop.load() == this ? s_wake_pipe[0] : -1, POLLIN, 0 });
     ids.append(0);
     for (auto const& watch : m_watches) {
         short events = watch->interest == Interest::Read ? POLLIN : POLLOUT;

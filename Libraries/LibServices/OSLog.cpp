@@ -24,14 +24,13 @@ namespace {
 // logd, found once (a process that cannot find it logs nothing).
 LogProxy* logd()
 {
-    static LogProxy* proxy = nullptr;
-    static bool looked = false;
-    if (!looked) {
-        looked = true;
+    // Initialized once, whichever threads come at once.
+    static LogProxy* const proxy = []() -> LogProxy* {
         auto port = IPC::look_up("com.vulture.logd"_sv);
-        if (!port.is_error())
-            proxy = new (Base::nothrow) LogProxy(port.release_value());
-    }
+        if (port.is_error())
+            return nullptr;
+        return new (Base::nothrow) LogProxy(port.release_value());
+    }();
     return proxy;
 }
 

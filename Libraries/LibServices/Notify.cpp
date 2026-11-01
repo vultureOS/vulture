@@ -15,13 +15,13 @@ namespace {
 
 NotifyProxy* notifyd()
 {
-    static NotifyProxy* proxy = nullptr;
-    if (!proxy) {
+    // Initialized once, whichever threads come at once.
+    static NotifyProxy* const proxy = []() -> NotifyProxy* {
         auto port = IPC::look_up("com.vulture.notifyd"_sv);
         if (port.is_error())
             return nullptr;
-        proxy = new (Base::nothrow) NotifyProxy(port.release_value());
-    }
+        return new (Base::nothrow) NotifyProxy(port.release_value());
+    }();
     return proxy;
 }
 
