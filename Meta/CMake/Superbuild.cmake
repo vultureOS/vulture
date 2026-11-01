@@ -55,13 +55,18 @@ vulture_add_part(uefi TOOLCHAIN vulture-uefi-aarch64 INSTALL_DIR ${VULTURE_ESP_D
 set(VULTURE_ROOT_DIR ${CMAKE_BINARY_DIR}/root)
 vulture_add_part(userland TOOLCHAIN vulture-aarch64 INSTALL_DIR ${VULTURE_ROOT_DIR})
 
+# The root also has the kernel where macOS keeps it (the loader boots the
+# copy on the ESP), without its debug information.
 add_custom_target(boot-archive ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${VULTURE_ROOT_DIR}/System/Library/Kernels
+    COMMAND ${VULTURE_LLVM_ROOT}/bin/llvm-objcopy --strip-debug
+        ${VULTURE_ESP_DIR}/System/Library/Kernels/vulture ${VULTURE_ROOT_DIR}/System/Library/Kernels/vulture
     COMMAND ${CMAKE_COMMAND}
         -DTOOL=${CMAKE_BINARY_DIR}/host/Tools/mkarchive/mkarchive
         -DROOT=${VULTURE_ROOT_DIR}
         -DOUTPUT=${VULTURE_ESP_DIR}/System/Library/Kernels/vulture.bootarchive
         -P ${CMAKE_SOURCE_DIR}/Meta/CMake/MakeBootArchive.cmake
-    DEPENDS host userland
+    DEPENDS host target userland
     VERBATIM)
 
 # One compile database for the whole tree, for clangd and other editors.

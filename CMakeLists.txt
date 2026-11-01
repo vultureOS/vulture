@@ -58,9 +58,20 @@ elseif(VULTURE_PART STREQUAL "userland")
     add_subdirectory(Libraries/LibC)
     add_subdirectory(Libraries/LibCxxRT)
     add_subdirectory(Services)
+    add_subdirectory(Utilities)
     add_subdirectory(Tests/Userland)
-    # The root filesystem skeleton: /etc and friends.
+    # The root filesystem skeleton: /etc and friends, and the macOS
+    # hierarchy's directories even while nothing is in them (their modes
+    # are in Meta/CMake/MakeBootArchive.cmake).
     install(DIRECTORY Base/ DESTINATION .)
+    foreach(directory
+            Applications Library Library/Preferences Library/LaunchDaemons Library/LaunchAgents
+            System/Library/CoreServices System/Library/Frameworks System/Library/LaunchDaemons System/Library/LaunchAgents
+            Users Users/Shared Volumes dev tmp
+            usr/local usr/local/bin usr/share
+            var var/root var/log var/run var/tmp var/db)
+        install(DIRECTORY DESTINATION ${directory})
+    endforeach()
 else()
     message(FATAL_ERROR "Unknown VULTURE_PART '${VULTURE_PART}'")
 endif()
