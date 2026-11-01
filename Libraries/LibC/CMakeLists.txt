@@ -16,6 +16,7 @@ add_library(LibC STATIC
     libgen.cpp
     locale.cpp
     malloc.cpp
+    math.cpp
     pthread.cpp
     pwd.cpp
     regex.cpp
