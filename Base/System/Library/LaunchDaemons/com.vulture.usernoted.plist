@@ -1,0 +1,9 @@
+{
+    "Label" : "com.vulture.usernoted",
+    "ProgramArguments" : [ "/usr/libexec/usernoted" ],
+    "MachServices" : { "com.vulture.usernoted" : true },
+    "LimitLoadToSessionType" : "Aqua",
+    "KeepAlive" : true,
+    "RunAtLoad" : true,
+    "ThrottleInterval" : 1
+}

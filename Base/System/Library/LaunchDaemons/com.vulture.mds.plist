@@ -1,0 +1,9 @@
+{
+    "Label" : "com.vulture.mds",
+    "ProgramArguments" : [ "/usr/libexec/mds" ],
+    "MachServices" : { "com.vulture.mds" : true },
+    "LimitLoadToSessionType" : "Aqua",
+    "KeepAlive" : true,
+    "RunAtLoad" : true,
+    "ThrottleInterval" : 1
+}

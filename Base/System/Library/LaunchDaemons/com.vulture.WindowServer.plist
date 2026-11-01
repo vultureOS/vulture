@@ -1,7 +1,8 @@
 {
     "Label" : "com.vulture.WindowServer",
     "ProgramArguments" : [
-        "/System/Library/CoreServices/WindowServer"
+        "/System/Library/CoreServices/WindowServer",
+        "--boot-screen"
     ],
     "MachServices" : {
         "com.vulture.windowserver" : true

@@ -1,0 +1,11 @@
+{
+    "Label" : "com.vulture.LoginWindow",
+    "ProgramArguments" : [ "/System/Library/CoreServices/LoginWindow" ],
+    "MachServices" : { "com.vulture.loginwindow" : true },
+    "LimitLoadToSessionType" : "Aqua",
+    "KeepAlive" : true,
+    "RunAtLoad" : true,
+    "StandardOutPath" : "/dev/console",
+    "StandardErrorPath" : "/dev/console",
+    "ThrottleInterval" : 1
+}
