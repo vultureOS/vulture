@@ -428,6 +428,12 @@ void TTY::release_session(ProcessID session)
     m_foreground_group.store(0);
 }
 
+bool TTY::is_hung_up() const
+{
+    SpinLockGuard guard(m_lock);
+    return m_hung_up;
+}
+
 void TTY::hang_up()
 {
     {

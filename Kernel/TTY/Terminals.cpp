@@ -10,6 +10,7 @@
 #include <Kernel/FileSystem/Poll.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/UserAccess.h>
+#include <Kernel/Security/Credentials.h>
 #include <Kernel/TTY/Terminals.h>
 #include <Kernel/Tasks/Thread.h>
 #include <LibBase/Format.h>
@@ -82,49 +83,21 @@ class PseudoTerminalMaster;
 
 // The program side of a pseudo-terminal: /dev/ttys000 and on, as macOS
 // names them.
-class PseudoTerminalSlave final : public TTY {
+// What the slave's programs have written, until the master reads it. Its own object, as
+// a program can be waiting for room in it just as the master goes away.
+class PseudoTerminalOutput final : public RefCounted<PseudoTerminalOutput> {
 public:
-    PseudoTerminalSlave(u32 number, PseudoTerminalMaster& master, StringView name)
-        : TTY(device_number(16, number), name)
-        , m_number(number)
-        , m_master(&master)
+    [[nodiscard]] static ErrorOr<NonnullRefPtr<PseudoTerminalOutput>> create()
     {
+        auto* output = new (Base::nothrow) PseudoTerminalOutput;
+        if (!output)
+            return Error::from_errno(ENOMEM);
+        return adopt_ref(*output);
     }
 
-    [[nodiscard]] u32 number() const { return m_number; }
-    void master_closed();
-
-protected:
-    void emit(ReadonlyBytes, bool from_echo) override;
-
-private:
-    u32 m_number;
-    SpinLock m_master_lock;
-    PseudoTerminalMaster* m_master;
-};
-
-// The terminal-window side: what the slave's programs write comes out of
-// its read(); what it writes is typed into the slave.
-class PseudoTerminalMaster final : public Device {
-public:
-    explicit PseudoTerminalMaster(u32 number)
-        : Device(InodeType::CharacterDevice, 0620, device_number(15, number))
-        , m_number(number)
-    {
-    }
-
-    ~PseudoTerminalMaster() override
-    {
-        if (m_slave) {
-            m_slave->master_closed();
-            DevFS::the().remove_device(m_slave->tty_name());
-        }
-        release_number(m_number);
-    }
-
-    void set_slave(NonnullRefPtr<PseudoTerminalSlave> slave) { m_slave = move(slave); }
-
-    ErrorOr<size_t> read(u64, size_t count, IOBuffer const& buffer) override
+    // What there is; waiting for some if there is none. 0 at the end: the slave was open,
+    // and everything that had it has closed it.
+    ErrorOr<size_t> read(size_t count, IOBuffer const& buffer)
     {
         if (count == 0)
             return 0;
@@ -138,6 +111,8 @@ public:
                     m_head = (m_head + 1) % sizeof(m_output);
                     --m_count;
                 }
+                if (taken == 0 && slave_gone_locked())
+                    return 0;
             }
             if (taken > 0)
                 break;
@@ -148,6 +123,147 @@ public:
         notify_pollers();
         TRY(buffer.write(0, { chunk, taken }));
         return taken;
+    }
+
+    [[nodiscard]] bool can_read() const
+    {
+        SpinLockGuard guard(m_lock);
+        return m_count > 0 || slave_gone_locked();
+    }
+
+    [[nodiscard]] bool slave_has_gone() const
+    {
+        SpinLockGuard guard(m_lock);
+        return slave_gone_locked();
+    }
+
+    // Program output, waiting for room unless it is echo (which runs inside the master's
+    // own write and must not wait on it). With no master, it goes nowhere.
+    void deliver(ReadonlyBytes bytes, bool from_echo)
+    {
+        size_t done = 0;
+        while (done < bytes.size()) {
+            size_t copied = 0;
+            {
+                SpinLockGuard guard(m_lock);
+                if (m_master_closed)
+                    return;
+                while (done + copied < bytes.size() && m_count < sizeof(m_output)) {
+                    m_output[(m_head + m_count) % sizeof(m_output)] = bytes[done + copied];
+                    ++m_count;
+                    ++copied;
+                }
+            }
+            done += copied;
+            if (copied > 0) {
+                m_readable.wake_all();
+                notify_pollers();
+            }
+            if (done < bytes.size()) {
+                if (from_echo)
+                    return;
+                if (!m_writable.wait_until_interruptible([&] {
+                        SpinLockGuard guard(m_lock);
+                        return m_count < sizeof(m_output) || m_master_closed;
+                    }))
+                    return;
+            }
+        }
+    }
+
+    void master_closed()
+    {
+        {
+            SpinLockGuard guard(m_lock);
+            m_master_closed = true;
+        }
+        m_writable.wake_all();
+    }
+
+    void slave_opened()
+    {
+        SpinLockGuard guard(m_lock);
+        ++m_slave_descriptions;
+        m_slave_was_opened = true;
+    }
+
+    void slave_closed()
+    {
+        {
+            SpinLockGuard guard(m_lock);
+            --m_slave_descriptions;
+            if (m_slave_descriptions > 0)
+                return;
+        }
+        m_readable.wake_all();
+        notify_pollers();
+    }
+
+private:
+    PseudoTerminalOutput() = default;
+
+    [[nodiscard]] bool slave_gone_locked() const { return m_slave_was_opened && m_slave_descriptions == 0; }
+
+    mutable SpinLock m_lock;
+    u8 m_output[16 * KiB];
+    size_t m_head { 0 };
+    size_t m_count { 0 };
+    u32 m_slave_descriptions { 0 };
+    bool m_slave_was_opened { false };
+    bool m_master_closed { false };
+    WaitQueue m_readable;
+    WaitQueue m_writable;
+};
+
+class PseudoTerminalSlave final : public TTY {
+public:
+    PseudoTerminalSlave(u32 number, NonnullRefPtr<PseudoTerminalOutput> output, StringView name)
+        : TTY(device_number(16, number), name)
+        , m_number(number)
+        , m_output(move(output))
+    {
+    }
+
+    [[nodiscard]] u32 number() const { return m_number; }
+    void master_closed();
+
+    void description_opened() override { m_output->slave_opened(); }
+    void description_closed() override { m_output->slave_closed(); }
+
+protected:
+    void emit(ReadonlyBytes, bool from_echo) override;
+
+private:
+    u32 m_number;
+    NonnullRefPtr<PseudoTerminalOutput> m_output;
+};
+
+// The terminal-window side: what the slave's programs write comes out of
+// its read(); what it writes is typed into the slave.
+class PseudoTerminalMaster final : public Device {
+public:
+    PseudoTerminalMaster(u32 number, NonnullRefPtr<PseudoTerminalOutput> output)
+        : Device(InodeType::CharacterDevice, 0620, device_number(15, number))
+        , m_number(number)
+        , m_output(move(output))
+    {
+    }
+
+    ~PseudoTerminalMaster() override
+    {
+        m_output->master_closed();
+        if (m_slave) {
+            m_slave->master_closed();
+            DevFS::the().remove_device(m_slave->tty_name());
+        }
+        release_number(m_number);
+    }
+
+    void set_slave(NonnullRefPtr<PseudoTerminalSlave> slave) { m_slave = move(slave); }
+
+    ErrorOr<size_t> read(u64, size_t count, IOBuffer const& buffer) override
+    {
+        return m_output->read(count, buffer);
     }
 
     ErrorOr<size_t> write(u64, size_t count, IOBuffer const& buffer) override
@@ -179,58 +295,17 @@ public:
         }
     }
 
-    [[nodiscard]] bool can_read() const override
-    {
-        SpinLockGuard guard(m_lock);
-        return m_count > 0;
-    }
-
+    [[nodiscard]] bool can_read() const override { return m_output->can_read(); }
     [[nodiscard]] bool can_write() const override { return true; }
-
-    // From the slave: program output, waiting for room unless it is echo
-    // (which runs inside the master's own write and must not wait on it).
-    void deliver(ReadonlyBytes bytes, bool from_echo)
-    {
-        size_t done = 0;
-        while (done < bytes.size()) {
-            size_t copied = 0;
-            {
-                SpinLockGuard guard(m_lock);
-                while (done + copied < bytes.size() && m_count < sizeof(m_output)) {
-                    m_output[(m_head + m_count) % sizeof(m_output)] = bytes[done + copied];
-                    ++m_count;
-                    ++copied;
-                }
-            }
-            done += copied;
-            if (copied > 0) {
-                m_readable.wake_all();
-                notify_pollers();
-            }
-            if (done < bytes.size()) {
-                if (from_echo)
-                    return;
-                if (!m_writable.wait_until_interruptible([&] {
-                        SpinLockGuard guard(m_lock);
-                        return m_count < sizeof(m_output);
-                    }))
-                    return;
-            }
-        }
-    }
+    [[nodiscard]] bool is_hung_up() const override { return m_output->slave_has_gone(); }
 
     static ErrorOr<u32> allocate_number();
     static void release_number(u32);
 
 private:
     u32 m_number;
+    NonnullRefPtr<PseudoTerminalOutput> m_output;
     RefPtr<PseudoTerminalSlave> m_slave;
-    mutable SpinLock m_lock;
-    u8 m_output[16 * KiB];
-    size_t m_head { 0 };
-    size_t m_count { 0 };
-    WaitQueue m_readable;
-    WaitQueue m_writable;
 };
 
 constexpr u32 max_pseudo_terminals = 256;
@@ -257,23 +332,16 @@ void PseudoTerminalMaster::release_number(u32 number)
 
 void PseudoTerminalSlave::emit(ReadonlyBytes bytes, bool from_echo)
 {
-    PseudoTerminalMaster* master;
-    {
-        SpinLockGuard guard(m_master_lock);
-        master = m_master;
-    }
-    if (master)
-        master->deliver(bytes, from_echo);
+    m_output->deliver(bytes, from_echo);
 }
 
 void PseudoTerminalSlave::master_closed()
 {
-    {
-        SpinLockGuard guard(m_master_lock);
-        m_master = nullptr;
-    }
     hang_up();
 }
+
+// As in /etc/group.
+static constexpr u32 tty_group = 4;
 
 // /dev/ptmx: each open makes a new pseudo-terminal and opens its master.
 class PseudoTerminalMultiplexer final : public Device {
@@ -285,8 +353,9 @@ public:
 
     ErrorOr<NonnullRefPtr<Inode>> open_inode(int) override
     {
+        auto output = TRY(PseudoTerminalOutput::create());
         u32 number = TRY(PseudoTerminalMaster::allocate_number());
-        auto* master = new (Base::nothrow) PseudoTerminalMaster(number);
+        auto* master = new (Base::nothrow) PseudoTerminalMaster(number, output);
         if (!master) {
             PseudoTerminalMaster::release_number(number);
             return Error::from_errno(ENOMEM);
@@ -294,10 +363,14 @@ public:
         auto master_reference = adopt_ref(*master);
         FixedStringBuilder<16> name;
         format_to(name, "ttys{:03}", number);
-        auto* slave = new (Base::nothrow) PseudoTerminalSlave(number, *master, name.view());
+        auto* slave = new (Base::nothrow) PseudoTerminalSlave(number, output, name.view());
         if (!slave)
             return Error::from_errno(ENOMEM);
         auto slave_reference = adopt_ref(*slave);
+        // It belongs to whoever opened it (grantpt's work, done here): owner may read and
+        // write it, the tty group may only write to it, nobody else may touch it.
+        if (auto const* credentials = current_credentials())
+            MUST(slave->set_owner(credentials->uid, tty_group));
         TRY(DevFS::the().add_device(name.view(), NonnullRefPtr<Inode>(*static_cast<Inode*>(slave))));
         master->set_slave(move(slave_reference));
         return NonnullRefPtr<Inode>(*static_cast<Inode*>(master));

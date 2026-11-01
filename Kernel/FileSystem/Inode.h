@@ -119,6 +119,12 @@ public:
     // For poll(): whether a read or a write would not block.
     [[nodiscard]] virtual bool can_read() const { return true; }
     [[nodiscard]] virtual bool can_write() const { return true; }
+    // And whoever is at the other end has gone.
+    [[nodiscard]] virtual bool is_hung_up() const { return false; }
+    // An open file description of it is made, or the last reference to one goes. (May
+    // be called with spinlocks held, so these must not sleep.)
+    virtual void description_opened() { }
+    virtual void description_closed() { }
 
     // Whether a directory has no entries besides "." and "..".
     [[nodiscard]] ErrorOr<bool> is_empty_directory();

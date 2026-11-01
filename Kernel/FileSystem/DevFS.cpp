@@ -130,6 +130,8 @@ InodeMetadata Device::metadata() const
     metadata.type = m_type;
     metadata.permissions = m_permissions;
     metadata.device = m_device_number;
+    metadata.uid = m_uid;
+    metadata.gid = m_gid;
     return metadata;
 }
 

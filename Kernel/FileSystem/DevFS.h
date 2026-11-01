@@ -47,6 +47,12 @@ constexpr u64 device_number(u32 major, u32 minor)
 class Device : public Inode {
 public:
     [[nodiscard]] InodeMetadata metadata() const override;
+    ErrorOr<void> set_owner(u32 uid, u32 gid) override
+    {
+        m_uid = uid;
+        m_gid = gid;
+        return {};
+    }
 
 protected:
     Device(InodeType, u32 permissions, u64 device_number);
@@ -55,6 +61,8 @@ private:
     InodeType m_type;
     u32 m_permissions;
     u64 m_device_number;
+    u32 m_uid { 0 };
+    u32 m_gid { 0 };
 };
 
 // The memory devices (null, zero, random: pseudo-random, not for keys yet)

@@ -10,7 +10,9 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <poll.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
@@ -201,9 +203,101 @@ void test_background_read_stops()
 
 }
 
+// A terminal is its opener's: others cannot open it. (Root can open anything, which hid
+// this: Terminal runs as an ordinary user, and could not open its own.)
+void test_a_terminal_belongs_to_its_opener()
+{
+    int path_pipe[2], done_pipe[2];
+    CHECK(pipe(path_pipe) == 0 && pipe(done_pipe) == 0);
+    pid_t owner = fork();
+    CHECK(owner >= 0);
+    if (owner == 0) {
+        close(path_pipe[0]);
+        close(done_pipe[1]);
+        if (setgid(20) != 0 || setuid(501) != 0)
+            _exit(10);
+        auto terminal = open_terminal();
+        struct stat info {};
+        if (stat(terminal.slave_path, &info) != 0 || info.st_uid != 501)
+            _exit(11);
+        if ((info.st_mode & 0777) != 0620)
+            _exit(12);
+        int slave = open(terminal.slave_path, O_RDWR | O_NOCTTY);
+        if (slave < 0)
+            _exit(13);
+        close(slave);
+        (void)!write(path_pipe[1], terminal.slave_path, strlen(terminal.slave_path) + 1);
+        // Open until the others have tried it.
+        char go = 0;
+        (void)!read(done_pipe[0], &go, 1);
+        _exit(0);
+    }
+    close(path_pipe[1]);
+    close(done_pipe[0]);
+    char path[64] = {};
+    CHECK(read(path_pipe[0], path, sizeof(path) - 1) > 0);
+    // Someone else cannot.
+    pid_t other = fork();
+    CHECK(other >= 0);
+    if (other == 0) {
+        if (setgid(20) != 0 || setuid(502) != 0)
+            _exit(20);
+        errno = 0;
+        _exit(open(path, O_RDWR | O_NOCTTY) < 0 && errno == EACCES ? 0 : 21);
+    }
+    int status = 0;
+    CHECK(waitpid(other, &status, 0) == other && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    close(done_pipe[1]);
+    close(path_pipe[0]);
+    CHECK(waitpid(owner, &status, 0) == owner && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+// A terminal window learns that its shell has gone: end of file, and POLLHUP, once the
+// last program with the slave open has closed it; and not a moment before.
+void test_the_master_sees_the_slave_go()
+{
+    auto terminal = open_terminal();
+    // Nobody has opened the slave yet: nothing to read, and no end either.
+    int flags = fcntl(terminal.master, F_GETFL);
+    CHECK(fcntl(terminal.master, F_SETFL, flags | O_NONBLOCK) == 0);
+    char byte = 0;
+    errno = 0;
+    CHECK(read(terminal.master, &byte, 1) < 0 && errno == EAGAIN);
+    pollfd waiting { terminal.master, POLLIN, 0 };
+    CHECK(poll(&waiting, 1, 0) == 0);
+    CHECK(fcntl(terminal.master, F_SETFL, flags) == 0);
+
+    int pipe_ends[2];
+    CHECK(pipe(pipe_ends) == 0);
+    pid_t child = fork();
+    CHECK(child >= 0);
+    if (child == 0) {
+        close(pipe_ends[1]);
+        become_session_leader(terminal);
+        (void)!write(1, "bye", 3);
+        // Until the parent has seen it go on being open.
+        char go = 0;
+        (void)!read(pipe_ends[0], &go, 1);
+        _exit(0);
+    }
+    close(pipe_ends[0]);
+    CHECK(read_until(terminal.master, "bye"));
+    // Open still: no end yet.
+    CHECK(poll(&waiting, 1, 50) == 0);
+    close(pipe_ends[1]);
+    int status = 0;
+    CHECK(waitpid(child, &status, 0) == child);
+    CHECK(poll(&waiting, 1, 2000) == 1);
+    CHECK(waiting.revents & POLLHUP);
+    CHECK(read(terminal.master, &byte, 1) == 0);
+    close(terminal.master);
+}
+
 int main()
 {
     CHECK(getpgrp() > 0 && getsid(0) > 0);
+    test_a_terminal_belongs_to_its_opener();
+    test_the_master_sees_the_slave_go();
     test_canonical_mode_and_echo();
     test_interrupt_character();
     test_suspend_and_continue();

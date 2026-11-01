@@ -103,6 +103,10 @@ public:
                 ssize_t got = read(m_master, m_transcript + m_length, sizeof(m_transcript) - 1 - m_length);
                 if (got > 0)
                     m_length += static_cast<size_t>(got);
+                else
+                    // The terminal has closed, so polling returns at once: the time
+                    // still has to go by for the program to finish ending.
+                    pause_milliseconds(100);
             }
         }
         return -1;

@@ -24,6 +24,7 @@ ErrorOr<NonnullRefPtr<FileDescription>> FileDescription::create(NonnullRefPtr<In
     if (!description)
         return Error::from_errno(ENOMEM);
     description->m_inode = move(inode);
+    description->m_inode->description_opened();
     return adopt_ref(*description);
 }
 
@@ -51,6 +52,8 @@ ErrorOr<NonnullRefPtr<FileDescription>> FileDescription::create_for_port(Nonnull
 
 FileDescription::~FileDescription()
 {
+    if (m_inode)
+        m_inode->description_closed();
     if (m_pipe)
         m_pipe->detach(m_is_pipe_writer);
     if (m_port)
@@ -81,7 +84,7 @@ bool FileDescription::is_hung_up() const
         return m_is_port_receiver ? !m_port->has_senders() : !m_port->has_receiver();
     if (m_pipe)
         return m_is_pipe_writer ? !m_pipe->has_readers() : !m_pipe->has_writers();
-    return false;
+    return m_inode && m_inode->is_hung_up();
 }
 
 void FileDescription::set_status_flags(int flags)
@@ -102,8 +105,11 @@ ErrorOr<size_t> FileDescription::read(IOBuffer const& buffer, size_t count)
     if (metadata.type == InodeType::Directory)
         return Error::from_errno(EISDIR);
     // Devices have no offset to speak of.
-    if (metadata.type == InodeType::CharacterDevice)
+    if (metadata.type == InodeType::CharacterDevice) {
+        if ((m_flags & O_NONBLOCK) && !m_inode->can_read())
+            return Error::from_errno(EAGAIN);
         return m_inode->read(0, count, buffer);
+    }
     MutexLocker locker(m_lock);
     size_t done = TRY(m_inode->read(m_offset, count, buffer));
     m_offset += done;

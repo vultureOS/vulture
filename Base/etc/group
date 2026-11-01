@@ -1,5 +1,6 @@
 wheel:*:0:root
 daemon:*:1:root
+tty:*:4:
 staff:*:20:root,vulture
 admin:*:80:root,vulture
 everyone:*:12:

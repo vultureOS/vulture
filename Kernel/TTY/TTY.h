@@ -35,6 +35,7 @@ public:
     ErrorOr<size_t> read(u64 offset, size_t count, IOBuffer const&) override;
     ErrorOr<size_t> write(u64 offset, size_t count, IOBuffer const&) override;
     ErrorOr<FlatPtr> ioctl(FileDescription&, unsigned request, FlatPtr argument) override;
+    [[nodiscard]] bool is_hung_up() const override;
     [[nodiscard]] TTY* as_tty() override { return this; }
     [[nodiscard]] bool can_read() const override;
     [[nodiscard]] bool can_write() const override { return true; }
