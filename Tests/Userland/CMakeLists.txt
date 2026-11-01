@@ -7,6 +7,7 @@
 # Programs /sbin/init runs with --test (see Services/Init).
 set(tests
     abort
+    accounts
     bad-pointers
     copy-on-write
     devices

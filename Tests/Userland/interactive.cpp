@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "PseudoTerminal.h"
 #include "Test.h"
 #include <fcntl.h>
 #include <poll.h>
@@ -23,82 +24,21 @@
 
 namespace {
 
-int s_master = -1;
-char s_transcript[65536];
-size_t s_length = 0;
-size_t s_position = 0; // Where the next expectation starts looking.
+PseudoTerminal s_terminal;
 
-void type(char const* keys)
-{
-    (void)write(s_master, keys, strlen(keys));
-}
-
-void pause_milliseconds(long milliseconds)
-{
-    struct timespec duration { milliseconds / 1000, (milliseconds % 1000) * 1'000'000 };
-    nanosleep(&duration, nullptr);
-}
-
-// Waits (up to five seconds) for `text` to appear after what the last
-// expectation matched.
-bool expect(char const* text)
-{
-    for (int waited = 0; waited < 5000;) {
-        s_transcript[s_length] = '\0';
-        if (char* found = strstr(s_transcript + s_position, text)) {
-            s_position = static_cast<size_t>(found - s_transcript) + strlen(text);
-            return true;
-        }
-        struct pollfd poller { s_master, POLLIN, 0 };
-        int ready = poll(&poller, 1, 100);
-        if (ready <= 0) {
-            waited += 100;
-            continue;
-        }
-        ssize_t got = read(s_master, s_transcript + s_length, sizeof(s_transcript) - 1 - s_length);
-        if (got <= 0)
-            break;
-        s_length += static_cast<size_t>(got);
-    }
-    // Show what came instead, escapes made visible.
-    fprintf(stderr, "interactive: never saw \"");
-    for (char const* c = text; *c; ++c)
-        fprintf(stderr, *c >= 0x20 && *c < 0x7f ? "%c" : "\\x%02x", static_cast<unsigned char>(*c));
-    fprintf(stderr, "\"; after it came:\n  \"");
-    for (size_t i = s_position; i < s_length; ++i)
-        fprintf(stderr, s_transcript[i] >= 0x20 && s_transcript[i] < 0x7f ? "%c" : "\\x%02x", static_cast<unsigned char>(s_transcript[i]));
-    fprintf(stderr, "\"\n");
-    return false;
-}
+void type(char const* keys) { s_terminal.type(keys); }
+bool expect(char const* text) { return s_terminal.expect(text); }
+void pause_milliseconds(long milliseconds) { PseudoTerminal::pause_milliseconds(milliseconds); }
 
 pid_t start_shell()
 {
     mkdir("/tmp/vsh-home", 0755);
     unlink("/tmp/vsh-home/.vsh_history");
-    s_master = posix_openpt(O_RDWR | O_NOCTTY);
-    if (s_master < 0 || grantpt(s_master) < 0 || unlockpt(s_master) < 0)
+    char const* argv[] = { "-vsh", nullptr };
+    char const* envp[] = { "HOME=/tmp/vsh-home", "PS1=test> ", "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "TERM=xterm-256color", nullptr };
+    if (!s_terminal.start("/bin/vsh", argv, envp))
         return -1;
-    char slave_path[64];
-    strncpy(slave_path, ptsname(s_master), sizeof(slave_path) - 1);
-    slave_path[sizeof(slave_path) - 1] = '\0';
-    pid_t child = fork();
-    if (child == 0) {
-        close(s_master);
-        setsid();
-        int slave = open(slave_path, O_RDWR);
-        if (slave < 0)
-            _exit(91);
-        dup2(slave, 0);
-        dup2(slave, 1);
-        dup2(slave, 2);
-        if (slave > 2)
-            close(slave);
-        char const* argv[] = { "-vsh", nullptr };
-        char const* envp[] = { "HOME=/tmp/vsh-home", "PS1=test> ", "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "TERM=xterm-256color", nullptr };
-        execve("/bin/vsh", const_cast<char**>(argv), const_cast<char**>(envp));
-        _exit(127);
-    }
-    return child;
+    return s_terminal.child();
 }
 
 }
@@ -192,14 +132,10 @@ int main()
     CHECK(expect("test> "));
     type("exit 0\r");
 
-    int status = -1;
-    pid_t reaped = 0;
-    for (int waited = 0; waited < 50 && (reaped = waitpid(shell, &status, WNOHANG)) == 0; ++waited)
-        pause_milliseconds(100);
-    CHECK(reaped == shell);
-    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
-    if (reaped != shell || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
-        fprintf(stderr, "interactive: the shell gave %d with status %#x\n", reaped, status);
+    int status = s_terminal.wait_for_exit();
+    CHECK(status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    if (status == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        fprintf(stderr, "interactive: the shell ended with status %#x\n", status);
 
     // The history file has what was typed.
     FILE* history = fopen("/tmp/vsh-home/.vsh_history", "r");
@@ -216,6 +152,5 @@ int main()
         CHECK(saw_first);
         CHECK(lines >= 10);
     }
-    close(s_master);
     return finish();
 }
