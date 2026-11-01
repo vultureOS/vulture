@@ -38,20 +38,28 @@ struct PasswdState {
 
 PasswdState s_passwd;
 
+char s_empty[] = "";
+
+// A line of /etc/passwd (7 fields) or /etc/master.passwd (10).
 bool parse_passwd(char* line, passwd& entry)
 {
     if (line[0] == '#' || line[0] == '\n' || line[0] == '\0')
         return false;
-    char* fields[7];
-    if (split_fields(line, fields, 7) != 7)
+    char* fields[10];
+    size_t count = split_fields(line, fields, 10);
+    if (count != 7 && count != 10)
         return false;
+    bool master = count == 10;
     entry.pw_name = fields[0];
     entry.pw_passwd = fields[1];
     entry.pw_uid = static_cast<uid_t>(strtoul(fields[2], nullptr, 10));
     entry.pw_gid = static_cast<gid_t>(strtoul(fields[3], nullptr, 10));
-    entry.pw_gecos = fields[4];
-    entry.pw_dir = fields[5];
-    entry.pw_shell = fields[6];
+    entry.pw_class = master ? fields[4] : s_empty;
+    entry.pw_change = master ? static_cast<time_t>(strtoll(fields[5], nullptr, 10)) : 0;
+    entry.pw_expire = master ? static_cast<time_t>(strtoll(fields[6], nullptr, 10)) : 0;
+    entry.pw_gecos = fields[master ? 7 : 4];
+    entry.pw_dir = fields[master ? 8 : 5];
+    entry.pw_shell = fields[master ? 9 : 6];
     return true;
 }
 
@@ -103,7 +111,11 @@ void endpwent(void)
 struct passwd* getpwent(void)
 {
     if (!s_passwd.file) {
-        s_passwd.file = fopen("/etc/passwd", "r");
+        // Root sees the hashes.
+        if (geteuid() == 0)
+            s_passwd.file = fopen("/etc/master.passwd", "r");
+        if (!s_passwd.file)
+            s_passwd.file = fopen("/etc/passwd", "r");
         if (!s_passwd.file)
             return nullptr;
     }
@@ -160,7 +172,8 @@ static int copy_passwd(struct passwd* found, struct passwd* entry, char* buffer,
     entry->pw_gecos = copy(found->pw_gecos);
     entry->pw_dir = copy(found->pw_dir);
     entry->pw_shell = copy(found->pw_shell);
-    if (!entry->pw_name || !entry->pw_passwd || !entry->pw_gecos || !entry->pw_dir || !entry->pw_shell)
+    entry->pw_class = copy(found->pw_class);
+    if (!entry->pw_name || !entry->pw_passwd || !entry->pw_gecos || !entry->pw_dir || !entry->pw_shell || !entry->pw_class)
         return ERANGE;
     *result = entry;
     return 0;
