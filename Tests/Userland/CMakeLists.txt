@@ -11,6 +11,7 @@ set(tests
     bad-pointers
     copy-on-write
     devices
+    eventloop
     exec
     exec-target
     files
@@ -40,3 +41,6 @@ foreach(test IN LISTS tests)
     vulture_add_program(test-${test} SOURCES ${test}.cpp DESTINATION usr/tests)
     set_target_properties(test-${test} PROPERTIES OUTPUT_NAME ${test})
 endforeach()
+
+# The tests of libraries above LibC.
+target_link_libraries(test-eventloop PRIVATE LibCore LibJSON)

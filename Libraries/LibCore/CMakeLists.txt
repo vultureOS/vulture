@@ -8,5 +8,6 @@
 # loop later.
 add_library(LibCore STATIC
     Account.cpp
+    EventLoop.cpp
     GetPassword.cpp)
 target_link_libraries(LibCore PUBLIC LibCrypto)
