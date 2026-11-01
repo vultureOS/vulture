@@ -92,10 +92,13 @@ struct DisplayMode {
 // Picks the largest graphics mode with a linear 32-bit framebuffer.
 static Optional<DisplayMode> choose_display_mode(UEFI::BootServices& boot_services)
 {
-    void* interface = nullptr;
-    if (UEFI::is_error(boot_services.LocateProtocol(&UEFI::graphics_output_protocol_guid, nullptr, &interface)) || !interface)
+    // Every display the firmware knows of: some only offer blitting (virtio-gpu
+    // does, until the kernel's driver takes it), and we need memory to draw in.
+    constexpr u32 by_protocol = 2;
+    UEFI::UIntN handle_count = 0;
+    UEFI::Handle* handles = nullptr;
+    if (UEFI::is_error(boot_services.LocateHandleBuffer(by_protocol, &UEFI::graphics_output_protocol_guid, nullptr, &handle_count, &handles)))
         return {};
-    auto* graphics = static_cast<UEFI::GraphicsOutputProtocol*>(interface);
 
     auto is_linear = [](UEFI::GraphicsPixelFormat format) {
         return format == UEFI::GraphicsPixelFormat::PixelBlueGreenRedReserved8BitPerColor
@@ -103,16 +106,23 @@ static Optional<DisplayMode> choose_display_mode(UEFI::BootServices& boot_servic
     };
 
     Optional<DisplayMode> best;
-    for (u32 number = 0; number < graphics->Mode->MaxMode; ++number) {
-        UEFI::UIntN info_size = 0;
-        UEFI::GraphicsOutputModeInformation* info = nullptr;
-        if (UEFI::is_error(graphics->QueryMode(graphics, number, &info_size, &info)))
+    for (UEFI::UIntN handle = 0; handle < handle_count; ++handle) {
+        void* interface = nullptr;
+        if (UEFI::is_error(boot_services.HandleProtocol(handles[handle], &UEFI::graphics_output_protocol_guid, &interface)) || !interface)
             continue;
-        u64 area = u64(info->HorizontalResolution) * info->VerticalResolution;
-        if (is_linear(info->PixelFormat) && (!best.has_value() || area > u64(best->width) * best->height))
-            best = DisplayMode { graphics, number, info->HorizontalResolution, info->VerticalResolution };
-        boot_services.FreePool(info);
+        auto* graphics = static_cast<UEFI::GraphicsOutputProtocol*>(interface);
+        for (u32 number = 0; number < graphics->Mode->MaxMode; ++number) {
+            UEFI::UIntN info_size = 0;
+            UEFI::GraphicsOutputModeInformation* info = nullptr;
+            if (UEFI::is_error(graphics->QueryMode(graphics, number, &info_size, &info)))
+                continue;
+            u64 area = u64(info->HorizontalResolution) * info->VerticalResolution;
+            if (is_linear(info->PixelFormat) && (!best.has_value() || area > u64(best->width) * best->height))
+                best = DisplayMode { graphics, number, info->HorizontalResolution, info->VerticalResolution };
+            boot_services.FreePool(info);
+        }
     }
+    boot_services.FreePool(handles);
     return best;
 }
 

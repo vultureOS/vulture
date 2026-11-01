@@ -344,7 +344,7 @@ struct BootServices {
 
     // Library
     void* ProtocolsPerHandle;
-    void* LocateHandleBuffer;
+    Status (*LocateHandleBuffer)(u32 search_type, Guid const* protocol, void* search_key, UIntN* handle_count, Handle** handles);
     Status (*LocateProtocol)(Guid const* protocol, void* registration, void** interface);
     void* InstallMultipleProtocolInterfaces;
     void* UninstallMultipleProtocolInterfaces;
