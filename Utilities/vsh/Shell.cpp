@@ -1197,7 +1197,11 @@ bool Shell::apply_redirections(Vector<Redirection> const& redirections, Vector<S
             continue;
         }
         if (fd != redirection.fd) {
-            dup2(fd, redirection.fd);
+            if (dup2(fd, redirection.fd) < 0) {
+                // "<&5" with nothing open as 5.
+                fprintf(stderr, "vsh: %d: %s\n", fd, strerror(errno));
+                return false;
+            }
             bool is_duplicate = redirection.kind == Redirection::Kind::DuplicateInput || redirection.kind == Redirection::Kind::DuplicateOutput;
             if (!is_duplicate || target.view().to_number<int>().value_or(-1) != fd)
                 close(fd);
