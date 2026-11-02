@@ -36,6 +36,7 @@
 #include <Kernel/Devices/USB/USB.h>
 #include <Kernel/Devices/Serial/BootSerial.h>
 #include <Kernel/Devices/Storage/BlockDevice.h>
+#include <Kernel/FileSystem/IOBuffer.h>
 #include <Kernel/FileSystem/BootArchive.h>
 #include <Kernel/FileSystem/DevFS.h>
 #include <Kernel/FileSystem/FATFS.h>
@@ -225,6 +226,26 @@ static void mount_volumes()
     }
 }
 
+// A disk may have a system for each of several kinds of machine, which says which it's for. One that
+// doesn't say is taken at its word.
+static bool is_system_for_this_machine(FileSystem& file_system)
+{
+    RefPtr<Inode> inode = file_system.root_inode();
+    StringView const components[] = { "System"_sv, "Library"_sv, "CoreServices"_sv, "Architecture"_sv };
+    for (auto component : components) {
+        auto next = inode->lookup(component);
+        if (next.is_error())
+            return true;
+        inode = next.release_value();
+    }
+    char text[32];
+    auto read = inode->read(0, sizeof(text), IOBuffer::kernel(text));
+    if (read.is_error())
+        return true;
+    StringView const name = Arch::architecture_name();
+    return read.value() >= name.length() && StringView(text, name.length()) == name;
+}
+
 // The root filesystem: the first vultureFS partition that mounts, or, with
 // none, a tmpfs filled from the boot archive (everything then lives in
 // memory and is gone at power off).
@@ -236,6 +257,10 @@ static bool mount_root_file_system(API::BootInfo const& boot_info)
         auto file_system = mount_vulturefs(*device);
         if (file_system.is_error()) {
             dmesgln("Root: cannot mount {}: {}", device->name(), file_system.error());
+            continue;
+        }
+        if (!is_system_for_this_machine(*file_system.value())) {
+            dmesgln("Root: {} is for another kind of machine", device->name());
             continue;
         }
         VirtualFileSystem::mount_root(file_system.release_value());

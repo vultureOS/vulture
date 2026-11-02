@@ -37,6 +37,14 @@ using MachineCode::PageTableBuilder;
 
 static constexpr char16_t kernel_path[] = u"\\System\\Library\\Kernels\\vulture";
 static constexpr char16_t boot_archive_path[] = u"\\System\\Library\\Kernels\\vulture.bootarchive";
+// On a disk that boots more than one kind of machine, each has its own.
+#if defined(__x86_64__)
+static constexpr char16_t native_kernel_path[] = u"\\System\\Library\\Kernels\\vulture.x86_64";
+static constexpr char16_t native_boot_archive_path[] = u"\\System\\Library\\Kernels\\vulture.bootarchive.x86_64";
+#else
+static constexpr char16_t native_kernel_path[] = u"\\System\\Library\\Kernels\\vulture.aarch64";
+static constexpr char16_t native_boot_archive_path[] = u"\\System\\Library\\Kernels\\vulture.bootarchive.aarch64";
+#endif
 static constexpr char16_t boot_args_path[] = u"\\System\\Library\\Kernels\\boot-args";
 
 static UEFI::SystemTable* s_system_table = nullptr;
@@ -349,13 +357,17 @@ static void exit_boot_services(UEFI::Handle image_handle, UEFI::BootServices& bo
     unwrap("checking the CPU"_sv, MachineCode::check_cpu());
 
     auto volume = unwrap("opening the boot volume"_sv, BootVolume::open(image_handle, boot_services));
-    auto kernel_file = unwrap("reading the kernel"_sv, volume.load(kernel_path, LoaderMemoryType::KernelFile));
+    auto kernel_file = unwrap("reading the kernel"_sv, volume.load(native_kernel_path, LoaderMemoryType::KernelFile));
+    if (!kernel_file.has_value())
+        kernel_file = unwrap("reading the kernel"_sv, volume.load(kernel_path, LoaderMemoryType::KernelFile));
     if (!kernel_file.has_value())
         fail("reading the kernel"_sv, Error::from_string_literal("\\System\\Library\\Kernels\\vulture is missing"));
     auto image = unwrap("reading the kernel"_sv, ELF::Image::parse(kernel_file->bytes()));
     auto boot_args = unwrap("reading boot-args"_sv, volume.load(boot_args_path, LoaderMemoryType::LoaderReclaimable));
     auto kernel = unwrap("loading the kernel"_sv, load_kernel(image, boot_services, choose_kernel_slide(boot_services, boot_args)));
-    auto boot_archive = unwrap("reading the boot archive"_sv, volume.load(boot_archive_path, LoaderMemoryType::BootArchive));
+    auto boot_archive = unwrap("reading the boot archive"_sv, volume.load(native_boot_archive_path, LoaderMemoryType::BootArchive));
+    if (!boot_archive.has_value())
+        boot_archive = unwrap("reading the boot archive"_sv, volume.load(boot_archive_path, LoaderMemoryType::BootArchive));
 
     // BootInfo and the memory map array share one allocation; the array is
     // sized for the largest map the reserved buffer can hold.

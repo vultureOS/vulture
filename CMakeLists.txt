@@ -106,6 +106,9 @@ elseif(VULTURE_PART STREQUAL "userland")
     # hierarchy's directories even while nothing is in them (their modes
     # are in Meta/CMake/MakeBootArchive.cmake).
     install(DIRECTORY Base/ DESTINATION .)
+    # Which kind of machine this system is for: a disk may hold more than one.
+    file(WRITE ${CMAKE_BINARY_DIR}/Architecture "${CMAKE_SYSTEM_PROCESSOR}\n")
+    install(FILES ${CMAKE_BINARY_DIR}/Architecture DESTINATION System/Library/CoreServices)
     foreach(directory
             Applications Library Library/Preferences Library/LaunchDaemons Library/LaunchAgents
             System/Library/CoreServices System/Library/Frameworks System/Library/LaunchDaemons System/Library/LaunchAgents
