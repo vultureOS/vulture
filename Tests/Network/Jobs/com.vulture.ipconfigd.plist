@@ -1,5 +1,6 @@
 {
     "Label" : "com.vulture.ipconfigd",
+    "SandboxProfile" : "service-network",
     "ProgramArguments" : [ "/usr/libexec/ipconfigd" ],
     "RunAtLoad" : true,
     "KeepAlive" : true,

@@ -29,6 +29,8 @@ struct AppInfo {
     // What it is, in plain words ("Terminal", for Terminal): shown beside its name, and
     // what searching for that finds it by.
     String kind;
+    // What it runs in: a profile in /System/Library/Sandbox/Profiles. Empty: it isn't.
+    String sandbox;
     // File extensions it opens.
     Vector<String> document_extensions;
 };
@@ -41,6 +43,8 @@ struct AppInfo {
 // Starts it, with these arguments, as a new session of its own. EINVAL for no program.
 ErrorOr<pid_t> launch(AppInfo const&, Span<StringView const> arguments);
 ErrorOr<pid_t> launch(AppInfo const&);
+// As launch, but not as a child of this process: by way of the desktop, for what is sandboxed.
+ErrorOr<pid_t> open_application(AppInfo const&);
 // Opens a file or a folder with what handles it, or an application bundle.
 ErrorOr<void> open_path(StringView path);
 

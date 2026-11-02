@@ -122,6 +122,7 @@ ErrorOr<FlatPtr> Process::sys_fstat(TrapFrame&, SyscallArguments const& argument
 static ErrorOr<FlatPtr> stat_path(StringView path, StringView cwd, FlatPtr result, bool follow)
 {
     auto resolved = TRY(VirtualFileSystem::resolve(path, cwd, follow));
+    TRY(sandbox_check(SandboxOperation::FileMetadata, resolved.path.view()));
     TRY(copy_to_user(result, resolved.inode->metadata().to_stat(resolved.inode->file_system().id())));
     return 0;
 }
@@ -233,6 +234,7 @@ ErrorOr<FlatPtr> Process::sys_chdir(TrapFrame&, SyscallArguments const& argument
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view()));
+    TRY(sandbox_check(SandboxOperation::FileMetadata, resolved.path.view()));
     auto metadata = resolved.inode->metadata();
     if (metadata.type != InodeType::Directory)
         return Error::from_errno(ENOTDIR);
@@ -273,6 +275,7 @@ ErrorOr<FlatPtr> Process::sys_readlink(TrapFrame&, SyscallArguments const& argum
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view(), false));
+    TRY(sandbox_check(SandboxOperation::FileMetadata, resolved.path.view()));
     char target[VirtualFileSystem::max_path];
     size_t length = TRY(resolved.inode->read_link({ reinterpret_cast<u8*>(target), sizeof(target) }));
     length = min<size_t>(length, arguments.values[2]);
@@ -329,6 +332,7 @@ ErrorOr<FlatPtr> Process::sys_access(TrapFrame&, SyscallArguments const& argumen
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     int mode = as_int(arguments.values[1]);
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view()));
+    TRY(sandbox_check(SandboxOperation::FileMetadata, resolved.path.view()));
     auto metadata = resolved.inode->metadata();
     TRY(check_access(metadata, mode & (R_OK | W_OK | X_OK)));
     if ((mode & W_OK) && resolved.inode->file_system().is_read_only())
@@ -373,6 +377,7 @@ ErrorOr<FlatPtr> Process::sys_chmod(TrapFrame&, SyscallArguments const& argument
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view()));
+    TRY(sandbox_check(SandboxOperation::FileWrite, resolved.path.view()));
     TRY(change_permissions(*resolved.inode, static_cast<u32>(arguments.values[1])));
     return 0;
 }
@@ -382,6 +387,8 @@ ErrorOr<FlatPtr> Process::sys_fchmod(TrapFrame&, SyscallArguments const& argumen
     auto description = TRY(file(as_int(arguments.values[0])));
     if (!description->inode())
         return Error::from_errno(EINVAL);
+    if (m_sandbox && !description->is_writable())
+        return Error::from_errno(EPERM);
     TRY(change_permissions(*description->inode(), static_cast<u32>(arguments.values[1])));
     return 0;
 }
@@ -391,6 +398,7 @@ ErrorOr<FlatPtr> Process::sys_chown(TrapFrame&, SyscallArguments const& argument
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     bool follow = !(arguments.values[3] & AT_SYMLINK_NOFOLLOW);
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view(), follow));
+    TRY(sandbox_check(SandboxOperation::FileWrite, resolved.path.view()));
     TRY(change_owner(*resolved.inode, static_cast<i32>(arguments.values[1]), static_cast<i32>(arguments.values[2])));
     return 0;
 }
@@ -398,6 +406,8 @@ ErrorOr<FlatPtr> Process::sys_chown(TrapFrame&, SyscallArguments const& argument
 ErrorOr<FlatPtr> Process::sys_fchown(TrapFrame&, SyscallArguments const& arguments)
 {
     auto description = TRY(file(as_int(arguments.values[0])));
+    if (m_sandbox && !description->is_writable())
+        return Error::from_errno(EPERM);
     if (!description->inode())
         return Error::from_errno(EINVAL);
     TRY(change_owner(*description->inode(), static_cast<i32>(arguments.values[1]), static_cast<i32>(arguments.values[2])));
@@ -453,6 +463,7 @@ ErrorOr<FlatPtr> Process::sys_utimensat(TrapFrame&, SyscallArguments const& argu
     auto path = TRY(copy_path_from_user(arguments.values[1]));
     bool follow = !(arguments.values[3] & AT_SYMLINK_NOFOLLOW);
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view(), follow));
+    TRY(sandbox_check(SandboxOperation::FileWrite, resolved.path.view()));
     TRY(change_times(*resolved.inode, arguments.values[2]));
     return 0;
 }
@@ -460,6 +471,8 @@ ErrorOr<FlatPtr> Process::sys_utimensat(TrapFrame&, SyscallArguments const& argu
 ErrorOr<FlatPtr> Process::sys_futimens(TrapFrame&, SyscallArguments const& arguments)
 {
     auto description = TRY(file(as_int(arguments.values[0])));
+    if (m_sandbox && !description->is_writable())
+        return Error::from_errno(EPERM);
     if (!description->inode())
         return Error::from_errno(EINVAL);
     TRY(change_times(*description->inode(), arguments.values[1]));

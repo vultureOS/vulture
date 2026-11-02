@@ -10,6 +10,6 @@
 add_library(LibServices STATIC
     Notify.cpp
     OSLog.cpp)
-vulture_compile_ipc(LibServices Audio.ipc Configuration.ipc Log.ipc Notify.ipc Pasteboard.ipc)
+vulture_compile_ipc(LibServices Audio.ipc Configuration.ipc Log.ipc Notify.ipc Pasteboard.ipc Privacy.ipc)
 target_include_directories(LibServices PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(LibServices PUBLIC LibIPC)

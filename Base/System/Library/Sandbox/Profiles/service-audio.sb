@@ -1,0 +1,5 @@
+# The sound device, and the one preference it keeps.
+include system
+write /dev/audio0
+write /Library/Preferences/com.vulture.audio.json
+write /Library/Preferences/com.vulture.audio.json.new

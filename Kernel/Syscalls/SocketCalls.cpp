@@ -8,6 +8,7 @@
 #include <Kernel/API/POSIX/files.h>
 #include <Kernel/API/POSIX/signal_numbers.h>
 #include <Kernel/API/POSIX/socket.h>
+#include <Kernel/Debug/KernelLog.h>
 #include <Kernel/FileSystem/FileDescription.h>
 #include <Kernel/Memory/UserAccess.h>
 #include <Kernel/Net/Socket.h>
@@ -78,6 +79,9 @@ ErrorOr<FlatPtr> Process::sys_socket(TrapFrame&, SyscallArguments const& argumen
     int protocol = as_int(arguments.values[2]);
     bool close_on_exec = type & SOCK_CLOEXEC;
     bool nonblocking = type & SOCK_NONBLOCK;
+    // Either will do for now: what it is used for is checked then.
+    if (m_sandbox && !m_sandbox->allows(SandboxOperation::NetworkOutbound, {}) && !m_sandbox->allows(SandboxOperation::NetworkInbound, {}))
+        TRY(sandbox_check(SandboxOperation::NetworkOutbound, {}));
     auto socket = TRY(Net::Socket::create(domain, type & ~(SOCK_CLOEXEC | SOCK_NONBLOCK), protocol));
     auto description = TRY(FileDescription::create_for_socket(move(socket)));
     if (nonblocking)
@@ -87,6 +91,7 @@ ErrorOr<FlatPtr> Process::sys_socket(TrapFrame&, SyscallArguments const& argumen
 
 ErrorOr<FlatPtr> Process::sys_bind(TrapFrame&, SyscallArguments const& arguments)
 {
+    TRY(sandbox_check(SandboxOperation::NetworkInbound, {}));
     auto socket = TRY(socket_for(as_int(arguments.values[0])));
     auto address = TRY(read_address(arguments.values[1], arguments.values[2]));
     TRY(socket->bind(address));
@@ -95,6 +100,7 @@ ErrorOr<FlatPtr> Process::sys_bind(TrapFrame&, SyscallArguments const& arguments
 
 ErrorOr<FlatPtr> Process::sys_listen(TrapFrame&, SyscallArguments const& arguments)
 {
+    TRY(sandbox_check(SandboxOperation::NetworkInbound, {}));
     auto socket = TRY(socket_for(as_int(arguments.values[0])));
     TRY(socket->listen(as_int(arguments.values[1])));
     return 0;
@@ -118,6 +124,7 @@ ErrorOr<FlatPtr> Process::sys_accept(TrapFrame&, SyscallArguments const& argumen
 
 ErrorOr<FlatPtr> Process::sys_connect(TrapFrame&, SyscallArguments const& arguments)
 {
+    TRY(sandbox_check(SandboxOperation::NetworkOutbound, {}));
     auto description = TRY(file(as_int(arguments.values[0])));
     auto* socket = description->socket();
     if (!socket)
@@ -129,6 +136,7 @@ ErrorOr<FlatPtr> Process::sys_connect(TrapFrame&, SyscallArguments const& argume
 
 ErrorOr<FlatPtr> Process::sys_sendto(TrapFrame&, SyscallArguments const& arguments)
 {
+    TRY(sandbox_check(SandboxOperation::NetworkOutbound, {}));
     auto description = TRY(file(as_int(arguments.values[0])));
     auto* socket = description->socket();
     if (!socket)
@@ -200,6 +208,7 @@ ErrorOr<FlatPtr> Process::socket_ioctl(unsigned request, FlatPtr argument)
 {
     if (request != VULTURE_SIOCSIFCONFIG)
         return Error::from_errno(ENOTTY);
+    TRY(sandbox_check(SandboxOperation::NetworkConfigure, {}));
     if (!m_credentials.is_superuser())
         return Error::from_errno(EPERM);
     auto config = TRY(copy_from_user<vulture_interface_config>(argument));
@@ -216,6 +225,44 @@ ErrorOr<FlatPtr> Process::socket_ioctl(unsigned request, FlatPtr argument)
     interface->netmask = { __builtin_bswap32(config.netmask) };
     interface->gateway = { __builtin_bswap32(config.gateway) };
     return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_sandbox_apply(TrapFrame&, SyscallArguments const& arguments)
+{
+    size_t const size = arguments.values[1];
+    if (size == 0 || size > 64 * KiB)
+        return Error::from_errno(EINVAL);
+    Vector<u8> text;
+    TRY(text.try_resize(size));
+    TRY(copy_from_user(text.data(), arguments.values[0], size));
+    auto profile = TRY(SandboxProfile::parse({ reinterpret_cast<char const*>(text.data()), size }, m_sandbox));
+    dmesgln("Sandbox: {}[{}] enters {}", name(), m_pid, profile->name());
+    m_sandbox = move(profile);
+    return 0;
+}
+
+// For vlaunchd, which hands out services: would this process's sandbox let it have this one? Only
+// says no in its log if it doesn't, which is what it's asking for.
+ErrorOr<FlatPtr> Process::sys_sandbox_check(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto const pid = static_cast<ProcessID>(static_cast<i32>(arguments.values[0]));
+    size_t const size = arguments.values[2];
+    if (size == 0 || size > 256)
+        return Error::from_errno(EINVAL);
+    char name[256];
+    TRY(copy_from_user(name, arguments.values[1], size));
+    StringView const service { name, size };
+    for (auto& process : all()) {
+        if (process->pid() != pid)
+            continue;
+        auto const* sandbox = process->sandbox();
+        if (sandbox && !sandbox->allows(SandboxOperation::Service, service)) {
+            dmesgln("Sandbox: {}[{}], in {}, denied service-lookup {}", process->name(), pid, sandbox->name(), service);
+            return Error::from_errno(EPERM);
+        }
+        return 0;
+    }
+    return Error::from_errno(ESRCH);
 }
 
 }

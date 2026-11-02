@@ -8,6 +8,7 @@
 #include "Log.h"
 #include <LibCore/Account.h>
 #include <dirent.h>
+#include <sandbox.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
@@ -116,6 +117,13 @@ void describe_end(int status, char* text, size_t size)
     auto** argv = static_cast<char**>(calloc(job.arguments.size() + 1, sizeof(char*)));
     for (size_t i = 0; i < job.arguments.size(); ++i)
         argv[i] = const_cast<char*>(job.arguments[i].characters());
+    if (job.sandbox_profile.has_value()) {
+        char* problem = nullptr;
+        if (sandbox_init_for_program(job.sandbox_profile->characters(), SANDBOX_NAMED, job.program.characters(), &problem) != 0) {
+            log("(%s) Could not start it in the sandbox %s: %s", job.label.characters(), job.sandbox_profile->characters(), problem ? problem : "?");
+            _exit(78);
+        }
+    }
     execv(job.program.characters(), argv);
     log("(%s) Could not run %s: %s", job.label.characters(), job.program.characters(), strerror(errno));
     _exit(78);
@@ -183,11 +191,14 @@ void Supervisor::stop_watching(Job& job)
     }
 }
 
-BootstrapEndpoint::LookUpAnswer Supervisor::look_up(IPC::Sender const&, String name)
+BootstrapEndpoint::LookUpAnswer Supervisor::look_up(IPC::Sender const& sender, String name)
 {
     auto* service = find_service(name.view());
     if (!service)
         return { ENOENT, {} };
+    // A sandbox says which services it may reach.
+    if (sandbox_check_service(sender.pid, name.characters()) != 0 && errno == EPERM)
+        return { EPERM, {} };
     // A registered service whose port is gone is gone too.
     if (!service->job) {
         struct pollfd poller { service->send.fd(), POLLOUT, 0 };

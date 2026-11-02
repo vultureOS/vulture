@@ -61,6 +61,8 @@ struct Job {
     u32 exit_timeout { 20 };
     bool only_in_graphical_session { false };
     Optional<String> user_name;
+    // A file in /System/Library/Sandbox/Profiles.
+    Optional<String> sandbox_profile;
     Optional<String> group_name;
     Optional<String> working_directory;
     Vector<String> environment; // "NAME=value"

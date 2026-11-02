@@ -22,6 +22,7 @@ add_library(LibC STATIC
     pwd.cpp
     regex.cpp
     resource.cpp
+    sandbox.cpp
     setjmp.S
     signal.cpp
     socket.cpp

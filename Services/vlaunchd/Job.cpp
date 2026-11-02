@@ -73,6 +73,7 @@ OwnPtr<Job> Job::from_plist(JSON::Value const& plist, char const*& error)
     if (auto session = plist.get_string("LimitLoadToSessionType"_sv); session.has_value())
         job->only_in_graphical_session = session.value() == "Graphical"_sv;
     job->user_name = optional_string(plist, "UserName"_sv);
+    job->sandbox_profile = optional_string(plist, "SandboxProfile"_sv);
     job->group_name = optional_string(plist, "GroupName"_sv);
     job->working_directory = optional_string(plist, "WorkingDirectory"_sv);
     job->standard_in = optional_string(plist, "StandardInPath"_sv);

@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/API/POSIX/privacy.h>
+#include <LibIPC/Bootstrap.h>
+#include <LibJSON/JSON.h>
+#include <PrivacyEndpoint.h>
 #include <Desktop.h>
 #include <LibCore/Account.h>
 #include <LibUI/Application.h>
@@ -340,6 +344,57 @@ void build_network(Page& page)
     page.finish();
 }
 
+String application_name_from_path(StringView path)
+{
+    auto const slash = path.find_last('/');
+    StringView name = slash.has_value() ? path.substring_view(slash.value() + 1) : path;
+    if (name.ends_with(".app"_sv))
+        name = name.substring_view(0, name.length() - 4);
+    return MUST(String::from_view(name));
+}
+
+void build_privacy(Page& page)
+{
+    auto read_flag = [](char const* name) {
+        int value = 0;
+        size_t size = sizeof(value);
+        return sysctlbyname(name, &value, &size, nullptr, 0) == 0 && value != 0;
+    };
+    auto& security = page.add_group("Security"_sv);
+    (void)security.rows().add<Row>("System volume"_sv, read_flag("security.seal.active") ? "Sealed and verified"_sv : "Not sealed"_sv);
+    (void)security.rows().add<Row>("Applications"_sv, read_flag("security.code.enforced") ? "Only signed code can run"_sv : "Anything can run"_sv);
+
+    auto& privacy = page.add_group("Files and Folders"_sv);
+    bool any = false;
+    if (auto port = IPC::look_up("com.vulture.privacyd"_sv); !port.is_error()) {
+        auto* service = new PrivacyProxy(port.release_value());
+        auto text = service->decisions();
+        if (!text.is_error()) {
+            auto list = JSON::parse(text.value().view());
+            if (!list.is_error() && list.value().is_array()) {
+                for (size_t i = 0; i < list.value().size(); ++i) {
+                    auto const& entry = list.value().at(i);
+                    auto const application = entry.get_string("application"_sv).value_or(""_sv);
+                    u32 const which = static_cast<u32>(entry.get_integer("service"_sv).value_or(0));
+                    StringView folder = which == VULTURE_PRIVACY_DESKTOP ? "Desktop"_sv : (which == VULTURE_PRIVACY_DOCUMENTS ? "Documents"_sv : "Downloads"_sv);
+                    StringBuilder title;
+                    title.appendff("{}: {} folder", application_name_from_path(application).view(), folder);
+                    auto& row = privacy.rows().add<Row>(title.view());
+                    auto& toggle = row.add<Switch>(entry.get_boolean("allowed"_sv).value_or(false));
+                    auto path = MUST(String::from_view(application));
+                    toggle.on_action = [service, path = move(path), which, &toggle] {
+                        (void)service->set_decision(path.view(), which, toggle.is_on());
+                    };
+                    any = true;
+                }
+            }
+        }
+    }
+    if (!any)
+        (void)privacy.rows().add<Row>("No application has asked yet"_sv);
+    page.finish();
+}
+
 void build_sound(Page& page)
 {
     auto& output = page.add_group("Output"_sv);
@@ -465,6 +520,7 @@ public:
         add_pane("Sound"_sv, Symbol::Speaker, build_sound);
         add_pane("Keyboard"_sv, Symbol::Plus, build_keyboard);
         add_pane("Notifications"_sv, Symbol::Question, build_notifications);
+        add_pane("Privacy & Security"_sv, Symbol::Lock, build_privacy);
         add_pane("Users"_sv, Symbol::Checkmark, build_users);
         add_pane("About"_sv, Symbol::Folder, build_about);
         m_sidebar->on_select = [this](size_t row) { show_page(row); };

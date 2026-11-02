@@ -36,7 +36,9 @@ set(tests
     pipes
     ports
     posix
+    privacy
     process-info
+    sandbox
     segfault
     services
     shell
@@ -73,6 +75,7 @@ target_link_libraries(test-windows PRIVATE LibWindow LibImage LibGfx LibIPC LibC
 target_link_libraries(test-toolkit PRIVATE LibUI LibImage)
 target_link_libraries(test-threads PRIVATE LibIPC LibCore)
 target_link_libraries(test-crypto PRIVATE LibCrypto)
+target_link_libraries(test-privacy PRIVATE LibCrypto)
 target_link_libraries(test-dynamic PRIVATE LibCrypto)
 target_link_libraries(test-hardening PRIVATE LibCrypto)
 vulture_compile_ipc(test-bootstrap Echo.ipc)

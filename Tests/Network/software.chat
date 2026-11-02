@@ -44,9 +44,67 @@ pause 0.3
 button left down
 pause 0.2
 button left up
+# The first thing it does is go for the Documents folder, having first tried to give itself permission.
+# Neither gets it anywhere: the system asks.
+expect privacy: asking about Hello
+pause 1
+screenshot consent.png
+pointer 14909 15545
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect hello: documents denied
 expect hello: ready
 pause 1
 screenshot hello.png
+key meta_l-q
+pause 1
+# That stays the answer: nobody is here to say so this time, and it doesn't wait.
+pointer 25247 17432
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect hello: documents denied
+expect hello: ready
+pause 1
+key meta_l-q
+pause 1
+# Until someone changes their mind, in Settings.
+key meta_l-spc
+expect search: shown
+pause 0.3
+type settings
+pause 1
+type \r
+expect settings: Appearance
+pause 1
+pointer 6656 13845
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect settings: Privacy & Security
+pause 0.8
+screenshot settings-privacy.png
+pointer 26231 14575
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.8
+screenshot settings-privacy-allowed.png
+key meta_l-q
+pause 1
+pointer 25247 17432
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect hello: documents allowed
+expect hello: ready
+pause 1
 key meta_l-q
 pause 1
 # A package that isn't what its index says: an alert, and nothing installed.

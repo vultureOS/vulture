@@ -4,10 +4,14 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <WorkspaceEndpoint.h>
+#include <Kernel/API/POSIX/privacy.h>
+#include <PrivacyEndpoint.h>
 #include <Desktop.h>
 #include <LibIPC/Bootstrap.h>
 #include <LibIPC/Listener.h>
 #include <LibJSON/JSON.h>
+#include <LibUI/Panels.h>
 #include <LibUI/Application.h>
 #include <LibUI/Controls.h>
 #include <LibUI/Layout.h>
@@ -377,6 +381,232 @@ private:
     String m_application;
     String m_title;
     String m_body;
+};
+
+// ---- Privacy: someone's question, on its own above everything.
+
+class ConsentPanel final : public PrivacyPromptsStub {
+public:
+    ConsentPanel()
+    {
+        auto port = IPC::look_up("com.vulture.privacyd"_sv);
+        if (port.is_error())
+            return;
+        m_service = adopt_own(*new PrivacyProxy(port.release_value()));
+        auto pair = IPC::create_port();
+        if (pair.is_error())
+            return;
+        auto ports = pair.release_value();
+        m_listener = adopt_own(*new IPC::Listener(Application::the().event_loop(), move(ports.receive), [this](IPC::ReceivedMessage& message) { (void)handle(message); }));
+        (void)m_service->subscribe(move(ports.send));
+    }
+
+    void ask(IPC::Sender const&, u32 id, String application, u32 service) override
+    {
+        m_questions.append(Question { id, move(application), service });
+        if (m_questions.size() == 1)
+            show_next();
+    }
+
+private:
+    struct Question {
+        u32 id;
+        String application;
+        u32 service;
+    };
+
+    class Icon final : public View {
+    public:
+        explicit Icon(RefPtr<Bitmap> bitmap)
+            : m_bitmap(move(bitmap))
+        {
+        }
+
+        [[nodiscard]] FloatSize intrinsic_size() const override
+        {
+            float const size = tokens().metric("alert.iconSize"_sv);
+            return { size, size };
+        }
+
+        void draw(Graphics& graphics) override
+        {
+            if (m_bitmap)
+                graphics.painter().draw_bitmap(*m_bitmap, FloatRect { 0, 0, width(), height() });
+            else
+                graphics.draw_symbol(Symbol::Question, { 0, 0, width(), height() }, tokens().color("accent"_sv), 3);
+        }
+
+    private:
+        RefPtr<Bitmap> m_bitmap;
+    };
+
+    // A window with nothing around it has no shadow from the window server, so the shadow is its own.
+    static constexpr float shadow_margin = 24;
+
+    class Face final : public View {
+    public:
+        void draw(Graphics& graphics) override
+        {
+            UI::draw_sheet_face(graphics, { shadow_margin, shadow_margin, width() - shadow_margin * 2, height() - shadow_margin * 2 });
+        }
+    };
+
+    void show_next()
+    {
+        if (m_questions.is_empty())
+            return;
+        auto const& question = m_questions.first();
+        auto const& t = tokens();
+
+        StringView name = question.application.view();
+        if (auto const slash = name.find_last('/'); slash.has_value())
+            name = name.substring_view(slash.value() + 1);
+        if (name.ends_with(".app"_sv))
+            name = name.substring_view(0, name.length() - 4);
+        RefPtr<Bitmap> icon;
+        if (auto bundle = Desktop::read_bundle(question.application.view()); !bundle.is_error()) {
+            icon = Desktop::icon_named(bundle.value().icon.view(), static_cast<int>(t.metric("alert.iconSize"_sv)), Platform::the().scale());
+            if (!bundle.value().name.is_empty())
+                name = {};
+            StringBuilder title;
+            title.append(name.is_empty() ? bundle.value().name.view() : name);
+            m_name = MUST(title.to_string());
+        } else {
+            m_name = MUST(String::from_view(name));
+        }
+
+        StringView folder;
+        switch (question.service) {
+        case VULTURE_PRIVACY_DESKTOP:
+            folder = "your Desktop folder"_sv;
+            break;
+        case VULTURE_PRIVACY_DOCUMENTS:
+            folder = "your Documents folder"_sv;
+            break;
+        case VULTURE_PRIVACY_DOWNLOADS:
+            folder = "your Downloads folder"_sv;
+            break;
+        default:
+            folder = "something of yours"_sv;
+            break;
+        }
+        StringBuilder message;
+        message.appendff("\u201C{}\u201D would like to access files in {}.", m_name.view(), folder);
+
+        float const padding = t.metric("alert.padding"_sv);
+        float const panel_width = t.metric("alert.width"_sv);
+        float const inner_width = panel_width - padding * 2;
+        float const spacing = t.metric("alert.spacing"_sv);
+        auto const headline = t.named_font("headline"_sv);
+        auto const small = t.named_font("small"_sv);
+
+        // Sized by what it holds, once that has been laid out to the width.
+        auto measure = [&](StringView text, FontSpec const& font) {
+            auto* probe = new Label(text, font);
+            probe->set_wraps(true);
+            probe->set_frame({ 0, 0, inner_width, Appearance::line_height(font) });
+            float const height = probe->intrinsic_size().height;
+            delete probe;
+            return height;
+        };
+        constexpr StringView explanation = "You can change this later in Settings, under Privacy & Security."_sv;
+        float const message_height = measure(message.view(), headline);
+        float const explanation_height = measure(explanation, small);
+        float const button_height = t.metric("alert.buttonHeight"_sv);
+        float const height = padding * 2 + t.metric("alert.iconSize"_sv) + message_height + explanation_height + button_height + spacing * 3;
+
+        auto screen = Platform::the().screen_size();
+        int const margin = static_cast<int>(shadow_margin);
+        IntRect const frame { (screen.width - static_cast<int>(panel_width)) / 2 - margin, (screen.height - static_cast<int>(height)) / 3 - margin, static_cast<int>(panel_width) + margin * 2, static_cast<int>(height) + margin * 2 };
+        m_window = adopt_own(*new UI::Window("Privacy"_sv, frame, WS::WindowBare | WS::WindowCanBecomeKey | WS::WindowSticky));
+        m_window->set_transparent(true);
+        m_window->backend().set_level(WS::LevelPopup);
+        m_window->backend().set_input_region({ margin, margin, static_cast<int>(panel_width), static_cast<int>(height) });
+        auto& face = m_window->root_view().add<Face>();
+        face.set_frame({ 0, 0, static_cast<float>(frame.width), static_cast<float>(frame.height) });
+        auto& stack = face.add<StackView>(Axis::Vertical, spacing, Alignment::Center, Insets::all(padding));
+        stack.set_frame({ shadow_margin, shadow_margin, panel_width, height });
+        (void)stack.add<Icon>(icon);
+        auto& message_label = stack.add<Label>(message.view(), headline);
+        message_label.set_alignment(TextAlignment::Center);
+        message_label.set_wraps(true);
+        message_label.set_fixed_size({ inner_width, message_height });
+        auto& explanation_label = stack.add<Label>(explanation, small);
+        explanation_label.set_alignment(TextAlignment::Center);
+        explanation_label.set_wraps(true);
+        explanation_label.set_fixed_size({ inner_width, explanation_height });
+        auto& row = stack.add<StackView>(Axis::Horizontal, t.metric("alert.buttonSpacing"_sv));
+        row.stack().set_distribution(Distribution::Equal);
+        row.set_fixed_size({ inner_width, button_height });
+        auto& refuse = row.add<Button>("Don\u2019t Allow"_sv);
+        refuse.set_control_size(ControlSize::Large);
+        refuse.on_action = [this] { answer(false); };
+        auto& allow = row.add<Button>("Allow"_sv, ButtonStyle::Default);
+        allow.set_control_size(ControlSize::Large);
+        allow.on_action = [this] { answer(true); };
+        Platform::the().play_sound("alert"_sv);
+        m_window->show();
+        m_window->backend().activate();
+        printf("privacy: asking about %s\n", m_name.characters());
+        fflush(stdout);
+    }
+
+    void answer(bool allowed)
+    {
+        if (m_questions.is_empty())
+            return;
+        (void)m_service->answer(m_questions.first().id, allowed);
+        m_questions.remove(0);
+        // Not from inside its own button's press.
+        auto* closing = m_window.leak_ptr();
+        if (closing) {
+            closing->hide();
+            Platform::the().defer([closing] { delete closing; });
+        }
+        printf("privacy: answered\n");
+        fflush(stdout);
+        show_next();
+    }
+
+    OwnPtr<PrivacyProxy> m_service;
+    OwnPtr<IPC::Listener> m_listener;
+    OwnPtr<UI::Window> m_window;
+    Vector<Question> m_questions;
+    String m_name;
+};
+
+// ---- Starting applications for what can't have them as its own children.
+
+class WorkspaceService final : public WorkspaceStub {
+public:
+    WorkspaceService()
+    {
+        auto pair = IPC::create_port();
+        if (pair.is_error())
+            return;
+        auto ports = pair.release_value();
+        m_listener = adopt_own(*new IPC::Listener(Application::the().event_loop(), move(ports.receive), [this](IPC::ReceivedMessage& message) { (void)handle(message); }));
+        (void)IPC::register_service("com.vulture.workspace"_sv, move(ports.send));
+    }
+
+    WorkspaceEndpoint::OpenApplicationAnswer open_application(IPC::Sender const& sender, String bundle) override
+    {
+        // Someone else's session isn't this one's business.
+        if (sender.uid != getuid())
+            return { EPERM, -1 };
+        if (!bundle.view().ends_with(".app"_sv))
+            return { EINVAL, -1 };
+        auto info = Desktop::read_bundle(bundle.view());
+        if (info.is_error())
+            return { info.error().code(), -1 };
+        auto launched = Desktop::launch(info.value());
+        if (launched.is_error())
+            return { launched.error().code(), -1 };
+        return { 0, launched.value() };
+    }
+
+private:
+    OwnPtr<IPC::Listener> m_listener;
 };
 
 class NotificationListener final : public NotificationEventsStub {
@@ -990,6 +1220,8 @@ int main(int argc, char** argv)
         }
     }
     (void)events;
+    ConsentPanel consent;
+    WorkspaceService workspace;
     printf("desktopshell: ready\n");
     fflush(stdout);
     return application->exec();

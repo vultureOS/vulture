@@ -426,6 +426,23 @@ void Graphics::draw_symbol(Symbol symbol, FloatRect const& rect, Color color, fl
         m_painter.fill_path(drive, color, FillRule::EvenOdd);
         return;
     }
+    case Symbol::Lock: {
+        Path body;
+        auto corner = at(3.2f, 7.2f);
+        body.add_rounded_rect({ corner.x, corner.y, 9.6f * unit, 7 * unit }, 1.4f * unit);
+        m_painter.fill_path(body, color);
+        // The shackle, over the top.
+        constexpr int steps = 10;
+        path.move_to(at(5, 7.2f));
+        path.line_to(at(5, 5));
+        for (int i = 0; i <= steps; ++i) {
+            float angle = 3.1415927f + 3.1415927f * static_cast<float>(i) / static_cast<float>(steps);
+            path.line_to(at(8 + 3 * static_cast<float>(Math::cosine(static_cast<double>(angle))), 5 + 3 * static_cast<float>(Math::sine(static_cast<double>(angle)))));
+        }
+        path.line_to(at(11, 7.2f));
+        style.width = 1.4f * unit;
+        break;
+    }
     case Symbol::Globe: {
         // The circle, the two meridians through it and two lines of latitude.
         constexpr int steps = 24;

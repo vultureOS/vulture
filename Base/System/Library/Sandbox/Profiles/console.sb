@@ -1,0 +1,2 @@
+# Reads the log, which comes from logd.
+include application

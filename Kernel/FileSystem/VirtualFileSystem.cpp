@@ -9,6 +9,8 @@
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Locking/Mutex.h>
 #include <Kernel/Security/Credentials.h>
+#include <Kernel/Security/Privacy.h>
+#include <Kernel/Security/Sandbox.h>
 #include <Kernel/Security/Seal.h>
 #include <LibBase/Vector.h>
 
@@ -91,6 +93,18 @@ ErrorOr<void> split_components(StringView path, Vector<String>& components)
         }
     }
     return {};
+}
+
+// What a sandbox sees: where something in `parent` would be, or is.
+ErrorOr<void> check_may_write_entry(ResolvedParent const& parent)
+{
+    StringBuilder path;
+    if (parent.directory_path.view() != "/"_sv)
+        path.append(parent.directory_path.view());
+    path.append('/');
+    path.append(parent.name.view());
+    TRY(sandbox_check(SandboxOperation::FileWrite, path.view()));
+    return Privacy::check(path.view());
 }
 
 ErrorOr<String> join(Vector<Step> const& steps, size_t count)
@@ -219,6 +233,7 @@ ErrorOr<NonnullRefPtr<FileDescription>> VirtualFileSystem::open(StringView path,
         if (resolved.error().code() != ENOENT || !(flags & O_CREAT))
             return resolved.release_error();
         auto parent = TRY(resolve_parent(path, cwd));
+        TRY(check_may_write_entry(parent));
         TRY(Seal::check_may_change(*parent.directory));
         TRY(check_access(parent.directory->metadata(), write_access | search_access));
         auto inode = TRY(parent.directory->create_child(parent.name.view(), InodeType::File, permissions & 07777, {}));
@@ -229,6 +244,11 @@ ErrorOr<NonnullRefPtr<FileDescription>> VirtualFileSystem::open(StringView path,
         return Error::from_errno(EEXIST);
     auto& inode = resolved.value().inode;
     auto metadata = inode->metadata();
+    if ((flags & O_ACCMODE) != O_WRONLY)
+        TRY(sandbox_check(SandboxOperation::FileRead, resolved.value().path.view()));
+    if ((flags & O_ACCMODE) != O_RDONLY || (flags & O_TRUNC))
+        TRY(sandbox_check(SandboxOperation::FileWrite, resolved.value().path.view()));
+    TRY(Privacy::check(resolved.value().path.view()));
     // O_NOFOLLOW: a symbolic link at the end is an error, not a file.
     if ((flags & O_NOFOLLOW) && metadata.type == InodeType::SymbolicLink)
         return Error::from_errno(ELOOP);
@@ -263,6 +283,7 @@ ErrorOr<void> VirtualFileSystem::mkdir(StringView path, StringView cwd, u32 perm
     auto parent = TRY(resolve_parent(path, cwd));
     if (!parent.directory->lookup(parent.name.view()).is_error())
         return Error::from_errno(EEXIST);
+    TRY(check_may_write_entry(parent));
     TRY(Seal::check_may_change(*parent.directory));
     TRY(check_access(parent.directory->metadata(), write_access | search_access));
     auto directory = TRY(parent.directory->create_child(parent.name.view(), InodeType::Directory, permissions & 07777, {}));
@@ -277,6 +298,7 @@ ErrorOr<void> VirtualFileSystem::unlink(StringView path, StringView cwd)
     auto metadata = inode->metadata();
     if (metadata.type == InodeType::Directory)
         return Error::from_errno(EISDIR);
+    TRY(check_may_write_entry(parent));
     TRY(Seal::check_may_change(*parent.directory));
     TRY(Seal::check_may_change(*inode));
     TRY(check_removal(parent.directory->metadata(), metadata));
@@ -291,6 +313,7 @@ ErrorOr<void> VirtualFileSystem::rmdir(StringView path, StringView cwd)
         return Error::from_errno(ENOTDIR);
     if (&inode->file_system() != &parent.directory->file_system())
         return Error::from_errno(EBUSY); // A mount point.
+    TRY(check_may_write_entry(parent));
     TRY(Seal::check_may_change(*parent.directory));
     TRY(Seal::check_may_change(*inode));
     if (!TRY(inode->is_empty_directory()))
@@ -306,6 +329,8 @@ ErrorOr<void> VirtualFileSystem::rename(StringView old_path, StringView new_path
     if (&old_parent.directory->file_system() != &new_parent.directory->file_system())
         return Error::from_errno(EXDEV);
     auto moving = TRY(old_parent.directory->lookup(old_parent.name.view()));
+    TRY(check_may_write_entry(old_parent));
+    TRY(check_may_write_entry(new_parent));
     TRY(Seal::check_may_change(*old_parent.directory));
     TRY(Seal::check_may_change(*new_parent.directory));
     TRY(Seal::check_may_change(*moving));
@@ -330,6 +355,7 @@ ErrorOr<void> VirtualFileSystem::symlink(StringView target, StringView link_path
     auto parent = TRY(resolve_parent(link_path, cwd));
     if (!parent.directory->lookup(parent.name.view()).is_error())
         return Error::from_errno(EEXIST);
+    TRY(check_may_write_entry(parent));
     TRY(Seal::check_may_change(*parent.directory));
     TRY(check_access(parent.directory->metadata(), write_access | search_access));
     auto link = TRY(parent.directory->create_child(parent.name.view(), InodeType::SymbolicLink, 0777, target));
@@ -347,6 +373,10 @@ ErrorOr<void> VirtualFileSystem::link(StringView existing_path, StringView new_p
         return Error::from_errno(EXDEV);
     if (!parent.directory->lookup(parent.name.view()).is_error())
         return Error::from_errno(EEXIST);
+    // A second name for something: only by someone who could change it under its first.
+    TRY(sandbox_check(SandboxOperation::FileWrite, existing.path.view()));
+    TRY(Privacy::check(existing.path.view()));
+    TRY(check_may_write_entry(parent));
     TRY(Seal::check_may_change(*parent.directory));
     // A second name for something sealed, somewhere it could be removed, would still be all right;
     // but a change to its link count isn't what the seal says either.

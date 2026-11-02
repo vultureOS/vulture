@@ -15,6 +15,7 @@
 #include <Kernel/API/POSIX/port.h>
 #include <Kernel/Memory/KernelBuffer.h>
 #include <Kernel/Security/Credentials.h>
+#include <Kernel/Security/Sandbox.h>
 #include <Kernel/Tasks/Thread.h>
 #include <LibBase/OwnPtr.h>
 #include <LibBase/String.h>
@@ -83,6 +84,19 @@ public:
     void lose_controlling_terminal();
     [[nodiscard]] bool is_signal_ignored_or_blocked(int signal) const;
     [[nodiscard]] Credentials const& credentials() const { return m_credentials; }
+    [[nodiscard]] SandboxProfile const* sandbox() const { return m_sandbox.ptr(); }
+    // What installed application this is, or was started by; nothing, if it all came with the system.
+    [[nodiscard]] StringView responsible_application() const { return m_responsible_application.view(); }
+    // Security/Privacy.h: what it has been told, by service, as bits.
+    [[nodiscard]] u8 privacy_allowed() const { return m_privacy_allowed; }
+    [[nodiscard]] u8 privacy_denied() const { return m_privacy_denied; }
+    void remember_privacy_answer(u8 bit, bool allowed)
+    {
+        if (allowed)
+            m_privacy_allowed |= bit;
+        else
+            m_privacy_denied |= bit;
+    }
     [[nodiscard]] u32 umask() const { return m_umask; }
 
     // Called when one of its threads is gone (its last reference).
@@ -229,6 +243,10 @@ private:
     u64 m_alarm_deadline { 0 };
 
     Credentials m_credentials;
+    RefPtr<SandboxProfile> m_sandbox;
+    String m_responsible_application;
+    u8 m_privacy_allowed { 0 };
+    u8 m_privacy_denied { 0 };
     u32 m_umask { 022 };
     RefPtr<TTY> m_controlling_terminal;
     // A send right to the name service (vlaunchd), inherited across fork

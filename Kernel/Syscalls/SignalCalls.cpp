@@ -25,6 +25,9 @@ static constexpr u64 bit(int signal)
 // process in the same session (job control).
 static bool may_signal(Process const& sender, Process const& target, int signal)
 {
+    // Out of a sandbox, nothing reaches anything outside it.
+    if (sender.sandbox() && sender.sandbox() != target.sandbox() && &sender != &target)
+        return false;
     auto const& from = sender.credentials();
     auto const& to = target.credentials();
     if (from.is_superuser())

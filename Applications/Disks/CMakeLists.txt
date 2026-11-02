@@ -8,6 +8,7 @@ vulture_add_application(Disks
     SOURCES main.cpp
     NAME "Disks"
     IDENTIFIER com.vulture.Disks
+    SANDBOX disks
     ICON Disks
     KIND "Volumes and Storage"
     LIBRARIES LibDesktop)

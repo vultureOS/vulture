@@ -8,6 +8,7 @@ vulture_add_application(Archiver
     SOURCES main.cpp
     NAME "Archiver"
     IDENTIFIER com.vulture.Archiver
+    SANDBOX document-editor
     ICON Archiver
     KIND "Compress and Expand"
     EXTENSIONS tar gz tgz

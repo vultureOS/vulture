@@ -44,6 +44,8 @@ Test const s_tests[] = {
     { "/usr/tests/sockets", 0, 0 },
     { "/usr/tests/crypto", 0, 0 },
     { "/usr/tests/hardening", 0, 0 },
+    { "/usr/tests/sandbox", 0, 0 },
+    { "/usr/tests/privacy", 0, 0 },
     // Only with the boot word that makes it mean anything (Meta/hardening-test.sh): else it fails.
     { "/usr/tests/kernel-fault", 1, 0 },
     { "/usr/tests/files", 0, 0 },

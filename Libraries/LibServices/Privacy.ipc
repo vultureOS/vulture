@@ -1,0 +1,16 @@
+// What people have said applications may have (com.vulture.privacyd). Only what came with the system
+// gets to say: an application can't answer for its own request.
+endpoint Privacy
+{
+    // The session's shell: where to put the questions.
+    subscribe(Port prompts) =|
+    answer(u32 id, bool allowed) =|
+    // What has been decided, for Settings: JSON, a list of { application, service, allowed }.
+    decisions() => (String json)
+    set_decision(String application, u32 service, bool allowed) =|
+}
+
+endpoint PrivacyPrompts
+{
+    ask(u32 id, String application, u32 service) =|
+}

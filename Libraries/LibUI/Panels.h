@@ -18,6 +18,9 @@
 
 namespace UI {
 
+// What a sheet looks like: its fill and shadow, which reaches 24 points around `shape`.
+void draw_sheet_face(Graphics&, Gfx::FloatRect shape);
+
 // Slides down over a window, and everything under it waits. One per window.
 class Sheet {
 public:

@@ -62,6 +62,7 @@ vulture_add_tool(mv bin)
 vulture_add_tool(ps bin)
 vulture_add_tool(rm bin)
 vulture_add_tool(rmdir bin)
+vulture_add_tool(sandbox-exec usr/bin)
 vulture_add_tool(sleep bin)
 vulture_add_tool(test bin)
 # "[" cannot go through a CMake list (brackets group list items).

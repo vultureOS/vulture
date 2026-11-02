@@ -13,6 +13,7 @@
 #include <notify.h>
 #include <os/log.h>
 #include <poll.h>
+#include <sandbox.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -215,6 +216,29 @@ void check_configuration()
     report("only root sets names", status == 1 && strcmp(run("scutil --get ComputerName"), "Test Machine\n") == 0);
 }
 
+// A sandboxed process finds only the services its profile names: not asking vlaunchd for the port is
+// not something it can be trusted to do by itself.
+void check_sandboxed_look_up()
+{
+    fflush(stdout);
+    pid_t child = fork();
+    if (child == 0) {
+        char* error = nullptr;
+        if (sandbox_init("read /\nservice com.vulture.logd\n", 0, &error) != 0)
+            _exit(1);
+        auto const named = IPC::look_up("com.vulture.logd"_sv);
+        if (named.is_error())
+            _exit(2);
+        auto const other = IPC::look_up("com.vulture.pasteboard"_sv);
+        if (!other.is_error() || other.error().code() != EPERM)
+            _exit(3);
+        _exit(0);
+    }
+    int status = 0;
+    waitpid(child, &status, 0);
+    report("a sandboxed process only finds the services it names", WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
 void check_pasteboard()
 {
     run("echo hello pasteboard | pbcopy");
@@ -273,6 +297,7 @@ int run_client()
     check_notifications();
     check_configuration();
     check_pasteboard();
+    check_sandboxed_look_up();
 
     // What the stream saw.
     for (int i = 0; i < 100 && !strstr(read_file("stream.out"), "clipboardd:"); ++i)

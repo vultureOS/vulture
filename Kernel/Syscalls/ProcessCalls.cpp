@@ -66,6 +66,10 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
     }
     child->m_bootstrap_port = m_bootstrap_port;
     child->m_credentials = m_credentials;
+    child->m_sandbox = m_sandbox;
+    child->m_responsible_application = m_responsible_application;
+    child->m_privacy_allowed = m_privacy_allowed;
+    child->m_privacy_denied = m_privacy_denied;
     child->m_umask = m_umask;
     auto space = TRY(m_address_space->clone_for_fork());
     {

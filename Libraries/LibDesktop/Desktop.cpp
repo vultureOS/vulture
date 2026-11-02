@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <WorkspaceEndpoint.h>
 #include <os/log.h>
 #include "Desktop.h"
 #include <LibIPC/Bootstrap.h>
@@ -13,6 +14,7 @@
 #include <NotificationsEndpoint.h>
 #include <SessionEndpoint.h>
 #include <dirent.h>
+#include <sandbox.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pwd.h>
@@ -140,6 +142,7 @@ ErrorOr<AppInfo> read_bundle(StringView bundle_path)
     info.executable_path = MUST(path.to_string());
     info.icon = copy(json.get_string("CFBundleIconFile"_sv).value_or("GenericApplication"_sv));
     info.kind = copy(json.get_string("VultureKind"_sv).value_or(StringView {}));
+    info.sandbox = copy(json.get_string("VultureSandbox"_sv).value_or(StringView {}));
     if (auto const* extensions = json.get_array("CFBundleDocumentExtensions"_sv)) {
         for (size_t i = 0; i < extensions->size(); ++i) {
             if (extensions->at(i).is_string())
@@ -214,6 +217,8 @@ ErrorOr<pid_t> launch(AppInfo const& application, Span<StringView const> argumen
         pid_t program = fork();
         if (program == 0) {
             close(answer[1]);
+            if (!application.sandbox.is_empty() && sandbox_init_for_program(application.sandbox.characters(), SANDBOX_NAMED, argv[0], nullptr) != 0)
+                _exit(126);
             execv(argv[0], argv.data());
             _exit(127);
         }
@@ -230,6 +235,15 @@ ErrorOr<pid_t> launch(AppInfo const& application, Span<StringView const> argumen
     static os_log_t const log = os_log_create("com.vulture.desktop", "launch");
     os_log_info(log, "Launched %s as process %d", application.name.characters(), program);
     return program;
+}
+
+ErrorOr<pid_t> open_application(AppInfo const& application)
+{
+    auto port = TRY(IPC::look_up("com.vulture.workspace"_sv));
+    auto reply = TRY(WorkspaceProxy(move(port)).open_application(application.bundle_path.view()));
+    if (reply.error != 0)
+        return Error::from_errno(reply.error);
+    return static_cast<pid_t>(reply.pid);
 }
 
 ErrorOr<void> open_path(StringView path)

@@ -8,6 +8,7 @@ vulture_add_application(Console
     SOURCES main.cpp
     NAME "Console"
     IDENTIFIER com.vulture.Console
+    SANDBOX console
     ICON Console
     KIND "System Log"
     LIBRARIES LibDesktop LibServices)

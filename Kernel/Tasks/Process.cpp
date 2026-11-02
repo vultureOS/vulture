@@ -511,6 +511,7 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
 {
     auto directory = current_directory();
     auto resolved = TRY(VirtualFileSystem::resolve(path, directory.view()));
+    TRY(sandbox_check(SandboxOperation::Execute, resolved.path.view()));
     auto executable = TRY(read_executable(*resolved.inode));
 
     // A script: "#!interpreter [argument]" runs the interpreter with the
@@ -587,7 +588,13 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     if (header.e_type == ELF::ET_DYN && !interpreter)
         return Error::from_errno(ENOEXEC);
 
-    (void)origin;
+    // Installed code, and whatever it goes on to start: "/Applications/Hello.app", or the program
+    // if it isn't in a bundle. (Set once, so that this can't be washed off by running something else.)
+    if (origin == CodeSigning::Origin::ThirdParty && m_responsible_application.is_empty()) {
+        auto const program_path = resolved.path.view();
+        auto const bundle = program_path.find(".app/"_sv);
+        m_responsible_application = TRY(String::from_view(bundle.has_value() ? program_path.substring_view(0, bundle.value() + 4) : program_path));
+    }
     auto random_pages = [](u64 count) {
         u64 random;
         get_random_bytes({ reinterpret_cast<u8*>(&random), sizeof(random) });
@@ -605,6 +612,9 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     // Set-user-ID and set-group-ID programs run as the file's owner and
     // group (from below); the dynamic linker must then trust no environment.
     auto program_file = resolved.inode->metadata();
+    // Nothing gets out of a sandbox by way of another user.
+    if (m_sandbox && (program_file.permissions & 06000))
+        return Error::from_errno(EPERM);
     u32 new_euid = (program_file.permissions & 04000) ? program_file.uid : m_credentials.euid;
     u32 new_egid = (program_file.permissions & 02000) ? program_file.gid : m_credentials.egid;
     bool secure = new_euid != m_credentials.uid || new_egid != m_credentials.gid;

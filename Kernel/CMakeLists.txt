@@ -37,6 +37,8 @@ add_executable(Kernel
     Debug/Sanitizers.cpp
     Security/CodeSigning.cpp
     Security/DebugFault.cpp
+    Security/Privacy.cpp
+    Security/Sandbox.cpp
     Security/Seal.cpp
     Security/StackProtector.cpp
     Syscalls/SocketCalls.cpp

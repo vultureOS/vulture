@@ -1,0 +1,8 @@
+{
+    "Label" : "com.vulture.privacyd",
+    "ProgramArguments" : [ "/usr/libexec/privacyd" ],
+    "MachServices" : { "com.vulture.privacyd" : true },
+    "KeepAlive" : true,
+    "RunAtLoad" : true,
+    "ThrottleInterval" : 1
+}

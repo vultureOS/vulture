@@ -1,0 +1,7 @@
+# Reads documents from anywhere a person might keep them, and writes them there.
+include application
+write ${HOME}
+write /Users/Shared
+write /tmp
+read /Volumes
+read /Library

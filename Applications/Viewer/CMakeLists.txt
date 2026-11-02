@@ -8,6 +8,7 @@ vulture_add_application(Viewer
     SOURCES main.cpp
     NAME "Viewer"
     IDENTIFIER com.vulture.Viewer
+    SANDBOX viewer
     ICON Viewer
     KIND "Pictures and Images"
     EXTENSIONS png jpg jpeg

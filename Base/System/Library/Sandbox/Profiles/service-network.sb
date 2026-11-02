@@ -1,0 +1,8 @@
+# Talks DHCP, sets the interface's address, and says what the name servers are.
+include system
+network outbound
+network inbound
+network configure
+write /etc/resolv.conf
+write /etc/resolv.conf.new
+read /etc/hostname

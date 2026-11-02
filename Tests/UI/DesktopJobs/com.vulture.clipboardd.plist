@@ -1,5 +1,6 @@
 {
     "Label" : "com.vulture.clipboardd",
+    "SandboxProfile" : "service-clipboard",
     "ProgramArguments" : [ "/usr/libexec/clipboardd" ],
     "MachServices" : { "com.vulture.pasteboard" : true },
     "RunAtLoad" : true,

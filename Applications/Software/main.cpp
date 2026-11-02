@@ -371,7 +371,7 @@ ApplicationRow::ApplicationRow(Desktop::AppInfo info, StringView package, Catalo
 {
     auto& open = add_button("Open"_sv);
     open.on_action = [this] {
-        auto launched = Desktop::launch(m_info);
+        auto launched = Desktop::open_application(m_info);
         if (launched.is_error())
             fprintf(stderr, "Software: cannot open %s\n", m_info.name.characters());
     };

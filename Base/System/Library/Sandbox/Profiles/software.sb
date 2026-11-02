@@ -1,0 +1,4 @@
+# Asks the installer for everything, and the desktop to open what's installed.
+include application
+service com.vulture.installd
+service com.vulture.workspace

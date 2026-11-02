@@ -1,5 +1,6 @@
 {
     "Label" : "com.vulture.notificationd",
+    "SandboxProfile" : "service-notifications",
     "ProgramArguments" : [ "/usr/libexec/notificationd" ],
     "MachServices" : { "com.vulture.notificationd" : true },
     "RunAtLoad" : true,

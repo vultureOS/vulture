@@ -8,6 +8,7 @@ vulture_add_application(Calculator
     SOURCES main.cpp
     NAME "Calculator"
     IDENTIFIER com.vulture.Calculator
+    SANDBOX calculator
     ICON Calculator
     KIND "Arithmetic"
     LIBRARIES LibDesktop)

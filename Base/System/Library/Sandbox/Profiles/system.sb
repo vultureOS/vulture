@@ -1,0 +1,13 @@
+# What nearly anything needs to run at all.
+read /usr/lib
+read /usr/share
+read /System/Library
+read /etc/passwd
+read /etc/group
+read /dev/null
+write /dev/null
+read /dev/urandom
+read /dev/random
+exec ${PROGRAM}
+service com.vulture.logd
+service com.vulture.notifyd

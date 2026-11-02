@@ -11,6 +11,18 @@
 
 namespace UI {
 
+void draw_sheet_face(Graphics& graphics, Gfx::FloatRect shape)
+{
+    auto const& t = Appearance::the();
+    float const radius = t.metric("sheet.radius"_sv);
+    // Its shadow, in stacked rings, softly: nothing under it needs to be read.
+    for (int i = 0; i < 12; ++i) {
+        float const grown = static_cast<float>(12 - i) * 2;
+        graphics.fill_rounded({ shape.x - grown, shape.y - grown / 2, shape.width + grown * 2, shape.height + grown * 1.5f }, radius + grown, Gfx::Color { 0, 0, 0, 3 });
+    }
+    graphics.fill_rounded(shape, radius, t.color("sheet.fill"_sv));
+}
+
 using namespace Gfx;
 namespace Math = Base::Math;
 
@@ -83,15 +95,7 @@ private:
 
         void draw(Graphics& graphics) override
         {
-            auto const& t = tokens();
-            FloatRect shape { 0, 0, width(), height() };
-            float radius = t.metric("sheet.radius"_sv);
-            // Its shadow, in stacked rings, softly: nothing under it needs to be read.
-            for (int i = 0; i < 12; ++i) {
-                float grown = static_cast<float>(12 - i) * 2;
-                graphics.fill_rounded({ shape.x - grown, shape.y - grown / 2, shape.width + grown * 2, shape.height + grown * 1.5f }, radius + grown, Color { 0, 0, 0, 3 });
-            }
-            graphics.fill_rounded(shape, radius, t.color("sheet.fill"_sv));
+            draw_sheet_face(graphics, { 0, 0, width(), height() });
         }
 
         [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::Sheet; }

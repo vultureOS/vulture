@@ -1,5 +1,6 @@
 {
     "Label" : "com.vulture.audioserver",
+    "SandboxProfile" : "service-audio",
     "ProgramArguments" : [ "/usr/libexec/AudioServer" ],
     "MachServices" : { "com.vulture.audioserver" : true },
     "KeepAlive" : true,

@@ -1,0 +1,6 @@
+# Looks at pictures, wherever they are; changes nothing.
+include application
+read ${HOME}
+read /Users/Shared
+read /Volumes
+read /tmp

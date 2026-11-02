@@ -186,6 +186,10 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
     FlatPtr new_buffer = arguments.values[4];
     size_t new_length = arguments.values[5];
 
+    // Nothing is changed from inside a sandbox.
+    if (new_buffer && m_sandbox)
+        return Error::from_errno(EPERM);
+
     u8 value[128];
     size_t value_length = 0;
     Vector<u8> table; // For the names that give a list.
@@ -243,6 +247,9 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
         set_string("arm64"_sv);
     } else if (name == "kern.proc.all"_sv) {
         for (auto& process : all()) {
+            // From inside a sandbox, it is the only thing there is.
+            if (m_sandbox && process.ptr() != this)
+                continue;
             vulture_process_info info;
             process->describe(info);
             size_t offset = table.size();
@@ -259,6 +266,25 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
         else if (debug_fault() == "user-execute"_sv)
             reinterpret_cast<void (*)()>(new_buffer)();
         set_number(0u);
+    } else if (name == "security.process.third-party"_sv) {
+        // Is that process, or what started it, something installed? For privacyd, which only takes
+        // answers from what came with the system. The process in question is given as the "new"
+        // value, as there's no other way to say which.
+        if (!m_credentials.is_superuser() || new_length != sizeof(i32))
+            return Error::from_errno(EPERM);
+        auto const pid = TRY(copy_from_user<i32>(new_buffer));
+        bool found = false;
+        int third_party = 1;
+        for (auto& process : all()) {
+            if (process->pid() == pid) {
+                found = true;
+                third_party = process->responsible_application().is_empty() ? 0 : 1;
+                break;
+            }
+        }
+        if (!found)
+            return Error::from_errno(ESRCH);
+        set_number(third_party);
     } else if (name == "security.seal.active"_sv) {
         set_number(Seal::is_active() ? 1 : 0);
     } else if (name == "security.code.enforced"_sv) {
@@ -357,7 +383,7 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
 
 ErrorOr<FlatPtr> Process::sys_reboot(TrapFrame&, SyscallArguments const& arguments)
 {
-    if (!m_credentials.is_superuser())
+    if (!m_credentials.is_superuser() || m_sandbox)
         return Error::from_errno(EPERM);
     int how = static_cast<int>(arguments.values[0]);
     if (auto result = VirtualFileSystem::sync_all(); result.is_error())

@@ -1,0 +1,3 @@
+# Says what is mounted, which it asks the kernel. (It looks at the volumes to say so.)
+include application
+read /Volumes

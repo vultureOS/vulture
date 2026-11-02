@@ -8,6 +8,7 @@ vulture_add_application(Software
     SOURCES main.cpp
     NAME "Software"
     IDENTIFIER com.vulture.Software
+    SANDBOX software
     ICON Software
     KIND "Applications"
     LIBRARIES LibDesktop LibPackage)

@@ -8,6 +8,7 @@ vulture_add_application(TextEditor
     SOURCES main.cpp
     NAME "Text Editor"
     IDENTIFIER com.vulture.TextEditor
+    SANDBOX document-editor
     ICON TextEditor
     KIND "Plain Text and Notes"
     EXTENSIONS txt text md log json cpp h conf plist
