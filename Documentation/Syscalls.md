@@ -76,7 +76,9 @@ Numbers are positions in `Syscalls.def`: only ever append to it.
 | `setsockopt`, `getsockopt` | fd, level, name, value*, size(*) | `SO_REUSEADDR`, `SO_BROADCAST`, `SO_RCVTIMEO`, `SO_SNDTIMEO`, `SO_ERROR`, `SO_NOSIGPIPE`, `TCP_NODELAY`, `IP_TTL`, `IP_BOUND_IF` |
 | `shutdown` | fd, how | |
 | `sched_yield`, `clock_gettime`, `nanosleep` | | |
-| `uname`, `getrandom`, `sysctl` | | `sysctl` by name: `kern.*` (including `kern.proc.all`, every process), `hw.*`, `vfs.mounts` |
+| `uname`, `getrandom`, `sysctl` | | `sysctl` by name: `kern.*` (including `kern.proc.all`, every process), `hw.*`, `vfs.mounts`, `security.*` (`seal.active`, `code.enforced`, and for root `code.trust`, `code.distrust`, `process.third-party`), `vm.compressor.*` (`pages`, `pool_bytes`, `stored_bytes`, `compressions`, `decompressions`, `zero_pages`, `rejected`, and for root `sweep`, which compresses the calling process's memory now) |
+| `sandbox_apply` | profile*, length | Applies a profile to the calling process, on top of any it has already (`EINVAL` if it doesn't parse) |
+| `sandbox_check` | pid, service*, length | Whether that process's sandbox lets it look up the service (`EPERM` if not, `ESRCH` if there's no such process): how vlaunchd decides |
 | `reboot` | how | Root: restart or power off (vlaunchd does it, after stopping every job) |
 | `power_off` | | Process 1 only, for the test boots |
 

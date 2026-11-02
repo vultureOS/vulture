@@ -77,6 +77,9 @@ ExternalProject over the same source tree and adds these targets:
 | `ninja -C build test-ui` | Golden screenshots: the window server's scene, the Widget Gallery, the desktop and every application, driven by the real keyboard and pointer (`Meta/ui-test.sh`) |
 | `ninja -C build test-sound` | Records what the sound device plays, and looks for a tone sent through the sound server in it (`Meta/sound-test.sh`) |
 | `ninja -C build test-network` | DHCP, DNS, HTTP, TLS (each cipher and group, and each way a certificate can be wrong), signed packages by `pkg` and by Software, against servers on this machine (`Meta/network-test.sh`) |
+| `ninja -C build test-hardening` | Each deliberate attack on the kernel ends in the panic that catches it; each change to a sealed file or a signed program is refused; PAC and BTI under emulation (`Meta/hardening-test.sh`) |
+| `ninja -C build test-compressor` | Programs using half as much memory again as a 1 GiB and a 512 MiB machine have, every byte checked; and then more than will compress, which ends the biggest one and nothing else (`Meta/compressor-test.sh`) |
+| `ninja -C build test-sanitized-kernel` | The kernel built with UBSan and KASAN-style heap checks: these catch what is planted, and find nothing in the kernel's tests or userland's (`Meta/sanitized-kernel-test.sh`) |
 | `ninja -C build check` | All of the above tests |
 | `ninja -C build test-internet` | `ping` and `curl https://example.com`, over the real internet (not part of `check`) |
 | `ninja -C build test-crash` | 100 power cuts while writing; fsck clean after each (not part of `check`) |
@@ -86,7 +89,7 @@ ExternalProject over the same source tree and adds these targets:
 `Meta/build.sh` wraps the configure step and `ninja`, checks that the tools
 are installed, and takes ninja targets as arguments (`--check` adds `check`).
 `Meta/run.sh` also takes `--boot-args` (the kernel command line, for example
-`-v` for a verbose boot) and, with `--headless`, `--screenshot FILE` to save
+`-v` for a verbose boot), `--memory` (how much the machine has) and, with `--headless`, `--screenshot FILE` to save
 the screen as PNG and `--wait-for-exit` to require that the guest powers
 itself off.
 
@@ -102,7 +105,11 @@ Kernel command line words:
 | `soundtest` | Run the jobs in `/usr/tests/sound` alone (see `test-sound`) |
 | `nettest`, `netguitest` | Run the jobs in `/usr/tests/network` or `/usr/tests/network-gui` alone (see `test-network`) |
 | `debug` | Log what the system is doing on the console: processes forked, exec'd and ended, launchd's jobs, and the unified log at every level |
-| `fault=KIND` | End the boot with a deliberate crash: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (in a timer interrupt) or `processor` (on processor 1) | Kernel code that does not touch hardware (such as
+| `fault=KIND` | End the boot with a deliberate crash: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (in a timer interrupt) or `processor` (on processor 1); or try something the kernel should stop: `stack-smash`, `text-write`, `rodata-write`, `data-execute`, `pac-return`, `bti-branch`, and on a sanitized kernel `kasan-*` and `ubsan-*` |
+| `debugfault=KIND` | Lets root ask the kernel to touch user memory the wrong way, through the `debug.fault` sysctl: `user-read`, `user-write`, `user-execute` (see `Tests/Userland/kernel-fault.cpp`) |
+| `nokaslr` | Don't move the kernel (`Meta/run.sh --gdb` adds it, so that symbols stay put) |
+| `noseal` | Don't check the system against its seal |
+| `nocodesign` | Run anything, signed or not | Kernel code that does not touch hardware (such as
 `Kernel/BootArguments.cpp`) is compiled into host tests too; see
 `Tests/Kernel`.
 
@@ -353,7 +360,7 @@ macOS-style at the top, real Unix underneath:
     Without a disk, the boot archive is unpacked into a tmpfs root.
   - **Shared with the host.** The same vultureFS code builds for the host
     as `mkvfs`, `fsck.vfs` and `mkimage`.
-  - **Later.** Snapshots, clones, xattrs, ACLs and a sealed System volume.
+  - **Later.** Snapshots, clones, xattrs and ACLs.
 - **Drivers.**
   - **PCI (M5).** PCIe through ECAM, with INTx routed via the device
     tree's `interrupt-map`.
@@ -368,6 +375,47 @@ macOS-style at the top, real Unix underneath:
   lock twice, or waiting on one for 5 s, panics. Threads sleep on `Mutex`
   (FIFO hand-over to the longest waiter), `Semaphore` and `WaitQueue`
   (condition checked under its lock, so no wakeup is lost).
+- **Memory protection (M13).** Nothing is writable and executable at once. Programs, their
+  libraries, stacks and heaps are at random addresses, and so is the kernel: the loader
+  chooses from 16384 places and applies its relocations. The kernel can't reach user memory
+  outside of `copy_from_user` and friends (PAN), or run it (PXN). Return addresses are signed,
+  with a key for each address space in user mode and one for the kernel (PAC), branches land
+  only where they're meant to (BTI, where the processor has it), and stacks have canaries.
+- **The seal and code signing (M13).** `vseal` writes a manifest of the system, with every file's
+  SHA-256, signed by a key made for the build; the kernel checks the signature when it boots
+  and each file when it's used, and refuses to change anything it covers (`EROFS`). A program
+  only runs if the seal lists it, or root has vouched for its hash, as the installer does for
+  a package whose signature it has checked. Executable memory comes only from such files.
+  Limits: the seal goes by whole files, so a block that is read again after leaving the cache
+  isn't checked again; and nothing checks the loader or the kernel (no UEFI secure boot).
+- **Sandboxes (M13).** A profile in `/System/Library/Sandbox/Profiles` says what a process may
+  read, write, run and connect to, and which services it may look up; everything else is
+  `EPERM`, and a line in the log. It is checked on canonical paths, so symbolic links and `..`
+  don't matter, is inherited, and can only narrow. Calculator, Viewer, Text Editor, Archiver,
+  Console, Disks, Software and the services that have no need for more are all sandboxed: see
+  `SANDBOX` in `vulture_add_application` and `SandboxProfile` in a job's plist. A sandboxed
+  process's children are as sandboxed as it is, so one that needs an application opened asks
+  `com.vulture.workspace`, in DesktopShell.
+- **Privacy (M13).** A person's Desktop, Documents and Downloads are only available to code that
+  came with the system. Anything else, and anything it starts (so `/bin/cat` is no way round
+  this), has to be allowed: the kernel asks `privacyd` over `/dev/privacy`, which asks them
+  through a panel from DesktopShell, or remembers what they said. Settings can change that,
+  for the application's next launch. Nothing installed can answer for itself, as `privacyd`
+  asks the kernel who is calling. With nobody to ask, the answer is no. Limits: what a service
+  does on an application's behalf isn't covered.
+- **Memory compression (M13).** There's no swap. When free memory is low (1/16 of all of it), a thread
+  goes round the address spaces. A page it finds mapped, it unmaps, which is the page's second
+  chance; if it's still unmapped next time round, nothing has touched it, so it goes into a
+  pool of compressed pages (or, if it's all zeros, is let go). A fault brings it back. Pages
+  are compressed by `LibCompress/PageCompression`, which is original and made for pages; what
+  won't get to half its size stays as it is, and isn't tried again until something has touched
+  it, as nothing else can have changed it. `fork` shares compressed pages as it does others.
+  The last 1/64 of memory is held back from programs, so that this always has room to work; a
+  fault that finds none waits. If nothing is left to compress, the process using the most
+  memory is ended, preferring people's own over root's and never init, and whoever else was
+  waiting carries on. Statistics are in `vm.compressor.*`, and in Monitor. Limits: a page shared
+  with another process isn't compressed, nor are private copies of file pages, and the file
+  cache doesn't give up memory.
 - **Debugging.** Serial log, embedded symbol table, symbolized backtraces
   (continuing through exceptions via a frame record in each trap frame),
   `VERIFY`, QEMU's GDB stub (`Meta/run.sh --gdb`), and the `ktest` boot mode.

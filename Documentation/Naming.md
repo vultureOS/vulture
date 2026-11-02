@@ -29,7 +29,8 @@ everywhere, and stay. An application's `KIND` (in its `CMakeLists.txt`) is what 
 and Launcher find it by, and what Software shows under its name.
 
 Services that show up in Monitor follow suit: `DesktopShell` (the menu bar, Search and
-notification banners), `indexd` (Search's index), `notificationd`, `clipboardd`.
+notification banners), `indexd` (Search's index), `notificationd`, `clipboardd`, `privacyd`
+(what people have said applications may have).
 
 ## What is deliberately left alone
 
