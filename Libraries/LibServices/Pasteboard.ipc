@@ -1,4 +1,4 @@
-// The pasteboard: pboard (com.vulture.pasteboard) holds what was copied,
+// The pasteboard: clipboardd (com.vulture.pasteboard) holds what was copied,
 // by type ("public.utf8-plain-text"), for pbcopy and pbpaste. Each user
 // has their own boards; "general" is the one copy and paste use ("find"
 // holds the text last searched for, as on macOS).

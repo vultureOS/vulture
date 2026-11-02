@@ -1,0 +1,7 @@
+{
+    "Label" : "com.vulture.test.sound",
+    "ProgramArguments" : [ "/usr/tests/sound-client" ],
+    "RunAtLoad" : true,
+    "StandardOutPath" : "/dev/console",
+    "StandardErrorPath" : "/dev/console"
+}

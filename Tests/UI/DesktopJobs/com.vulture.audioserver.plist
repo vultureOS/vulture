@@ -1,0 +1,12 @@
+{
+    "Label" : "com.vulture.audioserver",
+    "ProgramArguments" : [
+        "/usr/libexec/AudioServer"
+    ],
+    "MachServices" : {
+        "com.vulture.audioserver" : true
+    },
+    "RunAtLoad" : true,
+    "KeepAlive" : true,
+    "ThrottleInterval" : 1
+}

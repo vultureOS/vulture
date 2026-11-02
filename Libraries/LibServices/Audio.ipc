@@ -1,0 +1,13 @@
+// The sound server (com.vulture.audioserver): the one program with the device open, adding
+// together what everyone wants heard.
+endpoint Audio
+{
+    // One of the system's sounds: see LibAudio/Sounds.h.
+    play_sound(String name) =|
+    // 16-bit stereo at 48 kHz, whole frames, played after what this process last sent. The
+    // answer is how much it still has to play, to pace by.
+    play_samples(ByteBuffer samples) => (u32 milliseconds_queued)
+    // 0 to 100, for everything; kept between boots.
+    set_volume(u32 percent) =|
+    volume() => (u32 percent)
+}
