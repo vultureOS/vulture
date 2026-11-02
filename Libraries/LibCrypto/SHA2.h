@@ -59,6 +59,9 @@ public:
         return hasher.digest();
     }
 
+    // For SHA-384, which is this with other starting values.
+    void reset_to(u64 const* initial_state);
+
 private:
     void transform(u8 const* block);
 
@@ -66,6 +69,29 @@ private:
     u8 m_buffer[block_size];
     size_t m_buffered { 0 };
     u64 m_length { 0 }; // Bytes; messages over 2^61 bytes are not expected.
+};
+
+// SHA-512 from other starting values, cut short.
+class SHA384 {
+public:
+    static constexpr size_t digest_size = 48;
+    static constexpr size_t block_size = 128;
+    using Digest = Array<u8, digest_size>;
+
+    SHA384() { reset(); }
+    void reset();
+    void update(ReadonlyBytes data) { m_inner.update(data); }
+    [[nodiscard]] Digest digest();
+
+    [[nodiscard]] static Digest hash(ReadonlyBytes data)
+    {
+        SHA384 hasher;
+        hasher.update(data);
+        return hasher.digest();
+    }
+
+private:
+    SHA512 m_inner;
 };
 
 }
