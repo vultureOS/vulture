@@ -13,6 +13,7 @@
 #include <Kernel/Bus/PCI/PCI.h>
 #include <Kernel/Console/BootScreen.h>
 #include <Kernel/Console/TextConsole.h>
+#include <Kernel/Devices/Audio/Audio.h>
 #include <Kernel/Devices/Graphics/Graphics.h>
 #include <Kernel/Devices/Input/Input.h>
 #include <Kernel/Debug/KernelLog.h>
@@ -253,6 +254,7 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     must("terminals"_sv, create_terminals());
     initialize_graphics();
     initialize_input();
+    initialize_audio();
     initialize_storage();
     if (!mount_root_file_system(boot_info)) {
         dmesgln("Userland: no root disk and no boot archive, so no init");
@@ -292,6 +294,8 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
         init_arguments[argument_count++] = "--ui-gallery"_sv;
     else if (arguments.has_flag("uidesktop"_sv))
         init_arguments[argument_count++] = "--ui-desktop"_sv;
+    else if (arguments.has_flag("soundtest"_sv))
+        init_arguments[argument_count++] = "--sound-test"_sv;
     else if (!arguments.has_flag("console"_sv))
         // The desktop, unless asked for the text console: what an image must do, having
         // no boot arguments. (vlaunchd falls back on the console if there is no screen.)

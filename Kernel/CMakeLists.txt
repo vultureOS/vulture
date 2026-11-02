@@ -29,6 +29,7 @@ add_executable(Kernel
     Debug/KernelLog.cpp
     Debug/Panic.cpp
     Debug/Symbols.cpp
+    Devices/Audio/VirtIOSound.cpp
     Devices/Graphics/VirtIOGPU.cpp
     Devices/Input/Input.cpp
     Devices/Input/VirtIOInput.cpp

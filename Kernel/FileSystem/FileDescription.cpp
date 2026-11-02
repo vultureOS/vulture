@@ -125,8 +125,11 @@ ErrorOr<size_t> FileDescription::write(IOBuffer const& buffer, size_t count)
     if (m_pipe)
         return m_pipe->write(buffer, count, m_flags & O_NONBLOCK);
     auto metadata = m_inode->metadata();
-    if (metadata.type == InodeType::CharacterDevice)
+    if (metadata.type == InodeType::CharacterDevice) {
+        if ((m_flags & O_NONBLOCK) && !m_inode->can_write())
+            return Error::from_errno(EAGAIN);
         return m_inode->write(0, count, buffer);
+    }
     MutexLocker locker(m_lock);
     if (m_flags & O_APPEND)
         m_offset = m_inode->metadata().size;
