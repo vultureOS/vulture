@@ -106,7 +106,7 @@ int main(int argc, char** argv)
     }
     if (argc > 1 && strcmp(argv[1], "--test") == 0) {
         printf("vlaunchd: vultureOS userland is up (process %d)\n", getpid());
-        return Launchd::run_tests();
+        return Launchd::run_tests(argc > 2 && strcmp(argv[2], "--debug") != 0 ? argv[2] : nullptr);
     }
     if (argc > 1 && strcmp(argv[1], "--crash-test") == 0) {
         printf("vlaunchd: vultureOS userland is up (process %d)\n", getpid());
@@ -120,16 +120,27 @@ int main(int argc, char** argv)
     bool ui_gallery = argc > 1 && strcmp(argv[1], "--ui-gallery") == 0;
     bool ui_desktop = argc > 1 && strcmp(argv[1], "--ui-desktop") == 0;
     bool sound_test = argc > 1 && strcmp(argv[1], "--sound-test") == 0;
-    if (ui_test || ui_gallery || ui_desktop || sound_test) {
+    bool network_test = argc > 1 && strcmp(argv[1], "--network-test") == 0;
+    bool network_gui_test = argc > 1 && strcmp(argv[1], "--network-gui-test") == 0;
+    if (ui_test || ui_gallery || ui_desktop || sound_test || network_test || network_gui_test) {
         printf("vlaunchd: vultureOS userland is up (process %d)\n", getpid());
         fflush(stdout);
         // The test's jobs alone, in a supervisor of their own: this process
         // only reaps, until the machine is switched off from outside.
         pid_t supervisor = fork();
         if (supervisor == 0) {
-            execl("/sbin/vlaunchd", "vlaunchd", "--directory", sound_test ? "/usr/tests/sound" : (ui_desktop ? "/usr/tests/desktop" : (ui_gallery ? "/usr/tests/gallery" : "/usr/tests/ui")), nullptr);
+            execl("/sbin/vlaunchd", "vlaunchd", "--directory", network_gui_test ? "/usr/tests/network-gui" : network_test ? "/usr/tests/network" : sound_test ? "/usr/tests/sound" : (ui_desktop ? "/usr/tests/desktop" : (ui_gallery ? "/usr/tests/gallery" : "/usr/tests/ui")), nullptr);
             _exit(127);
         }
+        // Nobody to stop here: asked to shut down (see tool_reboot), it just happens.
+        signal(SIGUSR2, [](int) {
+            sync();
+            reboot(RB_POWEROFF);
+        });
+        signal(SIGINT, [](int) {
+            sync();
+            reboot(RB_AUTOBOOT);
+        });
         for (;;)
             (void)waitpid(-1, nullptr, 0);
     }

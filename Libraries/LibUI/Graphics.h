@@ -46,6 +46,7 @@ enum class Symbol : u8 {
     Drive,
     Refresh,
     Speaker,
+    Globe,
 };
 
 // A control's face: a shape with shadows outside it, a fill, shading inside it.

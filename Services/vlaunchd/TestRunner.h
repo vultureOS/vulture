@@ -9,7 +9,8 @@
 namespace Launchd {
 
 // Each runs to the end and powers the machine off.
-int run_tests();
+// Every test, or only the one named (as in /usr/tests/NAME).
+int run_tests(char const* only = nullptr);
 int run_storage_test(bool once);
 
 }

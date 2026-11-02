@@ -426,6 +426,32 @@ void Graphics::draw_symbol(Symbol symbol, FloatRect const& rect, Color color, fl
         m_painter.fill_path(drive, color, FillRule::EvenOdd);
         return;
     }
+    case Symbol::Globe: {
+        // The circle, the two meridians through it and two lines of latitude.
+        constexpr int steps = 24;
+        for (int i = 0; i <= steps; ++i) {
+            float angle = 6.2831855f * static_cast<float>(i) / static_cast<float>(steps);
+            auto point = at(8 + 6.2f * static_cast<float>(Math::cosine(static_cast<double>(angle))), 8 + 6.2f * static_cast<float>(Math::sine(static_cast<double>(angle))));
+            if (i == 0)
+                path.move_to(point);
+            else
+                path.line_to(point);
+        }
+        for (int i = 0; i <= steps; ++i) {
+            float angle = 6.2831855f * static_cast<float>(i) / static_cast<float>(steps);
+            auto point = at(8 + 2.7f * static_cast<float>(Math::cosine(static_cast<double>(angle))), 8 + 6.2f * static_cast<float>(Math::sine(static_cast<double>(angle))));
+            if (i == 0)
+                path.move_to(point);
+            else
+                path.line_to(point);
+        }
+        path.move_to(at(2.4f, 5.8f));
+        path.line_to(at(13.6f, 5.8f));
+        path.move_to(at(2.4f, 10.2f));
+        path.line_to(at(13.6f, 10.2f));
+        style.width = 1.1f * unit;
+        break;
+    }
     case Symbol::Speaker: {
         Path cone;
         cone.move_to(at(1.8f, 6));

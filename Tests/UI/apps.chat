@@ -180,7 +180,7 @@ pause 1
 type \r
 expect settings: Appearance
 pause 1
-pointer 6656 9257
+pointer 6656 10404
 pause 0.3
 button left down
 pause 0.2

@@ -11,11 +11,15 @@
 #include <LibUI/Layout.h>
 #include <LibUI/Motion.h>
 #include <LibUI/ScrollView.h>
+#include <Kernel/API/POSIX/socket.h>
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/sysctl.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
@@ -276,6 +280,66 @@ void build_dock(Page& page)
     page.finish();
 }
 
+void build_network(Page& page)
+{
+    vulture_interface_info interfaces[8];
+    size_t size = sizeof(interfaces);
+    if (sysctlbyname("net.interfaces", interfaces, &size, nullptr, 0) != 0)
+        size = 0;
+    bool any = false;
+    for (size_t i = 0; i < size / sizeof(interfaces[0]); ++i) {
+        auto const& info = interfaces[i];
+        if (info.flags & VULTURE_IFF_LOOPBACK)
+            continue;
+        any = true;
+        StringBuilder heading;
+        heading.appendff("Ethernet ({})", StringView { info.name, strlen(info.name) });
+        auto& group = page.add_group(heading.view());
+        (void)group.rows().add<Row>("Status"_sv, info.address ? "Connected"_sv : "Looking for a network"_sv);
+        auto address_row = [&](StringView title, unsigned address) {
+            if (address == 0)
+                return;
+            char text[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &address, text, sizeof(text));
+            (void)group.rows().add<Row>(title, StringView { text, strlen(text) });
+        };
+        address_row("IP address"_sv, info.address);
+        address_row("Subnet mask"_sv, info.netmask);
+        address_row("Router"_sv, info.gateway);
+        char mac[18];
+        snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x", info.mac[0], info.mac[1], info.mac[2], info.mac[3], info.mac[4], info.mac[5]);
+        (void)group.rows().add<Row>("Hardware address"_sv, StringView { mac, strlen(mac) });
+    }
+    if (any) {
+        // The servers ipconfigd was told of.
+        int fd = open("/etc/resolv.conf", O_RDONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            char text[1024];
+            ssize_t got = read(fd, text, sizeof(text) - 1);
+            close(fd);
+            if (got > 0) {
+                text[got] = 0;
+                StringBuilder servers;
+                StringView { text, static_cast<size_t>(got) }.for_each_split_view('\n', SplitBehavior::SkipEmpty, [&](StringView line) {
+                    if (line.starts_with("nameserver "_sv)) {
+                        if (!servers.view().is_empty())
+                            servers.append(", "_sv);
+                        servers.append(line.substring_view(11));
+                    }
+                });
+                if (!servers.view().is_empty()) {
+                    auto& dns = page.add_group("DNS"_sv);
+                    (void)dns.rows().add<Row>("Servers"_sv, servers.view());
+                }
+            }
+        }
+    } else {
+        auto& group = page.add_group();
+        (void)group.rows().add<Row>("Status"_sv, "No network hardware"_sv);
+    }
+    page.finish();
+}
+
 void build_sound(Page& page)
 {
     auto& output = page.add_group("Output"_sv);
@@ -397,6 +461,7 @@ public:
         add_pane("Appearance"_sv, Symbol::ClearCircle, build_appearance);
         add_pane("Wallpaper"_sv, Symbol::File, build_wallpaper);
         add_pane("Desktop & Dock"_sv, Symbol::Sidebar, build_dock);
+        add_pane("Network"_sv, Symbol::Globe, build_network);
         add_pane("Sound"_sv, Symbol::Speaker, build_sound);
         add_pane("Keyboard"_sv, Symbol::Plus, build_keyboard);
         add_pane("Notifications"_sv, Symbol::Question, build_notifications);

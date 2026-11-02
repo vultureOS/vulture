@@ -83,7 +83,7 @@ pause 0.2
 button left up
 pause 1
 # A notification, and where they are kept.
-pointer 6656 11551
+pointer 6656 12698
 pause 0.3
 button left down
 pause 0.2

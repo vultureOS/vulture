@@ -1,0 +1,12 @@
+{
+    "Label" : "com.vulture.notifyd",
+    "ProgramArguments" : [
+        "/usr/sbin/notifyd"
+    ],
+    "MachServices" : {
+        "com.vulture.notifyd" : true
+    },
+    "RunAtLoad" : true,
+    "KeepAlive" : true,
+    "ThrottleInterval" : 1
+}

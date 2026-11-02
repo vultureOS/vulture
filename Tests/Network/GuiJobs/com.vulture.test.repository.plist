@@ -1,0 +1,7 @@
+{
+    "Label" : "com.vulture.test.repository",
+    "ProgramArguments" : [ "/bin/sh", "/usr/tests/network-gui-setup.sh" ],
+    "RunAtLoad" : true,
+    "StandardOutPath" : "/dev/console",
+    "StandardErrorPath" : "/dev/console"
+}

@@ -1,0 +1,9 @@
+{
+    "Label" : "com.vulture.ipconfigd",
+    "ProgramArguments" : [ "/usr/libexec/ipconfigd" ],
+    "RunAtLoad" : true,
+    "KeepAlive" : true,
+    "ThrottleInterval" : 5,
+    "StandardOutPath" : "/dev/console",
+    "StandardErrorPath" : "/dev/console"
+}

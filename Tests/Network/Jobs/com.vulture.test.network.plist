@@ -1,0 +1,7 @@
+{
+    "Label" : "com.vulture.test.network",
+    "ProgramArguments" : [ "/bin/sh", "/usr/tests/network-client.sh" ],
+    "RunAtLoad" : true,
+    "StandardOutPath" : "/dev/console",
+    "StandardErrorPath" : "/dev/console"
+}

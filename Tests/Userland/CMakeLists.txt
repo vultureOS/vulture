@@ -11,6 +11,7 @@ set(tests
     bootstrap
     bad-pointers
     copy-on-write
+    crypto
     devices
     dynamic
     eventloop
@@ -38,6 +39,7 @@ set(tests
     services
     shell
     signals
+    sockets
     terminals
     threads
     time
@@ -68,6 +70,7 @@ target_link_libraries(test-services PRIVATE LibServices)
 target_link_libraries(test-windows PRIVATE LibWindow LibImage LibGfx LibIPC LibCore)
 target_link_libraries(test-toolkit PRIVATE LibUI LibImage)
 target_link_libraries(test-threads PRIVATE LibIPC LibCore)
+target_link_libraries(test-crypto PRIVATE LibCrypto)
 vulture_compile_ipc(test-bootstrap Echo.ipc)
 # The service bootstrap.cpp starts through vlaunchd.
 vulture_add_program(echo-service SOURCES echo-service.cpp DESTINATION usr/tests LIBRARIES LibIPC)

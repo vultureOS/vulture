@@ -26,6 +26,9 @@ vulture_add_program(open SOURCES bin/open.cpp DESTINATION usr/bin LIBRARIES LibD
 vulture_add_program(pbcopy SOURCES bin/pbcopy.cpp DESTINATION usr/bin LIBRARIES LibServices)
 vulture_install_alias(pbcopy usr/bin pbpaste)
 vulture_add_program(afplay SOURCES bin/afplay.cpp DESTINATION usr/bin LIBRARIES LibAudio LibServices)
+vulture_add_program(curl SOURCES bin/curl.cpp DESTINATION usr/bin LIBRARIES LibHTTP)
+vulture_add_program(pkg SOURCES bin/pkg.cpp DESTINATION usr/bin LIBRARIES LibPackage)
+vulture_add_program(shasum SOURCES bin/shasum.cpp DESTINATION usr/bin LIBRARIES LibCrypto)
 
 # vulture_add_tool(<name> <directory> [<other names> <directory>]...):
 # bin/<name>.cpp, installed in <directory> (and under the other names,
@@ -46,6 +49,11 @@ vulture_add_tool(cp bin)
 vulture_add_tool(date bin)
 vulture_add_tool(df bin)
 vulture_add_tool(hostname bin)
+vulture_add_tool(host usr/bin)
+vulture_add_tool(ifconfig sbin)
+vulture_add_tool(nc usr/bin)
+vulture_add_tool(netstat usr/sbin)
+vulture_add_tool(ping sbin)
 vulture_add_tool(kill bin)
 vulture_add_tool(ln bin)
 vulture_add_tool(ls bin)

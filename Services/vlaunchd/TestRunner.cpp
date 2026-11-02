@@ -41,6 +41,8 @@ Test const s_tests[] = {
     { "/usr/tests/memory", 0, 0 },
     { "/usr/tests/bad-pointers", 0, 0 },
     { "/usr/tests/signals", 0, 0 },
+    { "/usr/tests/sockets", 0, 0 },
+    { "/usr/tests/crypto", 0, 0 },
     { "/usr/tests/files", 0, 0 },
     { "/usr/tests/filesystem", 0, 0 },
     { "/usr/tests/pipes", 0, 0 },
@@ -121,11 +123,13 @@ bool run(Test const& test)
 
 }
 
-int run_tests()
+int run_tests(char const* only)
 {
     int passed = 0;
     int failed = 0;
     for (auto const& test : s_tests) {
+        if (only && strcmp(strrchr(test.path, '/') + 1, only) != 0)
+            continue;
         if (run(test))
             ++passed;
         else

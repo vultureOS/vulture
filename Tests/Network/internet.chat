@@ -1,0 +1,16 @@
+# M12's "done when": curl https://example.com, from the system, over the real internet.
+expect login: 
+send vulture\r
+expect Password:
+send vulture\r
+expect vulture@vulture ~ % 
+pause 3
+send ping -c 2 example.com\r
+expect packets received
+expect vulture@vulture ~ % 
+send curl -sS https://example.com | grep -c 'Example Domain'; echo status=done\r
+expect status=done
+expect vulture@vulture ~ % 
+send curl -sS -o /dev/null -w 'code=%{http_code}\n' https://example.com\r
+expect code=200
+expect vulture@vulture ~ % 
