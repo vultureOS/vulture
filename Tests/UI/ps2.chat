@@ -1,0 +1,34 @@
+# The keyboard and mouse a PC has by itself. The keyboard logs in, and opens Search; the mouse, which only
+# says how far it has moved, goes to the corner of the screen and finds the same thing from there.
+expect loginwindow: ready
+pause 0.5
+type vulture\r
+expect files: ready
+pause 2
+key meta_l-spc
+expect search: shown
+pause 0.5
+key esc
+pause 1
+# (No further at a time than a mouse says it has moved in one report.)
+nudge 127 -127
+pause 0.1
+nudge 127 -127
+pause 0.1
+nudge 127 -127
+pause 0.1
+nudge 127 -127
+pause 0.1
+nudge 127 -127
+pause 0.1
+nudge 127 -127
+pause 0.1
+nudge -127 12
+pause 0.1
+nudge -60 0
+pause 0.5
+button left down
+pause 0.1
+button left up
+expect search: shown
+pause 0.5

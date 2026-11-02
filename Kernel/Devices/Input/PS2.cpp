@@ -350,6 +350,9 @@ void initialize_ps2_input()
             config |= config_mouse_interrupt;
         }
     }
+    // (Read while they were turned off, which it says in here too.)
+    constexpr u8 config_ports_disabled = (1 << 4) | (1 << 5);
+    config &= ~config_ports_disabled;
     send_command(command_write_config);
     send_data(config);
     dmesgln("Input: PS/2 {}{}{}", has_keyboard ? "keyboard"_sv : "no keyboard"_sv, has_mouse ? ", mouse"_sv : ", no mouse"_sv, has_wheel ? " with a wheel"_sv : ""_sv);

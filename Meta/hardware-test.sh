@@ -112,6 +112,17 @@ else
     status=1
 fi
 
+# ---- A PC's own keyboard and mouse, on PS/2: a mouse being what only says how far it moved.
+if [ "${architecture:-aarch64}" = x86_64 ]; then
+    if VULTURE_REAL_DEVICES=1 VULTURE_KEEP_VIRTIO_DISPLAY=1 VULTURE_PS2_INPUT=1 "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --gui --fresh-disk \
+        --boot-args uidesktop --chat "$source_dir/Tests/UI/ps2.chat" --timeout 60 > "$out/ps2.log" 2>&1; then
+        echo "hardware-test: ok: typing and clicking on PS/2"
+    else
+        echo "hardware-test: FAIL: PS/2; see $out/ps2.log" >&2
+        status=1
+    fi
+fi
+
 if [ "$status" -eq 0 ]; then
     echo "hardware-test: PASS"
 else

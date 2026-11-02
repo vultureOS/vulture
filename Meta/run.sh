@@ -59,6 +59,7 @@
 #                       Return), "key KEYS" presses keys there (up, ctrl-c),
 #                       "screenshot FILE" saves the screen there, with
 #                       $VULTURE_SCREENSHOT_PREFIX before it,
+#                       "nudge DX DY" moves the pointer by that much, as a mouse does,
 #                       "pointer X Y" moves the pointer (0 to 32767 across the
 #                       screen), "button left down" presses a mouse button,
 #                       "pause SECONDS" waits (as a person would before ^Z);
@@ -355,7 +356,12 @@ else
 fi
 
 if [ "$real_devices" -eq 1 ]; then
-    input_devices=(-device qemu-xhci,id=usb0 -device usb-kbd,bus=usb0.0 -device usb-tablet,bus=usb0.0)
+    if [ -n "${VULTURE_PS2_INPUT:-}" ]; then
+        # The keyboard and mouse a PC has by itself: QEMU's q35 has them unless something else is added.
+        input_devices=()
+    else
+        input_devices=(-device qemu-xhci,id=usb0 -device usb-kbd,bus=usb0.0 -device usb-tablet,bus=usb0.0)
+    fi
     network_device=e1000e
 else
     input_devices=(-device virtio-keyboard-pci -device virtio-tablet-pci)
@@ -376,7 +382,7 @@ args=(
     # Lets the firmware hand the kernel some entropy.
     -device virtio-rng-pci
     # These reach the text console and the window server.
-    "${input_devices[@]}"
+    ${input_devices[@]+"${input_devices[@]}"}
     ${audio_args[@]+"${audio_args[@]}"}
     # QEMU's user-mode network: a NAT, with DHCP and DNS of its own, and the host at 10.0.2.2.
     -netdev "user,id=net0${VULTURE_NET_OPTIONS:+,$VULTURE_NET_OPTIONS}"
@@ -434,7 +440,7 @@ if [ -n "$chat_file" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
             "" | "#"*) ;;
-            "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "button "* | "screenshot "*) chat_steps+=("$line") ;;
+            "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "nudge "* | "button "* | "screenshot "*) chat_steps+=("$line") ;;
             *) echo "run.sh: $chat_file: not a step: $line" >&2; exit 2 ;;
         esac
     done < "$chat_file"
@@ -478,6 +484,11 @@ send_input_events() {
 # The pointer, at this fraction of the screen, in 32768ths.
 move_pointer() {
     send_input_events "{\"type\":\"abs\",\"data\":{\"axis\":\"x\",\"value\":$1}},{\"type\":\"abs\",\"data\":{\"axis\":\"y\",\"value\":$2}}"
+}
+
+# By how much, as a mouse would.
+nudge_pointer() {
+    send_input_events "{\"type\":\"rel\",\"data\":{\"axis\":\"x\",\"value\":$1}},{\"type\":\"rel\",\"data\":{\"axis\":\"y\",\"value\":$2}}"
 }
 
 # "left down", "left up".
@@ -593,6 +604,10 @@ advance_chat() {
                 ;;
             "pointer "*)
                 move_pointer ${step#pointer }
+                chat_index=$((chat_index + 1))
+                ;;
+            "nudge "*)
+                nudge_pointer ${step#nudge }
                 chat_index=$((chat_index + 1))
                 ;;
             "button "*)
