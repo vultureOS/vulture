@@ -7,6 +7,11 @@
 # (OUTPUT) with mkarchive (TOOL), in a stable order.
 
 file(GLOB_RECURSE files LIST_DIRECTORIES true RELATIVE ${ROOT} ${ROOT}/*)
+# A bracket in a name ("/bin/[") would group list items, so brackets are
+# stood in for while the list is worked on; the names go to mkarchive one
+# per line.
+string(REPLACE "[" "<open-bracket>" files "${files}")
+string(REPLACE "]" "<close-bracket>" files "${files}")
 # (Made below, from the rest. Any from an earlier build says nothing about this one. A test of what
 # happens to a system that has been tampered with says KEEP_SEAL, for the seal it had before.)
 if(NOT KEEP_SEAL)
@@ -14,11 +19,6 @@ if(NOT KEEP_SEAL)
 endif()
 # What a test delivers as a package isn't on the system until it has been installed.
 list(FILTER files EXCLUDE REGEX "^usr/tests/package-payload")
-# A bracket in a name ("/bin/[") would group list items, so brackets are
-# stood in for while the list is worked on; the names go to mkarchive one
-# per line.
-string(REPLACE "[" "<open-bracket>" files "${files}")
-string(REPLACE "]" "<close-bracket>" files "${files}")
 
 # Entries whose mode is not the usual one (0755 for directories and
 # programs, 0644 for other files), as macOS has them.
