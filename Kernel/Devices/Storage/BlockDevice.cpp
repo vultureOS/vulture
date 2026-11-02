@@ -80,23 +80,31 @@ ErrorOr<size_t> BlockDevice::write(u64 offset, size_t count, IOBuffer const& buf
     if (offset >= size)
         return Error::from_errno(ENOSPC);
     count = min<u64>(count, size - offset);
-    auto* bounce = static_cast<u8*>(kmalloc(block_size));
+    constexpr size_t chunk_blocks = 64;
+    auto* bounce = static_cast<u8*>(kmalloc(chunk_blocks * block_size));
     if (!bounce)
         return Error::from_errno(ENOMEM);
     size_t done = 0;
     ErrorOr<void> result {};
-    // A block at a time (read, modify, write) keeps partial blocks right.
+    // Whole blocks go together; one that's only partly written is read first, to keep the rest of it.
     while (done < count && !result.is_error()) {
         u64 position = offset + done;
         u64 block = position / block_size;
         size_t skip = position % block_size;
-        size_t length = min<size_t>(block_size - skip, count - done);
-        if (skip || length < block_size)
+        size_t length;
+        size_t blocks;
+        if (skip || count - done < block_size) {
+            blocks = 1;
+            length = min<size_t>(block_size - skip, count - done);
             result = read_blocks(block, 1, { bounce, block_size });
+        } else {
+            blocks = min<u64>(chunk_blocks, (count - done) / block_size);
+            length = blocks * block_size;
+        }
         if (!result.is_error())
             result = buffer.read(done, { bounce + skip, length });
         if (!result.is_error())
-            result = write_blocks(block, 1, { bounce, block_size });
+            result = write_blocks(block, blocks, { bounce, blocks * block_size });
         done += length;
     }
     kfree(bounce);
