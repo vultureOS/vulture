@@ -902,6 +902,10 @@ void Server::read_input()
                     wheel_moved(0, event.value);
                 else if (event.code == VULTURE_REL_HWHEEL)
                     wheel_moved(event.value, 0);
+                else if (event.code == VULTURE_REL_X)
+                    m_pending_relative_x += event.value;
+                else if (event.code == VULTURE_REL_Y)
+                    m_pending_relative_y += event.value;
                 break;
             case VULTURE_EV_KEY: {
                 u32 button = 0;
@@ -928,6 +932,14 @@ void Server::read_input()
                     if (m_pending_absolute_y >= 0)
                         target.y = static_cast<int>(static_cast<i64>(m_pending_absolute_y) * points.height / (VULTURE_INPUT_ABSOLUTE_MAXIMUM + 1));
                     m_pending_absolute_x = m_pending_absolute_y = -1;
+                    pointer_changed(target, m_buttons);
+                }
+                // A mouse, which only says how far it went. A point on the screen is the most that can
+                // be asked of it: a device pixel, at any scale, is less than one of those anyway.
+                if (m_pending_relative_x != 0 || m_pending_relative_y != 0) {
+                    auto points = m_screen.points();
+                    IntPoint target { clamp(m_pointer.x + m_pending_relative_x, 0, points.width - 1), clamp(m_pointer.y + m_pending_relative_y, 0, points.height - 1) };
+                    m_pending_relative_x = m_pending_relative_y = 0;
                     pointer_changed(target, m_buttons);
                 }
                 break;

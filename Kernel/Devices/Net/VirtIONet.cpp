@@ -197,9 +197,12 @@ private:
 
 }
 
+void initialize_e1000_devices(u32& number);
+
 void initialize_network_devices()
 {
     u32 number = 0;
+    initialize_e1000_devices(number);
     for (auto& pci : PCI::devices()) {
         if (pci.vendor_id() != VirtIO::vendor_id || (pci.device_id() != device_id_modern && pci.device_id() != device_id_transitional))
             continue;

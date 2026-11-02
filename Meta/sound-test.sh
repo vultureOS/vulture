@@ -35,7 +35,7 @@ rm -f "$wav"
 
 VULTURE_AUDIO_WAV="$wav" "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless \
     --boot-args soundtest \
-    --expect "Audio: virtio-sound" \
+    --expect "Audio: " \
     --expect "sound: played" \
     --wait-for-exit --timeout 60
 

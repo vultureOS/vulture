@@ -164,6 +164,8 @@ private:
     u32 m_buttons { 0 };
     u32 m_modifiers { 0 };
     int m_pending_absolute_x { -1 };
+    int m_pending_relative_x { 0 };
+    int m_pending_relative_y { 0 };
     int m_pending_absolute_y { -1 };
 
     enum class Gesture : u8 {

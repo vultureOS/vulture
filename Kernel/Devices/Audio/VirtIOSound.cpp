@@ -305,6 +305,8 @@ private:
 
 }
 
+void initialize_intel_hda();
+
 void initialize_audio()
 {
     for (auto& pci : PCI::devices()) {
@@ -319,6 +321,8 @@ void initialize_audio()
             dmesgln("Audio: /dev/audio0: {}", added.error());
         return;
     }
+    // A real machine's, then.
+    initialize_intel_hda();
 }
 
 }

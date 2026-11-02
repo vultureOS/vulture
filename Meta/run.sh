@@ -41,6 +41,9 @@
 #   --fresh-disk        make the root disk anew from the build first
 #   --no-disk           no root disk: the root is the boot archive, in memory
 #   --memory SIZE       how much memory the machine has (default: 4G)
+#   --real-devices      the kinds of device real machines have, in place of virtio: an AHCI
+#                       disk, xHCI USB with a keyboard and tablet, e1000e network, Intel
+#                       HD Audio. (The display stays virtio-gpu.)
 #   --nvme              attach the root disk as NVMe instead of virtio-blk
 #   --image FILE        boot a whole-disk image (ninja image) on its own,
 #                       instead of the build's EFI directory and root disk;
@@ -91,6 +94,8 @@ screenshot=""
 disk=""
 image=""
 memory_size=4G
+# (From the environment too, for a test that boots several times.)
+real_devices="${VULTURE_REAL_DEVICES:-0}"
 use_disk=1
 fresh_disk=0
 disk_interface="virtio-blk-pci,drive=root"
@@ -117,6 +122,7 @@ while [ $# -gt 0 ]; do
         --fresh-disk) fresh_disk=1; shift ;;
         --no-disk) use_disk=0; shift ;;
         --memory) memory_size="$2"; shift 2 ;;
+        --real-devices) real_devices=1; shift ;;
         --nvme) disk_interface="nvme,drive=root,serial=VULTURE0001"; shift ;;
         --image) image="$2"; use_disk=0; shift 2 ;;
         --kill) kill_power=1; shift ;;
@@ -273,10 +279,18 @@ if [ "$use_disk" -eq 1 ]; then
         "$mkvfs" update "$disk" "$archive" > /dev/null
         touch "$disk.updated"
     fi
-    disk_args=(
-        -drive "if=none,id=root,format=raw,file=$disk,cache=writeback"
-        -device "$disk_interface"
-    )
+    if [ "$real_devices" -eq 1 ]; then
+        disk_args=(
+            -drive "if=none,id=root,format=raw,file=$disk,cache=writeback"
+            -device ich9-ahci,id=ahci0
+            -device ide-hd,drive=root,bus=ahci0.0
+        )
+    else
+        disk_args=(
+            -drive "if=none,id=root,format=raw,file=$disk,cache=writeback"
+            -device "$disk_interface"
+        )
+    fi
 fi
 
 # Either one whole disk (EFI System Partition and vultureFS), or the build's
@@ -308,7 +322,7 @@ fi
 # The sound device, if this QEMU has it, and where its sound goes: a file if asked, the
 # machine's speakers for a person, nowhere for a test.
 audio_args=()
-if "$qemu" -device help 2>/dev/null | grep -q virtio-sound-pci; then
+if [ "$real_devices" -eq 1 ] || "$qemu" -device help 2>/dev/null | grep -q virtio-sound-pci; then
     audio_backend="none,id=sound0"
     if [ -n "${VULTURE_AUDIO_WAV:-}" ]; then
         audio_backend="wav,id=sound0,path=$VULTURE_AUDIO_WAV,out.frequency=48000,out.channels=2,out.format=s16"
@@ -321,7 +335,11 @@ if "$qemu" -device help 2>/dev/null | grep -q virtio-sound-pci; then
             fi
         done
     fi
-    audio_args=(-audiodev "$audio_backend" -device virtio-sound-pci,audiodev=sound0)
+    if [ "$real_devices" -eq 1 ]; then
+        audio_args=(-audiodev "$audio_backend" -device ich9-intel-hda -device hda-duplex,audiodev=sound0)
+    else
+        audio_args=(-audiodev "$audio_backend" -device virtio-sound-pci,audiodev=sound0)
+    fi
 fi
 
 if [ "$architecture" = x86_64 ]; then
@@ -329,6 +347,14 @@ if [ "$architecture" = x86_64 ]; then
 else
     # acpi=off makes the firmware publish a device tree, which the kernel uses for hardware discovery.
     machine_args=(-machine virt,gic-version=3,acpi=off)
+fi
+
+if [ "$real_devices" -eq 1 ]; then
+    input_devices=(-device qemu-xhci,id=usb0 -device usb-kbd,bus=usb0.0 -device usb-tablet,bus=usb0.0)
+    network_device=e1000e
+else
+    input_devices=(-device virtio-keyboard-pci -device virtio-tablet-pci)
+    network_device=virtio-net-pci
 fi
 
 args=(
@@ -344,13 +370,12 @@ args=(
     "${display_devices[@]}"
     # Lets the firmware hand the kernel some entropy.
     -device virtio-rng-pci
-    # USB has no driver yet (M14). These reach the text console and the window server.
-    -device virtio-keyboard-pci
-    -device virtio-tablet-pci
+    # These reach the text console and the window server.
+    "${input_devices[@]}"
     ${audio_args[@]+"${audio_args[@]}"}
     # QEMU's user-mode network: a NAT, with DHCP and DNS of its own, and the host at 10.0.2.2.
     -netdev "user,id=net0${VULTURE_NET_OPTIONS:+,$VULTURE_NET_OPTIONS}"
-    -device virtio-net-pci,netdev=net0
+    -device "$network_device,netdev=net0"
 )
 
 case "$accelerator" in

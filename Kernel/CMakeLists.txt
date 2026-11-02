@@ -51,7 +51,9 @@ add_executable(Kernel
     Debug/KernelLog.cpp
     Debug/Panic.cpp
     Debug/Symbols.cpp
+    Devices/Audio/IntelHDA.cpp
     Devices/Audio/VirtIOSound.cpp
+    Devices/Net/E1000.cpp
     Devices/Net/VirtIONet.cpp
     Net/NetworkStack.cpp
     Net/Socket.cpp
@@ -67,10 +69,14 @@ add_executable(Kernel
     Devices/Graphics/VirtIOGPU.cpp
     Devices/Input/Input.cpp
     Devices/Input/VirtIOInput.cpp
+    Devices/Storage/AHCIDevice.cpp
     Devices/Storage/BlockDevice.cpp
     Devices/Storage/NVMeDevice.cpp
     Devices/Storage/Storage.cpp
     Devices/Storage/VirtIOBlockDevice.cpp
+    Devices/USB/HID.cpp
+    Devices/USB/MassStorage.cpp
+    Devices/USB/XHCI.cpp
     Devices/VirtIO/VirtIO.cpp
     FileSystem/BootArchive.cpp
     FileSystem/DevFS.cpp

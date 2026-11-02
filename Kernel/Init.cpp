@@ -33,6 +33,7 @@
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Debug/Panic.h>
 #include <Kernel/Debug/Symbols.h>
+#include <Kernel/Devices/USB/USB.h>
 #include <Kernel/Devices/Serial/BootSerial.h>
 #include <Kernel/Devices/Storage/BlockDevice.h>
 #include <Kernel/FileSystem/BootArchive.h>
@@ -278,6 +279,8 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     Privacy::initialize();
     Compressor::initialize();
     initialize_storage();
+    // Keyboards, and also disks: so after those on the machine, and before looking for a root.
+    USB::initialize();
     if (!mount_root_file_system(boot_info)) {
         dmesgln("Userland: no root disk and no boot archive, so no init");
         return;
