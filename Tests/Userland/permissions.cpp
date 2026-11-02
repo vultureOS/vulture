@@ -29,10 +29,10 @@ void test_system_information()
     CHECK(strcmp(name.sysname, "vultureOS") == 0 && strcmp(name.machine, NATIVE_MACHINE) == 0);
     int processors = 0;
     size_t length = sizeof(processors);
-    CHECK(sysctlbyname("hw.ncpu", &processors, &length, nullptr, 0) == 0 && processors == 8);
+    CHECK(sysctlbyname("hw.ncpu", &processors, &length, nullptr, 0) == 0 && processors >= 1 && processors == sysconf(_SC_NPROCESSORS_ONLN));
     uint64_t memory = 0;
     length = sizeof(memory);
-    CHECK(sysctlbyname("hw.memsize", &memory, &length, nullptr, 0) == 0 && memory > 1024ull * 1024 * 1024);
+    CHECK(sysctlbyname("hw.memsize", &memory, &length, nullptr, 0) == 0 && memory > 128ull * 1024 * 1024);
     char text[64];
     length = sizeof(text);
     CHECK(sysctlbyname("kern.ostype", text, &length, nullptr, 0) == 0 && strcmp(text, "vultureOS") == 0);

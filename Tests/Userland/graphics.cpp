@@ -42,31 +42,40 @@ void test_display()
     vulture_gpu_mode bad { 0, 480, 0, 0 };
     CHECK(ioctl(gpu, VULTURE_GPU_SET_MODE, &bad) == -1 && errno == EINVAL);
 
+    // Most displays take any size. What the firmware left has the size it's in, and nothing else.
     vulture_gpu_mode mode { 640, 480, 0, 0 };
-    CHECK(ioctl(gpu, VULTURE_GPU_SET_MODE, &mode) == 0);
-    CHECK(mode.pitch == 2560 && mode.size == 2560 * 480);
+    bool const has_one_size = ioctl(gpu, VULTURE_GPU_SET_MODE, &mode) == -1 && errno == EINVAL;
+    if (has_one_size) {
+        mode = { display.width, display.height, 0, 0 };
+        CHECK(ioctl(gpu, VULTURE_GPU_SET_MODE, &mode) == 0);
+    }
+    unsigned const width = mode.width;
+    unsigned const height = mode.height;
+    CHECK(mode.pitch == width * 4 && mode.size == width * 4 * height);
     auto* pixels = static_cast<unsigned*>(mmap(nullptr, mode.size, PROT_READ | PROT_WRITE, MAP_SHARED, gpu, 0));
     CHECK(pixels != MAP_FAILED);
     if (pixels != MAP_FAILED) {
         CHECK(pixels[0] == 0);
-        for (unsigned y = 0; y < 480; ++y) {
-            for (unsigned x = 0; x < 640; ++x)
-                pixels[y * 640 + x] = 0xff000000 | (x & 255) << 16 | (y & 255) << 8;
+        for (unsigned y = 0; y < height; ++y) {
+            for (unsigned x = 0; x < width; ++x)
+                pixels[y * width + x] = 0xff000000 | (x & 255) << 16 | (y & 255) << 8;
         }
-        vulture_gpu_rect whole { 0, 0, 640, 480 };
+        vulture_gpu_rect whole { 0, 0, width, height };
         CHECK(ioctl(gpu, VULTURE_GPU_FLUSH, &whole) == 0);
         // Partly outside is cut down; wholly outside does nothing.
-        vulture_gpu_rect partly { 600, 400, 500, 500 };
+        vulture_gpu_rect partly { width - 40, height - 80, 500, 500 };
         CHECK(ioctl(gpu, VULTURE_GPU_FLUSH, &partly) == 0);
         vulture_gpu_rect outside { 5000, 5000, 5, 5 };
         CHECK(ioctl(gpu, VULTURE_GPU_FLUSH, &outside) == 0);
     }
 
     // A second mode: the old mapping stays good, if no longer shown.
-    vulture_gpu_mode second { 320, 200, 0, 0 };
-    CHECK(ioctl(gpu, VULTURE_GPU_SET_MODE, &second) == 0);
+    if (!has_one_size) {
+        vulture_gpu_mode second { 320, 200, 0, 0 };
+        CHECK(ioctl(gpu, VULTURE_GPU_SET_MODE, &second) == 0);
+    }
     if (pixels != MAP_FAILED) {
-        CHECK(pixels[5 * 640 + 7] == (0xff000000u | 7 << 16 | 5 << 8));
+        CHECK(pixels[5 * width + 7] == (0xff000000u | 7 << 16 | 5 << 8));
         munmap(pixels, mode.size);
     }
 
@@ -85,8 +94,9 @@ void test_display()
     int status = 0;
     pid_t child = fork();
     if (child == 0) {
-        auto* beyond = static_cast<volatile unsigned*>(mmap(nullptr, 1024 * 1024, PROT_READ, MAP_SHARED, gpu, 0));
-        unsigned value = beyond[1024 * 1024 / 4 - 1];
+        size_t const past_the_end = mode.size + 1024 * 1024;
+        auto* beyond = static_cast<volatile unsigned*>(mmap(nullptr, past_the_end, PROT_READ, MAP_SHARED, gpu, 0));
+        unsigned value = beyond[past_the_end / 4 - 1];
         _exit(value == 12345 ? 1 : 2);
     }
     waitpid(child, &status, 0);

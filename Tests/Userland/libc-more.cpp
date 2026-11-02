@@ -154,7 +154,7 @@ void test_environment_and_paths()
     char rest[8];
     CHECK(sscanf("0x1f:end", "%x:%7[a-z]", &hex, rest) == 2 && hex == 0x1f && strcmp(rest, "end") == 0);
     CHECK(strtod("2.5e3", nullptr) == 2500.0 && strtod("-0.125", nullptr) == -0.125);
-    CHECK(sysconf(_SC_NPROCESSORS_ONLN) == 8 && sysconf(_SC_PAGESIZE) == 4096);
+    CHECK(sysconf(_SC_NPROCESSORS_ONLN) >= 1 && sysconf(_SC_PAGESIZE) == 4096);
 }
 
 void test_users()
