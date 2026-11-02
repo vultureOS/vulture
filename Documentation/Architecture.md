@@ -3,7 +3,7 @@
 ## Goals
 
 - A Unix operating system that looks and feels like macOS (Sonoma/Sequoia
-  era): global menu bar, Dock, Finder, translucent materials, rounded
+  era): global menu bar, Dock, Files, translucent materials, rounded
   windows with traffic lights.
 - **Everything inside the disk image is our own code**: bootloader, kernel,
   C library, C++ runtime, graphics, font rasterizer, UI framework, window
@@ -74,6 +74,8 @@ ExternalProject over the same source tree and adds these targets:
 | `ninja -C build test-persistence` | Three boots in a row on one disk, each finding what the last committed |
 | `ninja -C build test-desktop-boot` | Boots with no flags, as an image does: the desktop's login window must come up |
 | `ninja -C build test-debug-boot` | Boots with `debug`: processes, launchd's jobs and the unified log must all reach the console |
+| `ninja -C build test-ui` | Golden screenshots: the window server's scene, the Widget Gallery, the desktop and every application, driven by the real keyboard and pointer (`Meta/ui-test.sh`) |
+| `ninja -C build test-sound` | Records what the sound device plays, and looks for a tone sent through the sound server in it (`Meta/sound-test.sh`) |
 | `ninja -C build check` | All of the above tests |
 | `ninja -C build test-crash` | 100 power cuts while writing; fsck clean after each (not part of `check`) |
 | `ninja -C build test-soak` | 1000 threads ping-ponging for 60 s (not part of `check`) |
@@ -95,6 +97,7 @@ Kernel command line words:
 | `ktest-seconds=N` | How long soak tests run (default 2) |
 | `utest` | Start `/sbin/vlaunchd --test`, which runs the userland tests and powers off |
 | `console` | Stay on the text console, with no desktop. Without it the system boots to the desktop (or to the console, if there is no display) |
+| `soundtest` | Run the jobs in `/usr/tests/sound` alone (see `test-sound`) |
 | `debug` | Log what the system is doing on the console: processes forked, exec'd and ended, launchd's jobs, and the unified log at every level |
 | `fault=KIND` | End the boot with a deliberate crash: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (in a timer interrupt) or `processor` (on processor 1) | Kernel code that does not touch hardware (such as
 `Kernel/BootArguments.cpp`) is compiled into host tests too; see
@@ -108,8 +111,8 @@ header dependency tracking.
 ## System layers
 
 ```
- Apps         Finder · Terminal · TextEdit · Preview · Settings · Activity Monitor · Software Center …
- Desktop      LoginWindow · SystemUI (menu bar) · Dock · Spotlight · Mission Control · Notification/Control Center
+ Apps         Files · Terminal · Text Editor · Preview · Settings · Monitor · Software …
+ Desktop      LoginWindow · SystemUI (menu bar) · Dock · Search · Overview · Notification/Quick Settings
  Frameworks   pranaUI (AppKit-like) · LibAnimation · LibGfx (Quartz-2D-like) · LibText (CoreText-like) · LibImage
  Core libs    LibCore (run loop, JSON plists) · LibIPC (+ipcc IDL) · LibCrypto/TLS/HTTP · LibUnicode · LibVT · LibAudio
  Runtime      LibC · LibM · LibCxxRT · LibSystem (syscalls; libSystem.B.dylib) · dyld · LibBase (shared with kernel)
@@ -140,8 +143,8 @@ Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem (libSystem
                LibCore (event loop, accounts) · LibCrypto · LibIPC · LibJSON · LibServices · LibDeviceTree · LibELF · LibVultureFS · LibTest
                LibGfx (drawing) · LibText (fonts) · LibImage · LibCompress · LibWindow (windows, for programs)
                LibUI (pranaUI) … later
-Services/      vlaunchd (process 1, M6); logd · notifyd · configd · pboard (M7); WindowServer (M8); Dock …  (M10+)
-Applications/  Finder · Terminal · TextEdit · Preview · SystemSettings · WidgetGallery …              (M9+)
+Services/      vlaunchd (process 1, M6); logd · notifyd · configd · clipboardd (M7); WindowServer (M8); Dock …  (M10+)
+Applications/  Files · Terminal · Text Editor · Preview · Settings · WidgetGallery …              (M9+)
 Utilities/     vsh and the command-line tools (bin/), login and accounts                               (M6)
 Base/          root filesystem skeleton, themes, fonts, icons, wallpapers, sounds                    (M5+)
 Tests/         host unit tests, kernel tests, userland suites (Userland; posix.cpp is the POSIX subset),
@@ -280,7 +283,7 @@ macOS-style at the top, real Unix underneath:
   unified log, `os_log`, `log stream` and `log show` in macOS's format), notifyd
   (`notify(3)`), configd (ComputerName, LocalHostName and HostName in
   `/Library/Preferences/SystemConfiguration/preferences.plist`; it names the
-  machine) and pboard (each user's pasteboards).
+  machine) and clipboardd (each user's pasteboards).
 - **Graphics and input (M8).** `/dev/gpu0` (virtio-gpu): a framebuffer in ordinary
   memory to `mmap`, shown rectangle by rectangle when flushed, and a cursor on a plane
   of its own. `/dev/input` (virtio-input): one reader at a time gets every key and
@@ -299,6 +302,21 @@ macOS-style at the top, real Unix underneath:
   whatever it reads is redrawn with it. The server draws title bars and traffic
   lights over the client's pixels, moves and resizes windows, and sends pointer and
   keyboard events on. Every look comes from a theme file.
+- **Applications (M11).** Ordinary pranaUI programs in `.app` bundles, each with its
+  logic in a piece a host test can reach (`Tests/Applications`, `Tests/LibVT`). Terminal is
+  LibVT (a VT-style screen model, with no idea what draws it) on a pseudo-terminal. Monitor,
+  Disks and Console read `sysctl` and the unified log. Archiver is LibArchive and
+  LibCompress, and refuses any member that would land outside the folder it expands into.
+  What things are called is in [Naming](Naming.md).
+- **Sound (M11).** `/dev/audio0` is virtio-sound: 48 kHz, stereo, 16-bit, four periods of
+  4 KiB (about 85 ms), a write waiting while they are full and `poll` saying when one is
+  free. AudioServer (`com.vulture.audioserver`) is the only program with it open: it adds
+  together what everyone sends, in LibAudio's mixer, one period at a time, and writes
+  nothing when nothing plays. The system's sounds are computed, from sine waves and a
+  little noise, so there is nothing recorded to carry around or license. Programs use
+  `Platform::play_sound` or the `Audio` endpoint; `afplay` plays WAV files. With no device,
+  every request is still answered, and nothing is heard. The boot flag `soundtest` runs
+  `Tests/Sound` instead of a session.
 - **Filesystems (M5).**
   - **VFS.** Paths resolve one component at a time across a mount table.
     Open files are shared by `dup` and `fork`.

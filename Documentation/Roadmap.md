@@ -20,9 +20,9 @@ See [Architecture](Architecture.md) for the design behind these steps.
 | **M6 Unix userland** | ✅ 2026-11-01 | Process groups, sessions and job control; TTY layer (line discipline, termios, foreground groups), the console's input, pseudo-terminals; ANSI text console; users, groups and credentials (set-ID programs), permissions; `poll`, `sysctl`, `uname`, `getrandom`, `pread`/`pwrite` and more; **vlaunchd** as process 1 (JSON plists with launchd's keys: RunAtLoad, KeepAlive, ThrottleInterval, StartInterval, UserName, ...; restart policy; orphan reaping; clean shutdown); **vsh** (the POSIX shell language, pipes, redirects, globs, here-documents, functions, job control, history with ^R, completion, scripts, zsh's prompt and messages); about 70 command-line tools with macOS's options and output; `login`, `su`, `passwd`, `sudo`, `getty` (PBKDF2-SHA512 hashes in `/etc/master.passwd`); **dyld** + `libSystem.B.dylib` (every program position independent and dynamically linked, the library's pages shared through the page cache; a prelinked shared cache is left for later); LibCore (event loop, accounts), LibJSON, LibCrypto (SHA-2, HMAC, PBKDF2); CI on macOS and Linux | Text login, `ls -l /System/Library \| grep Kernels \| wc -l`, Ctrl-Z/`fg`; our POSIX conformance subset passes. Verified by `ninja check`: `test-login` (a console login typed over the serial line: the pipeline, a job suspended and continued, logging out and in again, `sudo poweroff`) and `test-userland` (30 suites, among them `posix`: 208 of 208 requirements, see [POSIX](POSIX.md)) |
 | **M7 IPC + services** | ✅ 2026-11-01 | Kernel ports with direct handoff; LibIPC + `ipcc` IDL compiler; logd + `log`, notifyd, configd, pasteboard; name lookup via vlaunchd; threads (futexes, per-thread signals, ELF TLS, pthreads) | IPC round trip within budget; `log stream` shows multiple services |
 | **M8 Graphics + PranaWindowServer** | ✅ 2026-11-01 | virtio-gpu 2D + virtio-input, which also types at the text console; LibGfx (AA path rasterizer, strokes, rounded rects, gradients, blur, transforms, SIMD, tiles); LibText (TrueType/OpenType, glyph atlas, subpixel positioning); LibImage (inflate, PNG, JPEG, `.vicns`); WindowServer (shared-memory surfaces, damage compositing, shadows, vibrancy, input routing, window management, 2x) | 10 client windows with shadows and blur at 60 fps at 2560×1600 while dragging; golden screenshot passes |
-| **M9 pranaUI** | | App/Window/View, responder chain, layout, LibAnimation, appearance (light/dark, accent, materials), the full control set, scrolling, drag & drop, accessibility tree, declarative builder layer | Widget Gallery within ±1 px of the measured metrics; light/dark × 1x/2x golden tests pass |
-| **M10 Desktop** | | LoginWindow, menu bar, Dock, Finder, Spotlight + Indexer, Mission Control/Spaces, Launchpad, Notification + Control Center, wallpapers, System Settings, boot progress screen | Scripted UI walkthrough passes with golden screenshots |
-| **M11 Apps + audio** | | Terminal, TextEdit, Preview, Calculator, Activity Monitor, Console, Disk Utility, Archive Utility, Software Center; virtio-sound + AudioServer + UI sounds | Each app's UI test passes; sound plays through QEMU |
+| **M9 pranaUI** | ✅ 2026-11-01 | App/Window/View, responder chain, layout, LibAnimation, appearance (light/dark, accent, materials), the full control set, scrolling, drag & drop, accessibility tree, declarative builder layer | Widget Gallery within ±1 px of the measured metrics; light/dark × 1x/2x golden tests pass |
+| **M10 Desktop** | ✅ 2026-11-01 | LoginWindow, menu bar, Dock, Files, Search + Indexer, Overview/Spaces, Launcher, Notification + Quick Settings, wallpapers, Settings, boot progress screen | Scripted UI walkthrough passes with golden screenshots |
+| **M11 Apps + audio** | ✅ 2026-11-02 | Terminal (LibVT), Text Editor, Viewer, Calculator, Monitor, Console, Disks, Archiver (tar and gzip), Software; virtio-sound, LibAudio (mixer, sounds made from sine waves, WAV), AudioServer, `afplay`; alert, notification, trash, login and volume sounds, a Sound pane and a Quick Settings slider | Each app's UI test passes; sound plays through QEMU. Verified by `ninja check`: `test-ui` (a walkthrough of every application at 2x, 189 steps, real keyboard and pointer, golden screenshots) and `test-sound` (a 440 Hz tone sent through the server is found, 1.2 s of it, in what QEMU recorded the device playing) |
 | **M12 Network** | | virtio-net; TCP/IP; BSD sockets; DHCP; DNS; LibCrypto; LibTLS 1.3 + X.509; LibHTTP; `curl`, `ping`; signed packages over HTTPS | `curl https://example.com` works; crypto test vectors pass; a package installs from a test repo |
 | **M13 Hardening** | | W^X, ASLR + KASLR, PAN/PXN/UXN, PAC/BTI, stack protector, kernel UBSan + KASAN-style shadow, sandbox profiles, privacy prompts, code signing at exec, sealed System volume, memory compressor | Mitigation suite passes |
 | **M14 x86_64 + real hardware** | | `Arch/x86_64`, ACPI + AML subset, BOOTX64.EFI; AHCI, xHCI + USB HID/storage, e1000e, Intel HDA, PS/2; Raspberry Pi 4/5; Installer | One image boots in QEMU x86_64, on a real PC and on a Pi |
@@ -49,7 +49,7 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
 | IPC round trip | < 3 µs | 0.84 µs (M7, call and answer between two processes; 4.6 µs through a generated proxy to a vlaunchd-started service) |
 | Window drag at 2560×1600 | 60 fps | 59.2–59.7 fps (M8, and again at M9; 10 windows, 5 with blur; 16.7 ms beat, 8–11 ms of work per frame; beats with no pointer movement draw nothing) |
 | Input to photon | ≤ 1 frame | |
-| TextEdit cold launch | < 300 ms | |
+| Text Editor cold launch | < 300 ms | |
 
 ## Risks
 
@@ -191,7 +191,7 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
   could not: a press that becomes a drag, move or menu never hears its release.
 - **M10:** A desktop is mostly clients like any other: the server adds only what they
   cannot do themselves (who is an application, whose menus show, hotkeys, minimizing,
-  spaces, Mission Control), and tells a shell client the rest as a JSON state on any
+  spaces, Overview), and tells a shell client the rest as a JSON state on any
   change. Damage for materials must grow to a fixed point: a lower window's blur
   reach dirtied part of the menu bar after the bar had been considered, and the bar
   then blurred from finished pixels beside it. An active window's shadow must be
@@ -200,4 +200,15 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
   (`Tests/UI/desktop.chat`, real keyboard and pointer) found what unit tests had not:
   a reference to an appearance that a switch to dark had replaced, a path held across
   the reload that freed it, and Return going on from a field to what contains it.
+- **M11:** Running the system's real programs found kernel bugs no unit test had:
+  exec and exit freed an address space `describe()` was still reading (a panic in the
+  slab allocator, minutes later, and only under Monitor), and a pseudo-terminal's slave
+  belonged to root, so a person's shell could not open it, and never told the master it
+  had gone. A number from Monitor found another: AudioServer at 40 s of CPU, a server
+  spinning on a device with room, because `unwatch` takes the watch's id and it was given
+  the descriptor; `test-sound` now also fails if the server uses the processor while
+  there is nothing to play. Screenshots found what no assertion did: table dividers
+  drawn 16 points from where they could be dragged, and a row's text outside its
+  selection. Checking sound means looking at it: QEMU's `wav` backend records what the
+  device played, and a Goertzel filter over each 20 ms finds the tone in it.
 
