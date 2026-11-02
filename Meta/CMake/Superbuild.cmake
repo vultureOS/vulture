@@ -229,6 +229,13 @@ add_custom_target(test-hardening
     USES_TERMINAL
     VERBATIM)
 
+# The drivers for what real machines have, on QEMU's models of it.
+add_custom_target(test-hardware
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/hardware-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    DEPENDS host uefi target boot-archive
+    USES_TERMINAL
+    VERBATIM)
+
 # Using more memory than the machine has, and running out with nothing left to compress.
 add_custom_target(test-compressor
     COMMAND ${CMAKE_SOURCE_DIR}/Meta/compressor-test.sh --build-dir ${CMAKE_BINARY_DIR}
@@ -259,7 +266,7 @@ add_custom_target(test-internet
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-sound test-network test-hardening test-compressor test-sanitized-kernel test-ui test-persistence)
+add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-sound test-network test-hardening test-compressor test-hardware test-sanitized-kernel test-ui test-persistence)
 
 # M5's "done when": 100 power cuts at random moments while writing; each
 # must leave a disk that passes fsck and remounts with every committed

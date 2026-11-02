@@ -111,6 +111,8 @@ void panic(StringView reason, TrapFrame const* frame)
     }
 
     Processor::stop_others();
+    // Whoever had the screen, it's for this now.
+    boot_text_console().set_suspended(false);
     kernel_log().enter_panic_mode();
     show_panic_console();
     dmesgln("vultureOS needs to restart: the kernel ran into a problem it cannot recover from.");

@@ -1,0 +1,17 @@
+# The desktop with nothing but the firmware's framebuffer to draw on: at whatever size it's in, and with
+# a pointer drawn by the kernel's driver, as there's no hardware to do it.
+expect loginwindow: ready
+pause 0.5
+type vulture\r
+expect files: ready
+pause 2
+key meta_l-spc
+expect search: shown
+pause 0.3
+type terminal
+pause 1
+type \r
+pause 2
+pointer 16384 12000
+pause 1
+screenshot terminal.png

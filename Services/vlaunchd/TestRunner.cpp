@@ -29,6 +29,10 @@ struct Test {
     int signal;
 };
 
+Test const s_tests_when_asked[] = {
+    { "/usr/tests/usb-disk", 0, 0 },
+};
+
 Test const s_tests[] = {
     { "/usr/tests/hello", 0, 0 },
     { "/usr/tests/libc", 0, 0 },
@@ -140,6 +144,17 @@ int run_tests(char const* only)
             ++passed;
         else
             ++failed;
+    }
+    // What needs something on the machine that isn't always there: for when it's asked for.
+    if (only && passed + failed == 0) {
+        for (auto const& test : s_tests_when_asked) {
+            if (strcmp(strrchr(test.path, '/') + 1, only) != 0)
+                continue;
+            if (run(test))
+                ++passed;
+            else
+                ++failed;
+        }
     }
     // Asked for one, and it isn't there: that is no success.
     if (only && passed + failed == 0) {

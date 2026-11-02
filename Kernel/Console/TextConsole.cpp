@@ -84,6 +84,8 @@ void TextConsole::clear()
 
 void TextConsole::write(StringView text)
 {
+    if (m_suspended)
+        return;
     if (!m_framebuffer)
         return;
     show_cursor(false);

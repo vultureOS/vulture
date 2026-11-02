@@ -66,6 +66,7 @@ add_executable(Kernel
     Security/Seal.cpp
     Security/StackProtector.cpp
     Syscalls/SocketCalls.cpp
+    Devices/Graphics/FirmwareDisplay.cpp
     Devices/Graphics/VirtIOGPU.cpp
     Devices/Input/Input.cpp
     Devices/Input/VirtIOInput.cpp

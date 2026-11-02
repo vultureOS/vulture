@@ -48,6 +48,7 @@ public:
     [[nodiscard]] Gfx::IntRect frame() const;
     void set_frame(Gfx::IntRect);
     void center_on_screen();
+    void keep_on_screen();
     [[nodiscard]] Gfx::FloatSize size() const;
     [[nodiscard]] float title_bar_height() const;
     void set_transparent(bool);

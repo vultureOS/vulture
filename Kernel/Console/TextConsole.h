@@ -23,6 +23,8 @@ public:
     void initialize(Framebuffer&);
 
     [[nodiscard]] bool is_ready() const { return m_framebuffer != nullptr; }
+    // Someone else is using the screen, and its contents aren't this to change. Only a panic does then.
+    void set_suspended(bool suspended) { m_suspended = suspended; }
     [[nodiscard]] u32 columns() const { return m_columns; }
     [[nodiscard]] u32 rows() const { return m_rows; }
 
@@ -31,6 +33,7 @@ public:
     void write(StringView);
 
 private:
+    bool m_suspended { false };
     static constexpr u32 max_columns = 320;
     static constexpr u32 max_rows = 120;
     static constexpr size_t max_parameters = 8;

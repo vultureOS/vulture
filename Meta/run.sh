@@ -43,7 +43,7 @@
 #   --memory SIZE       how much memory the machine has (default: 4G)
 #   --real-devices      the kinds of device real machines have, in place of virtio: an AHCI
 #                       disk, xHCI USB with a keyboard and tablet, e1000e network, Intel
-#                       HD Audio. (The display stays virtio-gpu.)
+#                       HD Audio, and only the firmware's framebuffer to draw on.
 #   --nvme              attach the root disk as NVMe instead of virtio-blk
 #   --image FILE        boot a whole-disk image (ninja image) on its own,
 #                       instead of the build's EFI directory and root disk;
@@ -317,6 +317,11 @@ fi
 display_devices=(-device ramfb -device "virtio-gpu-pci,id=gpu0,xres=$gpu_width,yres=$gpu_height")
 if [ "$gui" -eq 1 ]; then
     display_devices=(-device "virtio-gpu-pci,id=gpu0,xres=$gpu_width,yres=$gpu_height" -device ramfb)
+fi
+# A real machine's display is whatever the firmware set up. (A test can keep the one it knows the size
+# of, for what it needs from it.)
+if [ "$real_devices" -eq 1 ] && [ -z "${VULTURE_KEEP_VIRTIO_DISPLAY:-}" ]; then
+    display_devices=(-device ramfb)
 fi
 
 # The sound device, if this QEMU has it, and where its sound goes: a file if asked, the

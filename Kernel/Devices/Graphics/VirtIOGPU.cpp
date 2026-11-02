@@ -481,6 +481,8 @@ private:
 
 }
 
+void initialize_firmware_display();
+
 void initialize_graphics()
 {
     u32 number = 0;
@@ -498,6 +500,9 @@ void initialize_graphics()
         if (auto added = DevFS::the().add_device(name.view(), NonnullRefPtr<Inode>(*device.value())); added.is_error())
             dmesgln("Graphics: {}: {}", name.view(), added.error());
     }
+    // Without a driver for what's there, there's what the firmware left on.
+    if (number == 0)
+        initialize_firmware_display();
 }
 
 }

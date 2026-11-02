@@ -29,6 +29,9 @@ public:
     [[nodiscard]] bool is_present() const { return m_base != nullptr; }
     [[nodiscard]] u32 width() const { return m_width; }
     [[nodiscard]] u32 height() const { return m_height; }
+    // For copying a whole picture to it, which a pixel at a time would take too long for.
+    [[nodiscard]] u32* raw_row(u32 y) const { return row(y); }
+    [[nodiscard]] bool has_native_byte_order() const { return m_format == API::PixelFormat::BGRX8888; }
 
     void fill_rect(i32 x, i32 y, i32 width, i32 height, Color);
 

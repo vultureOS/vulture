@@ -50,6 +50,7 @@ set(tests
     time
     toolkit
     tools
+    usb-disk
     volumes
     windows
     # Not in init's test list: the storage crash and persistence tests run it.

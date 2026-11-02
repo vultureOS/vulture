@@ -156,6 +156,8 @@ void Window::show()
     if (m_shown)
         return;
     m_shown = true;
+    if (!(m_flags & (WS::WindowPopup | WS::WindowBare)))
+        keep_on_screen();
     schedule_update();
     add_damage(m_root->frame());
     update_now();
@@ -204,6 +206,23 @@ void Window::set_frame(IntRect frame)
         m_presenting = false;
         handle_resized(frame.size().to<float>());
     }
+}
+
+// A window made for a bigger screen than this one is moved, and only if that isn't enough, made smaller:
+// all of it stays where it can be reached, below the menu bar.
+void Window::keep_on_screen()
+{
+    auto const screen = Platform::the().screen_size();
+    if (screen.width <= 0 || screen.height <= 0)
+        return;
+    auto wanted = frame();
+    int const top = static_cast<int>(Appearance::the().metric("menubar.height"_sv));
+    wanted.width = min(wanted.width, screen.width);
+    wanted.height = min(wanted.height, screen.height - top);
+    wanted.x = max(0, min(wanted.x, screen.width - wanted.width));
+    wanted.y = max(top, min(wanted.y, screen.height - wanted.height));
+    if (wanted != frame())
+        set_frame(wanted);
 }
 
 void Window::center_on_screen()

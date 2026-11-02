@@ -194,13 +194,26 @@ public:
 
 class XHCIDevice final : public Device {
 public:
-    XHCIDevice(Controller& controller, u8 slot, u8 port, u8 speed)
+    // Where it is: the port on the controller it comes by way of, and the ports of any hubs after that.
+    struct Location {
+        u8 root_port { 0 };
+        u32 route { 0 };
+        u8 depth { 0 };
+        u8 speed { 0 };
+        u8 parent_slot { 0 }; // For a slow device on a fast hub, which translates for it.
+        u8 parent_port { 0 };
+    };
+
+    XHCIDevice(Controller& controller, u8 slot, Location const& location)
         : m_controller(controller)
         , m_slot(slot)
-        , m_port(port)
-        , m_speed(speed)
+        , m_port(location.root_port)
+        , m_speed(location.speed)
+        , m_location(location)
     {
     }
+
+    void rescan_hub();
 
     ErrorOr<void> initialize(u16 first_max_packet);
     ErrorOr<void> bring_up();
@@ -220,6 +233,8 @@ private:
     void clear_input_context();
     void configure_slot_context(u8 highest_dci);
     ErrorOr<size_t> wait_for_transfer(XHCIEndpoint&, u32 finished_before, size_t length);
+    ErrorOr<bool> attach_hub(InterfaceDescription const&);
+    ErrorOr<void> attach_hub_port(u8 port);
 
     Controller& m_controller;
     u8 m_slot;
@@ -232,6 +247,10 @@ private:
     XHCIEndpoint* m_endpoints[32] {};
     u8 m_highest_dci { 1 };
     Mutex m_control_lock;
+    Location m_location;
+    bool m_is_hub { false };
+    u8 m_hub_ports { 0 };
+    u32 m_hub_ports_attached { 0 };
 };
 
 class Controller {
@@ -244,6 +263,8 @@ public:
     void set_device_context(u8 slot, PhysicalAddress address) { reinterpret_cast<u64*>(physical_to_virtual(m_device_contexts))[slot] = address.get(); }
 
     void scan_ports();
+    ErrorOr<void> attach_device(XHCIDevice::Location const&);
+    void hub_changed(XHCIDevice&);
 
 private:
     Controller(FlatPtr capabilities, FlatPtr operational, FlatPtr runtime, FlatPtr doorbells, u32 ports)
@@ -293,6 +314,8 @@ private:
     WaitQueue m_port_wait;
     XHCIDevice* m_slots[256] {};
     XHCIDevice* m_devices_on_ports[64] {};
+    // Hubs that have said something changed, as bits by slot, for the thread that deals with ports.
+    Atomic<u64> m_hubs_changed[4] {};
 };
 
 // A command's or transfer's wait: how long, at the most, anything here takes.
@@ -343,8 +366,10 @@ void XHCIDevice::clear_input_context()
 void XHCIDevice::configure_slot_context(u8 highest_dci)
 {
     auto* slot = slot_context_in_input();
-    slot[0] = (static_cast<u32>(highest_dci) << 27) | (static_cast<u32>(m_speed) << 20);
-    slot[1] = static_cast<u32>(m_port) << 16;
+    constexpr u32 slot_is_hub = 1u << 26;
+    slot[0] = (static_cast<u32>(highest_dci) << 27) | (static_cast<u32>(m_speed) << 20) | m_location.route | (m_is_hub ? slot_is_hub : 0);
+    slot[1] = (static_cast<u32>(m_port) << 16) | (static_cast<u32>(m_hub_ports) << 24);
+    slot[2] = static_cast<u32>(m_location.parent_slot) | (static_cast<u32>(m_location.parent_port) << 8);
 }
 
 ErrorOr<void> XHCIDevice::initialize(u16 first_max_packet)
@@ -585,7 +610,9 @@ ErrorOr<void> XHCIDevice::bring_up()
     for (size_t i = 0; i < interface_count; ++i) {
         auto const& interface = interfaces[i];
         ErrorOr<bool> attached = false;
-        if (interface.interface_class == class_hid)
+        if (interface.interface_class == class_hub)
+            attached = attach_hub(interface);
+        else if (interface.interface_class == class_hid)
             attached = attach_hid(*this, interface);
         else if (interface.interface_class == class_mass_storage)
             attached = attach_mass_storage(*this, interface);
@@ -597,6 +624,129 @@ ErrorOr<void> XHCIDevice::bring_up()
     if (!any)
         dmesgln("USB: port {}: {:04x}:{:04x}, nothing here can use it", m_port, vendor, product);
     return {};
+}
+
+// ---- Hubs: devices with more ports on them, which this reaches by way of requests to the hub.
+
+namespace {
+
+constexpr u8 request_get_status = 0;
+constexpr u8 request_set_feature = 3;
+constexpr u8 to_hub_port = 0x23;
+constexpr u8 from_hub_port = 0xa3;
+constexpr u8 from_hub_class = 0xa0;
+constexpr u8 descriptor_hub = 0x29;
+constexpr u8 descriptor_super_speed_hub = 0x2a;
+constexpr u16 feature_port_reset = 4;
+constexpr u16 feature_port_power = 8;
+constexpr u16 feature_clear_connection = 16;
+constexpr u16 feature_clear_reset = 20;
+constexpr u32 hub_port_connected = 1 << 0;
+constexpr u32 hub_port_enabled = 1 << 1;
+constexpr u32 hub_port_low_speed = 1 << 9;
+constexpr u32 hub_port_high_speed = 1 << 10;
+constexpr u32 hub_port_reset_changed = 1 << 20;
+
+}
+
+ErrorOr<bool> XHCIDevice::attach_hub(InterfaceDescription const& interface)
+{
+    // Five levels are all there's room for in the address of what's on one.
+    if (m_location.depth >= 5)
+        return false;
+    bool const super_speed = m_speed >= 4;
+    u8 descriptor[16];
+    (void)TRY(control(from_hub_class, request_get_descriptor, (super_speed ? descriptor_super_speed_hub : descriptor_hub) << 8, 0, { descriptor, sizeof(descriptor) }));
+    m_hub_ports = min<u8>(descriptor[2], 15);
+    m_is_hub = true;
+    Optional<EndpointDescription> in;
+    for (u8 i = 0; i < interface.endpoint_count; ++i) {
+        if (interface.endpoints[i].kind == EndpointKind::Interrupt && interface.endpoints[i].is_in())
+            in = interface.endpoints[i];
+    }
+    if (!in.has_value())
+        return false;
+    // This also tells the controller it's a hub, as that's what's in the slot's context now.
+    auto* endpoint = TRY(open_endpoint(in.value()));
+    for (u8 port = 1; port <= m_hub_ports; ++port)
+        (void)TRY(control(to_hub_port, request_set_feature, feature_port_power, port, {}));
+    // In units of 2 ms: how long it says its ports need.
+    u32 const power_on_ms = max<u32>(descriptor[5], 50u) * 2;
+    Time::wait_until(Time::now() + Time::ticks_from_milliseconds(power_on_ms));
+    dmesgln("USB: a hub with {} ports", m_hub_ports);
+    rescan_hub();
+    TRY(poll_interrupts(*endpoint, in->max_packet ? min<size_t>(in->max_packet, 8) : 1, [](void* context, ReadonlyBytes) {
+        auto& hub = *static_cast<XHCIDevice*>(context);
+        hub.m_controller.hub_changed(hub);
+    }, this));
+    return true;
+}
+
+void XHCIDevice::rescan_hub()
+{
+    for (u8 port = 1; port <= m_hub_ports; ++port) {
+        u8 status_bytes[4] {};
+        if (control(from_hub_port, request_get_status, 0, port, { status_bytes, sizeof(status_bytes) }).is_error())
+            continue;
+        u32 status;
+        __builtin_memcpy(&status, status_bytes, sizeof(status));
+        // A change it has told about stays until it's told it has been heard.
+        (void)control(0x23, request_clear_feature, feature_clear_connection, port, {});
+        u32 const bit = 1u << port;
+        bool const connected = status & hub_port_connected;
+        bool const attached = m_hub_ports_attached & bit;
+        if (connected && !attached) {
+            if (auto result = attach_hub_port(port); result.is_error())
+                dmesgln("USB: hub port {}: {}", port, result.error());
+            else
+                m_hub_ports_attached |= bit;
+        } else if (!connected && attached) {
+            dmesgln("USB: hub port {}: removed", port);
+            m_hub_ports_attached &= ~bit;
+        }
+    }
+}
+
+ErrorOr<void> XHCIDevice::attach_hub_port(u8 port)
+{
+    (void)TRY(control(to_hub_port, request_set_feature, feature_port_reset, port, {}));
+    u32 status = 0;
+    u64 const deadline = Time::now() + Time::ticks_from_milliseconds(500);
+    for (;;) {
+        u8 status_bytes[4] {};
+        (void)TRY(control(from_hub_port, request_get_status, 0, port, { status_bytes, sizeof(status_bytes) }));
+        __builtin_memcpy(&status, status_bytes, sizeof(status));
+        if (status & hub_port_reset_changed)
+            break;
+        if (Time::now() > deadline)
+            return Error::from_string_literal("the hub's port didn't reset");
+        (void)Thread::sleep_for_microseconds(10'000);
+    }
+    (void)TRY(control(0x23, request_clear_feature, feature_clear_reset, port, {}));
+    if (!(status & hub_port_enabled))
+        return Error::from_string_literal("the hub's port isn't enabled");
+
+    Location child;
+    child.root_port = m_location.root_port;
+    child.route = m_location.route | (static_cast<u32>(port) << (4 * m_location.depth));
+    child.depth = static_cast<u8>(m_location.depth + 1);
+    if (m_speed >= 4)
+        child.speed = m_speed;
+    else if (status & hub_port_low_speed)
+        child.speed = 2;
+    else if (status & hub_port_high_speed)
+        child.speed = 3;
+    else
+        child.speed = 1;
+    // A slow device on a high-speed hub goes through the hub's translator.
+    if (m_speed == 3 && child.speed < 3) {
+        child.parent_slot = m_slot;
+        child.parent_port = port;
+    } else {
+        child.parent_slot = m_location.parent_slot;
+        child.parent_port = m_location.parent_port;
+    }
+    return m_controller.attach_device(child);
 }
 
 // ---- The controller.
@@ -816,24 +966,42 @@ ErrorOr<void> Controller::attach_port(u8 port)
     FlatPtr const reg = port_register(port);
     if (!(mmio_read32(reg) & port_enabled))
         TRY(reset_port(port));
-    u8 const speed = (mmio_read32(reg) >> 10) & 0xf;
+    XHCIDevice::Location location;
+    location.root_port = port;
+    location.speed = (mmio_read32(reg) >> 10) & 0xf;
+    return attach_device(location);
+}
+
+ErrorOr<void> Controller::attach_device(XHCIDevice::Location const& location)
+{
     u16 first_max_packet = 8;
-    if (speed == 3)
+    if (location.speed == 3)
         first_max_packet = 64;
-    else if (speed >= 4)
+    else if (location.speed >= 4)
         first_max_packet = 512;
 
     u8 slot = 0;
     TRY(run_command(0, 0, trb_enable_slot << 10, &slot));
-    auto* device = new (Base::nothrow) XHCIDevice(*this, slot, port, speed);
+    auto* device = new (Base::nothrow) XHCIDevice(*this, slot, location);
     if (!device)
         return Error::from_errno(ENOMEM);
     m_slots[slot] = device;
     TRY(device->initialize(first_max_packet));
     TRY(device->bring_up());
-    if (port < sizeof(m_devices_on_ports) / sizeof(m_devices_on_ports[0]))
-        m_devices_on_ports[port] = device;
+    if (location.route == 0 && location.root_port < sizeof(m_devices_on_ports) / sizeof(m_devices_on_ports[0]))
+        m_devices_on_ports[location.root_port] = device;
     return {};
+}
+
+void Controller::hub_changed(XHCIDevice& hub)
+{
+    for (u32 slot = 0; slot < 256; ++slot) {
+        if (m_slots[slot] == &hub) {
+            m_hubs_changed[slot / 64].fetch_or(1ull << (slot % 64));
+            m_port_wait.wake_all();
+            return;
+        }
+    }
 }
 
 void Controller::scan_ports()
@@ -864,7 +1032,16 @@ void Controller::scan_ports()
 void Controller::port_loop()
 {
     for (;;) {
-        m_port_wait.wait_until([this] { return m_ports_changed.load() != 0; });
+        m_port_wait.wait_until([this] {
+            return m_ports_changed.load() != 0 || m_hubs_changed[0].load() != 0 || m_hubs_changed[1].load() != 0 || m_hubs_changed[2].load() != 0 || m_hubs_changed[3].load() != 0;
+        });
+        for (u32 word = 0; word < 4; ++word) {
+            u64 const hubs = m_hubs_changed[word].exchange(0);
+            for (u32 bit = 0; bit < 64; ++bit) {
+                if ((hubs & (1ull << bit)) && m_slots[word * 64 + bit])
+                    m_slots[word * 64 + bit]->rescan_hub();
+            }
+        }
         u32 const changed = m_ports_changed.exchange(0);
         for (u32 port = 1; port <= m_port_count && port <= 32; ++port) {
             if (!(changed & (1u << (port - 1))))

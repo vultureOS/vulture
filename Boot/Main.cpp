@@ -134,7 +134,10 @@ static Optional<DisplayMode> choose_display_mode(UEFI::BootServices& boot_servic
             if (UEFI::is_error(graphics->QueryMode(graphics, number, &info_size, &info)))
                 continue;
             u64 area = u64(info->HorizontalResolution) * info->VerticalResolution;
-            if (is_linear(info->PixelFormat) && (!best.has_value() || area > u64(best->width) * best->height))
+            // The biggest it offers is normally the screen's own, as it read that from the screen. It may
+            // also offer something no screen is: a square, in QEMU's case. Only the shapes screens are.
+            bool const is_screen_shaped = info->HorizontalResolution * 5 >= info->VerticalResolution * 6 && info->HorizontalResolution * 5 <= info->VerticalResolution * 12;
+            if (is_linear(info->PixelFormat) && is_screen_shaped && (!best.has_value() || area > u64(best->width) * best->height))
                 best = DisplayMode { graphics, number, info->HorizontalResolution, info->VerticalResolution };
             boot_services.FreePool(info);
         }
