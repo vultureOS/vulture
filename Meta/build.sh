@@ -12,6 +12,7 @@
 #   --build-dir DIR   build directory (default: <repo>/build)
 #   --clean           delete the build directory first
 #   --check           also run every test (unit, boot, crash, kernel)
+#   --arch ARCH       what to build for, when making the build directory: aarch64 (the default) or x86_64
 #   -j N              run N jobs at once (default: one per CPU)
 #
 # Ninja targets name parts of the build or tests, for example "target"
@@ -23,6 +24,7 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="$root_dir/build"
 clean=0
 check=0
+arch=aarch64
 jobs=()
 targets=()
 
@@ -31,9 +33,10 @@ while [ $# -gt 0 ]; do
         --build-dir) build_dir="$2"; shift 2 ;;
         --clean) clean=1; shift ;;
         --check) check=1; shift ;;
+        --arch) arch="$2"; shift 2 ;;
         -j) jobs=(-j "$2"); shift 2 ;;
         -j*) jobs=("$1"); shift ;;
-        -h|--help) sed -n '7,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '7,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*) echo "build.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
         *) targets+=("$1"); shift ;;
     esac
@@ -78,7 +81,7 @@ fi
 
 if [ ! -f "$build_dir/build.ninja" ]; then
     cmake -G Ninja -S "$root_dir" -B "$build_dir" \
-        -DVULTURE_LLVM_ROOT="$llvm_root" -DVULTURE_LLD_ROOT="$lld_root"
+        -DVULTURE_LLVM_ROOT="$llvm_root" -DVULTURE_LLD_ROOT="$lld_root" -DVULTURE_ARCH="$arch"
 fi
 
 ninja -C "$build_dir" ${jobs[@]+"${jobs[@]}"} ${targets[@]+"${targets[@]}"}

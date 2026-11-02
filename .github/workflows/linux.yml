@@ -62,3 +62,6 @@ jobs:
 
       - name: Build
         run: Meta/build.sh --build-dir build
+
+      - name: Build for x86_64
+        run: Meta/build.sh --build-dir build-x86_64 --arch x86_64
