@@ -196,7 +196,7 @@ static void copy_field(char* destination, size_t capacity, StringView text)
         destination[i] = text[i];
 }
 
-ErrorOr<void> TarWriter::write_header(StringView path, TarEntryType type, u32 mode, u64 size)
+ErrorOr<void> TarWriter::write_header(StringView path, TarEntryType type, u32 mode, u64 size, StringView link_target)
 {
     Header header {};
     __builtin_memset(&header, 0, sizeof(header));
@@ -219,7 +219,10 @@ ErrorOr<void> TarWriter::write_header(StringView path, TarEntryType type, u32 mo
     write_octal(header.gid, sizeof(header.gid), 0);
     write_octal(header.size, sizeof(header.size), size);
     write_octal(header.mtime, sizeof(header.mtime), 0);
-    header.typeflag = type == TarEntryType::Directory ? '5' : '0';
+    header.typeflag = type == TarEntryType::Directory ? '5' : (type == TarEntryType::SymbolicLink ? '2' : '0');
+    if (link_target.length() > sizeof(header.linkname))
+        return Error::from_string_literal("tar: link target too long");
+    copy_field(header.linkname, sizeof(header.linkname), link_target);
     copy_field(header.magic, sizeof(header.magic), "ustar"_sv);
     header.version[0] = '0';
     header.version[1] = '0';
@@ -247,6 +250,56 @@ ErrorOr<void> TarWriter::add_file(StringView path, u32 mode, ReadonlyBytes data)
     if (padding)
         m_sink.write({ zeros, padding });
     return {};
+}
+
+ErrorOr<void> TarWriter::add_symbolic_link(StringView path, StringView target)
+{
+    return write_header(TarReader::normalize(path), TarEntryType::SymbolicLink, 0777, 0, target);
+}
+
+bool is_safe_member_path(StringView path)
+{
+    if (path.is_empty() || path[0] == '/')
+        return false;
+    size_t start = 0;
+    for (size_t i = 0; i <= path.length(); ++i) {
+        if (i < path.length() && path[i] == '\0')
+            return false;
+        if (i == path.length() || path[i] == '/') {
+            if (path.substring_view(start, i - start) == ".."_sv)
+                return false;
+            start = i + 1;
+        }
+    }
+    return true;
+}
+
+bool is_safe_link_target(StringView path, StringView target)
+{
+    if (!is_safe_member_path(path) || target.is_empty() || target[0] == '/')
+        return false;
+    // How deep the link sits, going by the folders on the way to it.
+    int depth = 0;
+    for (size_t i = 0; i < path.length(); ++i) {
+        if (path[i] == '/')
+            ++depth;
+    }
+    size_t start = 0;
+    for (size_t i = 0; i <= target.length(); ++i) {
+        if (i < target.length() && target[i] == '\0')
+            return false;
+        if (i == target.length() || target[i] == '/') {
+            auto part = target.substring_view(start, i - start);
+            if (part == ".."_sv) {
+                if (--depth < 0)
+                    return false;
+            } else if (!part.is_empty() && part != "."_sv) {
+                ++depth;
+            }
+            start = i + 1;
+        }
+    }
+    return true;
 }
 
 void TarWriter::finish()

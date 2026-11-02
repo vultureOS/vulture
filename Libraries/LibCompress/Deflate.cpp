@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <LibBase/Checksum.h>
 #include <LibBase/StdLibExtras.h>
 #include <LibCompress/Deflate.h>
 
@@ -514,6 +515,73 @@ ErrorOr<Vector<u8>> zlib_compress(ReadonlyBytes input)
     TRY(output.try_append(static_cast<u8>(checksum >> 16)));
     TRY(output.try_append(static_cast<u8>(checksum >> 8)));
     TRY(output.try_append(static_cast<u8>(checksum)));
+    return output;
+}
+
+ErrorOr<Vector<u8>> gzip_decompress(ReadonlyBytes input, size_t limit)
+{
+    // Ten bytes of header, then what its flags add, then eight of trailer.
+    if (input.size() < 18 || input[0] != 0x1f || input[1] != 0x8b || input[2] != 8)
+        return Error::from_string_literal("invalid gzip header");
+    u8 flags = input[3];
+    if (flags & 0xe0)
+        return Error::from_string_literal("invalid gzip header");
+    size_t position = 10;
+    size_t end = input.size() - 8;
+    if (flags & 4) {
+        // FEXTRA: a length, and that many bytes.
+        if (position + 2 > end)
+            return Error::from_string_literal("invalid gzip header");
+        size_t extra = input[position] | (static_cast<size_t>(input[position + 1]) << 8);
+        position += 2;
+        if (extra > end - position)
+            return Error::from_string_literal("invalid gzip header");
+        position += extra;
+    }
+    // FNAME and FCOMMENT: each up to a zero byte.
+    u8 const text_flags[2] = { 8, 16 };
+    for (u8 flag : text_flags) {
+        if (!(flags & flag))
+            continue;
+        while (position < end && input[position] != 0)
+            ++position;
+        if (position >= end)
+            return Error::from_string_literal("invalid gzip header");
+        ++position;
+    }
+    if (flags & 2) {
+        // FHCRC: two bytes; not needed to read what follows.
+        if (end - position < 2)
+            return Error::from_string_literal("invalid gzip header");
+        position += 2;
+    }
+    auto output = TRY(inflate({ input.data() + position, end - position }, limit));
+    u8 const* tail = input.data() + end;
+    u32 expected_crc = static_cast<u32>(tail[0]) | (static_cast<u32>(tail[1]) << 8) | (static_cast<u32>(tail[2]) << 16) | (static_cast<u32>(tail[3]) << 24);
+    u32 expected_size = static_cast<u32>(tail[4]) | (static_cast<u32>(tail[5]) << 8) | (static_cast<u32>(tail[6]) << 16) | (static_cast<u32>(tail[7]) << 24);
+    if (crc32(output.span()) != expected_crc || static_cast<u32>(output.size()) != expected_size)
+        return Error::from_string_literal("checksum mismatch in compressed data");
+    return output;
+}
+
+ErrorOr<Vector<u8>> gzip_compress(ReadonlyBytes input)
+{
+    auto body = TRY(deflate(input));
+    Vector<u8> output;
+    TRY(output.try_ensure_capacity(body.size() + 18));
+    // No name, no time, from an unknown system: the same input gives the same bytes.
+    u8 const header[10] = { 0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0xff };
+    for (u8 byte : header)
+        TRY(output.try_append(byte));
+    for (size_t i = 0; i < body.size(); ++i)
+        TRY(output.try_append(body[i]));
+    auto append_little_endian = [&](u32 value) -> ErrorOr<void> {
+        for (int i = 0; i < 4; ++i)
+            TRY(output.try_append(static_cast<u8>(value >> (8 * i))));
+        return {};
+    };
+    TRY(append_little_endian(crc32(input)));
+    TRY(append_little_endian(static_cast<u32>(input.size())));
     return output;
 }
 

@@ -121,3 +121,65 @@ TEST_CASE(bad_input_fails_cleanly)
         (void)inflate({ copy + 2, sizeof(copy) - 2 }, 100000);
     }
 }
+
+TEST_CASE(gzip_from_gzip_itself)
+{
+    // `printf 'hello world\nhello world\nhello world\n' | gzip -n`
+    static constexpr u8 made_by_gzip[] = {
+        0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xcb, 0x48,
+        0xcd, 0xc9, 0xc9, 0x57, 0x28, 0xcf, 0x2f, 0xca, 0x49, 0xe1, 0xca, 0xc0,
+        0xc1, 0x06, 0x00, 0x8c, 0xf8, 0x09, 0xeb, 0x24, 0x00, 0x00, 0x00
+    };
+    auto output = MUST(gzip_decompress({ made_by_gzip, sizeof(made_by_gzip) }));
+    EXPECT(StringView(reinterpret_cast<char const*>(output.data()), output.size()) == "hello world\nhello world\nhello world\n"_sv);
+}
+
+TEST_CASE(gzip_with_a_name_in_the_header)
+{
+    // The same, with FNAME: "x\0" after the fixed header.
+    static constexpr u8 named[] = {
+        0x1f, 0x8b, 0x08, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 'x', 0x00, 0xcb, 0x48,
+        0xcd, 0xc9, 0xc9, 0x57, 0x28, 0xcf, 0x2f, 0xca, 0x49, 0xe1, 0xca, 0xc0,
+        0xc1, 0x06, 0x00, 0x8c, 0xf8, 0x09, 0xeb, 0x24, 0x00, 0x00, 0x00
+    };
+    auto output = MUST(gzip_decompress({ named, sizeof(named) }));
+    EXPECT_EQ(output.size(), static_cast<size_t>(36));
+}
+
+TEST_CASE(gzip_round_trips)
+{
+    Vector<u8> input;
+    for (int i = 0; i < 100000; ++i)
+        input.append(static_cast<u8>((static_cast<u32>(i) * static_cast<u32>(i)) >> 3));
+    auto compressed = MUST(gzip_compress(input.span()));
+    auto output = MUST(gzip_decompress(compressed.span()));
+    EXPECT_EQ(output.size(), input.size());
+    bool same = true;
+    for (size_t i = 0; i < input.size(); ++i)
+        same = same && input[i] == output[i];
+    EXPECT(same);
+    EXPECT(MUST(gzip_decompress(MUST(gzip_compress(ReadonlyBytes {})).span())).is_empty());
+}
+
+TEST_CASE(gzip_refuses_what_is_damaged)
+{
+    Vector<u8> input;
+    for (int i = 0; i < 1000; ++i)
+        input.append(static_cast<u8>(i));
+    auto good = MUST(gzip_compress(input.span()));
+    // A flipped bit in the checksum, the length, and the magic.
+    size_t const places[] = { good.size() - 8, good.size() - 1, 0 };
+    for (size_t place : places) {
+        auto damaged = good;
+        damaged[place] ^= 1;
+        EXPECT(gzip_decompress(damaged.span()).is_error());
+    }
+    // Cut short anywhere.
+    for (size_t size = 0; size < good.size(); size += 37)
+        EXPECT(gzip_decompress({ good.data(), size }).is_error());
+    // Headers that claim more than there is.
+    static constexpr u8 long_extra[] = { 0x1f, 0x8b, 8, 4, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0 };
+    EXPECT(gzip_decompress({ long_extra, sizeof(long_extra) }).is_error());
+    static constexpr u8 unending_name[] = { 0x1f, 0x8b, 8, 8, 0, 0, 0, 0, 0, 0, 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a' };
+    EXPECT(gzip_decompress({ unending_name, sizeof(unending_name) }).is_error());
+}

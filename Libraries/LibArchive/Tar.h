@@ -66,6 +66,13 @@ private:
     ReadonlyBytes m_archive;
 };
 
+// Whether unpacking this member stays inside the folder it goes in: relative, with no
+// "..". An archive says what it likes, so anything that unpacks one asks. (Links can
+// lead elsewhere too: whoever unpacks must also refuse to go through any link it made.)
+[[nodiscard]] bool is_safe_member_path(StringView path);
+// Whether a link at member `path` leads to somewhere inside as well.
+[[nodiscard]] bool is_safe_link_target(StringView path, StringView target);
+
 // Writes an archive through a sink (a file in the host tool).
 class TarSink {
 public:
@@ -84,11 +91,12 @@ public:
 
     ErrorOr<void> add_directory(StringView path, u32 mode);
     ErrorOr<void> add_file(StringView path, u32 mode, ReadonlyBytes data);
+    ErrorOr<void> add_symbolic_link(StringView path, StringView target);
     // Writes the two zero blocks that end an archive.
     void finish();
 
 private:
-    ErrorOr<void> write_header(StringView path, TarEntryType, u32 mode, u64 size);
+    ErrorOr<void> write_header(StringView path, TarEntryType, u32 mode, u64 size, StringView link_target = {});
 
     TarSink& m_sink;
 };

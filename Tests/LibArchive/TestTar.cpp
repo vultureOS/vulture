@@ -100,3 +100,39 @@ TEST_CASE(tar_rejects_corruption)
     u8 odd_size[100] {};
     EXPECT(Archive::TarReader::parse({ odd_size, sizeof(odd_size) }).is_error());
 }
+
+TEST_CASE(unpacking_stays_inside)
+{
+    EXPECT(Archive::is_safe_member_path("a"_sv));
+    EXPECT(Archive::is_safe_member_path("a/b/c.txt"_sv));
+    EXPECT(Archive::is_safe_member_path("./a"_sv));
+    EXPECT(Archive::is_safe_member_path("a..b/c..d"_sv));
+    EXPECT(!Archive::is_safe_member_path(""_sv));
+    EXPECT(!Archive::is_safe_member_path("/etc/passwd"_sv));
+    EXPECT(!Archive::is_safe_member_path("../x"_sv));
+    EXPECT(!Archive::is_safe_member_path("a/../../x"_sv));
+    EXPECT(!Archive::is_safe_member_path("a/.."_sv));
+
+    EXPECT(Archive::is_safe_link_target("a/link"_sv, "b"_sv));
+    EXPECT(Archive::is_safe_link_target("a/link"_sv, "../b"_sv));
+    EXPECT(Archive::is_safe_link_target("a/b/link"_sv, "../../c/d"_sv));
+    EXPECT(Archive::is_safe_link_target("link"_sv, "a/../b"_sv));
+    EXPECT(!Archive::is_safe_link_target("link"_sv, "../b"_sv));
+    EXPECT(!Archive::is_safe_link_target("a/link"_sv, "../../b"_sv));
+    EXPECT(!Archive::is_safe_link_target("a/link"_sv, "/etc"_sv));
+    EXPECT(!Archive::is_safe_link_target("link"_sv, "a/../../b"_sv));
+    EXPECT(!Archive::is_safe_link_target("../link"_sv, "a"_sv));
+}
+
+TEST_CASE(links_round_trip)
+{
+    BufferSink sink;
+    Archive::TarWriter writer(sink);
+    MUST(writer.add_symbolic_link("a/link"_sv, "../b"_sv));
+    writer.finish();
+    auto reader = MUST(Archive::TarReader::parse(sink.bytes()));
+    auto entry = reader.find("a/link"_sv);
+    EXPECT(entry.has_value());
+    EXPECT(entry->type == Archive::TarEntryType::SymbolicLink);
+    EXPECT(entry->link_target == "../b"_sv);
+}
