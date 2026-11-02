@@ -86,6 +86,9 @@ void initialize_storage()
         }
         add_disk(device.value(), description.view());
     }
+#if defined(__aarch64__)
+    initialize_sd_cards();
+#endif
 }
 
 }

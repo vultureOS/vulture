@@ -100,8 +100,21 @@ namespace Kernel::Arch {
 
 using namespace AArch64::PSCI;
 
+// The power manager of a Raspberry Pi, when that's what there is.
+static FlatPtr s_power_manager = 0;
+
 ErrorOr<void> initialize_power_management(DeviceTree::FlattenedDeviceTree const& device_tree)
 {
+    // A Raspberry Pi 4 has no such firmware: its watchdog does these things.
+    static constexpr StringView power_managers[] = { "brcm,bcm2835-pm-wdt"_sv, "brcm,bcm2835-pm"_sv, "brcm,bcm2711-pm"_sv };
+    for (auto compatible : power_managers) {
+        auto watchdog = device_tree.find_compatible_node(compatible);
+        if (!watchdog.has_value())
+            continue;
+        if (auto region = device_tree.reg(watchdog.value(), 0); region.has_value())
+            s_power_manager = TRY(memory_manager().map_mmio(PhysicalAddress(region->address), region->size));
+        break;
+    }
     static constexpr StringView compatibles[] = { "arm,psci-1.0"_sv, "arm,psci-0.2"_sv, "arm,psci"_sv };
     Optional<DeviceTree::Node> node;
     for (auto compatible : compatibles) {
@@ -109,8 +122,11 @@ ErrorOr<void> initialize_power_management(DeviceTree::FlattenedDeviceTree const&
         if (node.has_value())
             break;
     }
-    if (!node.has_value())
+    if (!node.has_value()) {
+        if (s_power_manager)
+            return {};
         return Error::from_string_literal("no PSCI firmware interface in the device tree");
+    }
     auto method = device_tree.find_property(node.value(), "method"_sv);
     if (!method.has_value())
         return Error::from_string_literal("PSCI has no calling method");
@@ -127,16 +143,38 @@ ErrorOr<void> initialize_power_management(DeviceTree::FlattenedDeviceTree const&
 void describe_power_management(FormatSink& sink)
 {
     if (!is_available()) {
-        sink.write("none"_sv);
+        sink.write(s_power_manager ? "the Raspberry Pi's watchdog"_sv : "none"_sv);
         return;
     }
     format_to(sink, "PSCI {}.{} via {}", s_version >> 16, s_version & 0xffff, s_conduit == Conduit::HVC ? "HVC"_sv : "SMC"_sv);
+}
+
+// The watchdog, set to go off almost at once, restarts the machine. Its firmware then looks in a register that
+// survives this for which partition to start from, and "63" means don't: stay off. (There's no real off.)
+static void restart_by_watchdog(bool stay_off)
+{
+    constexpr size_t reset_control = 0x1c;
+    constexpr size_t reset_status = 0x20;
+    constexpr size_t watchdog_time = 0x24;
+    constexpr u32 password = 0x5a00'0000;
+    constexpr u32 configuration_mask = 0x30;
+    constexpr u32 configuration_full_reset = 0x20;
+    constexpr u32 partition_63 = 0x555;
+    constexpr u32 partition_mask = 0xaaa ^ 0xfff;
+    constexpr u32 almost_at_once = 10;
+    FlatPtr const manager = s_power_manager;
+    if (stay_off)
+        AArch64::mmio_write32(manager + reset_status, password | (AArch64::mmio_read32(manager + reset_status) & ~partition_mask) | partition_63);
+    AArch64::mmio_write32(manager + watchdog_time, password | almost_at_once);
+    AArch64::mmio_write32(manager + reset_control, password | (AArch64::mmio_read32(manager + reset_control) & ~configuration_mask) | configuration_full_reset);
 }
 
 void power_off()
 {
     if (is_available())
         call(system_off);
+    else if (s_power_manager)
+        restart_by_watchdog(true);
     halt();
 }
 
@@ -144,6 +182,8 @@ void reboot()
 {
     if (is_available())
         call(system_reset);
+    else if (s_power_manager)
+        restart_by_watchdog(false);
     halt();
 }
 

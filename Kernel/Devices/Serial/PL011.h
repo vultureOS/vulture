@@ -18,7 +18,11 @@ public:
     void initialize(FlatPtr registers);
 
     // Points at a new mapping of the same registers.
-    void relocate(FlatPtr registers) { m_registers = reinterpret_cast<u32 volatile*>(registers); }
+    void relocate(FlatPtr registers)
+    {
+        if (m_registers)
+            m_registers = reinterpret_cast<u32 volatile*>(registers);
+    }
 
     [[nodiscard]] bool is_present() const { return m_registers != nullptr; }
 

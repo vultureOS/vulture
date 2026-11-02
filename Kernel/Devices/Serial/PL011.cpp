@@ -32,7 +32,14 @@ void PL011::write(char character)
 {
     if (!m_registers)
         return;
+    // On some machines nobody turned it on, and what's sent stays in its queue. Better no output than no boot.
+    constexpr u32 longest_wait = 1'000'000;
+    u32 waited = 0;
     while (m_registers[flag_register] & transmit_fifo_full) {
+        if (++waited == longest_wait) {
+            m_registers = nullptr;
+            return;
+        }
     }
     m_registers[data_register] = static_cast<u8>(character);
 }

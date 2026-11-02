@@ -19,6 +19,13 @@
 // lower half; it then jumps to its kernel address and drops the mapping.
 
 extern "C" u8 secondary_entry[];
+extern "C" u8 spin_table_entry[];
+
+// Where each processor released from a spin table finds its StartupParameters, by the low byte of its MPIDR.
+// Read with the MMU off.
+extern "C" {
+u64 spin_table_parameters[256] = { 0 };
+}
 
 namespace Kernel::Arch {
 
@@ -74,6 +81,54 @@ static void clean_to_point_of_coherency(void const* start, size_t size)
     asm volatile("dsb sy" ::: "memory");
 }
 
+// Where the device tree says this processor is waiting to be told where to go, if it does: firmware
+// without PSCI parks them, each watching an address of its own.
+static Optional<u64> spin_table_release_address(u64 hardware_id)
+{
+    auto tree = DeviceTree::FlattenedDeviceTree::parse(memory_manager().device_tree());
+    if (tree.is_error())
+        return {};
+    Optional<u64> release;
+    bool in_cpus = false;
+    auto result = tree.value().for_each_node([&](DeviceTree::Node const& node) {
+        if (node.depth == 1) {
+            if (in_cpus)
+                return DeviceTree::IterationDecision::Break;
+            in_cpus = node.name == "cpus"_sv;
+            return DeviceTree::IterationDecision::Continue;
+        }
+        if (!in_cpus || node.depth != 2)
+            return DeviceTree::IterationDecision::Continue;
+        auto reg = tree.value().reg(node, 0);
+        if (!reg.has_value() || reg->address != hardware_id)
+            return DeviceTree::IterationDecision::Continue;
+        auto method = tree.value().find_property(node, "enable-method"_sv);
+        auto address = tree.value().find_property(node, "cpu-release-addr"_sv);
+        if (method.has_value() && method->as_string() == "spin-table"_sv && address.has_value())
+            release = address->read_cells(0, 2);
+        return DeviceTree::IterationDecision::Break;
+    });
+    if (result.is_error())
+        return {};
+    return release;
+}
+
+static ErrorOr<void> release_from_spin_table(u64 hardware_id, u64 release_address, PhysicalAddress parameters)
+{
+    constexpr u64 number_mask = 0xff;
+    auto& entry = spin_table_parameters[hardware_id & number_mask];
+    entry = parameters.get();
+    clean_to_point_of_coherency(&entry, sizeof(entry));
+
+    // The address it's watching isn't in the direct map: it belongs to the firmware.
+    auto page = TRY(memory_manager().map_mmio(PhysicalAddress(align_down<u64>(release_address, page_size)), page_size));
+    auto* watched = reinterpret_cast<u64 volatile*>(page + (release_address & (page_size - 1)));
+    *watched = memory_manager().physical_address_of_kernel_image(spin_table_entry).get();
+    asm volatile("dsb sy\n"
+                 "sev" ::: "memory");
+    return {};
+}
+
 ErrorOr<void> start_processor(u64 hardware_id, FlatPtr stack_top, SecondaryEntry entry, void* argument)
 {
     if (s_parameters_block == PhysicalAddress())
@@ -102,6 +157,8 @@ ErrorOr<void> start_processor(u64 hardware_id, FlatPtr stack_top, SecondaryEntry
     }
     clean_to_point_of_coherency(&parameters, sizeof(parameters));
 
+    if (auto release_address = spin_table_release_address(hardware_id); release_address.has_value())
+        return release_from_spin_table(hardware_id, release_address.value(), slot_address);
     auto entry_physical = memory_manager().physical_address_of_kernel_image(secondary_entry);
     return AArch64::PSCI::cpu_on(hardware_id, entry_physical.get(), slot_address.get());
 }

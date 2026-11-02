@@ -78,6 +78,8 @@ public:
         case VULTURE_GPU_FLUSH: {
             auto const rect = TRY(copy_from_user<vulture_gpu_rect>(argument));
             MutexLocker locker(m_lock);
+            if (m_pages.is_empty())
+                return Error::from_errno(EINVAL);
             present(rect);
             return 0;
         }

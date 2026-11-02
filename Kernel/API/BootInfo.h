@@ -109,7 +109,10 @@ struct BootInfo {
     u64 entropy_size; // Valid bytes in `entropy` (0 if the firmware has no RNG).
     u8 entropy[64];
 
-    char command_line[256]; // Null-terminated contents of the boot-args file.
+    // What drives the SD card controller, where the firmware had to be asked. 0: the controller says.
+    u64 storage_clock_hz;
+
+    char command_line[248]; // Null-terminated contents of the boot-args file.
 };
 
 static_assert(sizeof(MemoryRegion) == 24);

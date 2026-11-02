@@ -64,11 +64,15 @@ u64 nanoseconds_from_ticks(u64 ticks)
 void initialize_wall_clock(DeviceTree::FlattenedDeviceTree const& device_tree)
 {
     auto const seconds = Arch::read_real_time_clock(device_tree);
+    u64 const counter_now = nanoseconds_from_ticks(now());
     if (!seconds.has_value()) {
-        dmesgln("Clock: no real-time clock; the time counts from 0 at boot");
+        // A Raspberry Pi 4 has nothing that keeps time with the power off. This isn't right, but it's closer than 1970,
+        // and certificates and file times can make something of it.
+        s_epoch_at_counter_zero = static_cast<u64>(VULTURE_BUILD_TIME) * nanoseconds_per_second - counter_now;
+        s_has_wall_clock = true;
+        dmesgln("Clock: no real-time clock; the time starts from when this was built, {} seconds since 1970", static_cast<u64>(VULTURE_BUILD_TIME));
         return;
     }
-    u64 const counter_now = nanoseconds_from_ticks(now());
     s_epoch_at_counter_zero = seconds.value() * nanoseconds_per_second - counter_now;
     s_has_wall_clock = true;
     dmesgln("Clock: the real-time clock reads {} seconds since 1970", seconds.value());

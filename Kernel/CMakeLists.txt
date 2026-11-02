@@ -28,6 +28,8 @@ else()
         Arch/aarch64/CPU.cpp
         Arch/aarch64/ContextSwitch.S
         Arch/aarch64/Exceptions.cpp
+        Arch/aarch64/GIC.cpp
+        Arch/aarch64/GICv2.cpp
         Arch/aarch64/GICv3.cpp
         Arch/aarch64/GenericTimer.cpp
         Arch/aarch64/PSCI.cpp
@@ -37,6 +39,7 @@ else()
         Arch/aarch64/UserAccess.S
         Arch/aarch64/UserContext.cpp
         Arch/aarch64/Vectors.S
+        Devices/Storage/SDCard.cpp
         Devices/Serial/PL011.cpp)
 endif()
 
@@ -142,6 +145,11 @@ set_target_properties(Kernel PROPERTIES
     OUTPUT_NAME vulture
     SUFFIX ""
     LINK_DEPENDS ${linker_script})
+
+# What a machine without a clock of its own believes the time is, at first. (From when this was last configured:
+# near enough, and it doesn't make every build rebuild this.)
+string(TIMESTAMP vulture_build_time "%s" UTC)
+set_source_files_properties(Time/Time.cpp PROPERTIES COMPILE_DEFINITIONS "VULTURE_BUILD_TIME=${vulture_build_time}")
 
 # What the sanitizers' own checks call, and what they rest on, can't be checked by them.
 if(VULTURE_KERNEL_SANITIZERS)

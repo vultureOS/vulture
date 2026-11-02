@@ -27,4 +27,10 @@ void add_disk(NonnullRefPtr<BlockDevice>, StringView description);
 // AHCI (class 01, subclass 06), with however many disks are on it.
 ErrorOr<void> create_ahci_disks(PCI::Device const&, u32& next_disk, Vector<NonnullRefPtr<BlockDevice>>& disks);
 
+#if defined(__aarch64__)
+// The SD card of a Raspberry Pi, from the device tree. What the controller's clock is, if the firmware said (0 otherwise).
+void set_sd_controller_clock(u64 hz);
+void initialize_sd_cards();
+#endif
+
 }

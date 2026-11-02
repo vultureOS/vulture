@@ -36,6 +36,7 @@
 #include <Kernel/Devices/USB/USB.h>
 #include <Kernel/Devices/Serial/BootSerial.h>
 #include <Kernel/Devices/Storage/BlockDevice.h>
+#include <Kernel/Devices/Storage/StorageControllers.h>
 #include <Kernel/FileSystem/IOBuffer.h>
 #include <Kernel/FileSystem/BootArchive.h>
 #include <Kernel/FileSystem/DevFS.h>
@@ -556,6 +557,9 @@ extern "C" [[noreturn, gnu::no_stack_protector]] void kernel_main(API::BootInfo 
     dmesgln("Kernel: {} KiB image at {:#x}, symbols {}", boot_info.kernel_image.size / KiB, boot_info.kernel_image.base,
         Symbols::is_available() ? "loaded"_sv : "unavailable"_sv);
     dmesgln("Entropy from firmware: {} bytes", boot_info.entropy_size);
+#if defined(__aarch64__)
+    set_sd_controller_clock(boot_info.storage_clock_hz);
+#endif
     initialize_random({ boot_info.entropy, min<size_t>(boot_info.entropy_size, sizeof(boot_info.entropy)) });
     initialize_stack_protector();
     show_progress(20);

@@ -6,7 +6,7 @@
 
 #include <Kernel/API/POSIX/signal_numbers.h>
 #include <Kernel/Arch/CPU.h>
-#include <Kernel/Arch/aarch64/GICv3.h>
+#include <Kernel/Arch/aarch64/GIC.h>
 #include <Kernel/Debug/Panic.h>
 #include <Kernel/Memory/UserAccess.h>
 #include <Kernel/Syscalls/Dispatch.h>

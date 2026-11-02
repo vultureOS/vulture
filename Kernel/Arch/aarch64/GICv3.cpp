@@ -5,7 +5,7 @@
  */
 
 #include <Kernel/Arch/InterruptController.h>
-#include <Kernel/Arch/aarch64/GICv3.h>
+#include <Kernel/Arch/aarch64/GIC.h>
 #include <Kernel/Arch/aarch64/MMIO.h>
 #include <Kernel/Arch/aarch64/SystemRegisters.h>
 #include <Kernel/Interrupts/InterruptHandlers.h>
@@ -19,12 +19,9 @@
 // reached through system registers. Every interrupt is Group 1 (IRQ) at
 // the same priority, so handlers never nest.
 
-namespace Kernel::Arch {
+namespace Kernel::AArch64::GICv3 {
 
-using AArch64::mmio_read32;
-using AArch64::mmio_read64;
-using AArch64::mmio_write32;
-using AArch64::mmio_write64;
+using namespace Kernel::Arch;
 
 namespace {
 
@@ -118,11 +115,9 @@ static FlatPtr current_redistributor()
     return redistributor;
 }
 
-ErrorOr<void> initialize_interrupt_controller(DeviceTree::FlattenedDeviceTree const& device_tree)
+ErrorOr<void> initialize(DeviceTree::FlattenedDeviceTree const& device_tree, DeviceTree::Node const& node_in_tree)
 {
-    auto node = device_tree.find_compatible_node("arm,gic-v3"_sv);
-    if (!node.has_value())
-        return Error::from_string_literal("no GICv3 in the device tree");
+    Optional<DeviceTree::Node> node = node_in_tree;
 
     auto distributor = device_tree.reg(node.value(), 0);
     if (!distributor.has_value())
@@ -198,7 +193,7 @@ static FlatPtr find_redistributor(u64 hardware_id)
     return 0;
 }
 
-ErrorOr<void> initialize_interrupt_controller_on_this_processor()
+ErrorOr<void> initialize_on_this_processor()
 {
     VERIFY(s_gic.distributor);
     FlatPtr gicr = find_redistributor(processor_hardware_id());
@@ -289,16 +284,12 @@ void send_ipi_to_others(IPI ipi)
     write_sgi_register(all_but_self | (static_cast<u64>(ipi) << 24));
 }
 
-void describe_interrupt_controller(FormatSink& sink)
+void describe(FormatSink& sink)
 {
     format_to(sink, "GICv3, distributor at {:#x}, {} interrupt lines, {} redistributor region{}, {} security state{}",
         s_gic.distributor_physical, s_gic.interrupt_lines, s_gic.region_count, s_gic.region_count == 1 ? ""_sv : "s"_sv,
         s_gic.single_security_state ? "one"_sv : "two"_sv, s_gic.single_security_state ? ""_sv : "s"_sv);
 }
-
-}
-
-namespace Kernel::AArch64 {
 
 void handle_irq()
 {
@@ -309,7 +300,7 @@ void handle_irq()
         // Complete the acknowledge before touching the device or memory.
         asm volatile("dsb sy" ::: "memory");
         u32 interrupt = acknowledge & 0xff'ffff;
-        if (interrupt >= Arch::first_special_interrupt && interrupt <= 1023)
+        if (interrupt >= first_special_interrupt && interrupt <= 1023)
             break;
         if (interrupt < ipi_count)
             Processor::handle_ipi(static_cast<IPI>(interrupt));

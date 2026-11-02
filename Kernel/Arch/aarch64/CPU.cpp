@@ -6,6 +6,8 @@
 
 #include <Kernel/API/BootInfo.h>
 #include <Kernel/Arch/CPU.h>
+#include <Kernel/Memory/MemoryManager.h>
+#include <LibDeviceTree/FlattenedDeviceTree.h>
 
 namespace Kernel::Arch {
 
@@ -21,7 +23,19 @@ StringView architecture_name()
 
 bool is_emulated_in_software()
 {
-    return false;
+    // QEMU's own processor says it's made by nobody. When it's imitating a real one, as on its Raspberry Pi, only
+    // what describes the machine can say.
+    constexpr u64 implementer_shift = 24;
+    if (((READ_SYSTEM_REGISTER(midr_el1) >> implementer_shift) & 0xff) == 0)
+        return true;
+    auto tree = DeviceTree::FlattenedDeviceTree::parse(memory_manager().device_tree());
+    if (tree.is_error())
+        return false;
+    auto root = tree.value().find_node_by_path("/"_sv);
+    if (!root.has_value())
+        return false;
+    auto model = tree.value().find_property(root.value(), "model"_sv);
+    return model.has_value() && model->as_string().contains("QEMU"_sv);
 }
 
 void halt()

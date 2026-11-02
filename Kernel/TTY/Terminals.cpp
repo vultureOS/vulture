@@ -398,9 +398,17 @@ Optional<u32> serial_interrupt()
     auto tree = DeviceTree::FlattenedDeviceTree::parse(memory_manager().device_tree());
     if (tree.is_error())
         return {};
+    // (A Raspberry Pi may name a different kind of port, which isn't the one in use. Then it's the first of these,
+    // as for the loader.)
+    auto is_pl011 = [&](DeviceTree::Node const& candidate) {
+        auto compatible = tree.value().find_property(candidate, "compatible"_sv);
+        return compatible.has_value() && (compatible->string_list_contains("arm,pl011"_sv) || compatible->string_list_contains("arm,pl011-axi"_sv));
+    };
     auto node = tree.value().find_stdout_node();
-    if (!node.has_value())
+    if (!node.has_value() || !is_pl011(node.value()))
         node = tree.value().find_compatible_node("arm,pl011"_sv);
+    if (!node.has_value())
+        node = tree.value().find_compatible_node("arm,pl011-axi"_sv);
     if (!node.has_value())
         return {};
     auto interrupts = tree.value().find_property(node.value(), "interrupts"_sv);
