@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Security/CodeSigning.h>
 #include <Kernel/FileSystem/TmpFS.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/memory.h>
@@ -38,6 +39,9 @@ ErrorOr<FlatPtr> Process::sys_mmap(TrapFrame&, SyscallArguments const& arguments
         // keep; not yet.
         if (shared)
             return Error::from_errno(ENOTSUP);
+        // Code comes from files that are vouched for, not from memory.
+        if ((protection & PROT_EXEC) && CodeSigning::is_enforced())
+            return Error::from_errno(EPERM);
         auto* region = TRY(m_address_space->map_anonymous(address, length, protection, (flags & MAP_STACK) ? "stack"_sv : "mmap"_sv, fixed));
         return region->base();
     }
@@ -52,7 +56,11 @@ ErrorOr<FlatPtr> Process::sys_mmap(TrapFrame&, SyscallArguments const& arguments
         return Error::from_errno(EACCES);
     if (offset % page_size != 0)
         return Error::from_errno(EINVAL);
+    if (protection & PROT_EXEC)
+        TRY(CodeSigning::check_mapped_file(*inode));
     auto* region = TRY(m_address_space->map_file(address, length, protection, fixed, *inode, offset, shared, shared && description->is_writable()));
+    if (protection & PROT_EXEC)
+        region->set_checked_code();
     return region->base();
 }
 

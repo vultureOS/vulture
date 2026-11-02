@@ -242,6 +242,7 @@ private:
 int main()
 {
     signal(SIGPIPE, SIG_IGN);
+    Package::trust_installed_code();
     auto port = IPC::check_in("com.vulture.installd"_sv);
     if (port.is_error()) {
         fprintf(stderr, "installd: check_in: %s\n", strerror(port.error().code()));

@@ -68,7 +68,8 @@ endfunction()
 vulture_add_part(host TOOLCHAIN host)
 # Both install into the EFI System Partition staging tree: the loader in
 # EFI/BOOT, the kernel in System/Library/Kernels.
-vulture_add_part(target TOOLCHAIN vulture-aarch64 INSTALL_DIR ${VULTURE_ESP_DIR})
+# (The kernel needs a host tool for the key the system is sealed with.)
+vulture_add_part(target TOOLCHAIN vulture-aarch64 INSTALL_DIR ${VULTURE_ESP_DIR} DEPENDS host)
 vulture_add_part(uefi TOOLCHAIN vulture-uefi-aarch64 INSTALL_DIR ${VULTURE_ESP_DIR})
 # Programs install into the root filesystem staging tree, which is packed
 # into the boot archive the kernel mounts as /.
@@ -85,6 +86,8 @@ add_custom_target(boot-archive ALL
     COMMAND ${CMAKE_COMMAND}
         -DTOOL=${CMAKE_BINARY_DIR}/host/Tools/mkarchive/mkarchive
         -DROOT=${VULTURE_ROOT_DIR}
+        -DSEAL_TOOL=${CMAKE_BINARY_DIR}/host/Tools/vseal/vseal
+        -DSEAL_KEY=${CMAKE_BINARY_DIR}/signing/system.key
         -DOUTPUT=${VULTURE_ESP_DIR}/System/Library/Kernels/vulture.bootarchive
         -P ${CMAKE_SOURCE_DIR}/Meta/CMake/MakeBootArchive.cmake
     DEPENDS host target userland

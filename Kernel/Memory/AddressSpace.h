@@ -43,6 +43,10 @@ public:
     void set_file(Inode&, i64 page_delta, bool shared, bool writer);
     [[nodiscard]] Inode* file() const { return m_file.ptr(); }
     [[nodiscard]] bool is_shared() const { return m_shared; }
+    // Code is only what was checked as such and has never been writable (Security/CodeSigning.h).
+    void set_checked_code() { m_checked_code = true; }
+    [[nodiscard]] bool is_checked_code() const { return m_checked_code; }
+    [[nodiscard]] bool has_been_writable() const { return m_has_been_writable; }
     [[nodiscard]] u64 file_page(size_t object_index) const { return static_cast<u64>(static_cast<i64>(object_index) + m_file_page_delta); }
 
 private:
@@ -58,6 +62,8 @@ private:
     RefPtr<Inode> m_file;
     i64 m_file_page_delta { 0 };
     bool m_shared { false };
+    bool m_checked_code { false };
+    bool m_has_been_writable { false };
     bool m_writer { false }; // Counted with the file as a shared writer.
     IntrusiveListNode m_list_node;
 };

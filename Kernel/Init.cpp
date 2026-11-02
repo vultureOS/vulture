@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Security/CodeSigning.h>
+#include <Kernel/Security/Seal.h>
 #include <Kernel/Memory/Heap.h>
 #include <Kernel/Security/DebugFault.h>
 #include <Kernel/API/POSIX/memory.h>
@@ -272,6 +274,8 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     make_directory("/tmp"_sv);
     must("devfs"_sv, VirtualFileSystem::mount(move(devices), "/dev"_sv));
     mount_volumes();
+    Seal::initialize(!arguments.has_flag("noseal"_sv));
+    CodeSigning::initialize(!arguments.has_flag("nocodesign"_sv));
     auto temporary = must("tmpfs"_sv, TmpFS::create());
     // Anyone may make files in /tmp; only their owners may remove them.
     must("/tmp"_sv, temporary->root_inode()->set_permissions(01777));

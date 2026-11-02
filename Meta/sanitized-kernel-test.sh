@@ -27,7 +27,7 @@ cmake -S "$source_dir" -B "$out" -G Ninja --no-warn-unused-cli \
     -DVULTURE_PART=target \
     -DVULTURE_KERNEL_SANITIZERS=ON \
     -DCMAKE_TOOLCHAIN_FILE="$source_dir/Meta/CMake/Toolchain/vulture-aarch64.cmake" \
-    -DVULTURE_HOST_TOOLS="$build_dir/host/Tools" > "$out.configure.log" 2>&1 || { tail -5 "$out.configure.log"; exit 1; }
+    -DVULTURE_HOST_TOOLS="$build_dir/host/Tools" -DVULTURE_SIGNING_DIR="$build_dir/signing" > "$out.configure.log" 2>&1 || { tail -5 "$out.configure.log"; exit 1; }
 ninja -C "$out" > "$out.build.log" 2>&1 || { grep -E "error|FAILED|undefined" "$out.build.log" | head -20; echo "sanitized-kernel-test: the build failed: see $out.build.log" >&2; exit 1; }
 
 # A copy of the boot volume, with this kernel on it. (The system's files are the usual ones.)

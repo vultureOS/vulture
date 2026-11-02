@@ -35,7 +35,9 @@ add_executable(Kernel
     Net/Socket.cpp
     Net/TCP.cpp
     Debug/Sanitizers.cpp
+    Security/CodeSigning.cpp
     Security/DebugFault.cpp
+    Security/Seal.cpp
     Security/StackProtector.cpp
     Syscalls/SocketCalls.cpp
     Devices/Graphics/VirtIOGPU.cpp
@@ -130,6 +132,18 @@ target_link_options(Kernel PRIVATE
     -Wl,-z,max-page-size=4096
     -Wl,--build-id=none)
 
-target_link_libraries(Kernel PRIVATE LibArchive LibDeviceTree LibELF LibVultureFS LibBase LibBaseFreestanding)
+target_link_libraries(Kernel PRIVATE LibArchive LibCrypto LibDeviceTree LibELF LibVultureFS LibBase LibBaseFreestanding)
+
+# The key the system's seal is checked with: see Tools/vseal, and Security/Seal.h.
+set(VULTURE_SIGNING_DIR ${VULTURE_HOST_TOOLS}/../../signing CACHE PATH "Where the key that signs the system is")
+set(system_key_header ${CMAKE_CURRENT_BINARY_DIR}/generated/SystemKey.h)
+add_custom_command(OUTPUT ${system_key_header}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/generated
+    COMMAND ${VULTURE_HOST_TOOLS}/vseal/vseal key ${VULTURE_SIGNING_DIR} ${system_key_header}
+    DEPENDS ${VULTURE_HOST_TOOLS}/vseal/vseal
+    VERBATIM)
+add_custom_target(SystemKeyHeader DEPENDS ${system_key_header})
+add_dependencies(Kernel SystemKeyHeader)
+target_include_directories(Kernel PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 install(TARGETS Kernel RUNTIME DESTINATION System/Library/Kernels)

@@ -5,12 +5,14 @@
  */
 
 #include "Test.h"
+#include <LibCrypto/SHA2.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -83,6 +85,10 @@ bool patched_copy(char const* source, char const* destination, char const* from,
         // Whole names only: NUL before and after.
         if (memcmp(file + i, from, size) == 0 && i > 0 && file[i - 1] == '\0' && file[i + size] == '\0') {
             memcpy(file + i, to, size);
+            // A program nobody has vouched for wouldn't get as far as dyld: so, as root, we do.
+            auto const hash = Crypto::SHA256::hash({ reinterpret_cast<u8 const*>(file), length });
+            if (sysctlbyname("security.code.trust", nullptr, nullptr, hash.data(), hash.size()) != 0)
+                return false;
             return write_all(destination, file, length, 0755);
         }
     }

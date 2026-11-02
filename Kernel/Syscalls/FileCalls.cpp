@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Security/Seal.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/termios.h>
 #include <Kernel/API/POSIX/time.h>
@@ -339,6 +340,7 @@ ErrorOr<FlatPtr> Process::sys_access(TrapFrame&, SyscallArguments const& argumen
 
 static ErrorOr<void> change_permissions(Inode& inode, u32 mode)
 {
+    TRY(Seal::check_may_change(inode));
     auto metadata = inode.metadata();
     TRY(check_owner(metadata));
     // Only a group member (or root) may keep the set-group-ID bit.
@@ -350,6 +352,7 @@ static ErrorOr<void> change_permissions(Inode& inode, u32 mode)
 
 static ErrorOr<void> change_owner(Inode& inode, i64 uid, i64 gid)
 {
+    TRY(Seal::check_may_change(inode));
     auto metadata = inode.metadata();
     auto const* credentials = current_credentials();
     u32 new_uid = uid < 0 ? metadata.uid : static_cast<u32>(uid);
@@ -433,6 +436,7 @@ static ErrorOr<void> change_times(Inode& inode, FlatPtr times_address)
             }
         }
     }
+    TRY(Seal::check_may_change(inode));
     // Setting times other than now takes ownership; now takes write access.
     if (explicit_times)
         TRY(check_owner(metadata));

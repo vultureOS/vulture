@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Security/CodeSigning.h>
 #include <Kernel/Arch/CPU.h>
 #include <Kernel/Security/Random.h>
 #include <Kernel/API/POSIX/errno.h>
@@ -26,6 +27,7 @@ Region::Region(FlatPtr base, size_t size, int protection, StringView name, Nonnu
     , m_protection(protection)
     , m_object(move(object))
     , m_object_first_page(object_first_page)
+    , m_has_been_writable(protection & PROT_WRITE)
 {
     m_name_length = min(name.length(), sizeof(m_name));
     __builtin_memcpy(m_name, name.characters_without_null_termination(), m_name_length);
@@ -212,6 +214,8 @@ ErrorOr<void> AddressSpace::split_around(FlatPtr address, size_t size)
                 return Error::from_errno(ENOMEM);
             if (region->m_file)
                 tail->set_file(*region->m_file, region->m_file_page_delta, region->m_shared, region->m_writer);
+            tail->m_checked_code = region->m_checked_code;
+            tail->m_has_been_writable = region->m_has_been_writable;
             region->m_size = boundary - region->base();
             insert_sorted(*tail);
         }
@@ -329,11 +333,27 @@ ErrorOr<void> AddressSpace::protect(FlatPtr address, size_t size, int protection
             return Error::from_errno(ENOMEM);
     }
     TRY(split_around(address, size));
+    // Nothing becomes code that hasn't been checked as code, or that anyone can have written.
+    if ((protection & PROT_EXEC) && CodeSigning::is_enforced()) {
+        for (auto& region : m_regions) {
+            if (region.base() < address || region.end() > address + size || region.m_checked_code)
+                continue;
+            if (!region.m_file || region.m_has_been_writable)
+                return Error::from_errno(EPERM);
+            TRY(CodeSigning::check_mapped_file(*region.m_file));
+            region.m_checked_code = true;
+        }
+    }
     for (auto& region : m_regions) {
         if (region.base() < address || region.end() > address + size)
             continue;
         bool becomes_code = (protection & PROT_EXEC) && !(region.m_protection & PROT_EXEC);
         region.m_protection = protection;
+        // Whatever it was checked as, from here on it could be anything.
+        if (protection & PROT_WRITE) {
+            region.m_has_been_writable = true;
+            region.m_checked_code = false;
+        }
         for (FlatPtr page = region.base(); page < region.end(); page += page_size) {
             auto physical = region.object().page(region.object_index(page));
             if (!physical.get())
@@ -427,6 +447,8 @@ ErrorOr<NonnullRefPtr<AddressSpace>> AddressSpace::clone_for_fork()
         if (!copy)
             return Error::from_errno(ENOMEM);
         child->m_regions.append(*copy);
+        copy->m_checked_code = region.m_checked_code;
+        copy->m_has_been_writable = region.m_has_been_writable;
         if (region.m_file)
             copy->set_file(*region.m_file, region.m_file_page_delta + static_cast<i64>(region.object_index(region.base())), region.m_shared, region.m_writer);
         // Now shared: our writable pages must fault on the next write

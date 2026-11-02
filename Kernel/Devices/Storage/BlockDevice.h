@@ -19,6 +19,7 @@ public:
     static constexpr size_t block_size = 512;
 
     [[nodiscard]] StringView name() const { return m_name.view(); }
+    [[nodiscard]] StringView block_device_name() const override { return m_name.view(); }
     [[nodiscard]] u64 block_count() const { return m_block_count; }
     [[nodiscard]] bool is_read_only() const { return m_read_only; }
 

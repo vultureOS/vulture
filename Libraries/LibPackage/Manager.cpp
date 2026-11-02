@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 
 namespace Package {
@@ -171,6 +172,27 @@ ErrorOr<Vector<u8>> fetch_to_memory(StringView url_text, Repository const& repos
         return Error::from_string_literal("the repository's server doesn't have that");
     }
     return body;
+}
+
+bool decode_hash(StringView text, u8* output)
+{
+    if (text.length() != 64)
+        return false;
+    auto digit = [](char c) -> int {
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        return -1;
+    };
+    for (size_t i = 0; i < 32; ++i) {
+        int const high = digit(text[i * 2]);
+        int const low = digit(text[i * 2 + 1]);
+        if (high < 0 || low < 0)
+            return false;
+        output[i] = static_cast<u8>(high << 4 | low);
+    }
+    return true;
 }
 
 String cache_path_of(Repository const& repository, StringView suffix)
@@ -416,6 +438,17 @@ ErrorOr<void> install(StringView name, Progress const& progress)
     if (problem.has_value())
         return problem.release_value();
 
+    // The signed index has vouched for all of this, so the kernel may run its code.
+    Vector<String> code_hashes;
+    TRY(tar.for_each_entry([&](Archive::TarEntry const& entry) {
+        if (entry.type == Archive::TarEntryType::File && entry.data.size() >= 4 && entry.data[0] == 0x7f && entry.data[1] == 'E' && entry.data[2] == 'L' && entry.data[3] == 'F') {
+            auto const hash = Crypto::SHA256::hash(entry.data);
+            code_hashes.append(hex_of(hash.span()));
+            (void)sysctlbyname("security.code.trust", nullptr, nullptr, hash.data(), hash.size());
+        }
+        return Archive::IterationDecision::Continue;
+    }));
+
     // Unpacked beside their places, and then all moved in.
     Vector<String> staged;
     auto undo_staged = [&] {
@@ -506,6 +539,10 @@ ErrorOr<void> install(StringView name, Progress const& progress)
     for (auto const& file : files)
         MUST(list.append(string_value(file.view())));
     MUST(record.set("files"_sv, move(list)));
+    auto code_list = JSON::Value::array();
+    for (auto const& hash : code_hashes)
+        MUST(code_list.append(string_value(hash.view())));
+    MUST(record.set("code"_sv, move(code_list)));
     auto text = MUST(record.serialize());
     mkdir(database_directory, 0755);
     StringBuilder record_name;
@@ -556,10 +593,54 @@ ErrorOr<void> remove(StringView name)
     }
     StringBuilder record_name;
     record_name.appendff("{}.json", name);
-    unlink(path_in(database_directory, record_name.view()).characters());
+    auto record_path = path_in(database_directory, record_name.view());
+    // And the kernel needn't run any of that any more.
+    if (auto record = read_whole_file(record_path.characters()); !record.is_error()) {
+        auto root = JSON::parse({ reinterpret_cast<char const*>(record.value().data()), record.value().size() });
+        if (!root.is_error()) {
+            if (auto const* code = root.value().get("code"_sv); code && code->is_array()) {
+                for (size_t i = 0; i < code->size(); ++i) {
+                    u8 hash[32];
+                    if (code->at(i).is_string() && decode_hash(code->at(i).as_string(), hash))
+                        (void)sysctlbyname("security.code.distrust", nullptr, nullptr, hash, sizeof(hash));
+                }
+            }
+        }
+    }
+    unlink(record_path.characters());
     sync();
     notify_post("com.vulture.software.changed");
     return {};
+}
+
+void trust_installed_code()
+{
+    auto all = installed();
+    if (all.is_error())
+        return;
+    DIR* directory = opendir(database_directory);
+    if (!directory)
+        return;
+    while (auto* entry = readdir(directory)) {
+        StringView const name { entry->d_name, strlen(entry->d_name) };
+        if (!name.ends_with(".json"_sv))
+            continue;
+        auto bytes = read_whole_file(path_in(database_directory, name).characters());
+        if (bytes.is_error())
+            continue;
+        auto root = JSON::parse({ reinterpret_cast<char const*>(bytes.value().data()), bytes.value().size() });
+        if (root.is_error())
+            continue;
+        auto const* code = root.value().get("code"_sv);
+        if (!code || !code->is_array())
+            continue;
+        for (size_t i = 0; i < code->size(); ++i) {
+            u8 hash[32];
+            if (code->at(i).is_string() && decode_hash(code->at(i).as_string(), hash))
+                (void)sysctlbyname("security.code.trust", nullptr, nullptr, hash, sizeof(hash));
+        }
+    }
+    closedir(directory);
 }
 
 String describe_catalog()

@@ -45,6 +45,10 @@ using Progress = Function<void(u32 percent)>;
 ErrorOr<void> install(StringView name, Progress const& = nullptr);
 ErrorOr<void> remove(StringView name);
 
+// What is installed may run: for the kernel, which forgets this at every boot. (installd does this
+// as it starts.)
+void trust_installed_code();
+
 // The catalog, as the installer service describes it.
 [[nodiscard]] String describe_catalog();
 

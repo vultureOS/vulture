@@ -5,7 +5,9 @@
  */
 
 #include "Test.h"
+#include <Kernel/API/POSIX/sysctl.h>
 #include <LibBase/Types.h>
+#include <LibCrypto/SHA2.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -14,6 +16,8 @@
 #include <string.h>
 #include <sys/auxv.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -107,6 +111,188 @@ void test_write_xor_execute()
     CHECK(ends_in_memory_fault(run_in_child([] { reinterpret_cast<void (*)()>(16)(); })));
     // And the kernel's half isn't there at all, from here.
     CHECK(ends_in_memory_fault(run_in_child([] { (void)*reinterpret_cast<u32 volatile*>(0xffffffff80000000); })));
+}
+
+// A copy of a program on the system, changed in `change_at` if that isn't negative.
+bool make_copy(char const* from, char const* to, off_t change_at)
+{
+    int in = open(from, O_RDONLY);
+    int out = open(to, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+    if (in < 0 || out < 0)
+        return false;
+    static u8 buffer[64 * 1024];
+    for (;;) {
+        ssize_t got = read(in, buffer, sizeof(buffer));
+        if (got <= 0)
+            break;
+        if (write(out, buffer, static_cast<size_t>(got)) != got)
+            return false;
+    }
+    if (change_at >= 0) {
+        u8 byte = 0;
+        CHECK(pread(in, &byte, 1, change_at) == 1);
+        byte ^= 0xff;
+        CHECK(pwrite(out, &byte, 1, change_at) == 1);
+    }
+    close(in);
+    close(out);
+    return true;
+}
+
+// What it exits with, or -errno if it wouldn't run at all.
+int run_program(char const* path)
+{
+    int fds[2];
+    CHECK(pipe2(fds, O_CLOEXEC) == 0);
+    pid_t child = fork();
+    if (child == 0) {
+        int null = open("/dev/null", O_WRONLY);
+        dup2(null, 1);
+        dup2(null, 2);
+        char arg0[] = "true";
+        char* arguments[] = { arg0, nullptr };
+        execv(path, arguments);
+        int const error = errno;
+        (void)!write(fds[1], &error, sizeof(error));
+        _exit(127);
+    }
+    close(fds[1]);
+    int error = 0;
+    ssize_t const got = read(fds[0], &error, sizeof(error));
+    close(fds[0]);
+    int status = 0;
+    waitpid(child, &status, 0);
+    if (got == sizeof(error))
+        return -error;
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 128;
+}
+
+void test_code_signing()
+{
+    int enforced = 0;
+    size_t size = sizeof(enforced);
+    CHECK(sysctlbyname("security.code.enforced", &enforced, &size, nullptr, 0) == 0 && enforced == 1);
+
+    // A faithful copy is the same program: its hash is what is vouched for.
+    constexpr char const* copy = "/tmp/hardening-copy";
+    CHECK(make_copy("/usr/bin/true", copy, -1));
+    CHECK(run_program(copy) == 0);
+    // One byte different isn't. (One far from anything that would stop it being a program.)
+    CHECK(make_copy("/usr/bin/true", copy, 4000));
+    CHECK(run_program(copy) == -EPERM);
+
+    // Root vouching for it is what lets it run, and taking that back stops it.
+    {
+        u8 bytes[64 * 1024];
+        int fd = open(copy, O_RDONLY);
+        CHECK(fd >= 0);
+        Crypto::SHA256 hasher;
+        for (;;) {
+            ssize_t got = read(fd, bytes, sizeof(bytes));
+            if (got <= 0)
+                break;
+            hasher.update({ bytes, static_cast<size_t>(got) });
+        }
+        close(fd);
+        auto const hash = hasher.digest();
+        CHECK(sysctlbyname("security.code.trust", nullptr, nullptr, hash.data(), hash.size()) == 0);
+        CHECK(run_program(copy) == 0);
+        CHECK(sysctlbyname("security.code.distrust", nullptr, nullptr, hash.data(), hash.size()) == 0);
+        CHECK(run_program(copy) == -EPERM);
+    }
+
+    // Nothing that isn't a file vouched for can be code at all.
+    void* anonymous = mmap(nullptr, 4096, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK(anonymous == MAP_FAILED && errno == EPERM);
+    void* written = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK(written != MAP_FAILED);
+    CHECK(mprotect(written, 4096, PROT_READ) == 0);
+    CHECK(mprotect(written, 4096, PROT_READ | PROT_EXEC) == -1 && errno == EPERM);
+    munmap(written, 4096);
+
+    int fd = open(copy, O_RDONLY);
+    CHECK(fd >= 0);
+    CHECK(mmap(nullptr, 4096, PROT_READ | PROT_EXEC, MAP_PRIVATE, fd, 0) == MAP_FAILED && errno == EPERM);
+    void* readable = mmap(nullptr, 4096, PROT_READ, MAP_PRIVATE, fd, 0);
+    CHECK(readable != MAP_FAILED);
+    CHECK(mprotect(readable, 4096, PROT_READ | PROT_EXEC) == -1 && errno == EPERM);
+    munmap(readable, 4096);
+    close(fd);
+    unlink(copy);
+
+    // A library that came with the system can be mapped as code; but not if it was ever writable.
+    fd = open("/usr/lib/libSystem.B.dylib", O_RDONLY);
+    CHECK(fd >= 0);
+    void* library = mmap(nullptr, 4096, PROT_READ | PROT_EXEC, MAP_PRIVATE, fd, 0);
+    CHECK(library != MAP_FAILED);
+    munmap(library, 4096);
+    void* changed = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+    CHECK(changed != MAP_FAILED);
+    *static_cast<u8*>(changed) ^= 1;
+    CHECK(mprotect(changed, 4096, PROT_READ | PROT_EXEC) == -1 && errno == EPERM);
+    munmap(changed, 4096);
+    close(fd);
+}
+
+void test_seal()
+{
+    int active = 0;
+    size_t size = sizeof(active);
+    CHECK(sysctlbyname("security.seal.active", &active, &size, nullptr, 0) == 0 && active == 1);
+    CHECK(geteuid() == 0);
+
+    // Not even root.
+    auto is_read_only = [](int result) { return result == -1 && errno == EROFS; };
+    CHECK(is_read_only(open("/bin/ls", O_WRONLY)));
+    CHECK(is_read_only(open("/bin/ls", O_RDWR)));
+    CHECK(is_read_only(open("/bin/ls", O_RDONLY | O_TRUNC)));
+    CHECK(is_read_only(open("/bin/new-file", O_WRONLY | O_CREAT, 0644)));
+    CHECK(is_read_only(open("/System/Library/new-file", O_WRONLY | O_CREAT, 0644)));
+    CHECK(is_read_only(open("/usr/lib/libSystem.B.dylib", O_WRONLY)));
+    CHECK(is_read_only(open("/System/Library/Seal/Manifest", O_WRONLY)));
+    CHECK(is_read_only(unlink("/bin/ls")));
+    CHECK(is_read_only(rename("/bin/ls", "/bin/ls2")));
+    CHECK(is_read_only(rename("/bin/ls", "/tmp/ls")) || errno == EXDEV);
+    CHECK(is_read_only(rename("/System", "/System2")));
+    CHECK(is_read_only(rename("/usr/local", "/usr/local2")));
+    CHECK(is_read_only(rmdir("/usr/share")));
+    CHECK(is_read_only(mkdir("/System/new-folder", 0755)));
+    CHECK(is_read_only(symlink("/tmp", "/usr/bin/new-link")));
+    CHECK(is_read_only(link("/bin/ls", "/usr/bin/ls2")));
+    CHECK(is_read_only(link("/bin/ls", "/Users/hard-link-to-ls")));
+    CHECK(is_read_only(chmod("/usr/bin/id", 04755)));
+    CHECK(is_read_only(chown("/bin/ls", 501, 20)));
+    CHECK(is_read_only(truncate("/bin/ls", 0)));
+    timespec times[2] = { { 0, 0 }, { 0, 0 } };
+    CHECK(is_read_only(utimensat(AT_FDCWD, "/bin/ls", times, 0)));
+    CHECK(is_read_only(open("/etc/ssl/cert.pem", O_WRONLY)));
+    // Nor by going to the disk underneath, whichever name it goes by.
+    vulture_mount_info mounts[8];
+    size = sizeof(mounts);
+    CHECK(sysctlbyname("vfs.mounts", mounts, &size, nullptr, 0) == 0);
+    char device[64];
+    snprintf(device, sizeof(device), "/dev/%s", mounts[0].device);
+    if (access(device, F_OK) == 0) {
+        CHECK(open(device, O_WRONLY) == -1 && errno == EPERM);
+        char* partition = strrchr(device, 's');
+        if (partition && partition > device + 5) {
+            *partition = 0;
+            CHECK(open(device, O_RDWR) == -1 && errno == EPERM);
+        }
+    }
+
+    // Reading still works, and the places left open are open.
+    int fd = open("/bin/ls", O_RDONLY);
+    CHECK(fd >= 0);
+    close(fd);
+    fd = open("/usr/local/hardening-test", O_WRONLY | O_CREAT, 0644);
+    CHECK(fd >= 0);
+    close(fd);
+    CHECK(unlink("/usr/local/hardening-test") == 0);
+    CHECK(mkdir("/Applications/Hardening-Test.app", 0755) == 0);
+    CHECK(rmdir("/Applications/Hardening-Test.app") == 0);
+    // What the system came with in there isn't open, though.
+    CHECK(is_read_only(rename("/Applications/Calculator.app", "/Applications/Calculator2.app")));
 }
 
 void test_stack_protector()
@@ -253,6 +439,8 @@ int main(int, char** argv)
     test_write_xor_execute();
     test_stack_protector();
     test_control_flow();
+    test_code_signing();
+    test_seal();
     test_layout_randomization(argv[0]);
     return finish();
 }

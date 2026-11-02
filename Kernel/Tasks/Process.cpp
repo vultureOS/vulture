@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Security/CodeSigning.h>
 #include <Kernel/Security/Random.h>
 #include <Kernel/API/POSIX/auxv.h>
 #include <Kernel/API/POSIX/errno.h>
@@ -488,6 +489,9 @@ static ErrorOr<LoadedImage> load_image(AddressSpace& space, ELF::Image const& im
         }
         auto* region = TRY(space.map_anonymous(start, end - start, protection, name, true));
         TRY(write_to_region(*region, vaddr, image.segment_data(segment)));
+        // (exec checked the file, before it got here.)
+        if (protection & PROT_EXEC)
+            region->set_checked_code();
         if (protection & PROT_EXEC) {
             for (FlatPtr page = start; page < end; page += page_size) {
                 auto physical = region->object().page(region->object_index(page));
@@ -546,6 +550,9 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     if ((header.e_type != ELF::ET_EXEC && header.e_type != ELF::ET_DYN) || header.e_machine != ELF::EM_AARCH64)
         return Error::from_errno(ENOEXEC);
 
+    // Is this something that may run at all?
+    auto const origin = TRY(CodeSigning::check_program(*resolved.inode, executable->bytes(), resolved.path.view()));
+
     // A dynamically linked program names its dynamic linker (/usr/lib/dyld),
     // which the kernel loads too and starts instead; it loads the libraries.
     RefPtr<KernelBuffer> interpreter;
@@ -562,6 +569,7 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
             return Error::from_errno(ENOEXEC);
         auto resolved_interpreter = TRY(VirtualFileSystem::resolve(interpreter_path, "/"_sv));
         interpreter = TRY(read_executable(*resolved_interpreter.inode));
+        (void)TRY(CodeSigning::check_program(*resolved_interpreter.inode, interpreter->bytes(), interpreter_path));
         auto parsed = ELF::Image::parse(interpreter->bytes());
         if (parsed.is_error())
             return Error::from_errno(ENOEXEC);
@@ -579,6 +587,7 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     if (header.e_type == ELF::ET_DYN && !interpreter)
         return Error::from_errno(ENOEXEC);
 
+    (void)origin;
     auto random_pages = [](u64 count) {
         u64 random;
         get_random_bytes({ reinterpret_cast<u8*>(&random), sizeof(random) });

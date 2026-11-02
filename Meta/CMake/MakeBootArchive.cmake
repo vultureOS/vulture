@@ -7,6 +7,13 @@
 # (OUTPUT) with mkarchive (TOOL), in a stable order.
 
 file(GLOB_RECURSE files LIST_DIRECTORIES true RELATIVE ${ROOT} ${ROOT}/*)
+# (Made below, from the rest. Any from an earlier build says nothing about this one. A test of what
+# happens to a system that has been tampered with says KEEP_SEAL, for the seal it had before.)
+if(NOT KEEP_SEAL)
+    list(FILTER files EXCLUDE REGEX "^System/Library/Seal")
+endif()
+# What a test delivers as a package isn't on the system until it has been installed.
+list(FILTER files EXCLUDE REGEX "^usr/tests/package-payload")
 # A bracket in a name ("/bin/[") would group list items, so brackets are
 # stood in for while the list is worked on; the names go to mkarchive one
 # per line.
@@ -64,4 +71,19 @@ file(WRITE ${list_file} "${listing}\n")
 execute_process(COMMAND ${TOOL} ${OUTPUT} ${ROOT} @${list_file} RESULT_VARIABLE result)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "mkarchive failed")
+endif()
+
+# The seal: made from what really went into the archive, and then put in it too.
+if(SEAL_TOOL)
+    file(MAKE_DIRECTORY ${ROOT}/System/Library/Seal)
+    execute_process(COMMAND ${SEAL_TOOL} seal ${OUTPUT} ${SEAL_KEY}
+        ${ROOT}/System/Library/Seal/Manifest ${ROOT}/System/Library/Seal/Manifest.sig RESULT_VARIABLE result)
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "vseal failed")
+    endif()
+    file(APPEND ${list_file} "System/Library/Seal/\t755\nSystem/Library/Seal/Manifest\nSystem/Library/Seal/Manifest.sig\n")
+    execute_process(COMMAND ${TOOL} ${OUTPUT} ${ROOT} @${list_file} RESULT_VARIABLE result)
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "mkarchive failed")
+    endif()
 endif()

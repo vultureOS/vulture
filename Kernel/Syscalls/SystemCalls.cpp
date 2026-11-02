@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Security/CodeSigning.h>
+#include <Kernel/Security/Seal.h>
 #include <Kernel/Security/DebugFault.h>
 #include <Kernel/API/POSIX/socket.h>
 #include <Kernel/Net/NetworkStack.h>
@@ -257,6 +259,23 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
         else if (debug_fault() == "user-execute"_sv)
             reinterpret_cast<void (*)()>(new_buffer)();
         set_number(0u);
+    } else if (name == "security.seal.active"_sv) {
+        set_number(Seal::is_active() ? 1 : 0);
+    } else if (name == "security.code.enforced"_sv) {
+        set_number(CodeSigning::is_enforced() ? 1 : 0);
+    } else if (name == "security.code.trust"_sv || name == "security.code.distrust"_sv) {
+        // What root, having checked it, vouches for: see Security/CodeSigning.h.
+        if (!m_credentials.is_superuser())
+            return Error::from_errno(EPERM);
+        if (new_length != CodeSigning::hash_size)
+            return Error::from_errno(EINVAL);
+        u8 hash[CodeSigning::hash_size];
+        TRY(copy_from_user(hash, new_buffer, sizeof(hash)));
+        if (name == "security.code.trust"_sv)
+            TRY(CodeSigning::trust(hash));
+        else
+            CodeSigning::distrust(hash);
+        set_number(0);
     } else if (name == "hw.optional.hwcap"_sv) {
         // What the processor can do, for programs to choose code by: bits as in AT_HWCAP.
         set_number(Arch::hardware_capabilities());

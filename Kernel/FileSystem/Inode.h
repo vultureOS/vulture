@@ -116,6 +116,8 @@ public:
     virtual ErrorOr<NonnullRefPtr<Inode>> open_inode(int flags);
     virtual ErrorOr<FlatPtr> ioctl(FileDescription&, unsigned request, FlatPtr argument);
     [[nodiscard]] virtual TTY* as_tty() { return nullptr; }
+    // Block devices: what they are called in /dev.
+    [[nodiscard]] virtual StringView block_device_name() const { return {}; }
     // For poll(): whether a read or a write would not block.
     [[nodiscard]] virtual bool can_read() const { return true; }
     [[nodiscard]] virtual bool can_write() const { return true; }
