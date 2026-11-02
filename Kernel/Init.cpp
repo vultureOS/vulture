@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Memory/Compressor.h>
 #include <Kernel/Security/Privacy.h>
 #include <Kernel/Security/CodeSigning.h>
 #include <Kernel/Security/Seal.h>
@@ -267,6 +268,7 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     initialize_audio();
     Net::NetworkStack::initialize();
     Privacy::initialize();
+    Compressor::initialize();
     initialize_storage();
     if (!mount_root_file_system(boot_info)) {
         dmesgln("Userland: no root disk and no boot archive, so no init");

@@ -447,6 +447,8 @@ public:
         m_memory_label = &right.add<Label>("Memory: \xE2\x80\x94"_sv);
         m_free_label = &right.add<Label>(StringView {});
         m_free_label->set_style(LabelStyle::Secondary);
+        m_compressed_label = &right.add<Label>(StringView {});
+        m_compressed_label->set_style(LabelStyle::Secondary);
 
         window.show();
         (void)window.make_first_responder(&table);
@@ -486,6 +488,10 @@ private:
         available.append("Free: "_sv);
         available.append(format_bytes(free).view());
         m_free_label->set_text(available.view());
+        StringBuilder compressed;
+        compressed.append("Compressed: "_sv);
+        compressed.append(format_bytes(system_value<u64>("vm.compressor.pool_bytes")).view());
+        m_compressed_label->set_text(compressed.view());
     }
 
     void reload()
@@ -550,6 +556,7 @@ private:
     Label* m_processes_label { nullptr };
     Label* m_memory_label { nullptr };
     Label* m_free_label { nullptr };
+    Label* m_compressed_label { nullptr };
     ProcessModel m_model;
     int m_selected_pid { -1 };
     bool m_restoring { false };

@@ -5,7 +5,8 @@
 #
 
 add_executable(TestLibCompress
-    TestDeflate.cpp)
+    TestDeflate.cpp
+    TestPageCompression.cpp)
 
 target_link_libraries(TestLibCompress PRIVATE LibTest LibCompress LibBase)
 add_test(NAME LibCompress COMMAND TestLibCompress)

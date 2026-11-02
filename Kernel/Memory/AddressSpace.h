@@ -106,6 +106,15 @@ public:
 
     PageFaultResult handle_fault(FlatPtr address, AccessKind);
 
+    // Goes over up to `budget` of its pages for the compressor, from where it last left off
+    // (Memory/Compressor.h). Passes if the address space is in use.
+    struct ReclaimResult {
+        size_t examined { 0 };
+        size_t aged { 0 };
+        size_t freed { 0 };
+    };
+    ReclaimResult reclaim(size_t budget);
+
     // For fork: a copy that shares every page copy-on-write.
     [[nodiscard]] ErrorOr<NonnullRefPtr<AddressSpace>> clone_for_fork();
 
@@ -127,8 +136,10 @@ public:
     // and an object mapped at a free address.
     ErrorOr<NonnullRefPtr<AnonymousVMObject>> copy_range(FlatPtr address, size_t size);
     ErrorOr<FlatPtr> map_object(NonnullRefPtr<AnonymousVMObject>, size_t size, int protection, StringView name);
-    // Pages the program has touched (some may be shared).
+    // Pages the program has touched (some may be shared), that are in memory as they are.
     [[nodiscard]] size_t resident_pages();
+    // And those that have been compressed: what would be in memory, if there were room for it all.
+    [[nodiscard]] size_t footprint_pages();
     [[nodiscard]] Arch::PageTable const& page_table() const { return m_page_table; }
     [[nodiscard]] u16 asid() const { return m_asid; }
 
@@ -147,10 +158,13 @@ private:
     // Removes [start, end) of `region` from the page table and releases
     // the pages behind it.
     void release_range(Region&, FlatPtr start, FlatPtr end);
+    PageFaultResult handle_fault_once(FlatPtr address, AccessKind);
     void insert_sorted(Region&);
     ErrorOr<void> split_around(FlatPtr address, size_t size);
 
     Mutex m_lock;
+    // Where reclaim() goes on from.
+    FlatPtr m_reclaim_hand { 0 };
     Arch::PageTable m_page_table;
     u16 m_asid { 0 };
     IntrusiveList<Region, &Region::m_list_node> m_regions;

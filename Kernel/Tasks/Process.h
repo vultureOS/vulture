@@ -67,11 +67,14 @@ public:
     [[nodiscard]] ProcessID parent_pid() const;
     [[nodiscard]] StringView name() const { return { m_name, m_name_length }; }
     [[nodiscard]] AddressSpace* address_space() { return m_address_space.ptr(); }
+    // For another thread: it stays good, whatever exec and exit do meanwhile.
+    [[nodiscard]] RefPtr<AddressSpace> address_space_reference();
 
     // "debug" on the kernel command line: the kernel log says what every process does.
     static void set_tracing(bool);
     [[nodiscard]] static bool is_tracing();
     [[nodiscard]] bool is_zombie() const { return m_zombie.load(MemoryOrder::Acquire); }
+    [[nodiscard]] bool is_being_killed() const;
     // Job control: the process group and session.
     [[nodiscard]] ProcessID pgid() const { return m_pgid.load(); }
     [[nodiscard]] ProcessID sid() const { return m_sid.load(); }

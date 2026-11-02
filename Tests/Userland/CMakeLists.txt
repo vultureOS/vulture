@@ -35,6 +35,7 @@ set(tests
     permissions
     pipes
     ports
+    compressor
     posix
     privacy
     process-info

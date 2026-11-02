@@ -72,6 +72,7 @@ add_executable(Kernel
     Memory/AddressSpace.cpp
     Memory/AnonymousVMObject.cpp
     Memory/BuddyAllocator.cpp
+    Memory/Compressor.cpp
     Memory/Heap.cpp
     Memory/MemoryManager.cpp
     Memory/PhysicalMemory.cpp
@@ -134,7 +135,7 @@ target_link_options(Kernel PRIVATE
     -Wl,-z,max-page-size=4096
     -Wl,--build-id=none)
 
-target_link_libraries(Kernel PRIVATE LibArchive LibCrypto LibDeviceTree LibELF LibVultureFS LibBase LibBaseFreestanding)
+target_link_libraries(Kernel PRIVATE LibArchive LibCompress LibCrypto LibDeviceTree LibELF LibVultureFS LibBase LibBaseFreestanding)
 
 # The key the system's seal is checked with: see Tools/vseal, and Security/Seal.h.
 set(VULTURE_SIGNING_DIR ${VULTURE_HOST_TOOLS}/../../signing CACHE PATH "Where the key that signs the system is")

@@ -39,6 +39,7 @@
 #                       with --headless, a new disk for every run
 #   --fresh-disk        make the root disk anew from the build first
 #   --no-disk           no root disk: the root is the boot archive, in memory
+#   --memory SIZE       how much memory the machine has (default: 4G)
 #   --nvme              attach the root disk as NVMe instead of virtio-blk
 #   --image FILE        boot a whole-disk image (ninja image) on its own,
 #                       instead of the build's EFI directory and root disk;
@@ -88,6 +89,7 @@ wait_for_exit=0
 screenshot=""
 disk=""
 image=""
+memory_size=4G
 use_disk=1
 fresh_disk=0
 disk_interface="virtio-blk-pci,drive=root"
@@ -113,6 +115,7 @@ while [ $# -gt 0 ]; do
         --disk) disk="$2"; shift 2 ;;
         --fresh-disk) fresh_disk=1; shift ;;
         --no-disk) use_disk=0; shift ;;
+        --memory) memory_size="$2"; shift 2 ;;
         --nvme) disk_interface="nvme,drive=root,serial=VULTURE0001"; shift ;;
         --image) image="$2"; use_disk=0; shift 2 ;;
         --kill) kill_power=1; shift ;;
@@ -303,7 +306,7 @@ args=(
     # acpi=off makes the firmware publish a device tree, which the kernel uses for hardware discovery.
     -machine virt,gic-version=3,acpi=off
     -smp 8
-    -m 4G
+    -m "$memory_size"
     -drive "if=pflash,format=raw,unit=0,readonly=on,file=$firmware_code"
     -drive "if=pflash,format=raw,unit=1,file=$vars_file"
     "${boot_disk_args[@]}"

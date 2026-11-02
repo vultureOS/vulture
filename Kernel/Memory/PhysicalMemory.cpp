@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/Debug/KernelLog.h>
+#include <Kernel/Memory/Compressor.h>
 #include <Kernel/Memory/PhysicalMemory.h>
 #include <Kernel/Tasks/Processor.h>
 
@@ -159,15 +160,38 @@ Optional<PhysicalAddress> PhysicalMemoryManager::allocate_from_zones(unsigned or
     return {};
 }
 
-void PhysicalMemoryManager::refill_cache(PhysicalPageCache& cache)
+void PhysicalMemoryManager::update_free_estimate()
+{
+    VERIFY(m_lock.is_locked_by_current_processor());
+    size_t free = 0;
+    for (size_t i = 0; i < m_zone_count; ++i)
+        free += m_zones[i].free_pages();
+    m_free_estimate.store(free);
+}
+
+void PhysicalMemoryManager::set_pressure_levels(size_t managed_pages)
 {
     SpinLockGuard guard(m_lock);
-    while (cache.count < PhysicalPageCache::batch) {
-        auto page = allocate_from_zones(0, PageUse::Cached);
-        if (!page.has_value())
-            break;
-        cache.pages[cache.count++] = page.value();
+    m_low_pages = managed_pages / 16;
+    m_plenty_pages = managed_pages / 10;
+    m_reserved_pages = managed_pages / 64;
+    update_free_estimate();
+}
+
+void PhysicalMemoryManager::refill_cache(PhysicalPageCache& cache)
+{
+    {
+        SpinLockGuard guard(m_lock);
+        while (cache.count < PhysicalPageCache::batch) {
+            auto page = allocate_from_zones(0, PageUse::Cached);
+            if (!page.has_value())
+                break;
+            cache.pages[cache.count++] = page.value();
+        }
+        update_free_estimate();
     }
+    if (is_low())
+        Compressor::memory_is_low();
 }
 
 void PhysicalMemoryManager::flush_cache(PhysicalPageCache& cache, u32 count)
@@ -177,6 +201,7 @@ void PhysicalMemoryManager::flush_cache(PhysicalPageCache& cache, u32 count)
         auto page = cache.pages[--cache.count];
         zone_containing(page)->free(page);
     }
+    update_free_estimate();
 }
 
 ErrorOr<PhysicalAddress> PhysicalMemoryManager::allocate_pages(unsigned order, PageUse use)
@@ -197,6 +222,7 @@ ErrorOr<PhysicalAddress> PhysicalMemoryManager::allocate_pages(unsigned order, P
 
     SpinLockGuard guard(m_lock);
     auto block = allocate_from_zones(order, use);
+    update_free_estimate();
     if (!block.has_value())
         return Error::from_string_literal("out of physical memory");
     return block.value();
@@ -229,7 +255,9 @@ unsigned PhysicalMemoryManager::free_pages(PhysicalAddress address)
     }
 
     SpinLockGuard guard(m_lock);
-    return zone->free(address);
+    auto const freed_order = zone->free(address);
+    update_free_estimate();
+    return freed_order;
 }
 
 PageUse PhysicalMemoryManager::block_use(PhysicalAddress address) const

@@ -61,9 +61,10 @@ attempt fault=ubsan-shift "KERNEL PANIC: UBSan: a shift out of bounds at Kernel/
 attempt fault=ubsan-bounds "KERNEL PANIC: UBSan: an index out of bounds at Kernel/Init.cpp"
 
 # And nothing goes off in ordinary use.
-find_nothing() { # boot-arguments expected-text timeout
+find_nothing() { # boot-arguments expected-text timeout [more arguments for run.sh]
     local arguments="$1" expected="$2" timeout="$3" output
-    output="$("$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --boot-args "$arguments" \
+    shift 3
+    output="$("$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless "$@" --boot-args "$arguments" \
         --expect "$expected" --wait-for-exit --timeout "$timeout" 2>&1)"
     if [ $? -eq 0 ] && ! printf '%s\n' "$output" | grep -aq "KERNEL PANIC"; then
         echo "sanitized-kernel-test: ok: $arguments: nothing found"
@@ -75,6 +76,8 @@ find_nothing() { # boot-arguments expected-text timeout
 }
 find_nothing ktest "ktest: PASS" 300
 find_nothing utest "userland: PASS" 500
+# (On a small machine, as it's slow: all the memory a program has, going through the compressor, and back.)
+find_nothing utest=compressor "userland: PASS" 500 --no-disk --memory 512M
 
 if [ "$status" -eq 0 ]; then
     echo "sanitized-kernel-test: PASS"

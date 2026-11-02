@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Tasks/Process.h>
 #include <Kernel/Security/CodeSigning.h>
 #include <Kernel/Arch/CPU.h>
 #include <Kernel/Security/Random.h>
@@ -13,6 +14,7 @@
 #include <Kernel/Arch/UserContext.h>
 #include <Kernel/FileSystem/Inode.h>
 #include <Kernel/Memory/AddressSpace.h>
+#include <Kernel/Memory/Compressor.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
 #include <LibBase/New.h>
@@ -310,6 +312,20 @@ size_t AddressSpace::resident_pages()
     return count;
 }
 
+size_t AddressSpace::footprint_pages()
+{
+    MutexLocker locker(m_lock);
+    size_t count = 0;
+    for (auto& region : m_regions) {
+        for (FlatPtr page = region.base(); page < region.end(); page += page_size) {
+            size_t const index = region.object_index(page);
+            if (region.object().page(index).get() || region.object().compressed_page(index))
+                ++count;
+        }
+    }
+    return count;
+}
+
 void AddressSpace::remove_all_regions()
 {
     MutexLocker locker(m_lock);
@@ -374,6 +390,30 @@ ErrorOr<void> AddressSpace::protect(FlatPtr address, size_t size, int protection
 
 PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
 {
+    // With no pages to be had, memory is made by compressing some, which may be some of this address
+    // space's: so that's waited for with nothing held.
+    for (;;) {
+        auto const result = handle_fault_once(address, access);
+        if (result != PageFaultResult::OutOfMemory)
+            return result;
+        // (If it's this process that was picked to end, it's what everyone else is waiting for.)
+        auto const* process = Process::current();
+        if ((process && process->is_being_killed()) || !Compressor::wait_for_memory())
+            return result;
+    }
+}
+
+// A page for a program, as long as that leaves enough for making room: the compressor's pool has to
+// be able to grow, and the kernel to go on working, for any of this to get better.
+static ErrorOr<PhysicalAddress> allocate_page_for_program()
+{
+    if (physical_memory().is_nearly_out())
+        return Error::from_errno(ENOMEM);
+    return physical_memory().allocate_user_page();
+}
+
+PageFaultResult AddressSpace::handle_fault_once(FlatPtr address, AccessKind access)
+{
     MutexLocker locker(m_lock);
     auto* region = find_region(address);
     if (!region)
@@ -390,7 +430,16 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
     auto& object = region->object();
     auto physical = object.page(index);
 
-    if (!physical.get() && region->file()) {
+    if (auto const compressed = object.compressed_page(index)) {
+        // Compressed while nobody was using it. Anyone else sharing it has its own reference, and
+        // would get its own copy.
+        auto page = allocate_page_for_program();
+        if (page.is_error())
+            return PageFaultResult::OutOfMemory;
+        Compressor::load(compressed, physical_to_virtual(page.value()));
+        object.set_page(index, page.value());
+        physical = page.value();
+    } else if (!physical.get() && region->file()) {
         // First touch of a file mapping: the file's page, shared with its
         // cache (a private mapping copies it on the first write, below).
         auto page = region->file()->mapped_page(region->file_page(index));
@@ -404,7 +453,7 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
         physical = page.value();
     } else if (!physical.get()) {
         // First touch: a fresh zeroed page.
-        auto page = physical_memory().allocate_user_page();
+        auto page = allocate_page_for_program();
         if (page.is_error())
             return PageFaultResult::OutOfMemory;
         object.set_page(index, page.value());
@@ -412,6 +461,9 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
             return PageFaultResult::OutOfMemory;
         return PageFaultResult::Resolved;
     }
+
+    // It is about to be in use, and may be written to.
+    object.set_known_incompressible(index, false);
 
     // Code from a file (a library's text) was written through the data
     // cache; instruction fetches must see it.
@@ -421,7 +473,7 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
     bool exclusive = region->is_shared() || physical_memory().user_page_references(physical) == 1;
     if (access == AccessKind::Write && !exclusive) {
         // Copy on write: this address space gets a page of its own.
-        auto copy = physical_memory().allocate_user_page();
+        auto copy = allocate_page_for_program();
         if (copy.is_error())
             return PageFaultResult::OutOfMemory;
         __builtin_memcpy(physical_to_virtual(copy.value()), physical_to_virtual(physical), page_size);
@@ -432,6 +484,79 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
     if (m_page_table.map_user_page(page_address, physical, protection_for(protection, exclusive)).is_error())
         return PageFaultResult::OutOfMemory;
     return PageFaultResult::Resolved;
+}
+
+AddressSpace::ReclaimResult AddressSpace::reclaim(size_t budget)
+{
+    ReclaimResult result;
+    if (!m_lock.try_lock())
+        return result;
+    auto* region = m_regions.first();
+    while (region && region->end() <= m_reclaim_hand)
+        region = m_regions.next(*region);
+    // The rest of the way round, then from the start: at most once, so that an address space with
+    // less in it than the budget doesn't go on for the rest of it.
+    bool wrapped = false;
+    // Most of what is mapped may well never have been touched, which isn't worth a whole turn.
+    size_t looked_at_nothing = 0;
+    while (result.examined < budget) {
+        if (!region) {
+            if (wrapped)
+                break;
+            wrapped = true;
+            m_reclaim_hand = 0;
+            region = m_regions.first();
+            if (!region)
+                break;
+        }
+        // What belongs to a file is the file's. Otherwise, a page referred to only from here can be
+        // taken away from it: the next touch is a fault, under this lock.
+        if (region->file() || region->is_shared()) {
+            m_reclaim_hand = region->end();
+            region = m_regions.next(*region);
+            continue;
+        }
+        FlatPtr page = max(m_reclaim_hand, region->base());
+        auto& object = region->object();
+        for (; page < region->end() && result.examined < budget; page += page_size) {
+            size_t const index = region->object_index(page);
+            auto const physical = object.page(index);
+            if (!physical.get() || object.is_known_incompressible(index) || physical_memory().user_page_references(physical) != 1) {
+                if (++looked_at_nothing == 64) {
+                    looked_at_nothing = 0;
+                    ++result.examined;
+                }
+                continue;
+            }
+            ++result.examined;
+            if (m_page_table.unmap_user_page(page).has_value()) {
+                // Its second chance. (When this returns, every processor has finished with it.)
+                ++result.aged;
+                continue;
+            }
+            auto const* contents = physical_to_virtual(physical);
+            bool all_zeros = true;
+            for (size_t offset = 0; offset < page_size && all_zeros; offset += sizeof(u64))
+                all_zeros = *reinterpret_cast<u64 const*>(contents + offset) == 0;
+            if (all_zeros) {
+                Compressor::note_zero_page();
+                object.release_page(index);
+                ++result.freed;
+                continue;
+            }
+            if (auto const handle = Compressor::store(contents)) {
+                object.set_compressed_page(index, handle);
+                ++result.freed;
+            } else {
+                object.set_known_incompressible(index, true);
+            }
+        }
+        m_reclaim_hand = page;
+        if (page >= region->end())
+            region = m_regions.next(*region);
+    }
+    m_lock.unlock();
+    return result;
 }
 
 ErrorOr<NonnullRefPtr<AddressSpace>> AddressSpace::clone_for_fork()

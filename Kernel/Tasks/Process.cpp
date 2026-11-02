@@ -166,6 +166,12 @@ bool Process::is_tracing()
     return s_tracing;
 }
 
+RefPtr<AddressSpace> Process::address_space_reference()
+{
+    SpinLockGuard guard(m_describe_lock);
+    return m_address_space;
+}
+
 Vector<NonnullRefPtr<Process>> Process::all()
 {
     Vector<NonnullRefPtr<Process>> processes;
@@ -1165,9 +1171,17 @@ void Process::dispatch_signal(TrapFrame& frame)
         m_signal_actions[signal] = {};
 }
 
+bool Process::is_being_killed() const
+{
+    return m_pending_signals.load() & bit(SIGKILL);
+}
+
 void Process::handle_user_fault(TrapFrame& frame, FlatPtr address, AccessKind, bool permission_fault, PageFaultResult result)
 {
     if (result == PageFaultResult::OutOfMemory) {
+        // On its way out already: the signal takes it from here, on the way back to user mode.
+        if (is_being_killed())
+            return;
         dmesgln("Process {} ({}): out of memory handling a page fault at {:#x}; killing it", m_pid, name(), address);
         terminate(VULTURE_W_SIGNALED(SIGKILL, false));
     }

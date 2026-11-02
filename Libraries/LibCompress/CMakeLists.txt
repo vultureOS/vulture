@@ -4,5 +4,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-add_library(LibCompress STATIC
-    Deflate.cpp)
+if(VULTURE_PART STREQUAL "target")
+    # The kernel only compresses pages.
+    add_library(LibCompress STATIC
+        PageCompression.cpp)
+else()
+    add_library(LibCompress STATIC
+        Deflate.cpp
+        PageCompression.cpp)
+endif()

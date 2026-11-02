@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Memory/Compressor.h>
 #include <Kernel/Security/CodeSigning.h>
 #include <Kernel/Security/Seal.h>
 #include <Kernel/Security/DebugFault.h>
@@ -241,6 +242,36 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
         set_number(static_cast<u64>(physical_memory().statistics().managed_pages * page_size));
     } else if (name == "hw.freemem"_sv) {
         set_number(static_cast<u64>(physical_memory().statistics().free_pages * page_size));
+    } else if (name == "vm.compressor.pages"_sv) {
+        set_number(Compressor::statistics().pages);
+    } else if (name == "vm.compressor.pool_bytes"_sv) {
+        set_number(Compressor::statistics().pool_bytes);
+    } else if (name == "vm.compressor.stored_bytes"_sv) {
+        set_number(Compressor::statistics().stored_bytes);
+    } else if (name == "vm.compressor.compressions"_sv) {
+        set_number(Compressor::statistics().compressions);
+    } else if (name == "vm.compressor.decompressions"_sv) {
+        set_number(Compressor::statistics().decompressions);
+    } else if (name == "vm.compressor.zero_pages"_sv) {
+        set_number(Compressor::statistics().zero_pages);
+    } else if (name == "vm.compressor.rejected"_sv) {
+        set_number(Compressor::statistics().rejected);
+    } else if (name == "vm.compressor.sweep"_sv) {
+        // Round this process's own memory twice now, as there being no need to doesn't make for a good
+        // test: how a program can see all this happen to it. Writing, which root only gets to do.
+        if (!m_credentials.is_superuser() || new_length == 0)
+            return Error::from_errno(EPERM);
+        for (int round = 0; round < 2; ++round) {
+            size_t examined = 0;
+            size_t const pages = m_address_space->resident_pages();
+            while (examined <= pages * 2) {
+                auto const turn = m_address_space->reclaim(128);
+                if (turn.examined == 0)
+                    break;
+                examined += turn.examined;
+            }
+        }
+        set_number(static_cast<i32>(0));
     } else if (name == "hw.pagesize"_sv) {
         set_number(static_cast<i32>(page_size));
     } else if (name == "hw.machine"_sv) {

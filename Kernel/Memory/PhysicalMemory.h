@@ -9,6 +9,7 @@
 #include <Kernel/API/BootInfo.h>
 #include <Kernel/Locking/SpinLock.h>
 #include <Kernel/Memory/BuddyAllocator.h>
+#include <LibBase/Atomic.h>
 #include <LibBase/Error.h>
 
 namespace Kernel {
@@ -85,6 +86,15 @@ public:
     // Free pages in the zones; pages in processor caches are not counted.
     [[nodiscard]] PhysicalMemoryStatistics statistics() const;
 
+    // How free memory is doing, for the compressor (Memory/Compressor.h), from how much is managed.
+    void set_pressure_levels(size_t managed_pages);
+    // Time to make some room.
+    [[nodiscard]] bool is_low() const { return m_free_estimate.load() < m_low_pages; }
+    // Enough room has been made.
+    [[nodiscard]] bool has_plenty_free() const { return m_free_estimate.load() >= m_plenty_pages; }
+    // What is left is for the kernel, and for making room: not for programs.
+    [[nodiscard]] bool is_nearly_out() const { return m_free_estimate.load() < m_reserved_pages; }
+
     template<typename Callback>
     void for_each_zone(Callback callback) const
     {
@@ -99,11 +109,17 @@ private:
     [[nodiscard]] Optional<PhysicalAddress> allocate_from_zones(unsigned order, PageUse);
     void refill_cache(PhysicalPageCache&);
     void flush_cache(PhysicalPageCache&, u32 count);
+    void update_free_estimate();
 
     mutable SpinLock m_lock;
     BuddyAllocator m_zones[max_zones];
     u16* m_reference_counts[max_zones] {};
     size_t m_zone_count { 0 };
+    // In the zones, as of the last time they changed.
+    Atomic<size_t> m_free_estimate { 0 };
+    size_t m_low_pages { 0 };
+    size_t m_plenty_pages { 0 };
+    size_t m_reserved_pages { 0 };
 };
 
 PhysicalMemoryManager& physical_memory();
