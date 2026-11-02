@@ -232,7 +232,7 @@
             "section" : "#00000080",
             "icon" : "#007aff"
         },
-        "sheet" : { "fill" : "#f6f6f6", "scrim" : "#00000000" },
+        "sheet" : { "fill" : "#f6f6f6", "scrim" : "#00000000", "edge" : "#00000000" },
         "alert" : { "fill" : "#f6f6f6e0" },
         "popover" : { "fill" : "#f6f6f6" },
         "fieldFace" : {

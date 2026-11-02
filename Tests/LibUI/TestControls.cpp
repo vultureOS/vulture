@@ -842,15 +842,30 @@ TEST_CASE(an_alert_answers_by_button_and_by_key)
     EXPECT_EQ(answer, static_cast<size_t>(0));
     test.settle();
     answer = 99;
+    // Escape is Cancel, wherever that was added...
     {
-        Alert alert("Again?"_sv);
-        alert.add_button("Yes"_sv);
-        alert.add_button("No"_sv);
+        Alert alert("Erase it?"_sv);
+        alert.add_button("Cancel"_sv);
+        alert.add_button("Erase"_sv, true);
         alert.show(*test.window, [&](size_t which) { answer = which; });
     }
     test.settle();
     test.key(KeyEscape);
-    EXPECT_EQ(answer, static_cast<size_t>(1));
+    EXPECT_EQ(answer, static_cast<size_t>(0));
+    test.settle();
+    answer = 99;
+    // ...and with no Cancel it's nothing: never the last button, which could be the one that loses something.
+    {
+        Alert alert("Close it?"_sv);
+        alert.add_button("Save"_sv);
+        alert.add_button("Don't Save"_sv);
+        alert.show(*test.window, [&](size_t which) { answer = which; });
+    }
+    test.settle();
+    test.key(KeyEscape);
+    EXPECT_EQ(answer, static_cast<size_t>(99));
+    test.key(KeyEnter);
+    EXPECT_EQ(answer, static_cast<size_t>(0));
     test.settle();
 }
 

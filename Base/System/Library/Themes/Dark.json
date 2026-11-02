@@ -244,7 +244,7 @@
             "section" : "#ffffff8c",
             "icon" : "#0a84ff"
         },
-        "sheet" : { "fill" : "#282828", "scrim" : "#00000000" },
+        "sheet" : { "fill" : "#282828", "scrim" : "#00000000", "edge" : "#ffffff26" },
         "alert" : { "fill" : "#282828e0" },
         "popover" : { "fill" : "#323232" },
         "fieldFace" : {

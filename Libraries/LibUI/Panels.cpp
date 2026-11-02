@@ -21,6 +21,8 @@ void draw_sheet_face(Graphics& graphics, Gfx::FloatRect shape)
         graphics.fill_rounded({ shape.x - grown, shape.y - grown / 2, shape.width + grown * 2, shape.height + grown * 1.5f }, radius + grown, Gfx::Color { 0, 0, 0, 3 });
     }
     graphics.fill_rounded(shape, radius, t.color("sheet.fill"_sv));
+    // On a dark window the shadow doesn't show, and it would have no edge at all.
+    graphics.stroke_rounded(shape, radius, 1, t.color("sheet.edge"_sv));
 }
 
 using namespace Gfx;
@@ -279,32 +281,62 @@ void Alert::show(Window& window, Function<void(size_t)> then)
     }
 
     NonnullRefPtr<SharedChoice> choose_shared = adopt_ref(*new SharedChoice(window, move(then)));
+    window.set_cancel_action(nullptr);
     float buttons_height = 0;
     size_t count = m_buttons.size();
-    bool side_by_side = count == 2;
     float button_height = t.metric("alert.buttonHeight"_sv);
     float spacing = t.metric("alert.buttonSpacing"_sv);
+    float button_width = alert_width - padding * 2;
+
+    // Two sit side by side while both titles fit half the width, the default on the right; otherwise, and with
+    // more, they're stacked with the default first. The order they were added in is what the answer means.
+    auto fits_half_width = [&] {
+        for (auto const& definition : m_buttons) {
+            Button measure(definition.title.view(), definition.is_default ? ButtonStyle::Default : ButtonStyle::Push);
+            measure.set_control_size(ControlSize::Large);
+            if (measure.intrinsic_size().width > (button_width - spacing) / 2)
+                return false;
+        }
+        return true;
+    };
+    bool side_by_side = count == 2 && fits_half_width();
+    size_t default_index = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (m_buttons[i].is_default)
+            default_index = i;
+    }
+    Vector<size_t> shown;
+    if (!side_by_side)
+        shown.append(default_index);
+    for (size_t i = 0; i < count; ++i) {
+        if (i != default_index)
+            shown.append(i);
+    }
+    if (side_by_side)
+        shown.append(default_index);
+
     auto* row = side_by_side ? &content->add<StackView>(Axis::Horizontal, spacing) : nullptr;
     if (row) {
         row->stack().set_distribution(Distribution::Equal);
-        row->set_fixed_size({ alert_width - padding * 2, button_height });
+        row->set_fixed_size({ button_width, button_height });
         buttons_height = button_height;
     }
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t place = 0; place < shown.size(); ++place) {
+        size_t i = shown[place];
         auto const& definition = m_buttons[i];
         auto* parent_view = row ? static_cast<View*>(row) : static_cast<View*>(content);
         auto& button = parent_view->add<Button>(definition.title.view(), definition.is_default ? ButtonStyle::Default : ButtonStyle::Push);
         button.set_control_size(ControlSize::Large);
         if (!row) {
-            button.set_fixed_width(alert_width - padding * 2);
-            buttons_height += button_height + (i + 1 < count ? spacing : 0);
+            button.set_fixed_width(button_width);
+            buttons_height += button_height + (place + 1 < count ? spacing : 0);
         }
         button.on_action = [choose_shared, i] { choose_shared->choose(i); };
         if (definition.is_default)
             window.set_default_action([choose_shared, i] { choose_shared->choose(i); });
-    }
-    if (count >= 2) {
-        window.set_cancel_action([choose_shared, cancel = count - 1] { choose_shared->choose(cancel); });
+        // Escape means no: only ever the button that says so. It mustn't be one that loses something.
+        if (definition.title.view() == "Cancel"_sv)
+            window.set_cancel_action([choose_shared, i] { choose_shared->choose(i); });
     }
     total += buttons_height;
     Sheet::present(window, adopt_own(*static_cast<View*>(content)), { alert_width, total });

@@ -556,7 +556,7 @@ private:
     {
         Alert alert("Save the changes to this document?"_sv, "They will be lost if you close it without saving."_sv);
         alert.add_button("Save"_sv);
-        alert.add_button("Don't Save"_sv);
+        alert.add_button("Cancel"_sv);
         m_window->set_key_interceptor(nullptr);
         alert.show(*m_window, [this](size_t) { m_window->set_key_interceptor(this); });
     }

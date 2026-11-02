@@ -366,6 +366,57 @@ void test_sheet()
     report("and it goes", !Sheet::is_presented(*window));
     click(frame.x + 240, frame.y + 350);
     report("what was under works again", under_pressed == 1);
+
+    // Escape is Cancel, wherever that was added, and never a button that loses something.
+    {
+        size_t escaped = 99;
+        Alert careful("Close without saving?"_sv, ""_sv);
+        careful.add_button("Save"_sv, true);
+        careful.add_button("Cancel"_sv);
+        careful.add_button("Don't Save"_sv);
+        careful.show(*window, [&](size_t which) { escaped = which; });
+        settle(100);
+        window->handle_key(true, KeyEscape, 0, {});
+        settle(100);
+        report("escape answers Cancel", escaped == 1);
+    }
+    {
+        size_t escaped = 99;
+        Alert nothing_to_cancel("Save the changes?"_sv, ""_sv);
+        nothing_to_cancel.add_button("Save"_sv, true);
+        nothing_to_cancel.add_button("Don't Save"_sv);
+        nothing_to_cancel.show(*window, [&](size_t which) { escaped = which; });
+        settle(100);
+        window->handle_key(true, KeyEscape, 0, {});
+        settle(100);
+        report("with no Cancel, escape chooses nothing", escaped == 99);
+
+        // Two that fit: side by side, the default on the right.
+        auto side_by_side = Accessibility::tree_of(*window);
+        auto const* save = Accessibility::find(side_by_side, Accessibility::Role::Button, "Save"_sv);
+        auto const* discard = Accessibility::find(side_by_side, Accessibility::Role::Button, "Don't Save"_sv);
+        report("two that fit are side by side, the default on the right",
+            save && discard && save->frame.y == discard->frame.y && save->frame.x > discard->frame.x);
+        window->handle_key(true, KeyEnter, 0, {});
+        settle(100);
+        report("return answers the default", escaped == 0);
+    }
+    {
+        size_t answer_to_long = 99;
+        Alert long_titles("Erase the disk?"_sv, ""_sv);
+        long_titles.add_button("Cancel"_sv);
+        long_titles.add_button("Erase and Install Everything"_sv, true);
+        long_titles.show(*window, [&](size_t which) { answer_to_long = which; });
+        settle(100);
+        auto stacked = Accessibility::tree_of(*window);
+        auto const* erase = Accessibility::find(stacked, Accessibility::Role::Button, "Erase and Install Everything"_sv);
+        auto const* cancel = Accessibility::find(stacked, Accessibility::Role::Button, "Cancel"_sv);
+        report("two that don't fit are stacked, the default first",
+            erase && cancel && erase->frame.x == cancel->frame.x && erase->frame.y < cancel->frame.y);
+        window->handle_key(true, KeyEscape, 0, {});
+        settle(100);
+        report("and answer as they were added", answer_to_long == 0);
+    }
     window->hide();
 }
 
