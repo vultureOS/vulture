@@ -64,7 +64,8 @@
 # VULTURE_FIRMWARE_CODE and VULTURE_FIRMWARE_VARS (the UEFI firmware and its
 # variable store template; found under Homebrew's or Debian's names
 # otherwise), VULTURE_TCG_TIMEOUT_SCALE, VULTURE_AUDIO_WAV (record what the
-# sound device plays to this file, instead of playing it).
+# sound device plays to this file, instead of playing it), VULTURE_NET_OPTIONS
+# (added to QEMU's -netdev user, as in hostfwd=tcp::8022-:22).
 
 set -euo pipefail
 
@@ -118,7 +119,7 @@ while [ $# -gt 0 ]; do
         --kill-delay) kill_delay="$2"; shift 2 ;;
         --) shift; extra_args=("$@"); break ;;
         --chat) chat_file="$2"; shift 2 ;;
-        -h|--help) sed -n '8,65p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '8,66p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "run.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -311,7 +312,9 @@ args=(
     -device virtio-keyboard-pci
     -device virtio-tablet-pci
     ${audio_args[@]+"${audio_args[@]}"}
-    -nic none
+    # QEMU's user-mode network: a NAT, with DHCP and DNS of its own, and the host at 10.0.2.2.
+    -netdev "user,id=net0${VULTURE_NET_OPTIONS:+,$VULTURE_NET_OPTIONS}"
+    -device virtio-net-pci,netdev=net0
 )
 
 case "$accelerator" in

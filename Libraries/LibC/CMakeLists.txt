@@ -17,12 +17,14 @@ add_library(LibC STATIC
     locale.cpp
     malloc.cpp
     math.cpp
+    netdb.cpp
     pthread.cpp
     pwd.cpp
     regex.cpp
     resource.cpp
     setjmp.S
     signal.cpp
+    socket.cpp
     spawn.cpp
     start.cpp
     stdio.cpp
