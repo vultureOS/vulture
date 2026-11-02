@@ -111,6 +111,8 @@ ninja -C build check      # unit tests + headless boot, crash and kernel tests
   `--gdb`.
 - `Meta/run_console.sh` boots to the text console, which you can type at in QEMU's
   window or in the terminal.
+- The system is on the network through QEMU's NAT: `curl https://example.com`, `ping`, `pkg`.
+  `VULTURE_NET_OPTIONS=hostfwd=tcp::8022-:22` forwards a port to it.
 - `Meta/run.sh --boot-args -v` boots verbosely.
 - [Documentation/Naming.md](Documentation/Naming.md) says what each application and
   service is called, and why those names.

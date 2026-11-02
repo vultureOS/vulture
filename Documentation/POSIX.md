@@ -24,7 +24,8 @@ The rest of `test-userland` checks the same interfaces from other sides:
 the shell language (`shell`), the command-line tools against macOS's
 output (`tools`), the interactive shell and job control through a
 pseudo-terminal (`interactive`), terminals and sessions (`terminals`),
-credentials and permissions (`permissions`), threads (`threads`), and more.
+credentials and permissions (`permissions`), threads (`threads`), BSD sockets
+(`sockets`), and more.
 
 ## What the subset covers
 

@@ -76,7 +76,9 @@ ExternalProject over the same source tree and adds these targets:
 | `ninja -C build test-debug-boot` | Boots with `debug`: processes, launchd's jobs and the unified log must all reach the console |
 | `ninja -C build test-ui` | Golden screenshots: the window server's scene, the Widget Gallery, the desktop and every application, driven by the real keyboard and pointer (`Meta/ui-test.sh`) |
 | `ninja -C build test-sound` | Records what the sound device plays, and looks for a tone sent through the sound server in it (`Meta/sound-test.sh`) |
+| `ninja -C build test-network` | DHCP, DNS, HTTP, TLS (each cipher and group, and each way a certificate can be wrong), signed packages by `pkg` and by Software, against servers on this machine (`Meta/network-test.sh`) |
 | `ninja -C build check` | All of the above tests |
+| `ninja -C build test-internet` | `ping` and `curl https://example.com`, over the real internet (not part of `check`) |
 | `ninja -C build test-crash` | 100 power cuts while writing; fsck clean after each (not part of `check`) |
 | `ninja -C build test-soak` | 1000 threads ping-ponging for 60 s (not part of `check`) |
 | `ninja -C build bench` | Boots with `ktest=bench` and prints the measurements |
@@ -95,9 +97,10 @@ Kernel command line words:
 | `-v` | Verbose boot: the kernel log on screen instead of the boot screen |
 | `ktest`, `ktest=PREFIX` | Run the in-kernel tests (those whose `suite.name` starts with PREFIX), then power off |
 | `ktest-seconds=N` | How long soak tests run (default 2) |
-| `utest` | Start `/sbin/vlaunchd --test`, which runs the userland tests and powers off |
+| `utest`, `utest=NAME` | Start `/sbin/vlaunchd --test`, which runs the userland tests (or `/usr/tests/NAME` alone) and powers off |
 | `console` | Stay on the text console, with no desktop. Without it the system boots to the desktop (or to the console, if there is no display) |
 | `soundtest` | Run the jobs in `/usr/tests/sound` alone (see `test-sound`) |
+| `nettest`, `netguitest` | Run the jobs in `/usr/tests/network` or `/usr/tests/network-gui` alone (see `test-network`) |
 | `debug` | Log what the system is doing on the console: processes forked, exec'd and ended, launchd's jobs, and the unified log at every level |
 | `fault=KIND` | End the boot with a deliberate crash: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (in a timer interrupt) or `processor` (on processor 1) | Kernel code that does not touch hardware (such as
 `Kernel/BootArguments.cpp`) is compiled into host tests too; see
@@ -278,7 +281,8 @@ macOS-style at the top, real Unix underneath:
   byte buffers going out of line by themselves. Each process inherits a bootstrap
   port, which vlaunchd serves: `look_up` finds a service by name, and starts it
   if it is a job with `MachServices` that is not running. Pipes, signals,
-  futexes and shared mappings sit alongside; Unix sockets come with networking.
+  futexes and shared mappings sit alongside. (There are no Unix-domain sockets: on this
+  system, local programs talk over ports.)
 - **System services (M7).** Each a vlaunchd job reached by name: logd (the
   unified log, `os_log`, `log stream` and `log show` in macOS's format), notifyd
   (`notify(3)`), configd (ComputerName, LocalHostName and HostName in
@@ -317,6 +321,24 @@ macOS-style at the top, real Unix underneath:
   `Platform::play_sound` or the `Audio` endpoint; `afplay` plays WAV files. With no device,
   every request is still answered, and nothing is heard. The boot flag `soundtest` runs
   `Tests/Sound` instead of a session.
+- **Network (M12).** `Kernel/Net`: IPv4 over Ethernet, and loopback (`en0`, `lo0`). Frames go
+  from the driver to a queue for the network thread, which also runs the timers, so nothing
+  of it runs in an interrupt; everything that touches protocol state holds one lock, plenty
+  for a desktop's few connections. TCP is RFC 9293 with window scaling, RFC 5681's Reno, fast
+  retransmit and RFC 6298's timers; what arrives out of order waits for what is missing.
+  Not here: IPv6, reassembling fragments, Unix-domain sockets, SACK and TCP timestamps.
+  `ipconfigd` gets an address by DHCP and writes `/etc/resolv.conf`; the resolver is in LibC.
+  LibCrypto, LibTLS and LibHTTP sit on a `Transport` of the caller's, so most of them run on
+  the host for tests. TLS is 1.3 alone, as a client, with no resumption and no client
+  certificates. Which authorities it trusts is `/etc/ssl/cert.pem`, which
+  `Meta/update-roots.sh` makes from a bundle of their public certificates: data, not code.
+- **Packages (M12).** A package is a gzip'd tar of `Manifest.json` and `Payload/`, laid out as
+  the system is (`Meta/vpkg.py` makes them). A repository is a folder at a URL with
+  `index.json`, listing each package's SHA-256, and `index.json.sig`, an Ed25519 signature
+  by the key `/etc/pkg/repositories.json` names for it. An index with a lower serial than
+  the last is refused. LibPackage does the work: `pkg` for root at a terminal, and
+  `installd` for Software, which runs each job in a process of its own, as everything in a
+  download comes from outside. Only members of `admin` may change what is installed.
 - **Filesystems (M5).**
   - **VFS.** Paths resolve one component at a time across a mount table.
     Open files are shared by `dup` and `fork`.

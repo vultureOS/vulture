@@ -23,7 +23,7 @@ See [Architecture](Architecture.md) for the design behind these steps.
 | **M9 pranaUI** | ✅ 2026-11-01 | App/Window/View, responder chain, layout, LibAnimation, appearance (light/dark, accent, materials), the full control set, scrolling, drag & drop, accessibility tree, declarative builder layer | Widget Gallery within ±1 px of the measured metrics; light/dark × 1x/2x golden tests pass |
 | **M10 Desktop** | ✅ 2026-11-01 | LoginWindow, menu bar, Dock, Files, Search + Indexer, Overview/Spaces, Launcher, Notification + Quick Settings, wallpapers, Settings, boot progress screen | Scripted UI walkthrough passes with golden screenshots |
 | **M11 Apps + audio** | ✅ 2026-11-02 | Terminal (LibVT), Text Editor, Viewer, Calculator, Monitor, Console, Disks, Archiver (tar and gzip), Software; virtio-sound, LibAudio (mixer, sounds made from sine waves, WAV), AudioServer, `afplay`; alert, notification, trash, login and volume sounds, a Sound pane and a Quick Settings slider | Each app's UI test passes; sound plays through QEMU. Verified by `ninja check`: `test-ui` (a walkthrough of every application at 2x, 189 steps, real keyboard and pointer, golden screenshots) and `test-sound` (a 440 Hz tone sent through the server is found, 1.2 s of it, in what QEMU recorded the device playing) |
-| **M12 Network** | | virtio-net; TCP/IP; BSD sockets; DHCP; DNS; LibCrypto; LibTLS 1.3 + X.509; LibHTTP; `curl`, `ping`; signed packages over HTTPS | `curl https://example.com` works; crypto test vectors pass; a package installs from a test repo |
+| **M12 Network** | ✅ 2026-11-02 | virtio-net; ARP, IPv4, ICMP, UDP and TCP (window scaling, Reno, fast retransmit, RFC 6298 timers); BSD sockets with macOS's structures; `ipconfigd` (DHCP); a resolver (`getaddrinfo`, `/etc/hosts`, CNAMEs); LibCrypto (AES-GCM, in hardware where it can be, ChaCha20-Poly1305, HKDF, X25519, Ed25519, RSA and ECDSA checks on P-256 and P-384); LibTLS (TLS 1.3 client, X.509 chains); LibHTTP; `curl`, `ping`, `host`, `ifconfig`, `netstat`, `nc`, `shasum`; signed packages (`pkg`, `installd`, Software's Get and Remove), Settings' Network pane | `curl https://example.com` works; crypto test vectors pass; a package installs from a test repo. Verified by `ninja check` (`test-host`: RFC vectors and OpenSSL's answers; `test-userland`: `sockets`, with 4 MiB through one packet in 23 lost, and `crypto`; `test-network`: 48 checks against this machine's servers, then Software's Get, run and Remove with the real pointer) and `ninja test-internet` (`curl https://example.com`, over the real internet, certificate checked) |
 | **M13 Hardening** | | W^X, ASLR + KASLR, PAN/PXN/UXN, PAC/BTI, stack protector, kernel UBSan + KASAN-style shadow, sandbox profiles, privacy prompts, code signing at exec, sealed System volume, memory compressor | Mitigation suite passes |
 | **M14 x86_64 + real hardware** | | `Arch/x86_64`, ACPI + AML subset, BOOTX64.EFI; AHCI, xHCI + USB HID/storage, e1000e, Intel HDA, PS/2; Raspberry Pi 4/5; Installer | One image boots in QEMU x86_64, on a real PC and on a Pi |
 
@@ -211,4 +211,17 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
   drawn 16 points from where they could be dragged, and a row's text outside its
   selection. Checking sound means looking at it: QEMU's `wav` backend records what the
   device played, and a Goertzel filter over each 20 ms finds the tone in it.
+- **M12:** Loopback found what a clean network never would: after a timeout, going back to
+  resend moves `snd_nxt`, and the cumulative ACK that then arrives is for more than
+  `snd_nxt`. Taken as acknowledging what was never sent, it was answered with an ACK, which
+  was answered with an ACK, for ever. A connection now keeps the furthest it ever sent too.
+  The test that showed it loses one packet in 23 on purpose, a `sysctl` for root.
+  QEMU's user-mode network answers ping from the host, DNS through the host's resolver,
+  and everything else with a real connection: `ping example.com` worked on the first boot.
+  Public-key code is checked against published vectors and, where those can't be trusted
+  from memory, against OpenSSL's and Node's answers: nothing here was tested only against
+  itself. AES on a processor without it costs a read of the whole S-box per byte, so a client
+  there offers ChaCha20 first. A signature on the index vouches for each package through
+  its hash, so that one key and one file cover a repository; a package's own manifest must
+  still agree with the index, and its files may go only under `/Applications` and `/usr/local`.
 

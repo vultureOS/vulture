@@ -68,6 +68,13 @@ Numbers are positions in `Syscalls.def`: only ever append to it.
 | `mmap` | address, length, protection, flags, fd, offset | Anonymous and file mappings, private or shared; writable and executable at once is refused (W^X) |
 | `munmap`, `mprotect` | address, length (, protection) | |
 | `shared_memory_create` | size, flags | A file with no name, to `mmap(MAP_SHARED)` in several processes |
+| `socket` | domain, type, protocol | `AF_INET`: TCP, UDP, and ICMP echoes (`SOCK_DGRAM` with `IPPROTO_ICMP`, for anyone). `SOCK_NONBLOCK` and `SOCK_CLOEXEC` in the type |
+| `bind`, `connect` | fd, `sockaddr_in*`, size | Below port 1024, only root |
+| `listen`, `accept` | fd, backlog; fd, address*, size*, flags | |
+| `sendto`, `recvfrom` | fd, buffer, size, flags, address*, size(*) | `read` and `write` work too. `MSG_PEEK`, `MSG_DONTWAIT`, `MSG_WAITALL`, `MSG_NOSIGNAL` |
+| `getsockname`, `getpeername` | fd, address*, size* | |
+| `setsockopt`, `getsockopt` | fd, level, name, value*, size(*) | `SO_REUSEADDR`, `SO_BROADCAST`, `SO_RCVTIMEO`, `SO_SNDTIMEO`, `SO_ERROR`, `SO_NOSIGPIPE`, `TCP_NODELAY`, `IP_TTL`, `IP_BOUND_IF` |
+| `shutdown` | fd, how | |
 | `sched_yield`, `clock_gettime`, `nanosleep` | | |
 | `uname`, `getrandom`, `sysctl` | | `sysctl` by name: `kern.*` (including `kern.proc.all`, every process), `hw.*`, `vfs.mounts` |
 | `reboot` | how | Root: restart or power off (vlaunchd does it, after stopping every job) |
