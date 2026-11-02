@@ -42,6 +42,7 @@ set(tests
     sandbox
     segfault
     services
+    sd-card
     shell
     signals
     sockets

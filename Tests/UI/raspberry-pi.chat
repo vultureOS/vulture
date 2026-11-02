@@ -1,0 +1,4 @@
+# As far as an emulated Raspberry Pi can go without a keyboard: its display, on the firmware's framebuffer.
+expect loginwindow: ready
+pause 4
+screenshot login.png

@@ -41,6 +41,9 @@
 #   --fresh-disk        make the root disk anew from the build first
 #   --no-disk           no root disk: the root is the boot archive, in memory
 #   --memory SIZE       how much memory the machine has (default: 4G)
+#   --raspberry-pi      QEMU's Raspberry Pi 4, started from kernel8.img as the Pi's own firmware
+#                       would, with the disk as its SD card. (It's only emulated, so it's slow, and it
+#                       has no USB or network here. --image gives the SD card, instead of a new one.)
 #   --real-devices      the kinds of device real machines have, in place of virtio: an AHCI
 #                       disk, xHCI USB with a keyboard and tablet, e1000e network, Intel
 #                       HD Audio, and only the firmware's framebuffer to draw on.
@@ -97,6 +100,7 @@ image=""
 memory_size=4G
 # (From the environment too, for a test that boots several times.)
 real_devices="${VULTURE_REAL_DEVICES:-0}"
+raspberry_pi=0
 use_disk=1
 fresh_disk=0
 disk_interface="virtio-blk-pci,drive=root"
@@ -126,6 +130,7 @@ while [ $# -gt 0 ]; do
         --real-devices) real_devices=1; shift ;;
         --nvme) disk_interface="nvme,drive=root,serial=VULTURE0001"; shift ;;
         --image) image="$2"; use_disk=0; shift 2 ;;
+        --raspberry-pi) raspberry_pi=1; shift ;;
         --kill) kill_power=1; shift ;;
         --kill-delay) kill_delay="$2"; shift 2 ;;
         --) shift; extra_args=("$@"); break ;;
@@ -153,6 +158,7 @@ esp_dir="${VULTURE_ESP_DIR:-$build_dir/esp}"
 # The hypervisor where there is one: HVF on an Apple silicon Mac that offers
 # it (not inside most virtual machines, CI runners included), KVM on AArch64
 # Linux; software emulation (TCG) everywhere else.
+[ "$raspberry_pi" -eq 1 ] && accelerator="tcg"
 if [ -z "$accelerator" ]; then
     case "$(uname -s)-$(uname -m)" in
         Darwin-arm64)
@@ -175,7 +181,7 @@ fi
 # AAVMF ones Debian and Ubuntu package (qemu-efi-aarch64).
 firmware_code="${VULTURE_FIRMWARE_CODE:-}"
 firmware_vars="${VULTURE_FIRMWARE_VARS:-}"
-if [ -z "$firmware_code" ] || [ -z "$firmware_vars" ]; then
+if [ "$raspberry_pi" -eq 0 ] && { [ -z "$firmware_code" ] || [ -z "$firmware_vars" ]; }; then
     if [ "$architecture" = x86_64 ]; then
         candidates=(
             "${VULTURE_FIRMWARE_DIR:-/nonexistent}/edk2-x86_64-code.fd:${VULTURE_FIRMWARE_DIR:-/nonexistent}/edk2-i386-vars.fd"
@@ -202,7 +208,7 @@ if [ -z "$firmware_code" ] || [ -z "$firmware_vars" ]; then
         fi
     done
 fi
-if [ -z "$firmware_code" ] || [ ! -f "$firmware_code" ] || [ ! -f "$firmware_vars" ]; then
+if [ "$raspberry_pi" -eq 0 ] && { [ -z "$firmware_code" ] || [ ! -f "$firmware_code" ] || [ ! -f "$firmware_vars" ]; }; then
     echo "run.sh: no $architecture UEFI firmware found; install QEMU (brew install qemu, or apt install qemu-efi-aarch64 or ovmf)" >&2
     echo "        or set VULTURE_FIRMWARE_CODE and VULTURE_FIRMWARE_VARS" >&2
     exit 1
@@ -239,7 +245,7 @@ fi
 
 # The firmware keeps its settings (boot order etc.) in a writable variable store.
 mkdir -p "$state_dir"
-if [ ! -f "$state_dir/efivars.fd" ]; then
+if [ "$raspberry_pi" -eq 0 ] && [ ! -f "$state_dir/efivars.fd" ]; then
     cp "$firmware_vars" "$state_dir/efivars.fd"
 fi
 vars_file="$state_dir/efivars.fd"
@@ -249,7 +255,7 @@ vars_file="$state_dir/efivars.fd"
 run_dir=""
 if [ "$headless" -eq 1 ]; then
     run_dir="$(mktemp -d "$state_dir/run.XXXXXX")"
-    cp "$state_dir/efivars.fd" "$run_dir/efivars.fd"
+    [ "$raspberry_pi" -eq 1 ] || cp "$state_dir/efivars.fd" "$run_dir/efivars.fd"
     vars_file="$run_dir/efivars.fd"
 fi
 
@@ -389,10 +395,36 @@ args=(
     -device "$network_device,netdev=net0"
 )
 
+# A Raspberry Pi is what it is: it starts from one file, and has its own idea of devices.
+if [ "$raspberry_pi" -eq 1 ]; then
+    if [ "$architecture" != aarch64 ]; then
+        echo "run.sh: a Raspberry Pi needs a build for aarch64" >&2
+        exit 2
+    fi
+    pi_dir="$build_dir/raspberry-pi"
+    for required in "$pi_dir/kernel8.img" "$pi_dir/raspi4b.dtb"; do
+        if [ ! -f "$required" ]; then
+            echo "run.sh: $required is missing; build first with: ninja -C $build_dir" >&2
+            exit 1
+        fi
+    done
+    args=(
+        -machine raspi4b
+        -global "bcm2835-fb.xres=$gpu_width"
+        -global "bcm2835-fb.yres=$gpu_height"
+        -kernel "$pi_dir/kernel8.img"
+        -dtb "$pi_dir/raspi4b.dtb"
+        -append "$boot_args"
+        -drive "if=sd,format=raw,file=${image:-$disk}"
+    )
+fi
+
 case "$accelerator" in
     hvf | kvm) args+=(-accel "$accelerator" -cpu host) ;;
     tcg)
-        if [ "$architecture" = x86_64 ]; then
+        if [ "$raspberry_pi" -eq 1 ]; then
+            args+=(-accel tcg,thread=multi)
+        elif [ "$architecture" = x86_64 ]; then
             args+=(-accel tcg,thread=multi -cpu max)
         else
             args+=(-accel tcg,thread=multi -cpu max,pauth-impdef=on)

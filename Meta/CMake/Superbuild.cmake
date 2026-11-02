@@ -97,6 +97,23 @@ add_custom_target(boot-archive ALL
     DEPENDS host target userland
     VERBATIM)
 
+# What a Raspberry Pi's firmware starts (and, for QEMU, which hasn't that firmware, a description of the machine).
+if(VULTURE_ARCH STREQUAL "aarch64")
+    set(VULTURE_RASPBERRY_PI_DIR ${CMAKE_BINARY_DIR}/raspberry-pi)
+    add_custom_target(raspberry-pi ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${VULTURE_RASPBERRY_PI_DIR}
+        COMMAND ${CMAKE_BINARY_DIR}/host/Tools/mkpiimage/mkpiimage
+            ${CMAKE_BINARY_DIR}/target/Boot/RaspberryPi/raspberry-pi-stub.bin
+            ${VULTURE_ESP_DIR}/System/Library/Kernels/vulture
+            ${VULTURE_ESP_DIR}/System/Library/Kernels/vulture.bootarchive
+            ${VULTURE_RASPBERRY_PI_DIR}/kernel8.img
+        COMMAND ${CMAKE_BINARY_DIR}/host/Tools/mkfdt/mkfdt
+            ${CMAKE_SOURCE_DIR}/Tests/Hardware/raspi4b.dts
+            ${VULTURE_RASPBERRY_PI_DIR}/raspi4b.dtb
+        DEPENDS boot-archive
+        VERBATIM)
+endif()
+
 # One compile database for the whole tree, for clangd and other editors.
 add_custom_target(compile-commands ALL
     COMMAND ${CMAKE_COMMAND}
@@ -266,7 +283,13 @@ add_custom_target(test-internet
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-sound test-network test-hardening test-compressor test-hardware test-sanitized-kernel test-ui test-persistence)
+add_custom_target(test-raspberry-pi
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/raspberry-pi-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    DEPENDS host uefi target boot-archive raspberry-pi
+    USES_TERMINAL
+    VERBATIM)
+
+add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-sound test-network test-hardening test-compressor test-hardware test-raspberry-pi test-sanitized-kernel test-ui test-persistence)
 
 # M5's "done when": 100 power cuts at random moments while writing; each
 # must leave a disk that passes fsck and remounts with every committed

@@ -7,7 +7,10 @@
 # One disk image that boots both kinds of machine: the firmware of each finds its own loader on the EFI
 # System Partition, the loader its own kernel, and the kernel its own vultureFS partition.
 #
-#   Meta/make-universal-image.sh [--aarch64 BUILD_DIR] [--x86_64 BUILD_DIR] [--size MIB] -o OUTPUT
+#   Meta/make-universal-image.sh [--aarch64 BUILD_DIR] [--x86_64 BUILD_DIR] [--raspberry-pi FIRMWARE_DIR] [--size MIB] -o OUTPUT
+#
+# With --raspberry-pi, it boots a Raspberry Pi 4 or 5 as well, for which the firmware is yours to add: see
+# Documentation/RaspberryPi.md.
 
 set -euo pipefail
 
@@ -16,13 +19,15 @@ aarch64="$source_dir/build"
 x86_64="$source_dir/build-x86_64"
 size=8192
 output=""
+raspberry_pi_firmware=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --aarch64) aarch64="$2"; shift 2 ;;
         --x86_64) x86_64="$2"; shift 2 ;;
+        --raspberry-pi) raspberry_pi_firmware="$2"; shift 2 ;;
         --size) size="$2"; shift 2 ;;
         -o) output="$2"; shift 2 ;;
-        *) echo "usage: make-universal-image.sh [--aarch64 DIR] [--x86_64 DIR] [--size MIB] -o OUTPUT" >&2; exit 2 ;;
+        *) echo "usage: make-universal-image.sh [--aarch64 DIR] [--x86_64 DIR] [--raspberry-pi FIRMWARE_DIR] [--size MIB] -o OUTPUT" >&2; exit 2 ;;
     esac
 done
 [ -n "$output" ] || { echo "make-universal-image.sh: where to? (-o OUTPUT)" >&2; exit 2; }
@@ -37,9 +42,15 @@ for pair in "aarch64:$aarch64" "x86_64:$x86_64"; do
     cp "$dir/esp/System/Library/Kernels/vulture" "$esp/System/Library/Kernels/vulture.$name"
     cp "$dir/esp/System/Library/Kernels/vulture.bootarchive" "$esp/System/Library/Kernels/vulture.bootarchive.$name"
 done
+# shellcheck source=raspberry-pi-files.sh
+source "$source_dir/Meta/raspberry-pi-files.sh"
+if [ -n "$raspberry_pi_firmware" ]; then
+    add_raspberry_pi_files "$esp" "$raspberry_pi_firmware" "$aarch64"
+fi
 "$aarch64/host/Tools/vfs/mkimage" "$output" "$size" "$esp" \
     "$aarch64/esp/System/Library/Kernels/vulture.bootarchive+$x86_64/esp/System/Library/Kernels/vulture.bootarchive" \
     EFI/BOOT/BOOTAA64.EFI EFI/BOOT/BOOTX64.EFI \
     System/Library/Kernels/vulture.aarch64 System/Library/Kernels/vulture.bootarchive.aarch64 \
-    System/Library/Kernels/vulture.x86_64 System/Library/Kernels/vulture.bootarchive.x86_64
+    System/Library/Kernels/vulture.x86_64 System/Library/Kernels/vulture.bootarchive.x86_64 \
+    ${raspberry_pi_files[@]+"${raspberry_pi_files[@]}"}
 rm -rf "$esp"

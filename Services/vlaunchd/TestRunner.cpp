@@ -31,6 +31,7 @@ struct Test {
 
 Test const s_tests_when_asked[] = {
     { "/usr/tests/usb-disk", 0, 0 },
+    { "/usr/tests/sd-card", 0, 0 },
 };
 
 Test const s_tests[] = {

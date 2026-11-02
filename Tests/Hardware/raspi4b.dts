@@ -1,0 +1,117 @@
+// QEMU's Raspberry Pi 4 B, described the way the Pi's own firmware describes the real one (it's the firmware's
+// device tree that a real Pi boots with; QEMU doesn't have that firmware, so this stands in for it): devices at
+// the video core's addresses, buses with "ranges" to get from those to the processor's, and processors parked
+// in a spin table. QEMU itself fills in /memory and /chosen/bootargs.
+/ {
+    compatible = "raspberrypi,4-model-b", "brcm,bcm2711";
+    model = "Raspberry Pi 4 Model B (QEMU)";
+    #address-cells = <2>;
+    #size-cells = <1>;
+    interrupt-parent = <1>;
+
+    aliases {
+        serial0 = "/soc/serial@7e201000";
+    };
+
+    chosen {
+        stdout-path = "serial0:115200n8";
+    };
+
+    memory@0 {
+        device_type = "memory";
+        reg = <0 0 0x3c000000>;
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        cpu@0 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a72";
+            reg = <0>;
+            enable-method = "spin-table";
+            cpu-release-addr = <0 0xd8>;
+        };
+        cpu@1 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a72";
+            reg = <1>;
+            enable-method = "spin-table";
+            cpu-release-addr = <0 0xe0>;
+        };
+        cpu@2 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a72";
+            reg = <2>;
+            enable-method = "spin-table";
+            cpu-release-addr = <0 0xe8>;
+        };
+        cpu@3 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a72";
+            reg = <3>;
+            enable-method = "spin-table";
+            cpu-release-addr = <0 0xf0>;
+        };
+    };
+
+    timer {
+        compatible = "arm,armv8-timer";
+        // Secure physical, non-secure physical, virtual, hypervisor: each (type, number, flags).
+        interrupts = <1 13 0xf08>, <1 14 0xf08>, <1 11 0xf08>, <1 10 0xf08>;
+    };
+
+    soc {
+        compatible = "simple-bus";
+        #address-cells = <1>;
+        #size-cells = <1>;
+        ranges = <0x7e000000 0x0 0xfe000000 0x01800000>,
+                 <0x7c000000 0x0 0xfc000000 0x02000000>,
+                 <0x40000000 0x0 0xff800000 0x00800000>;
+
+        interrupt-controller@40041000 {
+            compatible = "arm,gic-400";
+            phandle = <1>;
+            #interrupt-cells = <3>;
+            interrupt-controller;
+            reg = <0x40041000 0x1000>, <0x40042000 0x2000>, <0x40044000 0x2000>, <0x40046000 0x2000>;
+        };
+
+        mailbox@7e00b880 {
+            compatible = "brcm,bcm2835-mbox";
+            reg = <0x7e00b880 0x40>;
+        };
+
+        watchdog@7e100000 {
+            compatible = "brcm,bcm2711-pm", "brcm,bcm2835-pm-wdt";
+            reg = <0x7e100000 0x114>;
+        };
+
+        rng@7e104000 {
+            compatible = "brcm,bcm2711-rng200";
+            reg = <0x7e104000 0x28>;
+        };
+
+        serial@7e201000 {
+            compatible = "arm,pl011", "arm,primecell";
+            reg = <0x7e201000 0x200>;
+            interrupts = <0 121 4>;
+        };
+
+        emmc2bus {
+            compatible = "simple-bus";
+            #address-cells = <2>;
+            #size-cells = <1>;
+            ranges = <0 0x7e000000 0x7e000000 0x01800000>;
+
+            // A real Pi 4's card is on its EMMC2 controller, at 0x7e340000. QEMU has that too, but puts the card on
+            // the older controller beside it, which has the same registers; so here it's called what the driver
+            // looks for.
+            mmc@7e300000 {
+                compatible = "brcm,bcm2711-emmc2";
+                reg = <0 0x7e300000 0x100>;
+                interrupts = <0 126 4>;
+            };
+        };
+    };
+};
