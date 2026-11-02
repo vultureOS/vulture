@@ -430,13 +430,19 @@ private:
                 if (long_length > 0) {
                     name = { long_name, long_length };
                 } else {
-                    // "NAME    EXT" becomes "name.ext".
+                    // "NAME    EXT" becomes "NAME.EXT": capitals, as it's written, unless Windows's two
+                    // flags (in what was once reserved) say that one part or the other is really small letters.
+                    constexpr u8 lowercase_name = 0x08;
+                    constexpr u8 lowercase_extension = 0x10;
+                    auto with_case = [&](char character, u8 flag) {
+                        return (entry.reserved & flag) ? Base::to_ascii_lowercase(character) : character;
+                    };
                     for (size_t i = 0; i < 8 && entry.name[i] != ' '; ++i)
-                        short_name[short_length++] = Base::to_ascii_lowercase(entry.name[i]);
+                        short_name[short_length++] = with_case(entry.name[i], lowercase_name);
                     if (entry.name[8] != ' ') {
                         short_name[short_length++] = '.';
                         for (size_t i = 8; i < 11 && entry.name[i] != ' '; ++i)
-                            short_name[short_length++] = Base::to_ascii_lowercase(entry.name[i]);
+                            short_name[short_length++] = with_case(entry.name[i], lowercase_extension);
                     }
                     name = { short_name, short_length };
                 }
