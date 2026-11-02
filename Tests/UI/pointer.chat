@@ -1,0 +1,9 @@
+# The pointer going for a walk, for Meta/ui-test.sh to see what the display is told about it.
+expect loginwindow: ready
+pause 1
+pointer 8000 8000
+pause 0.3
+pointer 12000 9000
+pause 0.3
+pointer 16000 16000
+pause 0.5

@@ -11,6 +11,9 @@
 
 namespace WindowServer {
 
+// The display's cursor is this size in pixels: at 2x, it holds 32 points.
+constexpr int VULTURE_CURSOR_IMAGE_SIZE = 64;
+
 struct CursorImage {
     NonnullRefPtr<Gfx::Bitmap> image;
     Gfx::IntPoint hot_spot;

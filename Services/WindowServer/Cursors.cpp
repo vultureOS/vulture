@@ -5,9 +5,14 @@
  */
 
 #include "Cursors.h"
+#include <LibGfx/Filter.h>
 #include <LibGfx/Painter.h>
 
-// The pointer's shapes: original art, in points, drawn at the screen's scale.
+// The pointer's shapes, in the manner of the Mac's before Big Sur: black with a white edge, and a soft shadow. This is
+// original art, not a copy of anyone's pictures, and it's drawn rather than stored, in points, for the screen's scale.
+//
+// Each shape is laid out so that it's sharp at 1x, where a blurred edge shows: what should be a straight edge is on a
+// pixel boundary, a slanted one is at exactly 45 degrees or 2 to 1, and a line one point wide is centered in a pixel.
 
 namespace WindowServer {
 
@@ -17,184 +22,243 @@ using Window::CursorShape;
 namespace {
 
 constexpr float pi = 3.14159265f;
+// How far a shape's white edge goes beyond its black, in points. A stroke is half outside what it strokes.
+constexpr float outline_width = 2;
+constexpr float shadow_opacity = 0.42f;
+constexpr float shadow_sigma = 1.1f;
+constexpr int shadow_drop = 1;
 
 Color const ink = Color::from_rgb(0x000000);
 Color const edge = Color::from_rgb(0xffffff);
 
-void draw_outlined(Painter& painter, Path const& shape, float outline = 1.5f)
+void draw_outlined(Painter& painter, Path const& shape)
 {
     StrokeStyle stroke;
-    stroke.width = outline;
+    stroke.width = outline_width;
     stroke.join = LineJoin::Round;
     stroke.cap = LineCap::Round;
     painter.stroke_path(shape, stroke, edge);
     painter.fill_path(shape, ink);
 }
 
-void draw_line(Painter& painter, Path const& line, float width)
+void draw_thin_line(Painter& painter, Path const& line)
 {
     StrokeStyle under;
-    under.width = width + 1.5f;
-    under.cap = LineCap::Round;
+    under.width = 3;
+    under.join = LineJoin::Round;
+    under.cap = LineCap::Butt;
     painter.stroke_path(line, under, edge);
     StrokeStyle over;
-    over.width = width;
-    over.cap = LineCap::Round;
+    over.width = 1;
+    over.join = LineJoin::Miter;
+    over.cap = LineCap::Butt;
     painter.stroke_path(line, over, ink);
 }
 
-void draw_double_arrow(Painter& painter)
+// The arrow, with its tip at the origin: down the left side, in to the tail, round it, and back up the diagonal.
+void draw_arrow(Painter& painter)
 {
-    // Along x, around the origin: painters turn it where it is wanted.
     Path arrow;
-    arrow.move_to({ -9, 0 });
-    arrow.line_to({ -4.5f, -4.5f });
-    arrow.line_to({ -4.5f, -1.5f });
-    arrow.line_to({ 4.5f, -1.5f });
-    arrow.line_to({ 4.5f, -4.5f });
-    arrow.line_to({ 9, 0 });
-    arrow.line_to({ 4.5f, 4.5f });
-    arrow.line_to({ 4.5f, 1.5f });
-    arrow.line_to({ -4.5f, 1.5f });
-    arrow.line_to({ -4.5f, 4.5f });
+    arrow.move_to({ 0, 0 });
+    arrow.line_to({ 0, 15 });
+    arrow.line_to({ 3, 12 });
+    arrow.line_to({ 5.5f, 17 });
+    arrow.line_to({ 7.5f, 16 });
+    arrow.line_to({ 5, 11 });
+    arrow.line_to({ 11, 11 });
     arrow.close();
     draw_outlined(painter, arrow);
 }
 
-void draw_hand(Painter& painter, bool closed)
+// Along x, around the origin: painters turn it where it is wanted.
+void draw_double_arrow(Painter& painter)
 {
-    Path hand;
-    // The palm, then four fingers, straight or curled over it.
-    hand.add_rounded_rect({ 3, 8, 12, 9 }, 4);
-    float length = closed ? 2.5f : 6;
-    for (int i = 0; i < 4; ++i) {
-        float x = 3.5f + static_cast<float>(i) * 2.9f;
-        float reach = i == 0 || i == 3 ? length - 1 : length;
-        hand.add_rounded_rect({ x, 9 - reach, 2.4f, reach + 2 }, 1.2f);
-    }
-    if (!closed)
-        hand.add_rounded_rect({ 0.5f, 9, 4, 2.4f }, 1.2f);
+    Path arrow;
+    arrow.move_to({ -9, 0 });
+    arrow.line_to({ -5, -4 });
+    arrow.line_to({ -5, -1 });
+    arrow.line_to({ 5, -1 });
+    arrow.line_to({ 5, -4 });
+    arrow.line_to({ 9, 0 });
+    arrow.line_to({ 5, 4 });
+    arrow.line_to({ 5, 1 });
+    arrow.line_to({ -5, 1 });
+    arrow.line_to({ -5, 4 });
+    arrow.close();
+    draw_outlined(painter, arrow);
+}
+
+// A white hand with a black edge: all its parts stroked first, then all filled, so that the edge is only round the
+// whole, and between the fingers, where a point's gap is left.
+struct HandPart {
+    FloatRect rect;
+    float radius;
+};
+
+void draw_hand_parts(Painter& painter, Span<HandPart const> parts, Path const* thumb)
+{
     StrokeStyle stroke;
-    stroke.width = 1.5f;
+    stroke.width = outline_width;
     stroke.join = LineJoin::Round;
-    painter.stroke_path(hand, stroke, ink);
-    painter.fill_path(hand, edge);
+    for (auto const& part : parts) {
+        Path path;
+        path.add_rounded_rect(part.rect, part.radius);
+        painter.stroke_path(path, stroke, ink);
+    }
+    StrokeStyle thumb_style;
+    thumb_style.cap = LineCap::Round;
+    if (thumb) {
+        thumb_style.width = 3 + outline_width;
+        painter.stroke_path(*thumb, thumb_style, ink);
+    }
+    for (auto const& part : parts) {
+        Path path;
+        path.add_rounded_rect(part.rect, part.radius);
+        painter.fill_path(path, edge);
+    }
+    if (thumb) {
+        thumb_style.width = 3;
+        painter.stroke_path(*thumb, thumb_style, edge);
+    }
+}
+
+// Its fingertip at the origin, as that's where it points.
+void draw_pointing_hand(Painter& painter)
+{
+    HandPart const parts[] = {
+        { { -1, 0, 3, 13 }, 1.5f },
+        { { 3, 6, 3, 8 }, 1.5f },
+        { { 7, 7, 3, 7 }, 1.5f },
+        { { 11, 8, 2.5f, 6 }, 1.25f },
+        { { -1, 11, 14.5f, 8 }, 3.5f },
+    };
+    Path thumb;
+    thumb.move_to({ -4.5f, 9.5f });
+    thumb.line_to({ -1, 14 });
+    draw_hand_parts(painter, { parts, array_size(parts) }, &thumb);
+}
+
+// Around its palm's middle, as that's what it holds things by. Closed, its fingers are knuckles over the palm.
+void draw_flat_hand(Painter& painter, bool closed)
+{
+    float const top = closed ? -5 : -8;
+    float const palm_top = closed ? -1 : -2;
+    HandPart const parts[] = {
+        { { -7, top + 2, 3, 8 }, 1.5f },
+        { { -3, top, 3, 8 }, 1.5f },
+        { { 1, top, 3, 8 }, 1.5f },
+        { { 5, top + 1.5f, 2.5f, 8 }, 1.25f },
+        { { -7, palm_top, 14.5f, 9 - palm_top }, 3.5f },
+    };
+    if (closed) {
+        draw_hand_parts(painter, { parts, array_size(parts) }, nullptr);
+        return;
+    }
+    Path thumb;
+    thumb.move_to({ -10.5f, -1 });
+    thumb.line_to({ -7, 3.5f });
+    draw_hand_parts(painter, { parts, array_size(parts) }, &thumb);
+}
+
+// Under a shape: the shape again, black, blurred, and a little lower.
+NonnullRefPtr<Bitmap> with_shadow(Bitmap const& shape, int scale)
+{
+    auto shadow = MUST(Bitmap::create(shape.size()));
+    for (int y = 0; y < shape.height(); ++y) {
+        for (int x = 0; x < shape.width(); ++x) {
+            auto const alpha = static_cast<float>(shape.pixel_at(x, y) >> 24);
+            shadow->set_pixel_at(x, y, static_cast<Pixel>(alpha * shadow_opacity + 0.5f) << 24);
+        }
+    }
+    MUST(gaussian_blur(*shadow, { 0, 0, shadow->width(), shadow->height() }, shadow_sigma * static_cast<float>(scale)));
+    auto result = MUST(Bitmap::create(shape.size()));
+    Painter painter(*result);
+    painter.blit(*shadow, { 0, shadow_drop * scale }, { 0, 0, shadow->width(), shadow->height() - shadow_drop * scale });
+    painter.blit(shape, { 0, 0 }, { 0, 0, shape.width(), shape.height() });
+    return result;
 }
 
 }
 
 CursorImage make_cursor(CursorShape shape, int scale)
 {
-    auto image = MUST(Bitmap::create({ 64, 64 }));
-    Painter painter(*image);
-    auto s = static_cast<float>(scale);
+    auto layer = MUST(Bitmap::create({ VULTURE_CURSOR_IMAGE_SIZE, VULTURE_CURSOR_IMAGE_SIZE }));
+    Painter painter(*layer);
+    auto const s = static_cast<float>(scale);
     painter.scale(s, s);
-    FloatPoint hot { 0, 0 };
+    // Where the hot spot goes in the picture, in whole points, leaving room for the edge and shadow.
+    IntPoint hot { 16, 16 };
     switch (shape) {
     case CursorShape::Arrow:
-    case CursorShape::Count: {
-        hot = { 1.5f, 1 };
-        painter.translate(hot.x, hot.y);
-        Path arrow;
-        arrow.move_to({ 0, 0 });
-        arrow.line_to({ 0, 15 });
-        arrow.line_to({ 3.6f, 11.6f });
-        arrow.line_to({ 6.2f, 17.4f });
-        arrow.line_to({ 8.8f, 16.2f });
-        arrow.line_to({ 6.2f, 10.6f });
-        arrow.line_to({ 11, 10.6f });
-        arrow.close();
-        draw_outlined(painter, arrow);
+    case CursorShape::Count:
+        hot = { 6, 6 };
+        painter.translate(6, 6);
+        draw_arrow(painter);
         break;
-    }
     case CursorShape::IBeam: {
-        hot = { 5, 9 };
-        painter.translate(hot.x, hot.y);
+        painter.translate(16, 16);
         Path beam;
-        beam.move_to({ 0, -7 });
-        beam.line_to({ 0, 7 });
-        beam.move_to({ -3, -8 });
-        beam.line_to({ -1, -8 });
-        beam.line_to({ 0, -7 });
-        beam.line_to({ 1, -8 });
-        beam.line_to({ 3, -8 });
-        beam.move_to({ -3, 8 });
-        beam.line_to({ -1, 8 });
-        beam.line_to({ 0, 7 });
-        beam.line_to({ 1, 8 });
-        beam.line_to({ 3, 8 });
-        draw_line(painter, beam, 1);
+        beam.move_to({ 0.5f, -6.5f });
+        beam.line_to({ 0.5f, 7.5f });
+        beam.move_to({ -3, -7.5f });
+        beam.line_to({ -0.5f, -7.5f });
+        beam.line_to({ 0.5f, -6.5f });
+        beam.line_to({ 1.5f, -7.5f });
+        beam.line_to({ 4, -7.5f });
+        beam.move_to({ -3, 8.5f });
+        beam.line_to({ -0.5f, 8.5f });
+        beam.line_to({ 0.5f, 7.5f });
+        beam.line_to({ 1.5f, 8.5f });
+        beam.line_to({ 4, 8.5f });
+        draw_thin_line(painter, beam);
         break;
     }
-    case CursorShape::PointingHand: {
-        hot = { 6, 1 };
-        Path hand;
-        hand.add_rounded_rect({ 4.8f, 1, 2.6f, 11 }, 1.3f);
-        hand.add_rounded_rect({ 7.6f, 6, 2.5f, 7 }, 1.25f);
-        hand.add_rounded_rect({ 10.2f, 6.8f, 2.5f, 6 }, 1.25f);
-        hand.add_rounded_rect({ 12.8f, 7.6f, 2.4f, 5 }, 1.2f);
-        hand.add_rounded_rect({ 4.8f, 10, 10.4f, 7 }, 3.5f);
-        // The thumb, across the palm's edge.
-        Path thumb;
-        thumb.move_to({ 2, 9.5f });
-        thumb.line_to({ 5.5f, 13 });
-        StrokeStyle stroke;
-        stroke.width = 1.5f;
-        stroke.join = LineJoin::Round;
-        painter.stroke_path(hand, stroke, ink);
-        StrokeStyle thumb_outline;
-        thumb_outline.width = 4;
-        thumb_outline.cap = LineCap::Round;
-        painter.stroke_path(thumb, thumb_outline, ink);
-        thumb_outline.width = 2.5f;
-        painter.stroke_path(thumb, thumb_outline, edge);
-        painter.fill_path(hand, edge);
+    case CursorShape::PointingHand:
+        hot = { 12, 6 };
+        painter.translate(12, 6);
+        draw_pointing_hand(painter);
         break;
-    }
     case CursorShape::ResizeLeftRight:
-        hot = { 11, 7 };
-        painter.translate(hot.x, hot.y);
+        painter.translate(16, 16);
         draw_double_arrow(painter);
         break;
     case CursorShape::ResizeUpDown:
-        hot = { 7, 11 };
-        painter.translate(hot.x, hot.y);
+        painter.translate(16, 16);
         painter.rotate(pi / 2);
         draw_double_arrow(painter);
         break;
     case CursorShape::ResizeDiagonalDown:
-        hot = { 10, 10 };
-        painter.translate(hot.x, hot.y);
+        painter.translate(16, 16);
         painter.rotate(pi / 4);
         draw_double_arrow(painter);
         break;
     case CursorShape::ResizeDiagonalUp:
-        hot = { 10, 10 };
-        painter.translate(hot.x, hot.y);
+        painter.translate(16, 16);
         painter.rotate(-pi / 4);
         draw_double_arrow(painter);
         break;
     case CursorShape::OpenHand:
-        hot = { 8, 8 };
-        draw_hand(painter, false);
+        // (Its thumb goes out to the left, further than it does to the right.)
+        hot = { 18, 15 };
+        painter.translate(18, 15);
+        draw_flat_hand(painter, false);
         break;
     case CursorShape::ClosedHand:
-        hot = { 8, 8 };
-        draw_hand(painter, true);
+        painter.translate(16, 16);
+        draw_flat_hand(painter, true);
         break;
     case CursorShape::Crosshair: {
-        hot = { 9, 9 };
-        painter.translate(hot.x, hot.y);
+        painter.translate(16, 16);
         Path cross;
-        cross.move_to({ -7, 0 });
-        cross.line_to({ 7, 0 });
-        cross.move_to({ 0, -7 });
-        cross.line_to({ 0, 7 });
-        draw_line(painter, cross, 1);
+        cross.move_to({ -7, 0.5f });
+        cross.line_to({ 8, 0.5f });
+        cross.move_to({ 0.5f, -7 });
+        cross.line_to({ 0.5f, 8 });
+        draw_thin_line(painter, cross);
         break;
     }
     }
-    return { move(image), { static_cast<int>(hot.x * s), static_cast<int>(hot.y * s) } };
+    return { with_shadow(*layer, scale), { hot.x * scale, hot.y * scale } };
 }
 
 }

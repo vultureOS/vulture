@@ -130,9 +130,17 @@ private:
         return {};
     }
 
+    // Where the corner of the pointer's picture is: off the screen, when its hot spot is near the top or left.
+    [[nodiscard]] i32 cursor_left() const { return static_cast<i32>(m_cursor_x) - static_cast<i32>(m_hot_x); }
+    [[nodiscard]] i32 cursor_top() const { return static_cast<i32>(m_cursor_y) - static_cast<i32>(m_hot_y); }
+
+    // What it covers on the screen.
     [[nodiscard]] vulture_gpu_rect cursor_rect() const
     {
-        return { m_cursor_x > m_hot_x ? m_cursor_x - m_hot_x : 0, m_cursor_y > m_hot_y ? m_cursor_y - m_hot_y : 0, VULTURE_GPU_CURSOR_SIZE, VULTURE_GPU_CURSOR_SIZE };
+        i32 const size = VULTURE_GPU_CURSOR_SIZE;
+        i32 const left = max(cursor_left(), 0);
+        i32 const top = max(cursor_top(), 0);
+        return { static_cast<u32>(left), static_cast<u32>(top), static_cast<u32>(cursor_left() + size - left), static_cast<u32>(cursor_top() + size - top) };
     }
 
     [[nodiscard]] u32 const* shadow_at(size_t offset) const
@@ -168,12 +176,12 @@ private:
                 x += count;
             }
             // The pointer, where it's in this row.
-            if (m_has_cursor && y >= cursor.y && y < cursor.y + VULTURE_GPU_CURSOR_SIZE) {
+            if (m_has_cursor && y >= cursor.y && y < cursor.y + cursor.height) {
                 u32 const first = max(rect.x, cursor.x);
-                u32 const last = min(right, cursor.x + VULTURE_GPU_CURSOR_SIZE);
-                u32 const cursor_row = (y - cursor.y) * VULTURE_GPU_CURSOR_SIZE;
+                u32 const last = min(right, cursor.x + cursor.width);
+                u32 const cursor_row = static_cast<u32>(static_cast<i32>(y) - cursor_top()) * VULTURE_GPU_CURSOR_SIZE;
                 for (u32 at = first; at < last; ++at) {
-                    u32 const pixel = m_cursor[cursor_row + (at - cursor.x)];
+                    u32 const pixel = m_cursor[cursor_row + static_cast<u32>(static_cast<i32>(at) - cursor_left())];
                     u32 const alpha = pixel >> 24;
                     if (alpha == 0)
                         continue;

@@ -91,5 +91,32 @@ for config in "gallery-2x 2560 1600 gallery uigallery" "gallery-1x 1280 800 gall
     done
     [ "$update" -eq 1 ] && echo "ui-test: $name: updated"
 done
+# The pointer. It's the display's own to draw, so it isn't in any screenshot above. Its shapes are compared on paper...
+sheet="$out_dir/cursors.png"
+"$build_dir/host/Tests/WindowServer/cursor-sheet" "$sheet"
+if [ "$update" -eq 1 ]; then
+    cp "$sheet" "$golden_dir/cursors.png"
+elif ! "$imgdiff" --output "$out_dir/cursors-difference.png" "$golden_dir/cursors.png" "$sheet"; then
+    echo "ui-test: cursors.png: differs from the golden; see $out_dir/cursors-difference.png" >&2
+    status=1
+fi
+# ...and that it's shown at all, by what QEMU is told. It reads a move with no resource as "there's no cursor now".
+if "${QEMU:-qemu-system-aarch64}" -trace help 2>/dev/null | grep -q '^virtio_gpu_update_cursor$'; then
+    trace="$out_dir/pointer-trace.log"
+    rm -f "$trace"
+    if VULTURE_GPU_WIDTH=1280 VULTURE_GPU_HEIGHT=800 "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --gui --fresh-disk \
+        --chat "$source_dir/Tests/UI/pointer.chat" --timeout 60 -- -trace virtio_gpu_update_cursor -D "$trace" > "$out_dir/pointer.log" 2>&1; then
+        moves="$(grep -a -c 'virtio_gpu_update_cursor.*move' "$trace" || true)"
+        hidden="$(grep -a -c 'virtio_gpu_update_cursor.*move, res 0x0' "$trace" || true)"
+        if [ "$moves" -lt 3 ] || [ "$hidden" -ne 0 ]; then
+            echo "ui-test: the pointer: of $moves moves, $hidden would hide it; see $trace" >&2
+            status=1
+        fi
+    else
+        echo "ui-test: the pointer: it did not get through; see $out_dir/pointer.log" >&2
+        status=1
+    fi
+fi
+
 [ "$status" -eq 0 ] && echo "ui-test: PASS" || echo "ui-test: FAIL" >&2
 exit "$status"

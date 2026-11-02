@@ -110,3 +110,15 @@ translucent surfaces stay cheap when nothing behind them moves.
 - **Symbols:** an original set of vector UI glyphs drawn through LibGfx paths.
 - **Wallpapers and sounds:** original. Wallpapers can be generated with LibGfx
   as a host tool.
+
+## The pointer
+
+`Services/WindowServer/Cursors.cpp` draws every shape of it, in the manner of the Mac's before Big Sur: black with a one
+point white edge and a soft shadow that falls a point below. It's original art, drawn in code rather than stored,
+and none of it comes from Apple. Each shape is on the pixel grid at 1x, where a blurred edge would show: straight
+edges fall on pixel boundaries, slanted ones are at exactly 45 degrees or 2 to 1, and thin lines are centered in a pixel.
+
+Those proportions are from memory of how that cursor looks, not measured from it, unlike the controls above.
+The hardware draws it on top of everything, so it's in no screenshot: `cursor-sheet` puts every shape on paper for
+`Tests/UI/Golden/cursors.png`, `TestCursors` checks that the arrow's edges are sharp and that nothing is cut off, and
+`ui-test` reads QEMU's trace to see that the display was told to keep showing it.

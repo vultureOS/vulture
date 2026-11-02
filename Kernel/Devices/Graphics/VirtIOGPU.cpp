@@ -414,6 +414,16 @@ private:
         }
         // Into kernel memory first: no user copy with the device waiting.
         TRY(copy_from_user(physical_to_virtual(m_cursor_memory), pixels, cursor_bytes));
+        // We draw with premultiplied alpha. Displays show this resource as plain alpha, which would darken soft edges.
+        auto* cursor_pixels = physical_to_virtual<u32>(m_cursor_memory);
+        for (u32 i = 0; i < VULTURE_GPU_CURSOR_SIZE * VULTURE_GPU_CURSOR_SIZE; ++i) {
+            u32 const pixel = cursor_pixels[i];
+            u32 const alpha = pixel >> 24;
+            if (alpha == 0 || alpha == 255)
+                continue;
+            auto undo = [&](u32 channel) { return min<u32>((channel * 255 + alpha / 2) / alpha, 255); };
+            cursor_pixels[i] = (alpha << 24) | (undo((pixel >> 16) & 0xff) << 16) | (undo((pixel >> 8) & 0xff) << 8) | undo(pixel & 0xff);
+        }
         TransferToHost2D transfer {};
         transfer.header.type = command_transfer_to_host_2d;
         transfer.rectangle = { 0, 0, VULTURE_GPU_CURSOR_SIZE, VULTURE_GPU_CURSOR_SIZE };
@@ -440,6 +450,8 @@ private:
         update.scanout_id = scanout;
         update.x = x;
         update.y = y;
+        // It's not only for an update: QEMU takes a move without this to mean there's no cursor to show.
+        update.resource_id = m_cursor_resource_id;
         return cursor_command(update);
     }
 
