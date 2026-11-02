@@ -23,4 +23,5 @@
 #define AT_GID 13
 #define AT_EGID 14
 #define AT_SECURE 23 // Set-user-ID or set-group-ID: trust no environment.
+#define AT_RANDOM 25 // Points at 16 random bytes: what stack canaries come from.
 #define AT_EXECFN 31 // The path the program was run by.

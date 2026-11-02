@@ -46,6 +46,7 @@ constexpr u64 read_only = 1ull << 7; // AP[2]: no writes at any level.
 constexpr u64 inner_shareable = 3ull << 8;
 constexpr u64 access_flag = 1ull << 10;
 constexpr u64 not_global = 1ull << 11; // Tagged with the ASID (user mappings).
+constexpr u64 guarded = 1ull << 50; // BTI: indirect branches here must land on a landing pad.
 constexpr u64 privileged_execute_never = 1ull << 53;
 constexpr u64 unprivileged_execute_never = 1ull << 54;
 constexpr u64 address_mask = 0x0000'ffff'ffff'f000;

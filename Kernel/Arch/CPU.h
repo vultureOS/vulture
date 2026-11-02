@@ -24,6 +24,18 @@ namespace Kernel::Arch {
 // What the processor offers user programs, as bits of AT_HWCAP: see Libraries/LibCrypto.
 [[nodiscard]] u64 hardware_capabilities();
 
+// What this processor can do to keep the kernel safe, turned on: the kernel can't touch user
+// memory except on purpose (PAN). On every processor, once.
+void enable_hardening_features();
+// For the log: what is on, like "PAN, PAC, BTI".
+void describe_hardening_features(FormatSink&);
+[[nodiscard]] bool has_pointer_authentication();
+[[nodiscard]] bool has_branch_target_identification();
+// The key programs' return addresses are signed with: each address space has its own.
+void set_user_pointer_key(u64 low, u64 high);
+// What the above add to hardware_capabilities().
+[[nodiscard]] u64 hardware_capabilities_extra();
+
 // Stops this CPU for good, with interrupts masked.
 [[noreturn]] void halt();
 

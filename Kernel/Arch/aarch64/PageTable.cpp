@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Arch/CPU.h>
 #include <Kernel/API/BootInfo.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Arch/PageTable.h>
@@ -108,6 +109,8 @@ ErrorOr<void> PageTable::map(FlatPtr virtual_address, PhysicalAddress physical_a
 
         u64& entry = table[table_index(virtual_address, level)];
         u64 descriptor = AArch64::leaf_descriptor(physical_address.get(), attribute, access, level == 3);
+        if (access == AArch64::Access::ReadExecute && has_branch_target_identification())
+            descriptor |= AArch64::Descriptor::guarded;
         if (entry & Descriptor::valid) {
             if (entry != descriptor)
                 return Error::from_string_literal("conflicting mapping");
@@ -202,6 +205,9 @@ ErrorOr<void> PageTable::map_user_page(FlatPtr virtual_address, PhysicalAddress 
         table = TRY(next_level(table, table_index(virtual_address, level)));
     u64& entry = table[table_index(virtual_address, 3)];
     u64 descriptor = AArch64::user_page_descriptor(physical_address.get(), access_for(protection));
+    // Every program here is built with landing pads: anything that isn't can't be run by accident.
+    if (protection == Protection::ReadExecute && has_branch_target_identification())
+        descriptor |= AArch64::Descriptor::guarded;
     if (entry == descriptor)
         return {};
     if (entry & Descriptor::valid) {
@@ -233,6 +239,8 @@ bool PageTable::protect_user_page(FlatPtr virtual_address, Protection protection
     if (!entry || !(*entry & Descriptor::valid))
         return false;
     u64 descriptor = AArch64::user_page_descriptor(*entry & Descriptor::address_mask, access_for(protection));
+    if (protection == Protection::ReadExecute && has_branch_target_identification())
+        descriptor |= AArch64::Descriptor::guarded;
     if (*entry != descriptor) {
         *entry = descriptor;
         flush_page(virtual_address);

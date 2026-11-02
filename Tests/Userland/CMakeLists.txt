@@ -23,6 +23,8 @@ set(tests
     launchd
     fork
     graphics
+    hardening
+    kernel-fault
     hello
     libc
     libc-more

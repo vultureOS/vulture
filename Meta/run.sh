@@ -133,7 +133,8 @@ if [ -n "$image" ] && { [ "$debug" -eq 1 ] || [ "$gui" -eq 0 ]; }; then
 fi
 
 qemu="${QEMU:-qemu-system-aarch64}"
-esp_dir="$build_dir/esp"
+# (Another kernel can be booted by giving its own copy of this, as sanitized-kernel-test.sh does.)
+esp_dir="${VULTURE_ESP_DIR:-$build_dir/esp}"
 
 # The hypervisor where there is one: HVF on an Apple silicon Mac that offers
 # it (not inside most virtual machines, CI runners included), KVM on AArch64
@@ -187,7 +188,11 @@ for required in "$esp_dir/EFI/BOOT/BOOTAA64.EFI" "$kernels_dir/vulture"; do
 done
 
 # VultureBoot passes the contents of boot-args to the kernel as its command line.
-# (The kernel boots to the desktop unless told otherwise, as an image must.)
+# (The kernel boots to the desktop unless told otherwise, as an image must. And with a debugger
+# attached, it stays where it was linked, so that the symbols mean what they say.)
+if [ "$gdb" -eq 1 ]; then
+    boot_args="${boot_args:+$boot_args }nokaslr"
+fi
 if [ "$gui" -eq 0 ]; then
     boot_args="${boot_args:+$boot_args }console"
 fi
@@ -319,7 +324,7 @@ args=(
 
 case "$accelerator" in
     hvf | kvm) args+=(-accel "$accelerator" -cpu host) ;;
-    tcg) args+=(-accel tcg,thread=multi -cpu max) ;;
+    tcg) args+=(-accel tcg,thread=multi -cpu max,pauth-impdef=on) ;;
     *) echo "run.sh: unknown accelerator '$accelerator' (hvf, kvm or tcg)" >&2; exit 2 ;;
 esac
 

@@ -136,7 +136,7 @@ it. Addresses are physical unless named otherwise.
 |---|---|
 | `magic`, `version`, `size` | `"VBOOTINF"`, 1, 496; the kernel halts on a mismatch |
 | `memory_map`, `memory_map_entries` | The `MemoryRegion` array (base, length, type) |
-| `kernel_image`, `kernel_virtual_base` | Where the segments are, and the lowest segment's address |
+| `kernel_image`, `kernel_virtual_base`, `kernel_slide` | Where the segments are, the lowest segment's address, and how far that is from the address it was linked at. The loader chooses the slide from the firmware's random numbers, and applies the kernel's relative relocations; the boot word `nokaslr` makes it 0 |
 | `kernel_file` | The ELF file, for symbolizing backtraces |
 | `boot_archive` | Empty when there is none |
 | `device_tree` | The loader's copy; empty when the firmware has none |

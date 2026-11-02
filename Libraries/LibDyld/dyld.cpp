@@ -667,6 +667,28 @@ void run_finalizers(void*)
 
 }
 
+// Where the kernel put us, the addresses in our data are wrong by that much: only the relative
+// relocations a position-independent, self-contained program has. This runs before anything may
+// use such an address, so it touches nothing but what it is given.
+extern "C" void dyld_relocate_self(u64 base, u64 const* dynamic)
+{
+    u64 const* table = nullptr;
+    u64 size = 0;
+    for (u64 const* entry = dynamic; entry[0] != 0; entry += 2) {
+        if (entry[0] == 7) // DT_RELA
+            table = reinterpret_cast<u64 const*>(base + entry[1]);
+        else if (entry[0] == 8) // DT_RELASZ
+            size = entry[1];
+    }
+    for (u64 i = 0; i < size / 24; ++i) {
+        u64 const offset = table[i * 3];
+        u64 const info = table[i * 3 + 1];
+        u64 const addend = table[i * 3 + 2];
+        if ((info & 0xffffffff) == 1027) // R_AARCH64_RELATIVE
+            *reinterpret_cast<u64*>(base + offset) = base + addend;
+    }
+}
+
 extern "C" u64 dyld_main(u64* stack)
 {
     int argc = static_cast<int>(stack[0]);

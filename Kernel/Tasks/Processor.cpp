@@ -55,6 +55,7 @@ Processor& Processor::with_id(u32 id)
 void Processor::initialize_this_processor()
 {
     Arch::enable_floating_point();
+    Arch::enable_hardening_features();
     // The boot processor set up user translation during memory setup.
     if (m_id != 0)
         Arch::activate_user_page_table(nullptr, 0);

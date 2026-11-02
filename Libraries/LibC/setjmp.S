@@ -10,6 +10,7 @@
 .global setjmp
 .type setjmp, %function
 setjmp:
+    bti c
     stp x19, x20, [x0, #0]
     stp x21, x22, [x0, #16]
     stp x23, x24, [x0, #32]
@@ -29,6 +30,7 @@ setjmp:
 .global longjmp
 .type longjmp, %function
 longjmp:
+    bti c
     ldp x19, x20, [x0, #0]
     ldp x21, x22, [x0, #16]
     ldp x23, x24, [x0, #32]

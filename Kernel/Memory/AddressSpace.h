@@ -148,6 +148,10 @@ private:
     Arch::PageTable m_page_table;
     u16 m_asid { 0 };
     IntrusiveList<Region, &Region::m_list_node> m_regions;
+    // Where mmap() starts looking: different for each address space (see MemoryLayout).
+    FlatPtr m_mmap_base { 0 };
+    // What return addresses are signed with here: a fork goes on returning, with the same.
+    u64 m_pointer_key[2] { 0, 0 };
 };
 
 }

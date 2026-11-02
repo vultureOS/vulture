@@ -25,7 +25,9 @@ constexpr u64 irq_from_user = 9;
 
 // ESR_EL1 exception classes.
 constexpr u64 class_unknown = 0x00;
+constexpr u64 class_branch_target = 0x0d;
 constexpr u64 class_illegal_state = 0x0e;
+constexpr u64 class_pointer_authentication = 0x1c;
 constexpr u64 class_svc = 0x15;
 constexpr u64 class_instruction_abort_user = 0x20;
 constexpr u64 class_pc_alignment = 0x22;
@@ -85,6 +87,11 @@ void handle_user_synchronous(TrapFrame& frame)
     case class_pc_alignment:
     case class_sp_alignment:
         process.handle_user_exception(frame, SIGBUS);
+        break;
+    case class_branch_target:
+    case class_pointer_authentication:
+        // A jump to somewhere that isn't a landing pad, or a return address that doesn't check out.
+        process.handle_user_exception(frame, SIGILL);
         break;
     case class_breakpoint:
         process.handle_user_exception(frame, SIGTRAP);

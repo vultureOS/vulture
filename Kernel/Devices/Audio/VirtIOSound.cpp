@@ -198,10 +198,12 @@ private:
             return Error::from_errno(ENODEV);
         QueryInfo query { request_pcm_info, 0, streams, sizeof(StreamInfo) };
         TRY(send_command(&query, sizeof(query), streams * sizeof(StreamInfo)));
-        auto const* infos = reinterpret_cast<StreamInfo const*>(physical_to_virtual(m_control_memory.offset(response_offset + sizeof(u32))));
+        // Right after the status, so not aligned as a StreamInfo would be: copied out.
+        auto const* answers = reinterpret_cast<u8 const*>(physical_to_virtual(m_control_memory.offset(response_offset + sizeof(u32))));
         Optional<u32> found;
         for (u32 i = 0; i < streams && !found.has_value(); ++i) {
-            auto const& info = infos[i];
+            StreamInfo info;
+            __builtin_memcpy(&info, answers + i * sizeof(StreamInfo), sizeof(info));
             if (info.direction == direction_output && (info.formats & (1ull << format_s16)) && (info.rates & (1ull << rate_48000))
                 && info.channels_min <= VULTURE_AUDIO_CHANNELS && info.channels_max >= VULTURE_AUDIO_CHANNELS)
                 found = i;

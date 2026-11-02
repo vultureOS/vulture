@@ -4,13 +4,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-# The dynamic linker, /usr/lib/dyld: a static program linked for its own
-# address (MemoryLayout::user_interpreter_base), with no C library.
+# The dynamic linker, /usr/lib/dyld: a static program, position independent as everything is, that
+# relocates itself first thing (Start.S), with no C library. It runs before there is a canary to
+# check against, so it goes without; what it reads is checked by being signed.
 add_executable(dyld Start.S dyld.cpp)
-target_compile_options(dyld PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffreestanding -fno-threadsafe-statics>)
+target_compile_options(dyld PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffreestanding -fno-threadsafe-statics -fno-stack-protector>)
 target_link_libraries(dyld PRIVATE LibBaseFreestanding)
 target_link_options(dyld PRIVATE
-    -Wl,--image-base=0x7f0000000000
+    -Wl,-pie
+    -Wl,--no-dynamic-linker
+    -Wl,-Bsymbolic
+    -Wl,-z,notext
+    -Wl,--hash-style=sysv
     -Wl,-e,_dyld_start
     -Wl,-z,max-page-size=4096
     -Wl,-z,separate-loadable-segments

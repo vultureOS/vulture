@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Security/Random.h>
 #include <Kernel/API/POSIX/auxv.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/memory.h>
@@ -358,7 +359,7 @@ struct AuxiliaryValue {
     u64 value;
 };
 
-static ErrorOr<FlatPtr> build_initial_stack(Region& stack, Span<StringView const> arguments, Span<StringView const> environment, StringView path,
+static ErrorOr<FlatPtr> build_initial_stack(Region& stack, FlatPtr top, Span<StringView const> arguments, Span<StringView const> environment, StringView path,
     Span<AuxiliaryValue const> auxiliary)
 {
     constexpr size_t limit = 128 * KiB;
@@ -370,11 +371,17 @@ static ErrorOr<FlatPtr> build_initial_stack(Region& stack, Span<StringView const
     if (strings_size > limit || arguments.size() + environment.size() > 4096)
         return Error::from_errno(E2BIG);
 
-    // AT_EXECFN and AT_NULL follow the given pairs.
-    size_t pointer_words = 1 + arguments.size() + 1 + environment.size() + 1 + 2 * (auxiliary.size() + 2);
-    FlatPtr top = MemoryLayout::user_stack_top;
-    FlatPtr strings_start = top - strings_size;
+    // AT_EXECFN, AT_RANDOM and AT_NULL follow the given pairs. Nobody can count on where in
+    // the top page it all starts, either.
+    size_t pointer_words = 1 + arguments.size() + 1 + environment.size() + 1 + 2 * (auxiliary.size() + 3);
+    u8 random_bytes[16];
+    u16 sub_page;
+    get_random_bytes({ random_bytes, sizeof(random_bytes) });
+    get_random_bytes({ reinterpret_cast<u8*>(&sub_page), sizeof(sub_page) });
+    FlatPtr random_address = top - sizeof(random_bytes) - (sub_page % 256) * 16;
+    FlatPtr strings_start = random_address - strings_size;
     FlatPtr sp = align_down<FlatPtr>(strings_start - pointer_words * sizeof(u64), 16);
+    TRY(write_to_region(stack, random_address, { random_bytes, sizeof(random_bytes) }));
 
     auto* words = static_cast<u64*>(kzalloc(pointer_words * sizeof(u64)));
     if (!words)
@@ -401,6 +408,8 @@ static ErrorOr<FlatPtr> build_initial_stack(Region& stack, Span<StringView const
         }
         words[word++] = AT_EXECFN;
         words[word++] = TRY(place(path));
+        words[word++] = AT_RANDOM;
+        words[word++] = random_address;
         words[word++] = AT_NULL;
         words[word++] = 0;
         return write_to_region(stack, sp, { reinterpret_cast<u8 const*>(words), pointer_words * sizeof(u64) });
@@ -570,13 +579,19 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     if (header.e_type == ELF::ET_DYN && !interpreter)
         return Error::from_errno(ENOEXEC);
 
+    auto random_pages = [](u64 count) {
+        u64 random;
+        get_random_bytes({ reinterpret_cast<u8*>(&random), sizeof(random) });
+        return (random % count) * page_size;
+    };
     auto space = TRY(AddressSpace::create());
-    auto program = TRY(load_image(*space, image, header.e_type == ELF::ET_DYN ? MemoryLayout::user_program_base : 0, "program"_sv));
+    auto program = TRY(load_image(*space, image, header.e_type == ELF::ET_DYN ? MemoryLayout::user_program_base + random_pages(MemoryLayout::user_program_random_pages) : 0, "program"_sv));
     Optional<LoadedImage> linker;
     if (interpreter_image.has_value())
-        linker = TRY(load_image(*space, *interpreter_image, interpreter_image->header().e_type == ELF::ET_DYN ? MemoryLayout::user_interpreter_base : 0, "dyld"_sv));
+        linker = TRY(load_image(*space, *interpreter_image, interpreter_image->header().e_type == ELF::ET_DYN ? MemoryLayout::user_interpreter_base + random_pages(MemoryLayout::user_interpreter_random_pages) : 0, "dyld"_sv));
 
-    FlatPtr stack_bottom = MemoryLayout::user_stack_top - MemoryLayout::user_stack_size;
+    FlatPtr stack_top = MemoryLayout::user_stack_top - random_pages(MemoryLayout::user_stack_random_pages);
+    FlatPtr stack_bottom = stack_top - MemoryLayout::user_stack_size;
     auto* stack = TRY(space->map_anonymous(stack_bottom, MemoryLayout::user_stack_size, PROT_READ | PROT_WRITE, "stack"_sv, true));
     // Set-user-ID and set-group-ID programs run as the file's owner and
     // group (from below); the dynamic linker must then trust no environment.
@@ -598,7 +613,7 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
         { AT_EGID, new_egid },
         { AT_SECURE, secure ? 1u : 0u },
     };
-    FlatPtr stack_pointer = TRY(build_initial_stack(*stack, arguments, environment, path, { auxiliary, array_size(auxiliary) }));
+    FlatPtr stack_pointer = TRY(build_initial_stack(*stack, stack_top, arguments, environment, path, { auxiliary, array_size(auxiliary) }));
 
     // The point of no return: the new program replaces the old one, as the
     // process's only thread.
@@ -1267,9 +1282,11 @@ void Process::report_crash(TrapFrame const& frame, int signal, vulture_siginfo c
         auto record = copy_from_user<Arch::StackFrame>(frame_pointer);
         if (record.is_error() || record.value().return_address == 0)
             break;
+        // Without the signature, if it is signed.
+        FlatPtr const return_address = record.value().return_address & 0x0000'ffff'ffff'ffff;
         line.clear();
-        format_to(line, "  #{:<2} {:#018x}  ", index, record.value().return_address);
-        symbolizer.write(line, record.value().return_address - 4);
+        format_to(line, "  #{:<2} {:#018x}  ", index, return_address);
+        symbolizer.write(line, return_address - 4);
         dmesgln("{}", line.view());
         if (record.value().previous_frame_pointer <= frame_pointer)
             break;

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/API/BootInfo.h>
 #include <Kernel/Arch/CPU.h>
 
 namespace Kernel::Arch {
@@ -74,6 +75,10 @@ static StringView exception_class_name(u64 exception_class)
     case 0x18:
         return "Trapped system register access"_sv;
     case 0x20:
+    case 0x0d:
+        return "Branch target exception"_sv;
+    case 0x1c:
+        return "Pointer authentication failure"_sv;
     case 0x21:
         return "Instruction abort"_sv;
     case 0x22:
@@ -169,7 +174,99 @@ u64 hardware_capabilities()
         capabilities |= capability_pmull;
     if (((isar0 >> 12) & 0xf) >= 1)
         capabilities |= capability_sha2;
+    return capabilities | hardware_capabilities_extra();
+}
+
+namespace {
+
+bool has_pan()
+{
+    return ((READ_SYSTEM_REGISTER(id_aa64mmfr1_el1) >> 20) & 0xf) != 0;
+}
+
+}
+
+bool has_pointer_authentication()
+{
+    u64 const isar1 = READ_SYSTEM_REGISTER(id_aa64isar1_el1);
+    // APA and API: address authentication, by one algorithm or another. (ISAR2's APA3 is the
+    // newest; not every assembler knows that register by name.)
+    u64 const isar2 = READ_SYSTEM_REGISTER(S3_0_C0_C6_2);
+    return ((isar1 >> 4) & 0xf) != 0 || ((isar1 >> 8) & 0xf) != 0 || ((isar2 >> 12) & 0xf) != 0;
+}
+
+bool has_branch_target_identification()
+{
+    return (READ_SYSTEM_REGISTER(id_aa64pfr1_el1) & 0xf) != 0;
+}
+
+}
+
+// Read by UserAccess.S: whether there is a PAN to step around.
+extern "C" {
+u8 aarch64_has_pan = 0;
+}
+
+namespace Kernel::Arch {
+
+void enable_hardening_features()
+{
+    if (has_pan()) {
+        // SPAN clear: PAN goes on whenever an exception brings the processor to this level.
+        constexpr u64 sctlr_span = 1ull << 23;
+        WRITE_SYSTEM_REGISTER(sctlr_el1, READ_SYSTEM_REGISTER(sctlr_el1) & ~sctlr_span);
+        asm volatile("isb\n"
+                     ".arch_extension pan\n"
+                     "msr pan, #1\n");
+        aarch64_has_pan = 1;
+    }
+}
+
+void describe_hardening_features(FormatSink& sink)
+{
+    sink.write(has_pan() ? "PAN"_sv : "no PAN"_sv);
+    sink.write(has_pointer_authentication() ? ", PAC"_sv : ", no PAC"_sv);
+    sink.write(has_branch_target_identification() ? ", BTI"_sv : ", no BTI"_sv);
+}
+
+void set_user_pointer_key(u64 low, u64 high)
+{
+    if (!has_pointer_authentication())
+        return;
+    WRITE_SYSTEM_REGISTER(S3_0_C2_C1_0, low);  // APIAKeyLo_EL1
+    WRITE_SYSTEM_REGISTER(S3_0_C2_C1_1, high); // APIAKeyHi_EL1
+    asm volatile("isb");
+}
+
+u64 hardware_capabilities_extra()
+{
+    constexpr u64 capability_paca = 1ull << 30;
+    constexpr u64 capability_bti = 1ull << 40;
+    u64 capabilities = 0;
+    if (has_pointer_authentication())
+        capabilities |= capability_paca;
+    if (has_branch_target_identification())
+        capabilities |= capability_bti;
     return capabilities;
+}
+
+// Before anything has signed a return address: this function, and what called it, aren't signed.
+// The key comes from what the loader got of the firmware's random numbers, mixed with the time:
+// the same on every processor, and new at every boot. It isn't used by programs, which have
+// the other key, one for each process.
+extern "C" [[gnu::target("branch-protection=none"), gnu::no_stack_protector]] void aarch64_enable_pointer_authentication(API::BootInfo const* boot_info)
+{
+    if (!has_pointer_authentication())
+        return;
+    u64 words[2];
+    __builtin_memcpy(words, boot_info->entropy + 32, sizeof(words));
+    u64 const counter = READ_SYSTEM_REGISTER(cntpct_el0);
+    WRITE_SYSTEM_REGISTER(S3_0_C2_C1_2, words[0] ^ (counter * 0x9e3779b97f4a7c15ull));
+    WRITE_SYSTEM_REGISTER(S3_0_C2_C1_3, words[1] ^ (counter * 0xc2b2ae3d27d4eb4full));
+    constexpr u64 sctlr_enable_a = 1ull << 31;
+    constexpr u64 sctlr_enable_b = 1ull << 30;
+    WRITE_SYSTEM_REGISTER(sctlr_el1, READ_SYSTEM_REGISTER(sctlr_el1) | sctlr_enable_a | sctlr_enable_b);
+    asm volatile("isb");
 }
 
 }

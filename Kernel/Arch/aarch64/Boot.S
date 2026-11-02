@@ -31,6 +31,13 @@ _start:
     /* A zero frame pointer ends backtraces here. */
     mov x29, xzr
     mov x30, xzr
+    /*
+     * Pointer authentication goes on before anything is signed: nothing signed before it could
+     * be checked after. Keeps x0, the BootInfo, which this function only reads.
+     */
+    mov x19, x0
+    bl aarch64_enable_pointer_authentication
+    mov x0, x19
     bl kernel_main
 
 1:  wfi
@@ -53,6 +60,8 @@ secondary_entry:
     ldp x5, x6, [x0, #32]   /* sctlr, vbar */
     ldp x7, x8, [x0, #48]   /* stack_top, entry */
     ldr x9, [x0, #64]       /* argument */
+    ldp x11, x12, [x0, #72] /* the kernel's pointer authentication key */
+    ldr x13, [x0, #88]      /* whether there is such a thing */
     msr mair_el1, x1
     msr tcr_el1, x2
     msr ttbr0_el1, x3
@@ -61,12 +70,18 @@ secondary_entry:
     tlbi vmalle1
     dsb nsh
     isb
+    /* The registers only exist if the feature does. */
+    cbz x13, 4f
+    msr S3_0_C2_C1_2, x11   /* APIBKeyLo_EL1 */
+    msr S3_0_C2_C1_3, x12   /* APIBKeyHi_EL1 */
+4:
     msr sctlr_el1, x5
     isb
     /* Translation is on; continue at the kernel's own address. */
     ldr x10, =2f
     br x10
 2:
+    bti j
     msr vbar_el1, x6
     msr spsel, #1
     mov sp, x7

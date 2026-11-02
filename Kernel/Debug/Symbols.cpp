@@ -11,9 +11,12 @@
 namespace Kernel::Symbols {
 
 static Optional<ELF::Image> s_kernel_image;
+// The symbols are where the kernel was linked, and it's this far from there.
+static u64 s_slide = 0;
 
-void initialize(API::PhysicalRange kernel_file)
+void initialize(API::PhysicalRange kernel_file, u64 slide)
 {
+    s_slide = slide;
     if (kernel_file.size == 0)
         return;
     ReadonlyBytes file { reinterpret_cast<u8 const*>(API::direct_map_base + kernel_file.base), kernel_file.size };
@@ -30,15 +33,16 @@ bool is_available()
 void write_symbolicated(FormatSink& sink, FlatPtr address)
 {
     Optional<ELF::Symbol> symbol;
+    FlatPtr const linked_address = address - s_slide;
     if (s_kernel_image.has_value())
-        symbol = s_kernel_image->find_symbol(address);
+        symbol = s_kernel_image->find_symbol(linked_address);
     if (!symbol.has_value()) {
         sink.write("??"_sv);
         return;
     }
     if (!ELF::demangle(symbol->name, sink))
         sink.write(symbol->name);
-    format_to(sink, "+{:#x}", address - symbol->address);
+    format_to(sink, "+{:#x}", linked_address - symbol->address);
 }
 
 }

@@ -37,7 +37,23 @@ struct Slab {
     u32 size_class;
 };
 
+#if VULTURE_KERNEL_SANITIZERS
+// A sanitized kernel keeps, in each slab, a byte of shadow for each 8 of the slab: 0 is all 8 may be
+// touched, 1 to 7 only that many of them, and these say why none may.
+static constexpr u8 shadow_redzone = 0xfa;
+static constexpr u8 shadow_freed = 0xfd;
+static constexpr size_t shadow_size = slab_size / 8;
+// Past the end of every object, so that an overflow lands somewhere watched.
+static constexpr size_t redzone_size = 16;
+static constexpr size_t slab_header_size = align_up<size_t>(sizeof(Slab) + shadow_size, 16);
+
+static u8* shadow_of(Slab const* slab)
+{
+    return const_cast<u8*>(reinterpret_cast<u8 const*>(slab)) + sizeof(Slab);
+}
+#else
 static constexpr size_t slab_header_size = align_up<size_t>(sizeof(Slab), 16);
+#endif
 
 class SlabCache {
 public:
@@ -90,6 +106,9 @@ Slab* SlabCache::create_slab()
         return nullptr;
     u8* base = to_pointer(block.value());
     auto* slab = new (base) Slab;
+#if VULTURE_KERNEL_SANITIZERS
+    __builtin_memset(shadow_of(slab), shadow_redzone, shadow_size);
+#endif
     slab->cache = this;
     slab->in_use = 0;
     slab->size_class = m_size_class;
@@ -231,6 +250,138 @@ static unsigned order_for(size_t size)
     return order;
 }
 
+#if VULTURE_KERNEL_SANITIZERS
+
+// Freed objects wait here a while before anyone can have them again, so that a use after a free
+// finds them still marked as freed.
+static constexpr size_t quarantine_size = 4096;
+static void* s_quarantine[quarantine_size];
+static size_t s_quarantine_next = 0;
+static SpinLock s_quarantine_lock;
+
+static void* unchecked_kmalloc(size_t);
+static void unchecked_kfree(void*);
+
+static Slab* slab_holding(FlatPtr address)
+{
+    if (address < API::direct_map_base)
+        return nullptr;
+    PhysicalAddress const physical(address - API::direct_map_base);
+    PhysicalAddress const start(align_down<u64>(physical.get(), slab_size));
+    if (physical.get() >= (1ull << 46) || physical_memory().block_use(start) != PageUse::Slab)
+        return nullptr;
+    return reinterpret_cast<Slab*>(to_pointer(start));
+}
+
+// Marks [address, address + size) as allowed, and the rest of the object as a red zone.
+static void unpoison_object(void* pointer, size_t size)
+{
+    auto const address = reinterpret_cast<FlatPtr>(pointer);
+    auto* slab = slab_holding(address);
+    if (!slab)
+        return;
+    size_t const object_size = 1u << (slab->size_class + smallest_size_shift);
+    u8* shadow = shadow_of(slab);
+    size_t const offset = address - reinterpret_cast<FlatPtr>(slab);
+    for (size_t i = 0; i < object_size; i += 8) {
+        u8 value = shadow_redzone;
+        if (i + 8 <= size)
+            value = 0;
+        else if (i < size)
+            value = static_cast<u8>(size - i);
+        shadow[(offset + i) / 8] = value;
+    }
+}
+
+static void poison_object(void* pointer, u8 value)
+{
+    auto const address = reinterpret_cast<FlatPtr>(pointer);
+    auto* slab = slab_holding(address);
+    if (!slab)
+        return;
+    size_t const object_size = 1u << (slab->size_class + smallest_size_shift);
+    size_t const offset = address - reinterpret_cast<FlatPtr>(slab);
+    __builtin_memset(shadow_of(slab) + offset / 8, value, object_size / 8);
+}
+
+bool heap_check_access(FlatPtr address, size_t size, StringView& problem)
+{
+    auto* slab = slab_holding(address);
+    if (!slab)
+        return true;
+    u8 const* shadow = shadow_of(slab);
+    FlatPtr const base = reinterpret_cast<FlatPtr>(slab);
+    for (FlatPtr at = address; at < address + size;) {
+        // Past the slab: its neighbor has its own shadow, if it is a slab at all.
+        if (at - base >= slab_size)
+            return heap_check_access(at, address + size - at, problem);
+        // The header is the allocator's: nobody else has any business in it.
+        size_t const offset = at - base;
+        if (offset < slab_header_size) {
+            problem = "a slab's header"_sv;
+            return false;
+        }
+        u8 const value = shadow[offset / 8];
+        size_t const in_granule = offset % 8;
+        size_t const wanted = min<size_t>(8 - in_granule, address + size - at);
+        if (value == shadow_freed) {
+            problem = "use after free"_sv;
+            return false;
+        }
+        if (value == shadow_redzone || (value != 0 && in_granule + wanted > value)) {
+            problem = "heap buffer overflow"_sv;
+            return false;
+        }
+        at += wanted;
+    }
+    return true;
+}
+
+void* kmalloc(size_t size)
+{
+    if (size == 0)
+        size = 1;
+    // No room for a red zone in the largest class. (And a large allocation isn't in a slab at all,
+    // which unpoison_object() sees for itself.)
+    bool const room_for_redzone = size + redzone_size <= heap_largest_small_size;
+    void* pointer = unchecked_kmalloc(room_for_redzone ? size + redzone_size : size);
+    if (pointer)
+        unpoison_object(pointer, size);
+    return pointer;
+}
+
+void kfree(void* pointer)
+{
+    if (!pointer)
+        return;
+    auto const address = reinterpret_cast<FlatPtr>(pointer);
+    auto* slab = slab_holding(address);
+    if (!slab) {
+        unchecked_kfree(pointer);
+        return;
+    }
+    if (shadow_of(slab)[(address - reinterpret_cast<FlatPtr>(slab)) / 8] == shadow_freed) {
+        FixedStringBuilder<64> reason;
+        format_to(reason, "KASAN: double free of {:p}", pointer);
+        panic(reason.view());
+    }
+    poison_object(pointer, shadow_freed);
+    void* evicted = nullptr;
+    {
+        SpinLockGuard guard(s_quarantine_lock);
+        evicted = s_quarantine[s_quarantine_next];
+        s_quarantine[s_quarantine_next] = pointer;
+        s_quarantine_next = (s_quarantine_next + 1) % quarantine_size;
+    }
+    if (evicted)
+        unchecked_kfree(evicted);
+}
+
+#    define kmalloc unchecked_kmalloc_impl
+#    define kfree unchecked_kfree_impl
+
+#endif
+
 void* kmalloc(size_t size)
 {
     if (size == 0)
@@ -256,14 +407,6 @@ void* kmalloc(size_t size)
             return nullptr;
     }
     return magazine.objects[--magazine.count];
-}
-
-void* kzalloc(size_t size)
-{
-    void* pointer = kmalloc(size);
-    if (pointer)
-        __builtin_memset(pointer, 0, size);
-    return pointer;
 }
 
 void kfree(void* pointer)
@@ -300,6 +443,27 @@ void kfree(void* pointer)
     s_large_pages.fetch_sub(1ull << order, MemoryOrder::Relaxed);
 }
 
+#if VULTURE_KERNEL_SANITIZERS
+#    undef kmalloc
+#    undef kfree
+static void* unchecked_kmalloc(size_t size)
+{
+    return unchecked_kmalloc_impl(size);
+}
+static void unchecked_kfree(void* pointer)
+{
+    unchecked_kfree_impl(pointer);
+}
+#endif
+
+void* kzalloc(size_t size)
+{
+    void* pointer = kmalloc(size);
+    if (pointer)
+        __builtin_memset(pointer, 0, size);
+    return pointer;
+}
+
 HeapStatistics heap_statistics()
 {
     HeapStatistics statistics;
@@ -311,6 +475,25 @@ HeapStatistics heap_statistics()
 
 void heap_drain_processor_cache()
 {
+#if VULTURE_KERNEL_SANITIZERS
+    // What is waiting in quarantine isn't in use either.
+    for (;;) {
+        void* waiting = nullptr;
+        {
+            SpinLockGuard guard(s_quarantine_lock);
+            for (auto& slot : s_quarantine) {
+                if (slot) {
+                    waiting = slot;
+                    slot = nullptr;
+                    break;
+                }
+            }
+        }
+        if (!waiting)
+            break;
+        unchecked_kfree(waiting);
+    }
+#endif
     InterruptDisabler disabler;
     auto& cache = Processor::current().heap_cache();
     for (size_t size_class = 0; size_class < heap_size_class_count; ++size_class) {

@@ -34,6 +34,9 @@ add_executable(Kernel
     Net/NetworkStack.cpp
     Net/Socket.cpp
     Net/TCP.cpp
+    Debug/Sanitizers.cpp
+    Security/DebugFault.cpp
+    Security/StackProtector.cpp
     Syscalls/SocketCalls.cpp
     Devices/Graphics/VirtIOGPU.cpp
     Devices/Input/Input.cpp
@@ -107,8 +110,23 @@ set_target_properties(Kernel PROPERTIES
     SUFFIX ""
     LINK_DEPENDS ${linker_script})
 
+# What the sanitizers' own checks call, and what they rest on, can't be checked by them.
+if(VULTURE_KERNEL_SANITIZERS)
+    set_source_files_properties(
+        Debug/Sanitizers.cpp
+        Memory/Heap.cpp
+        Memory/PhysicalMemory.cpp
+        Memory/BuddyAllocator.cpp
+        PROPERTIES COMPILE_OPTIONS "-fno-sanitize=kernel-address,undefined")
+endif()
+
 target_link_options(Kernel PRIVATE
     -T ${linker_script}
+    -Wl,-pie
+    -Wl,--no-dynamic-linker
+    -Wl,-Bsymbolic
+    -Wl,-z,notext
+    -Wl,--hash-style=sysv
     -Wl,-z,max-page-size=4096
     -Wl,--build-id=none)
 

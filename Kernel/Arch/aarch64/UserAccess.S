@@ -21,10 +21,34 @@
 
 .text
 
+/*
+ * With PAN on, the kernel can't touch user memory even by accident: these are the one place that
+ * means to, and they step around it for just as long as they need. An exception in between finds
+ * PAN on again, and on the way back it goes back to what it was here.
+ */
+.arch_extension pan
+
+.macro USER_ACCESS_BEGIN
+    adrp x5, aarch64_has_pan
+    ldrb w5, [x5, :lo12:aarch64_has_pan]
+    cbz w5, 9998f
+    msr pan, #0
+9998:
+.endm
+
+.macro USER_ACCESS_END
+    adrp x5, aarch64_has_pan
+    ldrb w5, [x5, :lo12:aarch64_has_pan]
+    cbz w5, 9997f
+    msr pan, #1
+9997:
+.endm
+
 /* u64 aarch64_copy_user(void* destination, void const* source, u64 size): 0, or 1 on a fault. */
 .global aarch64_copy_user
 .type aarch64_copy_user, %function
 aarch64_copy_user:
+    USER_ACCESS_BEGIN
     cbz x2, 2f
     /* Eight bytes at a time while both are aligned, then bytes. */
     orr x3, x0, x1
@@ -41,9 +65,11 @@ aarch64_copy_user:
     USER_ACCESS 4f, strb w3, [x0], #1
     subs x2, x2, #1
     b.ne 1b
-2:  mov x0, #0
+2:  USER_ACCESS_END
+    mov x0, #0
     ret
-4:  mov x0, #1
+4:  USER_ACCESS_END
+    mov x0, #1
     ret
 .size aarch64_copy_user, . - aarch64_copy_user
 
@@ -55,6 +81,7 @@ aarch64_copy_user:
 .global aarch64_copy_user_string
 .type aarch64_copy_user_string, %function
 aarch64_copy_user_string:
+    USER_ACCESS_BEGIN
     mov x4, #0
 1:  cmp x4, x2
     b.hs 3f
@@ -63,10 +90,13 @@ aarch64_copy_user_string:
     cbz w3, 2f
     add x4, x4, #1
     b 1b
-2:  mov x0, x4
+2:  USER_ACCESS_END
+    mov x0, x4
     ret
-3:  mov x0, #-2
+3:  USER_ACCESS_END
+    mov x0, #-2
     ret
-4:  mov x0, #-1
+4:  USER_ACCESS_END
+    mov x0, #-1
     ret
 .size aarch64_copy_user_string, . - aarch64_copy_user_string

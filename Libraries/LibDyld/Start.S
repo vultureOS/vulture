@@ -15,6 +15,12 @@
 _dyld_start:
     mov x29, xzr
     mov x30, xzr
+    // Nothing that takes an absolute address works until this has run.
+    adrp x0, __ehdr_start
+    add x0, x0, :lo12:__ehdr_start
+    adrp x1, _DYNAMIC
+    add x1, x1, :lo12:_DYNAMIC
+    bl dyld_relocate_self
     mov x0, sp
     bl dyld_main
     mov x16, x0
@@ -30,6 +36,7 @@ _dyld_start:
 .global dyld_tlsdesc_static
 .type dyld_tlsdesc_static, %function
 dyld_tlsdesc_static:
+    bti c
     ldr x0, [x0, #8]
     ret
 .size dyld_tlsdesc_static, . - dyld_tlsdesc_static

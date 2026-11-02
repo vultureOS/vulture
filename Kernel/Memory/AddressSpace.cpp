@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Arch/CPU.h>
+#include <Kernel/Security/Random.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/memory.h>
 #include <Kernel/Arch/MemoryLayout.h>
@@ -88,6 +90,10 @@ ErrorOr<NonnullRefPtr<AddressSpace>> AddressSpace::create()
         page_table.destroy();
         return Error::from_errno(ENOMEM);
     }
+    u64 random;
+    get_random_bytes({ reinterpret_cast<u8*>(&random), sizeof(random) });
+    space->m_mmap_base = MemoryLayout::user_mmap_base + (random % MemoryLayout::user_mmap_random_pages) * page_size;
+    get_random_bytes({ reinterpret_cast<u8*>(space->m_pointer_key), sizeof(space->m_pointer_key) });
     return adopt_ref(*space);
 }
 
@@ -104,6 +110,7 @@ AddressSpace::~AddressSpace()
 void AddressSpace::activate() const
 {
     Arch::activate_user_page_table(&m_page_table, m_asid);
+    Arch::set_user_pointer_key(m_pointer_key[0], m_pointer_key[1]);
 }
 
 Region* AddressSpace::find_region(FlatPtr address)
@@ -130,7 +137,7 @@ void AddressSpace::insert_sorted(Region& region)
 
 ErrorOr<FlatPtr> AddressSpace::find_free_range(FlatPtr hint, size_t size) const
 {
-    FlatPtr candidate = max(hint, MemoryLayout::user_mmap_base);
+    FlatPtr candidate = max(hint, m_mmap_base);
     // Keep clear of the stack area at the top.
     FlatPtr limit = MemoryLayout::user_stack_top - MemoryLayout::user_stack_size - page_size;
     for (auto& region : m_regions) {
@@ -410,6 +417,9 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
 ErrorOr<NonnullRefPtr<AddressSpace>> AddressSpace::clone_for_fork()
 {
     auto child = TRY(create());
+    child->m_mmap_base = m_mmap_base;
+    child->m_pointer_key[0] = m_pointer_key[0];
+    child->m_pointer_key[1] = m_pointer_key[1];
     MutexLocker locker(m_lock);
     for (auto& region : m_regions) {
         auto object = TRY(region.object().clone_range(region.object_index(region.base()), region.size() / page_size));

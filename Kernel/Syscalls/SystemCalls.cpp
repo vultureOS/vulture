@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Security/DebugFault.h>
 #include <Kernel/API/POSIX/socket.h>
 #include <Kernel/Net/NetworkStack.h>
 #include <Kernel/Net/Socket.h>
@@ -246,6 +247,16 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
             TRY(table.try_resize(offset + sizeof(info)));
             __builtin_memcpy(table.begin() + offset, &info, sizeof(info));
         }
+    } else if (name == "debug.fault"_sv && !debug_fault().is_empty()) {
+        // A deliberate mistake with this process's memory: see Security/DebugFault.h.
+        dmesgln("Deliberately touching user memory at {:#x}: {}", new_buffer, debug_fault());
+        if (debug_fault() == "user-read"_sv)
+            dmesgln("Read: {}", static_cast<u32>(*reinterpret_cast<u8 volatile*>(new_buffer)));
+        else if (debug_fault() == "user-write"_sv)
+            *reinterpret_cast<u8 volatile*>(new_buffer) = 0;
+        else if (debug_fault() == "user-execute"_sv)
+            reinterpret_cast<void (*)()>(new_buffer)();
+        set_number(0u);
     } else if (name == "hw.optional.hwcap"_sv) {
         // What the processor can do, for programs to choose code by: bits as in AT_HWCAP.
         set_number(Arch::hardware_capabilities());

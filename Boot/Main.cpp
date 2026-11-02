@@ -199,6 +199,27 @@ static void collect_entropy(UEFI::BootServices& boot_services, API::BootInfo& bo
         boot_info.entropy_size = sizeof(boot_info.entropy);
 }
 
+// How far up the kernel goes from where it is linked: somewhere in the first 1 GiB above that, on
+// a 64 KiB boundary, so one of 16384 places. The boot word "nokaslr" leaves it where it was linked,
+// for a debugger reading the symbols.
+static u64 choose_kernel_slide(UEFI::BootServices& boot_services, Optional<LoadedFile> const& boot_args)
+{
+    if (boot_args.has_value() && StringView(boot_args->bytes()).contains("nokaslr"_sv))
+        return 0;
+    constexpr u64 alignment = 64 * KiB;
+    constexpr u64 choices = 16384;
+    u64 random;
+    asm volatile("mrs %0, cntpct_el0" : "=r"(random));
+    void* interface = nullptr;
+    if (!UEFI::is_error(boot_services.LocateProtocol(&UEFI::rng_protocol_guid, nullptr, &interface)) && interface) {
+        u64 from_firmware = 0;
+        auto* rng = static_cast<UEFI::RngProtocol*>(interface);
+        if (!UEFI::is_error(rng->GetRNG(rng, nullptr, sizeof(from_firmware), reinterpret_cast<u8*>(&from_firmware))))
+            random ^= from_firmware;
+    }
+    return (random % choices) * alignment;
+}
+
 // boot-args is a text file; its contents become the kernel command line.
 static void set_command_line(API::BootInfo& boot_info, Optional<LoadedFile> const& boot_args)
 {
@@ -268,9 +289,10 @@ static ErrorOr<void> map_kernel(PageTableBuilder& tables, ELF::Image const& imag
             access = Access::ReadExecute;
         else if (segment.p_flags & ELF::PF_W)
             access = Access::ReadWrite;
-        u64 physical = kernel.physical_base + (segment.p_vaddr - kernel.virtual_base);
+        u64 const address = segment.p_vaddr + kernel.slide;
+        u64 physical = kernel.physical_base + (address - kernel.virtual_base);
         u64 size = align_up<u64>(segment.p_memsz, UEFI::page_size);
-        TRY(tables.map(segment.p_vaddr, physical, size, MemoryAttribute::Normal, access));
+        TRY(tables.map(address, physical, size, MemoryAttribute::Normal, access));
     }
     return {};
 }
@@ -300,9 +322,9 @@ static void exit_boot_services(UEFI::Handle image_handle, UEFI::BootServices& bo
     if (!kernel_file.has_value())
         fail("reading the kernel"_sv, Error::from_string_literal("\\System\\Library\\Kernels\\vulture is missing"));
     auto image = unwrap("reading the kernel"_sv, ELF::Image::parse(kernel_file->bytes()));
-    auto kernel = unwrap("loading the kernel"_sv, load_kernel(image, boot_services));
-    auto boot_archive = unwrap("reading the boot archive"_sv, volume.load(boot_archive_path, LoaderMemoryType::BootArchive));
     auto boot_args = unwrap("reading boot-args"_sv, volume.load(boot_args_path, LoaderMemoryType::LoaderReclaimable));
+    auto kernel = unwrap("loading the kernel"_sv, load_kernel(image, boot_services, choose_kernel_slide(boot_services, boot_args)));
+    auto boot_archive = unwrap("reading the boot archive"_sv, volume.load(boot_archive_path, LoaderMemoryType::BootArchive));
 
     // BootInfo and the memory map array share one allocation; the array is
     // sized for the largest map the reserved buffer can hold.
@@ -320,6 +342,7 @@ static void exit_boot_services(UEFI::Handle image_handle, UEFI::BootServices& bo
     boot_info.memory_map = boot_info_address + regions_offset;
     boot_info.kernel_image = { kernel.physical_base, kernel.size };
     boot_info.kernel_virtual_base = kernel.virtual_base;
+    boot_info.kernel_slide = kernel.slide;
     boot_info.kernel_file = { kernel_file->base, kernel_file->size };
     if (boot_archive.has_value())
         boot_info.boot_archive = { boot_archive->base, boot_archive->size };

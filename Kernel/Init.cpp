@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Memory/Heap.h>
+#include <Kernel/Security/DebugFault.h>
+#include <Kernel/API/POSIX/memory.h>
+#include <Kernel/Memory/UserAccess.h>
+#include <Kernel/Memory/AddressSpace.h>
 #include <Kernel/API/BootInfo.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Arch/CPU.h>
@@ -32,6 +37,7 @@
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
 #include <Kernel/Security/Random.h>
+#include <Kernel/Security/StackProtector.h>
 #include <Kernel/TTY/Terminals.h>
 #include <Kernel/Tasks/Process.h>
 #include <Kernel/Tasks/Processor.h>
@@ -331,6 +337,23 @@ static void initialize_interrupts_and_time(DeviceTree::FlattenedDeviceTree const
     dmesgln("Timer: {} kHz, tickless", Time::ticks_per_second() / 1000);
 }
 
+// For fault=stack-smash. No inlining or the like: it should look like the real thing.
+[[gnu::noinline]] static void smash_my_stack(size_t count)
+{
+    char array[16];
+    char volatile* volatile pointer = array;
+    for (size_t i = 0; i < count; ++i)
+        pointer[i] = 'A';
+}
+
+// For fault=pac-return: what overwriting a return address does, without being able to sign it.
+[[gnu::noinline]] static void return_to_a_changed_address()
+{
+    dmesgln("Changing this function's return address");
+    auto* frame = static_cast<u64*>(__builtin_frame_address(0));
+    frame[1] ^= 0x10;
+}
+
 // "fault=<kind>" on the command line ends the boot with a deliberate
 // failure, to check that crashes are reported properly.
 [[gnu::noinline]] static void trigger_deliberate_fault(StringView kind)
@@ -360,8 +383,60 @@ static void initialize_interrupts_and_time(DeviceTree::FlattenedDeviceTree const
                 panic("deliberate panic on processor 1"_sv);
         },
             nullptr);
+    } else if (kind == "stack-smash"_sv) {
+        // Past the end of an array on this frame, up over what the compiler put there.
+        smash_my_stack(64);
+#if VULTURE_KERNEL_SANITIZERS
+    } else if (kind == "kasan-overflow"_sv) {
+        auto* volatile bytes = static_cast<u8*>(kmalloc(40));
+        bytes[40] = 1;
+    } else if (kind == "kasan-overflow-partial"_sv) {
+        // Inside the last eight bytes of it, and past the end all the same.
+        auto* volatile bytes = static_cast<u8*>(kmalloc(37));
+        bytes[36] = 1;
+        dmesgln("The last byte was fine");
+        bytes[37] = 1;
+    } else if (kind == "kasan-use-after-free"_sv) {
+        auto* volatile bytes = static_cast<u8*>(kmalloc(40));
+        kfree(const_cast<u8*>(bytes));
+        dmesgln("Read after free: {}", static_cast<u32>(bytes[0]));
+    } else if (kind == "kasan-double-free"_sv) {
+        void* pointer = kmalloc(40);
+        kfree(pointer);
+        kfree(pointer);
+    } else if (kind == "kasan-memcpy"_sv) {
+        auto* volatile bytes = static_cast<u8*>(kmalloc(16));
+        char volatile source[32] = {};
+        __builtin_memcpy(const_cast<u8*>(bytes), const_cast<char*>(source), 32);
+    } else if (kind == "ubsan-overflow"_sv) {
+        int volatile large = 2147483647;
+        dmesgln("Overflow: {}", large + 1);
+    } else if (kind == "ubsan-shift"_sv) {
+        int volatile by = 40;
+        dmesgln("Shift: {}", 1 << by);
+    } else if (kind == "ubsan-bounds"_sv) {
+        int array[4] = {};
+        // (Four is one past the end, which may be pointed at; so one further.)
+        int volatile index = 5;
+        dmesgln("Past the end: {}", array[index]);
+#endif
+    } else if (kind == "pac-return"_sv) {
+        return_to_a_changed_address();
+    } else if (kind == "bti-branch"_sv) {
+        // Into the middle of a function: not somewhere anyone should be able to jump.
+        auto* middle = reinterpret_cast<u8 const*>(&smash_my_stack) + 12;
+        reinterpret_cast<void (*)(size_t)>(const_cast<u8*>(middle))(0);
+    } else if (kind == "text-write"_sv) {
+        // Code isn't writable: W^X for the kernel.
+        *reinterpret_cast<u32 volatile*>(&trigger_deliberate_fault) = 0;
+    } else if (kind == "rodata-write"_sv) {
+        static char const constant[] = "constants stay constant";
+        *const_cast<char volatile*>(&constant[0]) = 'X';
+    } else if (kind == "data-execute"_sv) {
+        static u32 data[4] = { 0xd503201f, 0xd503201f, 0xd65f03c0, 0 };
+        reinterpret_cast<void (*)()>(data)();
     } else {
-        dmesgln("Unknown fault kind; expected data-abort, trap, verify, panic, interrupt or processor");
+        dmesgln("Unknown fault kind");
     }
 }
 
@@ -372,7 +447,7 @@ using namespace Kernel;
 // The kernel's copy: the loader's is in memory the kernel reclaims.
 static API::BootInfo s_boot_info;
 
-extern "C" [[noreturn]] void kernel_main(API::BootInfo const* loader_boot_info)
+extern "C" [[noreturn, gnu::no_stack_protector]] void kernel_main(API::BootInfo const* loader_boot_info)
 {
     // Nothing can report a bad handoff yet; stop rather than guess.
     if (!loader_boot_info || loader_boot_info->magic != API::boot_info_magic || loader_boot_info->version != API::boot_info_version || loader_boot_info->size != sizeof(API::BootInfo))
@@ -391,7 +466,7 @@ extern "C" [[noreturn]] void kernel_main(API::BootInfo const* loader_boot_info)
         serial.initialize(API::direct_map_base + boot_info.serial.physical_base);
         log.attach_serial(&serial);
     }
-    Symbols::initialize(boot_info.kernel_file);
+    Symbols::initialize(boot_info.kernel_file, boot_info.kernel_slide);
 
     BootArguments arguments { StringView(boot_info.command_line) };
     bool verbose = arguments.has_flag("-v"_sv);
@@ -426,6 +501,7 @@ extern "C" [[noreturn]] void kernel_main(API::BootInfo const* loader_boot_info)
         Symbols::is_available() ? "loaded"_sv : "unavailable"_sv);
     dmesgln("Entropy from firmware: {} bytes", boot_info.entropy_size);
     initialize_random({ boot_info.entropy, min<size_t>(boot_info.entropy_size, sizeof(boot_info.entropy)) });
+    initialize_stack_protector();
     show_progress(20);
 
     initialize_memory(boot_info, framebuffer);
@@ -451,6 +527,12 @@ extern "C" [[noreturn]] void kernel_main(API::BootInfo const* loader_boot_info)
         dmesgln("PCI: {}", pci.view());
     }
 
+    {
+        FixedStringBuilder<96> protections;
+        Arch::describe_hardening_features(protections);
+        dmesgln("Protections: {}", protections.view());
+    }
+
     // From here on, this code is the "boot" thread.
     Scheduler::initialize();
     dmesgln("Scheduler: {} QoS classes, {} ms time slices, idle processors take work", qos_class_count, Scheduler::time_slice_microseconds / 1000);
@@ -471,6 +553,9 @@ extern "C" [[noreturn]] void kernel_main(API::BootInfo const* loader_boot_info)
 
     if (auto fault = arguments.value("fault"_sv); fault.has_value())
         trigger_deliberate_fault(fault.value());
+    // See "debug.fault" in sys_sysctl.
+    if (auto fault = arguments.value("debugfault"_sv); fault.has_value())
+        set_debug_fault(fault.value());
 
     show_progress(100);
     dmesgln("vultureKernel: boot complete");

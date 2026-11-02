@@ -13,6 +13,7 @@
 .global _start
 .type _start, %function
 _start:
+    bti c
     mov x29, xzr
     mov x30, xzr
     mov x0, sp

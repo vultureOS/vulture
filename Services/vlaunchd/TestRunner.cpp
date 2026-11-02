@@ -43,6 +43,9 @@ Test const s_tests[] = {
     { "/usr/tests/signals", 0, 0 },
     { "/usr/tests/sockets", 0, 0 },
     { "/usr/tests/crypto", 0, 0 },
+    { "/usr/tests/hardening", 0, 0 },
+    // Only with the boot word that makes it mean anything (Meta/hardening-test.sh): else it fails.
+    { "/usr/tests/kernel-fault", 1, 0 },
     { "/usr/tests/files", 0, 0 },
     { "/usr/tests/filesystem", 0, 0 },
     { "/usr/tests/pipes", 0, 0 },
@@ -134,6 +137,11 @@ int run_tests(char const* only)
             ++passed;
         else
             ++failed;
+    }
+    // Asked for one, and it isn't there: that is no success.
+    if (only && passed + failed == 0) {
+        printf("vlaunchd: no test called %s\n", only);
+        ++failed;
     }
     printf("userland: %d passed, %d failed\n", passed, failed);
     printf("userland: %s\n", failed == 0 ? "PASS" : "FAIL");

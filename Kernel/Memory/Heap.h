@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <LibBase/StringView.h>
+
 #include <LibBase/Types.h>
 
 // The kernel heap. Small allocations come from slabs: 16 KiB blocks cut
@@ -21,6 +23,12 @@ namespace Kernel {
 // Like kmalloc, but the memory is zeroed.
 [[nodiscard]] void* kzalloc(size_t);
 void kfree(void*);
+
+#if VULTURE_KERNEL_SANITIZERS
+// Whether `size` bytes at `address` are memory that may be touched. If not, `problem` says why. Only
+// the heap's own memory, and free pages, are ever refused: everything else is taken on trust.
+[[nodiscard]] bool heap_check_access(FlatPtr address, size_t size, StringView& problem);
+#endif
 
 constexpr size_t heap_size_class_count = 8;
 constexpr size_t heap_largest_small_size = 2048;

@@ -33,9 +33,12 @@ struct StartupParameters {
     u64 stack_top;
     u64 entry;
     u64 argument;
+    u64 pointer_key_low;
+    u64 pointer_key_high;
+    u64 has_pointer_authentication;
 };
 
-static_assert(sizeof(StartupParameters) == 72);
+static_assert(sizeof(StartupParameters) == 96);
 
 constexpr unsigned parameters_order = 1;
 constexpr size_t parameter_slots = (page_size << parameters_order) / sizeof(StartupParameters);
@@ -89,6 +92,12 @@ ErrorOr<void> start_processor(u64 hardware_id, FlatPtr stack_top, SecondaryEntry
     parameters.stack_top = stack_top;
     parameters.entry = reinterpret_cast<u64>(entry);
     parameters.argument = reinterpret_cast<u64>(argument);
+    parameters.has_pointer_authentication = has_pointer_authentication();
+    if (parameters.has_pointer_authentication) {
+        // All the processors sign the kernel's return addresses with the one key.
+        parameters.pointer_key_low = READ_SYSTEM_REGISTER(S3_0_C2_C1_2);
+        parameters.pointer_key_high = READ_SYSTEM_REGISTER(S3_0_C2_C1_3);
+    }
     clean_to_point_of_coherency(&parameters, sizeof(parameters));
 
     auto entry_physical = memory_manager().physical_address_of_kernel_image(secondary_entry);

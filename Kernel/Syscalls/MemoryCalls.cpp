@@ -23,6 +23,9 @@ ErrorOr<FlatPtr> Process::sys_mmap(TrapFrame&, SyscallArguments const& arguments
     u64 offset = arguments.values[5];
     if (length == 0 || (protection & ~(PROT_READ | PROT_WRITE | PROT_EXEC)))
         return Error::from_errno(EINVAL);
+    // Memory is writable or executable, never both.
+    if ((protection & PROT_WRITE) && (protection & PROT_EXEC))
+        return Error::from_errno(EACCES);
     bool shared = flags & MAP_SHARED;
     if (shared == static_cast<bool>(flags & MAP_PRIVATE))
         return Error::from_errno(EINVAL); // Exactly one of the two.
@@ -70,6 +73,8 @@ ErrorOr<FlatPtr> Process::sys_mprotect(TrapFrame&, SyscallArguments const& argum
     int protection = static_cast<int>(arguments.values[2]);
     if (address % page_size != 0 || (protection & ~(PROT_READ | PROT_WRITE | PROT_EXEC)))
         return Error::from_errno(EINVAL);
+    if ((protection & PROT_WRITE) && (protection & PROT_EXEC))
+        return Error::from_errno(EACCES);
     TRY(m_address_space->protect(address, length, protection));
     return 0;
 }

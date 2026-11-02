@@ -141,8 +141,37 @@ extern "C" void __libc_initialize(int argc, char** argv, char** envp)
 
 __attribute__((section(".init_array.00001"), used)) static Constructor s_initialize = __libc_initialize;
 
-extern "C" [[noreturn]] void __libc_start(unsigned long* stack)
+// What functions with arrays on the stack check on the way out (-fstack-protector-strong).
+extern "C" {
+unsigned long __stack_chk_guard = 0x00dead5ca1ab1e00;
+
+[[noreturn]] void __stack_chk_fail()
 {
+    static char const message[] = "*** stack smashing detected ***: terminated\n";
+    (void)System::syscall(System::Syscall::write, 2, reinterpret_cast<unsigned long>(message), sizeof(message) - 1);
+    abort();
+}
+}
+
+// From the 16 random bytes the kernel gives each new program.
+[[gnu::no_stack_protector]] static void set_stack_guard(unsigned long* stack)
+{
+    int const argc = static_cast<int>(stack[0]);
+    char** envp = reinterpret_cast<char**>(stack + 1) + argc + 1;
+    while (*envp)
+        ++envp;
+    auto const* auxiliary = reinterpret_cast<unsigned long const*>(envp + 1);
+    for (; auxiliary[0] != AT_NULL; auxiliary += 2) {
+        if (auxiliary[0] == AT_RANDOM) {
+            __stack_chk_guard = *reinterpret_cast<unsigned long const*>(auxiliary[1]) & ~0xfful;
+            return;
+        }
+    }
+}
+
+extern "C" [[noreturn, gnu::no_stack_protector]] void __libc_start(unsigned long* stack)
+{
+    set_stack_guard(stack);
     int argc = static_cast<int>(stack[0]);
     char** argv = reinterpret_cast<char**>(stack + 1);
     char** envp = argv + argc + 1;

@@ -8,6 +8,9 @@
  * The kernel runs in the top 2 GiB of the address space. Each permission
  * class gets its own page-aligned segment, so VultureBoot can map code
  * read-execute, constants read-only and data read-write (never executable).
+ *
+ * It is position independent. VultureBoot picks where it really goes, somewhere
+ * above this address, and applies the relative relocations listed in .rela.dyn.
  */
 
 OUTPUT_FORMAT("elf64-littleaarch64")
@@ -19,6 +22,7 @@ PHDRS
     text PT_LOAD FLAGS(5);   /* read, execute */
     rodata PT_LOAD FLAGS(4); /* read */
     data PT_LOAD FLAGS(6);   /* read, write */
+    dynamic PT_DYNAMIC FLAGS(4);
 }
 
 KERNEL_VIRTUAL_BASE = 0xffffffff80000000;
@@ -49,6 +53,13 @@ SECTIONS
         __ex_table_end = .;
     } :rodata
 
+    /* What the loader reads to relocate the kernel. */
+    .dynsym : { *(.dynsym) } :rodata
+    .gnu.hash : { *(.gnu.hash) } :rodata
+    .hash : { *(.hash) } :rodata
+    .dynstr : { *(.dynstr) } :rodata
+    .rela.dyn : { *(.rela.dyn) *(.rela.*) } :rodata
+
     .init_array :
     {
         __init_array_start = .;
@@ -57,9 +68,11 @@ SECTIONS
         __init_array_end = .;
     } :rodata
 
-    .data : ALIGN(4K)
+    .dynamic : ALIGN(4K) { __data_start = .; *(.dynamic) } :data :dynamic
+    .got : { *(.got .got.*) } :data
+
+    .data : ALIGN(8)
     {
-        __data_start = .;
         *(.data .data.*)
     } :data
 

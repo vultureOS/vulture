@@ -58,7 +58,9 @@ elseif(VULTURE_PART STREQUAL "userland")
     string(REPLACE "-static" "" CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
     vulture_add_cxx_options(
         -O2
-        -fno-stack-protector
+        -fstack-protector-strong
+        -mstack-protector-guard=global
+        -mbranch-protection=pac-ret+bti
         -mno-omit-leaf-frame-pointer
         -mno-outline-atomics
         -fno-unwind-tables
@@ -71,10 +73,28 @@ elseif(VULTURE_PART STREQUAL "target")
         -O2
         -ffreestanding
         -fno-threadsafe-statics
-        -fno-stack-protector
+        -fPIE
+        -fstack-protector-strong
+        -mstack-protector-guard=global
+        -mbranch-protection=pac-ret+b-key+bti
         -mgeneral-regs-only
         -mno-omit-leaf-frame-pointer
         -mno-outline-atomics
         -fno-unwind-tables
         -fno-asynchronous-unwind-tables)
+    # A second flavor of the kernel, for tests (Meta/sanitized-kernel-test.sh): undefined behavior
+    # and heap mistakes end in a panic. The checks go through functions, Kernel/Debug/Sanitizers.cpp,
+    # rather than shadow memory at a fixed address.
+    if(VULTURE_KERNEL_SANITIZERS)
+        add_compile_definitions(VULTURE_KERNEL_SANITIZERS=1)
+        vulture_add_cxx_options(
+            -fsanitize=undefined,kernel-address
+            -fno-sanitize=vptr,function
+            -fsanitize-recover=undefined
+            "SHELL:-mllvm -asan-instrumentation-with-call-threshold=0"
+            "SHELL:-mllvm -asan-stack=0"
+            "SHELL:-mllvm -asan-globals=0"
+            "SHELL:-mllvm -asan-instrument-dynamic-allocas=0"
+            "SHELL:-mllvm -asan-kernel-mem-intrinsic-prefix=1")
+    endif()
 endif()

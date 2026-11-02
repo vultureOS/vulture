@@ -13,4 +13,8 @@ if(NOT VULTURE_PART STREQUAL "host")
         Freestanding/Memory.cpp)
     # These are memcpy and friends: never let the compiler call them here.
     target_compile_options(LibBaseFreestanding PRIVATE -ffreestanding)
+    # The sanitizers check on behalf of these (__asan_memcpy and the rest), and call them.
+    if(VULTURE_KERNEL_SANITIZERS)
+        target_compile_options(LibBaseFreestanding PRIVATE -fno-sanitize=kernel-address,undefined)
+    endif()
 endif()

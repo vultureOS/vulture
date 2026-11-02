@@ -16,7 +16,7 @@
 namespace Kernel::API {
 
 constexpr u64 boot_info_magic = 0x464e49544f4f4256; // "VBOOTINF"
-constexpr u32 boot_info_version = 1;
+constexpr u32 boot_info_version = 2;
 
 // All of physical memory is mapped here, so physical address P is at
 // direct_map_base + P.
@@ -86,6 +86,8 @@ struct BootInfo {
     // The loaded segments, and the ELF file itself (kept for its symbol table).
     PhysicalRange kernel_image;
     u64 kernel_virtual_base;
+    // How far that is from where it was linked (what addresses in kernel_file are relative to).
+    u64 kernel_slide;
     PhysicalRange kernel_file;
 
     PhysicalRange boot_archive; // Empty until the boot archive exists (M4).
@@ -104,6 +106,6 @@ struct BootInfo {
 
 static_assert(sizeof(MemoryRegion) == 24);
 // Pins the layout: the PE loader and the ELF kernel must agree on it.
-static_assert(sizeof(BootInfo) == 496);
+static_assert(sizeof(BootInfo) == 504);
 
 }

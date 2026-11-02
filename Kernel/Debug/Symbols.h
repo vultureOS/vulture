@@ -14,7 +14,7 @@
 
 namespace Kernel::Symbols {
 
-void initialize(API::PhysicalRange kernel_file);
+void initialize(API::PhysicalRange kernel_file, u64 slide);
 
 [[nodiscard]] bool is_available();
 
