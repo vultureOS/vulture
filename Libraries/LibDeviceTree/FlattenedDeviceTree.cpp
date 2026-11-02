@@ -315,7 +315,7 @@ Optional<Region> FlattenedDeviceTree::reg(Node const& node, size_t index) const
     if (!address.has_value())
         return {};
     Region region;
-    region.address = address.value();
+    region.address = translate_through_buses(node, address.value());
     if (node.size_cells > 0) {
         auto size = property->read_cells(index * entry_cells + node.address_cells, node.size_cells);
         if (!size.has_value())
@@ -323,6 +323,75 @@ Optional<Region> FlattenedDeviceTree::reg(Node const& node, size_t index) const
         region.size = size.value();
     }
     return region;
+}
+
+// A node's address is in its parent's terms. Each bus between it and the root says, in "ranges", where
+// those are in its own parent's. (A bus with an empty "ranges", or none, or addresses that won't fit two
+// cells as PCI's don't, passes them on as they are.)
+u64 FlattenedDeviceTree::translate_through_buses(Node const& node, u64 address) const
+{
+    Array<Node, max_depth + 1> ancestors {};
+    bool found = false;
+    auto result = for_each_node([&](Node const& visited) {
+        if (visited.depth > max_depth)
+            return IterationDecision::Continue;
+        ancestors[visited.depth] = visited;
+        if (visited.properties_offset != node.properties_offset)
+            return IterationDecision::Continue;
+        found = true;
+        return IterationDecision::Break;
+    });
+    if (result.is_error() || !found)
+        return address;
+
+    for (size_t depth = node.depth; depth-- > 1;) {
+        auto const& bus = ancestors[depth];
+        auto ranges = find_property(bus, "ranges"_sv);
+        if (!ranges.has_value())
+            continue;
+        u32 const child_cells = u32_property(bus, "#address-cells"_sv, 2);
+        u32 const parent_cells = bus.address_cells;
+        u32 const size_cells = u32_property(bus, "#size-cells"_sv, 1);
+        size_t const entry_cells = child_cells + parent_cells + size_cells;
+        if (entry_cells == 0)
+            continue;
+        for (size_t entry = 0; entry + entry_cells <= ranges->cell_count(); entry += entry_cells) {
+            auto child = ranges->read_cells(entry, child_cells);
+            auto parent = ranges->read_cells(entry + child_cells, parent_cells);
+            auto size = ranges->read_cells(entry + child_cells + parent_cells, size_cells);
+            if (!child.has_value() || !parent.has_value() || !size.has_value())
+                break;
+            if (address >= child.value() && address - child.value() < size.value()) {
+                address = parent.value() + (address - child.value());
+                break;
+            }
+        }
+    }
+    return address;
+}
+
+Optional<Region> FlattenedDeviceTree::memory_reservation(size_t index) const
+{
+    // Pairs of big-endian 64-bit numbers, ending with a pair of zeroes.
+    auto read_be64 = [&](size_t at) -> Optional<u64> {
+        if (at + 8 > m_blob.size())
+            return {};
+        u64 value = 0;
+        for (size_t i = 0; i < 8; ++i)
+            value = (value << 8) | m_blob[at + i];
+        return value;
+    };
+    constexpr size_t reservation_block_offset_at = 16;
+    if (m_blob.size() < reservation_block_offset_at + 4)
+        return {};
+    size_t block = 0;
+    for (size_t i = 0; i < 4; ++i)
+        block = (block << 8) | m_blob[reservation_block_offset_at + i];
+    auto address = read_be64(block + index * 16);
+    auto size = read_be64(block + index * 16 + 8);
+    if (!address.has_value() || !size.has_value() || (address.value() == 0 && size.value() == 0))
+        return {};
+    return Region { address.value(), size.value() };
 }
 
 Optional<Node> FlattenedDeviceTree::find_stdout_node() const

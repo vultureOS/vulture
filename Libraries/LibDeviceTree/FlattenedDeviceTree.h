@@ -83,8 +83,12 @@ public:
     // A u32 property such as "#address-cells", or `fallback` if absent.
     [[nodiscard]] u32 u32_property(Node const&, StringView name, u32 fallback) const;
 
-    // Entry `index` of the node's "reg" property.
+    // Entry `index` of the node's "reg" property, as the processor addresses it: through the "ranges"
+    // of the buses above the node.
     [[nodiscard]] Optional<Region> reg(Node const&, size_t index) const;
+
+    // What the firmware's memory reservation block lists, one entry at a time, until there are no more.
+    [[nodiscard]] Optional<Region> memory_reservation(size_t index) const;
 
     // The node named by /chosen's "stdout-path", resolving aliases and
     // dropping ":options".
@@ -96,6 +100,7 @@ private:
     FlattenedDeviceTree() = default;
     ErrorOr<void> walk_nodes(NodeVisitor, void* context) const;
 
+    [[nodiscard]] u64 translate_through_buses(Node const&, u64 address) const;
     [[nodiscard]] Optional<u32> read_token(size_t offset) const;
     [[nodiscard]] Optional<StringView> read_string_at(ReadonlyBytes block, size_t offset) const;
 

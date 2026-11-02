@@ -235,3 +235,63 @@ TEST_CASE(finds_nodes_by_phandle_and_reads_u32_properties)
     EXPECT_EQ(tree.u32_property(node.value(), "#missing"_sv, 7), 7u);
     EXPECT(!tree.find_node_by_phandle(0x1234).has_value());
 }
+
+TEST_CASE(reg_goes_through_the_ranges_of_the_buses_above)
+{
+    // As on a Raspberry Pi 4: devices are named by the addresses the video core knows them by.
+    Builder builder;
+    builder.begin_node(""_sv);
+    builder.property_cells("#address-cells"_sv, 2);
+    builder.property_cells("#size-cells"_sv, 1);
+    builder.begin_node("soc"_sv);
+    builder.property_cells("#address-cells"_sv, 1);
+    builder.property_cells("#size-cells"_sv, 1);
+    builder.property_cells("ranges"_sv, 0x7e000000, 0x0, 0xfe000000, 0x01800000, 0x40000000, 0x0, 0xff800000, 0x00800000);
+    builder.begin_node("serial@7e201000"_sv);
+    builder.property_string("compatible"_sv, "arm,pl011"_sv);
+    builder.property_cells("reg"_sv, 0x7e201000, 0x200);
+    builder.end_node();
+    builder.begin_node("interrupt-controller@40041000"_sv);
+    builder.property_string("compatible"_sv, "arm,gic-400"_sv);
+    builder.property_cells("reg"_sv, 0x40041000, 0x1000, 0x40042000, 0x2000);
+    builder.end_node();
+    builder.begin_node("emmc2bus"_sv);
+    builder.property_cells("#address-cells"_sv, 2);
+    builder.property_cells("#size-cells"_sv, 1);
+    builder.property_cells("ranges"_sv, 0x0, 0x7e000000, 0x7e000000, 0x01800000);
+    builder.begin_node("mmc@7e340000"_sv);
+    builder.property_string("compatible"_sv, "brcm,bcm2711-emmc2"_sv);
+    builder.property_cells("reg"_sv, 0x0, 0x7e340000, 0x100);
+    builder.end_node();
+    builder.end_node();
+    builder.end_node();
+    builder.begin_node("plain@1000"_sv);
+    builder.property_string("compatible"_sv, "not-on-a-bus"_sv);
+    builder.property_cells("reg"_sv, 0x0, 0x1000, 0x100);
+    builder.end_node();
+    builder.end_node();
+    auto tree = MUST(DeviceTree::FlattenedDeviceTree::parse(builder.finish()));
+
+    auto serial = tree.reg(tree.find_compatible_node("arm,pl011"_sv).value(), 0);
+    EXPECT(serial.has_value());
+    EXPECT_EQ(serial->address, 0xfe201000u);
+    EXPECT_EQ(serial->size, 0x200u);
+
+    auto controller = tree.find_compatible_node("arm,gic-400"_sv).value();
+    EXPECT_EQ(tree.reg(controller, 0)->address, 0xff841000u);
+    EXPECT_EQ(tree.reg(controller, 1)->address, 0xff842000u);
+
+    // Two buses, one above the other.
+    EXPECT_EQ(tree.reg(tree.find_compatible_node("brcm,bcm2711-emmc2"_sv).value(), 0)->address, 0xfe340000u);
+
+    EXPECT_EQ(tree.reg(tree.find_compatible_node("not-on-a-bus"_sv).value(), 0)->address, 0x1000u);
+}
+
+TEST_CASE(a_tree_without_reservations_has_none)
+{
+    Builder builder;
+    builder.begin_node(""_sv);
+    builder.end_node();
+    auto tree = MUST(DeviceTree::FlattenedDeviceTree::parse(builder.finish()));
+    EXPECT(!tree.memory_reservation(0).has_value());
+}
