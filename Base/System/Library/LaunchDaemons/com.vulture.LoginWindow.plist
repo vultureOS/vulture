@@ -2,7 +2,7 @@
     "Label" : "com.vulture.LoginWindow",
     "ProgramArguments" : [ "/System/Library/CoreServices/LoginWindow" ],
     "MachServices" : { "com.vulture.loginwindow" : true },
-    "LimitLoadToSessionType" : "Aqua",
+    "LimitLoadToSessionType" : "Graphical",
     "KeepAlive" : true,
     "RunAtLoad" : true,
     "StandardOutPath" : "/dev/console",

@@ -91,6 +91,9 @@ public:
     // The general pasteboard, as text.
     virtual void copy_text(StringView) = 0;
     [[nodiscard]] virtual ErrorOr<String> paste_text() = 0;
+
+    // One of the system's sounds, if there is anything to hear it with (see LibAudio/Sounds.h).
+    virtual void play_sound(StringView) { }
 };
 
 }

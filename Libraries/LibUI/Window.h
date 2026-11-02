@@ -93,6 +93,9 @@ public:
     void update_now();
     void draw_focus_ring(Graphics&, View&);
     void set_materials(Span<MaterialRegion const>);
+    // The sidebar's material down the left, this wide, however tall the window gets. (The
+    // window must be transparent.)
+    void set_sidebar_material(float width);
 
     // The press going on now will end elsewhere (a menu took the pointer, a drag or a
     // move is under way): nothing here will hear it let go.
@@ -157,6 +160,7 @@ private:
     bool m_presenting { false };
     bool m_update_pending { false };
     bool m_closed { false };
+    float m_sidebar_material_width { 0 };
     WS::CursorShape m_cursor { WS::CursorShape::Arrow };
     // For telling a double click.
     double m_last_press_time { -1 };

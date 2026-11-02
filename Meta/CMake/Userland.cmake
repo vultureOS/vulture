@@ -78,12 +78,13 @@ function(vulture_compile_ipc target)
 endfunction()
 
 # vulture_add_application(<target> SOURCES <files...> NAME <name> IDENTIFIER <id> ICON <icon>
-#                         [DESTINATION <dir>] [EXTENSIONS <extensions...>] [LIBRARIES <libs...>])
+#                         [KIND <what it is>] [DESTINATION <dir>] [EXTENSIONS <extensions...>]
+#                         [LIBRARIES <libs...>])
 #
 # An application bundle: <dir>/<name>.app, with Contents/MacOS/<target> and an Info.plist
 # saying what LibDesktop needs to know. Under /Applications, unless told otherwise.
 function(vulture_add_application target)
-    cmake_parse_arguments(PARSE_ARGV 1 arg "" "NAME;IDENTIFIER;ICON;DESTINATION" "SOURCES;LIBRARIES;EXTENSIONS")
+    cmake_parse_arguments(PARSE_ARGV 1 arg "" "NAME;IDENTIFIER;ICON;KIND;DESTINATION" "SOURCES;LIBRARIES;EXTENSIONS")
     if(NOT arg_DESTINATION)
         set(arg_DESTINATION Applications)
     endif()
@@ -96,6 +97,6 @@ function(vulture_add_application target)
         string(APPEND extensions "\"${extension}\"")
     endforeach()
     set(plist "${CMAKE_CURRENT_BINARY_DIR}/${target}-Info.plist")
-    file(WRITE "${plist}" "{\n    \"CFBundleName\" : \"${arg_NAME}\",\n    \"CFBundleIdentifier\" : \"${arg_IDENTIFIER}\",\n    \"CFBundleExecutable\" : \"${target}\",\n    \"CFBundleIconFile\" : \"${arg_ICON}\",\n    \"CFBundleDocumentExtensions\" : [ ${extensions} ]\n}\n")
+    file(WRITE "${plist}" "{\n    \"CFBundleName\" : \"${arg_NAME}\",\n    \"CFBundleIdentifier\" : \"${arg_IDENTIFIER}\",\n    \"CFBundleExecutable\" : \"${target}\",\n    \"CFBundleIconFile\" : \"${arg_ICON}\",\n    \"VultureKind\" : \"${arg_KIND}\",\n    \"CFBundleDocumentExtensions\" : [ ${extensions} ]\n}\n")
     install(FILES "${plist}" DESTINATION "${arg_DESTINATION}/${arg_NAME}.app/Contents" RENAME Info.plist)
 endfunction()

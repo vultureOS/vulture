@@ -28,7 +28,7 @@ a text login on the console.
 - Programs talk through Mach-style ports, with messages described in an
   interface language (`ipcc`) and services found by name through vlaunchd.
   The system services are there: `logd` (`log stream`, `log show`), `notifyd`
-  (`notify(3)`, `notifyutil`), `configd` (`scutil`) and `pboard` (`pbcopy`,
+  (`notify(3)`, `notifyutil`), `configd` (`scutil`) and `clipboardd` (`pbcopy`,
   `pbpaste`).
 - Processes have threads: `pthread_*`, `thread_local`, futexes, each thread
   with its own signal mask and alternate stack.
@@ -112,6 +112,8 @@ ninja -C build check      # unit tests + headless boot, crash and kernel tests
 - `Meta/run_console.sh` boots to the text console, which you can type at in QEMU's
   window or in the terminal.
 - `Meta/run.sh --boot-args -v` boots verbosely.
+- [Documentation/Naming.md](Documentation/Naming.md) says what each application and
+  service is called, and why those names.
 - `Meta/run.sh --help` lists the other options, such as software emulation
   (`--tcg`), waiting for a debugger (`--gdb`) and saving a screenshot.
 - For editor support, point clangd at `/opt/homebrew/opt/llvm@22/bin/clangd`.

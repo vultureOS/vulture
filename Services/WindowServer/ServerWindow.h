@@ -79,7 +79,7 @@ struct ServerWindow {
     [[nodiscard]] bool is_unified() const { return flags & Window::WindowUnifiedTitle; }
     [[nodiscard]] bool can_become_key() const { return !is_popup() && (!is_bare() || (flags & Window::WindowCanBecomeKey)); }
     [[nodiscard]] bool is_on_every_space() const { return (flags & Window::WindowSticky) || level != Window::LevelNormal; }
-    // On the Dock's and Mission Control's minds: a window of an application's own.
+    // On the Dock's and Overview's minds: a window of an application's own.
     [[nodiscard]] bool is_document_window() const { return is_titled() && !is_popup(); }
     [[nodiscard]] Gfx::Bitmap const* shown_surface() const { return has_presented ? buffers[shown_buffer].ptr() : nullptr; }
 };

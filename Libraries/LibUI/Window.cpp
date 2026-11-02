@@ -445,6 +445,13 @@ void Window::draw_focus_ring(Graphics& graphics, View& view)
     graphics.stroke_rounded(rect.inflated(width), view.focus_ring_radius() + width, width, appearance.color("focus"_sv));
 }
 
+void Window::set_sidebar_material(float width)
+{
+    m_sidebar_material_width = width;
+    MaterialRegion region { { 0, 0, static_cast<int>(width), static_cast<int>(size().height) }, WS::Material::Sidebar };
+    set_materials(Span<MaterialRegion const>(&region, 1));
+}
+
 void Window::set_materials(Span<MaterialRegion const> regions)
 {
     m_backend->set_materials(regions);
@@ -725,6 +732,8 @@ void Window::handle_resized(FloatSize size)
     m_root->set_frame({ 0, 0, size.width, size.height });
     // Fresh pixels: all of it.
     add_damage({ 0, 0, size.width, size.height });
+    if (m_sidebar_material_width > 0)
+        set_sidebar_material(m_sidebar_material_width);
     if (on_resize)
         on_resize(size);
 }

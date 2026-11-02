@@ -38,6 +38,14 @@ enum class Symbol : u8 {
     Folder,
     File,
     Sidebar,
+    Home,
+    Desktop,
+    Download,
+    Applications,
+    Trash,
+    Drive,
+    Refresh,
+    Speaker,
 };
 
 // A control's face: a shape with shadows outside it, a fill, shading inside it.

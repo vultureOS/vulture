@@ -32,7 +32,9 @@ void TableHeaderView::add_column(StringView title, float column_width)
 
 float TableHeaderView::column_x(size_t index) const
 {
-    float x = 0;
+    // The columns start where a selected row's highlight does, so that what is in them
+    // stays inside it.
+    float x = tokens().metric("table.selectionInset"_sv);
     for (size_t i = 0; i < index; ++i)
         x += m_columns[i].width;
     return x;
@@ -40,7 +42,7 @@ float TableHeaderView::column_x(size_t index) const
 
 float TableHeaderView::total_width() const
 {
-    return column_x(m_columns.size());
+    return column_x(m_columns.size()) + tokens().metric("table.selectionInset"_sv);
 }
 
 void TableHeaderView::set_scroll(float x)
@@ -61,19 +63,26 @@ void TableHeaderView::draw(Graphics& graphics)
     auto const& t = tokens();
     graphics.fill({ 0, 0, width(), height() }, t.color("tableHeader.fill"_sv));
     FontSpec font { t.metric("table.headerFontSize"_sv), FontWeight::Medium, false };
-    float padding = t.metric("table.headerPadding"_sv);
+    // As in the rows below, so that a title stands over its column's text.
+    float padding = t.metric("table.cellPadding"_sv);
     float baseline = (height() + Appearance::cap_height(font)) / 2 - 0.5f;
     for (size_t i = 0; i < m_columns.size(); ++i) {
         float x = column_x(i) - m_scroll;
         float column_width = m_columns[i].width;
         if (static_cast<int>(i) == m_pressed)
             graphics.fill({ x, 0, column_width, height() }, t.color("texturedPressed"_sv));
-        graphics.draw_text_truncated(m_columns[i].title.view(), font, { x + padding, baseline }, column_width - padding * 2, t.color("tableHeader.text"_sv));
-        if (static_cast<int>(i) == m_sort_column) {
-            float size = 10;
-            graphics.draw_symbol(m_sort_ascending ? Symbol::ChevronUp : Symbol::ChevronDown, { x + column_width - padding - size, (height() - size) / 2, size, size }, t.color("secondaryLabel"_sv), 2);
-        }
-        float divider_x = graphics.snap(x + column_width + t.metric("table.intercellWidth"_sv) - 1);
+        constexpr float sort_size = 10;
+        constexpr float sort_gap = 3;
+        bool sorted = static_cast<int>(i) == m_sort_column;
+        // Room for the arrow, which goes at the end of the column.
+        float title_room = column_width - padding * 2 - (sorted ? sort_size + sort_gap : 0);
+        float title_x = x + padding;
+        if (is_right_aligned && is_right_aligned(i))
+            title_x += max(title_room - Appearance::text_width(font, m_columns[i].title.view()), 0.0f);
+        graphics.draw_text_truncated(m_columns[i].title.view(), font, { title_x, baseline }, title_room, t.color("tableHeader.text"_sv));
+        if (sorted)
+            graphics.draw_symbol(m_sort_ascending ? Symbol::ChevronUp : Symbol::ChevronDown, { x + column_width - padding - sort_size, (height() - sort_size) / 2, sort_size, sort_size }, t.color("secondaryLabel"_sv), 2);
+        float divider_x = graphics.snap(x + column_width - 1);
         graphics.fill({ divider_x, 6, 1, height() - 13 }, t.color("tableHeader.divider"_sv));
     }
     graphics.fill({ 0, height() - 1, width(), 1 }, t.color("tableHeader.border"_sv));
@@ -224,6 +233,8 @@ public:
                     }
                 }
                 auto text = model->text_at(row, column);
+                if (model->is_right_aligned(column))
+                    x += max(cell_width - Appearance::text_width(font, text.view()), 0.0f);
                 graphics.draw_text_truncated(text.view(), font, { x, y + (row_height + cap) / 2 }, max(cell_width, 0.0f), text_color);
             }
         }
@@ -494,7 +505,7 @@ void OutlineView::draw_row_prefix(Graphics& graphics, size_t row, FloatRect cons
         return;
     auto const& t = tokens();
     float size = t.metric("table.disclosureSize"_sv);
-    float x = t.metric("table.cellPadding"_sv) + static_cast<float>(entry.depth) * t.metric("table.outlineIndent"_sv);
+    float x = t.metric("table.selectionInset"_sv) + t.metric("table.cellPadding"_sv) + static_cast<float>(entry.depth) * t.metric("table.outlineIndent"_sv);
     graphics.draw_symbol(is_expanded(entry.item) ? Symbol::ChevronDown : Symbol::ChevronRight, { x, rect.y + (rect.height - size) / 2, size, size }, t.color("disclosureSymbol"_sv), 1.8f);
 }
 
@@ -505,7 +516,7 @@ bool OutlineView::row_prefix_pressed(size_t row, float x)
         return false;
     auto const& t = tokens();
     float size = t.metric("table.disclosureSize"_sv);
-    float left = t.metric("table.cellPadding"_sv) + static_cast<float>(entry.depth) * t.metric("table.outlineIndent"_sv);
+    float left = t.metric("table.selectionInset"_sv) + t.metric("table.cellPadding"_sv) + static_cast<float>(entry.depth) * t.metric("table.outlineIndent"_sv);
     if (x < left || x >= left + size)
         return false;
     set_expanded(entry.item, !is_expanded(entry.item));

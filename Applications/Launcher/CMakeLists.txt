@@ -4,9 +4,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-vulture_add_application(Launchpad
+vulture_add_application(Launcher
     SOURCES main.cpp
-    NAME "Launchpad"
-    IDENTIFIER com.vulture.launchpad
-    ICON Launchpad
+    NAME "Launcher"
+    IDENTIFIER com.vulture.launcher
+    ICON Launcher
+    KIND "All Applications"
     LIBRARIES LibDesktop)

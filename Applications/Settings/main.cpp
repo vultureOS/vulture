@@ -19,7 +19,7 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
-// System Settings: a list of panes down the side, each a stack of grouped rows.
+// Settings: a list of panes down the side, each a stack of grouped rows.
 
 using namespace UI;
 using namespace Gfx;
@@ -81,10 +81,9 @@ public:
 
 class Page final : public StackView {
 public:
-    explicit Page(StringView title)
+    Page()
         : StackView(Axis::Vertical, 14, Alignment::Fill, Insets { 18, 24, 18, 24 })
     {
-        (void)add<Label>(title, tokens().named_font("title2"_sv));
     }
 
     Group& add_group(StringView heading = {})
@@ -277,6 +276,37 @@ void build_dock(Page& page)
     page.finish();
 }
 
+void build_sound(Page& page)
+{
+    auto& output = page.add_group("Output"_sv);
+    (void)output.rows().add<Row>("Output device"_sv, access("/dev/audio0"_sv.characters_without_null_termination(), F_OK) == 0 ? "Virtual Sound Device"_sv : "None"_sv);
+    auto& volume_row = output.rows().add<Row>("Output volume"_sv);
+    auto percent = Application::the().output_volume();
+    auto& volume = volume_row.add<Slider>(0.0f, 100.0f, static_cast<float>(percent.value_or(0)));
+    volume.set_fixed_width(220);
+    volume.set_enabled(percent.has_value());
+    volume.on_action = [&volume] { Application::the().set_output_volume(static_cast<u32>(volume.value() + 0.5f)); };
+
+    auto& effects = page.add_group("Sound Effects"_sv);
+    struct Effect {
+        StringView title;
+        StringView sound;
+    };
+    static constexpr Effect const all_effects[] = {
+        { "Alert"_sv, "alert"_sv },
+        { "Notification"_sv, "notification"_sv },
+        { "Move to Trash"_sv, "trash"_sv },
+        { "Log in"_sv, "login"_sv },
+    };
+    for (auto const& effect : all_effects) {
+        auto& row = effects.rows().add<Row>(effect.title);
+        auto& play = row.add<Button>("Play"_sv);
+        auto sound = effect.sound;
+        play.on_action = [sound] { Platform::the().play_sound(sound); };
+    }
+    page.finish();
+}
+
 void build_keyboard(Page& page)
 {
     auto& group = page.add_group();
@@ -284,8 +314,8 @@ void build_keyboard(Page& page)
     auto& toggle = row.add<Switch>(Control::full_keyboard_access());
     toggle.on_action = [&toggle] { Control::set_full_keyboard_access(toggle.is_on()); };
     (void)group.rows().add<Row>("Move focus"_sv, "Tab"_sv);
-    (void)group.rows().add<Row>("Spotlight"_sv, "\xE2\x8C\x98Space"_sv);
-    (void)group.rows().add<Row>("Mission Control"_sv, "\xE2\x8C\x83\xE2\x86\x91"_sv);
+    (void)group.rows().add<Row>("Search"_sv, "\xE2\x8C\x98Space"_sv);
+    (void)group.rows().add<Row>("Overview"_sv, "\xE2\x8C\x83\xE2\x86\x91"_sv);
     (void)group.rows().add<Row>("Switch applications"_sv, "\xE2\x8C\x98Tab"_sv);
     page.finish();
 }
@@ -310,7 +340,7 @@ void build_notifications(Page& page)
     auto& group = page.add_group();
     auto& row = group.rows().add<Row>("Test notification"_sv);
     auto& send = row.add<Button>("Send"_sv);
-    send.on_action = [] { Desktop::post_notification("System Settings"_sv, "It works"_sv, "This is how notifications look."_sv); };
+    send.on_action = [] { Desktop::post_notification("Settings"_sv, "It works"_sv, "This is how notifications look."_sv); };
     page.finish();
 }
 
@@ -347,7 +377,7 @@ public:
     explicit Settings(StringView first_pane)
     {
         auto const& t = tokens();
-        m_window = adopt_own(*new UI::Window("System Settings"_sv, { 200, 90, 880, 600 }, WS::WindowTitled | WS::WindowUnifiedTitle));
+        m_window = adopt_own(*new UI::Window("Settings"_sv, { 200, 90, 880, 600 }, WS::WindowTitled | WS::WindowUnifiedTitle));
         m_window->set_transparent(true);
         auto& root = m_window->set_content<Background>();
         auto& split = root.add<SplitView>();
@@ -357,7 +387,7 @@ public:
         auto& right = split.add_pane<StackView>(0, 300, Axis::Vertical);
         m_toolbar = &right.add<Toolbar>();
         m_toolbar->set_left_padding(t.metric("toolbar.paddingRight"_sv));
-        m_title = &m_toolbar->add_item<Label>("System Settings"_sv, t.named_font("headline"_sv));
+        m_title = &m_toolbar->add_item<Label>("Settings"_sv, t.named_font("headline"_sv));
         m_pages = &right.add<View>();
         m_pages->set_stretch(0, 1);
         split.set_frame({ 0, 0, 880, 600 });
@@ -367,6 +397,7 @@ public:
         add_pane("Appearance"_sv, Symbol::ClearCircle, build_appearance);
         add_pane("Wallpaper"_sv, Symbol::File, build_wallpaper);
         add_pane("Desktop & Dock"_sv, Symbol::Sidebar, build_dock);
+        add_pane("Sound"_sv, Symbol::Speaker, build_sound);
         add_pane("Keyboard"_sv, Symbol::Plus, build_keyboard);
         add_pane("Notifications"_sv, Symbol::Question, build_notifications);
         add_pane("Users"_sv, Symbol::Checkmark, build_users);
@@ -408,7 +439,7 @@ private:
     {
         m_names.append(MUST(String::from_view(name)));
         m_sidebar->add_row(name, symbol);
-        auto& page = m_pages->add<Page>(name);
+        auto& page = m_pages->add<Page>();
         build(page);
         page.set_hidden(true);
         if (!m_pages->layout_manager())
@@ -447,9 +478,9 @@ int main(int argc, char** argv)
         else
             first_pane = StringView(argv[i], strlen(argv[i]));
     }
-    auto application_or_error = Application::create("System Settings"_sv, "com.vulture.SystemSettings"_sv);
+    auto application_or_error = Application::create("Settings"_sv, "com.vulture.Settings"_sv);
     if (application_or_error.is_error()) {
-        fprintf(stderr, "System Settings: cannot reach the window server\n");
+        fprintf(stderr, "Settings: cannot reach the window server\n");
         return 1;
     }
     auto application = application_or_error.release_value();

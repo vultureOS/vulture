@@ -147,7 +147,7 @@ void test_basics(Client& client)
     // The corner is rounded: the very corner shows what is behind (with shadow).
     auto corner = shot->color_at(100 * s, 100 * s);
     report("rounded corners", !near(corner, Color::from_rgb(0xececec), 8));
-    report("the corner's edge is antialiased", shot->color_at(100 * s + 8, 100 * s + 2) != shot->color_at(100 * s + 40, 100 * s + 2));
+    report("the corner's edge is antialiased", shot->color_at(100 * s + 3 * s, 100 * s + 3 * s) != shot->color_at(100 * s + 40 * s, 100 * s + 3 * s));
 
     // A shadow: darker just below than the wallpaper there was.
     auto below_before = before->color_at(250 * s, 306 * s);

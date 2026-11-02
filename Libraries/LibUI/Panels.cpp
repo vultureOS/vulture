@@ -247,6 +247,7 @@ private:
 
 void Alert::show(Window& window, Function<void(size_t)> then)
 {
+    Platform::the().play_sound("alert"_sv);
     auto const& t = tokens();
     float padding = t.metric("alert.padding"_sv);
     float alert_width = t.metric("alert.width"_sv);
@@ -469,7 +470,7 @@ public:
             return;
         for (auto const& entry : listed.value())
             m_entries.append(FileEntry { MUST(String::from_view(entry.name.view())), entry.is_directory });
-        // Folders and files together, by name, as Finder lists them.
+        // Folders and files together, by name, as Files lists them.
         for (size_t i = 1; i < m_entries.size(); ++i) {
             for (size_t j = i; j > 0 && compare(m_entries[j - 1].name.view(), m_entries[j].name.view()) > 0; --j) {
                 auto moved = move(m_entries[j]);
@@ -529,7 +530,7 @@ public:
 
         m_table = &add<TableView>(&m_files);
         m_table->set_headers_visible(false);
-        m_table->add_column("Name"_sv, tokens().metric("panel.width"_sv) - tokens().metric("alert.padding"_sv) * 2);
+        m_table->add_column("Name"_sv, tokens().metric("panel.width"_sv) - tokens().metric("alert.padding"_sv) * 2 - tokens().metric("table.selectionInset"_sv) * 2);
         m_table->set_stretch(0, 1);
         m_table->on_activate = [this](size_t row) { activate(row); };
         m_table->on_selection_change = [this] { selection_changed(); };
@@ -539,7 +540,7 @@ public:
         filler.set_stretch(1, 0);
         auto& cancel = buttons->add<Button>("Cancel"_sv);
         cancel.on_action = [this] { finish({}); };
-        m_confirm = &buttons->add<Button>(kind == FilePanel::Kind::Open ? "Open"_sv : "Save"_sv, ButtonStyle::Default);
+        m_confirm = &buttons->add<Button>(kind == FilePanel::Kind::Save ? "Save"_sv : "Open"_sv, ButtonStyle::Default);
         m_confirm->on_action = [this] { confirm(); };
         buttons->set_fixed_height(20);
         load(directory);
@@ -562,6 +563,11 @@ private:
     {
         if (m_kind == FilePanel::Kind::Open) {
             m_confirm->set_enabled(m_table->selected_row() >= 0);
+            return;
+        }
+        if (m_kind == FilePanel::Kind::OpenFolder) {
+            int selected = m_table->selected_row();
+            m_confirm->set_enabled(selected < 0 || m_files.entry(static_cast<size_t>(selected)).is_directory);
             return;
         }
         int row = m_table->selected_row();
@@ -602,6 +608,15 @@ private:
             return;
         }
         int row = m_table->selected_row();
+        if (m_kind == FilePanel::Kind::OpenFolder) {
+            if (row < 0) {
+                auto directory = MUST(String::from_view(m_files.directory()));
+                finish(directory.view());
+            } else if (m_files.entry(static_cast<size_t>(row)).is_directory) {
+                finish(joined(m_files.directory(), m_files.entry(static_cast<size_t>(row)).name.view()).view());
+            }
+            return;
+        }
         if (row >= 0)
             activate(static_cast<size_t>(row));
     }

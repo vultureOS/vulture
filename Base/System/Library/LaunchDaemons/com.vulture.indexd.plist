@@ -1,8 +1,8 @@
 {
-    "Label" : "com.vulture.mds",
-    "ProgramArguments" : [ "/usr/libexec/mds" ],
-    "MachServices" : { "com.vulture.mds" : true },
-    "LimitLoadToSessionType" : "Aqua",
+    "Label" : "com.vulture.indexd",
+    "ProgramArguments" : [ "/usr/libexec/indexd" ],
+    "MachServices" : { "com.vulture.indexd" : true },
+    "LimitLoadToSessionType" : "Graphical",
     "KeepAlive" : true,
     "RunAtLoad" : true,
     "ThrottleInterval" : 1

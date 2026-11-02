@@ -9,7 +9,7 @@ expect loginwindow: incorrect password
 pause 0.5
 screenshot login-wrong.png
 type vulture\r
-expect finder: ready
+expect files: ready
 pause 2
 screenshot desktop.png
 # The application's File menu, and the system's.
@@ -29,19 +29,19 @@ button left down
 pause 0.2
 button left up
 pause 0.6
-# Spotlight: a word, then what it found, by Return.
+# Search: a word, then what it found, by Return.
 key meta_l-spc
-expect spotlight: shown
+expect search: shown
 pause 0.3
-type system
+type settings
 pause 1
-screenshot spotlight.png
+screenshot search.png
 type \r
 expect settings: Appearance
 pause 1
 screenshot settings.png
 # Dark, then a wallpaper.
-pointer 26060 9011
+pointer 26060 7536
 pause 0.3
 button left down
 pause 0.2
@@ -55,7 +55,7 @@ pause 0.2
 button left up
 expect settings: Wallpaper
 pause 0.5
-pointer 18200 10977
+pointer 18200 9502
 pause 0.3
 button left down
 pause 0.2
@@ -63,7 +63,7 @@ button left up
 pause 1.5
 screenshot wallpaper.png
 # Back to the first wallpaper and to light.
-pointer 12800 10977
+pointer 12800 9502
 pause 0.3
 button left down
 pause 0.2
@@ -76,21 +76,21 @@ pause 0.2
 button left up
 expect settings: Appearance
 pause 0.5
-pointer 25100 9011
+pointer 25100 7536
 pause 0.3
 button left down
 pause 0.2
 button left up
 pause 1
 # A notification, and where they are kept.
-pointer 6656 10404
+pointer 6656 11551
 pause 0.3
 button left down
 pause 0.2
 button left up
 expect settings: Notifications
 pause 0.5
-pointer 26112 9093
+pointer 26112 7618
 pause 0.3
 button left down
 pause 0.2
@@ -104,38 +104,38 @@ button left down
 pause 0.2
 button left up
 pause 0.6
-screenshot notification-center.png
+screenshot notification-list.png
 pointer 16000 24000
 pause 0.2
 button left down
 pause 0.2
 button left up
 pause 0.6
-# Control Center.
+# Quick Settings.
 pointer 28800 491
 pause 0.3
 button left down
 pause 0.2
 button left up
 pause 0.6
-screenshot control-center.png
+screenshot quick-settings.png
 pointer 16000 24000
 pause 0.2
 button left down
 pause 0.2
 button left up
 pause 0.6
-# Mission Control, and a new space.
+# Overview, and a new space.
 key ctrl-up
 pause 1
-screenshot mission-control.png
+screenshot overview.png
 pointer 18227 2949
 pause 0.2
 button left down
 pause 0.2
 button left up
 pause 0.6
-screenshot mission-control-spaces.png
+screenshot overview-spaces.png
 pointer 26000 28000
 pause 0.2
 button left down
@@ -147,18 +147,18 @@ pause 1
 screenshot second-space.png
 key ctrl-left
 pause 1
-# Launchpad.
-pointer 14670 31070
+# Launcher.
+pointer 10977 31070
 pause 0.5
 button left down
 pause 0.2
 button left up
-expect launchpad: shown
+expect launcher: shown
 pause 1
-screenshot launchpad.png
+screenshot launcher.png
 key esc
 pause 1
-# Settings goes away; Finder, by its own folders.
+# Settings goes away; Files, by its own folders.
 pointer 16000 24000
 pause 0.2
 button left down
@@ -177,7 +177,7 @@ button left down
 pause 0.1
 button left up
 pause 1
-screenshot finder-documents.png
+screenshot files-documents.png
 pointer 25958 4301
 pause 0.3
 button left down
@@ -186,14 +186,14 @@ button left up
 pause 0.6
 type Notes\r
 pause 1
-screenshot finder-new-folder.png
+screenshot files-new-folder.png
 pointer 24934 4301
 pause 0.3
 button left down
 pause 0.2
 button left up
 pause 0.6
-screenshot finder-list.png
+screenshot files-list.png
 # Into the Dock with the yellow light, and back.
 pointer 5478 3850
 pause 0.3
@@ -202,7 +202,7 @@ pause 0.2
 button left up
 pause 1
 screenshot minimized.png
-pointer 18700 31070
+pointer 22528 31070
 pause 0.5
 button left down
 pause 0.2

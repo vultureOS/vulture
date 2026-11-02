@@ -5,4 +5,4 @@
 #
 
 # The pasteboard, for copy and paste.
-vulture_add_program(pboard SOURCES main.cpp DESTINATION usr/libexec LIBRARIES LibServices LibCore)
+vulture_add_program(clipboardd SOURCES main.cpp DESTINATION usr/libexec LIBRARIES LibServices LibCore)

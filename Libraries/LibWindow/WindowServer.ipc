@@ -75,8 +75,8 @@ endpoint WindowServer
     set_input_region(u32 window, i32 x, i32 y, i32 width, i32 height) =|
     // By name: see /System/Library/Themes/Wallpapers.json.
     set_wallpaper(String name) => (i32 error)
-    // Spaces, and all windows spread out over them.
-    set_mission_control(bool shown) =|
+    // Desktops, and all windows spread out over them.
+    set_overview(bool shown) =|
     switch_space(i32 space) =|
 
     // For tests and tools: only root may. As if the pointer moved here (points).

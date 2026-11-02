@@ -1,7 +1,7 @@
 {
-    "Label" : "com.vulture.pboard",
+    "Label" : "com.vulture.clipboardd",
     "ProgramArguments" : [
-        "/usr/libexec/pboard"
+        "/usr/libexec/clipboardd"
     ],
     "MachServices" : {
         "com.vulture.pasteboard" : true

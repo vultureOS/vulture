@@ -63,7 +63,8 @@
 # Environment: QEMU (the emulator), VULTURE_ACCEL (hvf, kvm or tcg),
 # VULTURE_FIRMWARE_CODE and VULTURE_FIRMWARE_VARS (the UEFI firmware and its
 # variable store template; found under Homebrew's or Debian's names
-# otherwise), VULTURE_TCG_TIMEOUT_SCALE.
+# otherwise), VULTURE_TCG_TIMEOUT_SCALE, VULTURE_AUDIO_WAV (record what the
+# sound device plays to this file, instead of playing it).
 
 set -euo pipefail
 
@@ -117,7 +118,7 @@ while [ $# -gt 0 ]; do
         --kill-delay) kill_delay="$2"; shift 2 ;;
         --) shift; extra_args=("$@"); break ;;
         --chat) chat_file="$2"; shift 2 ;;
-        -h|--help) sed -n '8,64p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '8,65p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "run.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -273,6 +274,25 @@ if [ "$gui" -eq 1 ]; then
     display_devices=(-device "virtio-gpu-pci,id=gpu0,xres=$gpu_width,yres=$gpu_height" -device ramfb)
 fi
 
+# The sound device, if this QEMU has it, and where its sound goes: a file if asked, the
+# machine's speakers for a person, nowhere for a test.
+audio_args=()
+if "$qemu" -device help 2>/dev/null | grep -q virtio-sound-pci; then
+    audio_backend="none,id=sound0"
+    if [ -n "${VULTURE_AUDIO_WAV:-}" ]; then
+        audio_backend="wav,id=sound0,path=$VULTURE_AUDIO_WAV,out.frequency=48000,out.channels=2,out.format=s16"
+    elif [ "$headless" -eq 0 ]; then
+        backends="$("$qemu" -audiodev help 2>/dev/null || true)"
+        for candidate in coreaudio pipewire pa alsa sdl; do
+            if printf '%s\n' "$backends" | grep -qx "$candidate"; then
+                audio_backend="$candidate,id=sound0"
+                break
+            fi
+        done
+    fi
+    audio_args=(-audiodev "$audio_backend" -device virtio-sound-pci,audiodev=sound0)
+fi
+
 args=(
     # acpi=off makes the firmware publish a device tree, which the kernel uses for hardware discovery.
     -machine virt,gic-version=3,acpi=off
@@ -290,6 +310,7 @@ args=(
     # USB has no driver yet (M14). These reach the text console and the window server.
     -device virtio-keyboard-pci
     -device virtio-tablet-pci
+    ${audio_args[@]+"${audio_args[@]}"}
     -nic none
 )
 

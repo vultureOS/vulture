@@ -23,6 +23,12 @@ public:
     // An icon in the first column, if any.
     [[nodiscard]] virtual bool has_symbol_at(size_t) const { return false; }
     [[nodiscard]] virtual Symbol symbol_at(size_t) const { return Symbol::File; }
+    // Numbers line up by their right ends.
+    [[nodiscard]] virtual bool is_right_aligned(size_t column) const
+    {
+        (void)column;
+        return false;
+    }
     // By a column, ascending or not: the model reorders itself.
     virtual void sort_by(size_t column, bool ascending)
     {
@@ -45,6 +51,8 @@ public:
 
     Function<void()> on_columns_changed;
     Function<void(size_t column, bool ascending)> on_sort;
+    // Whether a column's title goes to the right, as its numbers do.
+    Function<bool(size_t)> is_right_aligned;
 
     [[nodiscard]] Gfx::FloatSize intrinsic_size() const override;
     void draw(Graphics&) override;

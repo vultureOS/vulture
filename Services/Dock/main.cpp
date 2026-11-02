@@ -54,16 +54,16 @@ struct Tile {
     double bouncing_since { -1 };
 };
 
-// What is kept there to begin with: Finder always first.
+// What is kept there to begin with: Files always first.
 StringView const s_default_tiles[] = {
-    "/System/Library/CoreServices/Finder.app"_sv,
-    "/Applications/Launchpad.app"_sv,
-    "/Applications/System Settings.app"_sv,
+    "/System/Library/CoreServices/Files.app"_sv,
+    "/Applications/Launcher.app"_sv,
+    "/Applications/Settings.app"_sv,
     "/Applications/Terminal.app"_sv,
-    "/Applications/TextEdit.app"_sv,
-    "/Applications/Preview.app"_sv,
+    "/Applications/Text Editor.app"_sv,
+    "/Applications/Viewer.app"_sv,
     "/Applications/Calculator.app"_sv,
-    "/Applications/Activity Monitor.app"_sv,
+    "/Applications/Monitor.app"_sv,
     "/Applications/Widget Gallery.app"_sv,
 };
 
@@ -90,8 +90,8 @@ public:
     {
         m_state_applications.clear();
         for (auto const& application : state.applications) {
-            if (application.identifier.view() == "com.vulture.Finder"_sv)
-                m_finder_has_windows = !application.windows.is_empty();
+            if (application.identifier.view() == "com.vulture.Files"_sv)
+                m_files_has_windows = !application.windows.is_empty();
             RunningApplication running;
             running.pid = application.pid;
             running.identifier = MUST(String::from_view(application.identifier.view()));
@@ -451,8 +451,8 @@ private:
         }
         if (tile.pid) {
             (void)server.activate_application(tile.pid);
-            // Finder, with nothing open, opens something.
-            if (tile.identifier.view() == "com.vulture.Finder"_sv && !m_finder_has_windows)
+            // Files, with nothing open, opens something.
+            if (tile.identifier.view() == "com.vulture.Files"_sv && !m_files_has_windows)
                 (void)Desktop::open_path(Desktop::home_directory().view());
             return;
         }
@@ -495,7 +495,7 @@ private:
 
     Vector<Tile> m_pinned;
     Vector<Tile> m_tiles;
-    bool m_finder_has_windows { true };
+    bool m_files_has_windows { true };
     Vector<RunningApplication> m_state_applications;
     Vector<MinimizedEntry> m_minimized_pending;
     FloatRect m_shelf;

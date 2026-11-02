@@ -5,4 +5,4 @@
 #
 
 # Keeps notifications, and tells whoever shows them.
-vulture_add_program(usernoted SOURCES main.cpp DESTINATION usr/libexec LIBRARIES LibDesktop)
+vulture_add_program(notificationd SOURCES main.cpp DESTINATION usr/libexec LIBRARIES LibDesktop)

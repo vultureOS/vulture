@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Desktop.h>
 #include <LibBase/HashMap.h>
 #include <LibCore/EventLoop.h>
 #include <LibIPC/Bootstrap.h>
@@ -18,7 +19,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-// com.vulture.mds: what files there are and what words they hold, for Spotlight. It
+// com.vulture.indexd: what files there are and what words they hold, for Search. It
 // walks the places people keep things, and the applications, keeps an inverted index in
 // memory, and walks again now and then and when asked. Names always; text only of files
 // small enough to read in passing and that look like text.
@@ -45,6 +46,8 @@ struct FileEntry {
     String lowered_name;
     // "application", "folder" or "document".
     StringView kind;
+    // What an application is, in lower case: its name is not all it can be found by.
+    String lowered_kind {};
 };
 
 class Index {
@@ -77,8 +80,18 @@ public:
             bool is_directory = S_ISDIR(info.st_mode);
             bool is_application = is_directory && name.ends_with(".app"_sv);
             add_file(full_path.view(), name, is_application ? "application"_sv : (is_directory ? "folder"_sv : "document"_sv));
-            if (is_application)
+            if (is_application) {
+                if (auto bundle = Desktop::read_bundle(full_path.view()); !bundle.is_error()) {
+                    StringBuilder lowered;
+                    auto kind = bundle.value().kind.view();
+                    for (size_t i = 0; i < kind.length(); ++i) {
+                        char c = lower(kind[i]);
+                        lowered.append(StringView(&c, 1));
+                    }
+                    m_files.last().lowered_kind = MUST(lowered.to_string());
+                }
                 continue;
+            }
             if (is_directory) {
                 if (depth < deepest)
                     add_tree(full_path.view(), depth + 1);
@@ -119,6 +132,8 @@ public:
                 score = 100;
             else if (name.contains(wanted))
                 score = 60;
+            else if (file.lowered_kind.view().contains(wanted))
+                score = 50;
             if (score >= 0) {
                 if (file.kind == "application"_sv)
                     score += 50;
@@ -260,9 +275,9 @@ private:
 int main()
 {
     signal(SIGPIPE, SIG_IGN);
-    auto port = IPC::check_in("com.vulture.mds"_sv);
+    auto port = IPC::check_in("com.vulture.indexd"_sv);
     if (port.is_error()) {
-        fprintf(stderr, "mds: check_in: %s\n", strerror(port.error().code()));
+        fprintf(stderr, "indexd: check_in: %s\n", strerror(port.error().code()));
         return 1;
     }
     Core::EventLoop loop;

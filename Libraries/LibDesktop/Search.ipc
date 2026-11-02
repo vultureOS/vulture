@@ -1,4 +1,4 @@
-// The metadata server (com.vulture.mds): what Spotlight searches.
+// The metadata server (com.vulture.indexd): what Search searches.
 endpoint Search
 {
     // By name and by words in the text of files; JSON: [ { "path", "name", "kind" } ].

@@ -26,6 +26,9 @@ struct AppInfo {
     String bundle_path;
     String executable_path;
     String icon;
+    // What it is, in plain words ("Terminal", for Terminal): shown beside its name, and
+    // what searching for that finds it by.
+    String kind;
     // File extensions it opens.
     Vector<String> document_extensions;
 };
@@ -69,7 +72,7 @@ struct ShellState {
     String menus;
     int space { 0 };
     int space_count { 1 };
-    bool mission_control { false };
+    bool overview { false };
     Vector<ApplicationEntry> applications;
 };
 [[nodiscard]] ErrorOr<ShellState> parse_shell_state(StringView json);

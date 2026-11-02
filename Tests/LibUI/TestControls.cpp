@@ -639,7 +639,7 @@ TEST_CASE(an_outline_opens_and_closes)
     auto const& t = Appearance::the();
     float row = t.metric("table.rowHeight"_sv);
     // On the disclosure triangle.
-    test.click(t.metric("table.cellPadding"_sv) + 3, row / 2);
+    test.click(t.metric("table.selectionInset"_sv) + t.metric("table.cellPadding"_sv) + 3, row / 2);
     EXPECT_EQ(outline.model()->row_count(), static_cast<size_t>(3));
     EXPECT(outline.item_at_row(1) == &leaf);
     test.settle();

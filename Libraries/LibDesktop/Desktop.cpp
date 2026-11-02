@@ -9,7 +9,7 @@
 #include <LibIPC/Bootstrap.h>
 #include <LibImage/Image.h>
 #include <LibUI/Application.h>
-#include <FinderEndpoint.h>
+#include <FilesEndpoint.h>
 #include <NotificationsEndpoint.h>
 #include <SessionEndpoint.h>
 #include <dirent.h>
@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 extern char** environ;
@@ -138,6 +139,7 @@ ErrorOr<AppInfo> read_bundle(StringView bundle_path)
     path.append(executable.value());
     info.executable_path = MUST(path.to_string());
     info.icon = copy(json.get_string("CFBundleIconFile"_sv).value_or("GenericApplication"_sv));
+    info.kind = copy(json.get_string("VultureKind"_sv).value_or(StringView {}));
     if (auto const* extensions = json.get_array("CFBundleDocumentExtensions"_sv)) {
         for (size_t i = 0; i < extensions->size(); ++i) {
             if (extensions->at(i).is_string())
@@ -152,7 +154,7 @@ Vector<AppInfo> installed_applications()
     Vector<AppInfo> applications;
     scan_applications("/Applications"_sv, applications);
     scan_applications("/System/Applications"_sv, applications);
-    // By name, as Launchpad lists them.
+    // By name, as Launcher lists them.
     for (size_t i = 1; i < applications.size(); ++i) {
         for (size_t j = i; j > 0 && comes_after(applications[j - 1].name.view(), applications[j].name.view()); --j) {
             auto moved = move(applications[j]);
@@ -169,7 +171,7 @@ Optional<AppInfo> application_with_identifier(StringView identifier)
         if (application.identifier.view() == identifier)
             return Optional<AppInfo>(move(application));
     }
-    StringView const core[] = { "/System/Library/CoreServices/Finder.app"_sv };
+    StringView const core[] = { "/System/Library/CoreServices/Files.app"_sv };
     for (auto path : core) {
         auto bundle = read_bundle(path);
         if (!bundle.is_error() && bundle.value().identifier.view() == identifier)
@@ -193,17 +195,41 @@ ErrorOr<pid_t> launch(AppInfo const& application, Span<StringView const> argumen
     for (auto& argument : owned)
         argv.append(const_cast<char*>(argument.characters()));
     argv.append(nullptr);
-    pid_t child = fork();
-    if (child < 0)
+    // Forked twice, so that it is nobody's child here: what launches an application does
+    // not wait for it, and it would stay a zombie after it quit. The one in the middle
+    // says who it started, and goes.
+    int answer[2];
+    if (pipe(answer) != 0)
         return Error::from_errno(errno);
-    if (child == 0) {
-        setsid();
-        execv(argv[0], argv.data());
-        _exit(127);
+    pid_t middle = fork();
+    if (middle < 0) {
+        int saved = errno;
+        close(answer[0]);
+        close(answer[1]);
+        return Error::from_errno(saved);
     }
+    if (middle == 0) {
+        close(answer[0]);
+        setsid();
+        pid_t program = fork();
+        if (program == 0) {
+            close(answer[1]);
+            execv(argv[0], argv.data());
+            _exit(127);
+        }
+        (void)!write(answer[1], &program, sizeof(program));
+        _exit(0);
+    }
+    close(answer[1]);
+    pid_t program = -1;
+    ssize_t got = read(answer[0], &program, sizeof(program));
+    close(answer[0]);
+    while (waitpid(middle, nullptr, 0) < 0 && errno == EINTR) { }
+    if (got != sizeof(program) || program < 0)
+        return Error::from_errno(EAGAIN);
     static os_log_t const log = os_log_create("com.vulture.desktop", "launch");
-    os_log_info(log, "Launched %s as process %d", application.name.characters(), child);
-    return child;
+    os_log_info(log, "Launched %s as process %d", application.name.characters(), program);
+    return program;
 }
 
 ErrorOr<void> open_path(StringView path)
@@ -214,17 +240,17 @@ ErrorOr<void> open_path(StringView path)
         return {};
     }
     if (is_directory(path)) {
-        // Finder is one program, and says where it can be found.
-        auto port = IPC::look_up("com.vulture.Finder"_sv);
+        // Files is one program, and says where it can be found.
+        auto port = IPC::look_up("com.vulture.Files"_sv);
         if (!port.is_error()) {
-            (void)FinderProxy(port.release_value()).open_folder(path);
+            (void)FilesProxy(port.release_value()).open_folder(path);
             return {};
         }
-        auto finder = application_with_identifier("com.vulture.Finder"_sv);
-        if (!finder.has_value())
+        auto files = application_with_identifier("com.vulture.Files"_sv);
+        if (!files.has_value())
             return Error::from_errno(ENOENT);
         StringView arguments[1] = { path };
-        (void)TRY(launch(finder.value(), Span<StringView const>(arguments, 1)));
+        (void)TRY(launch(files.value(), Span<StringView const>(arguments, 1)));
         return {};
     }
     auto extension = extension_of(path);
@@ -290,7 +316,7 @@ ErrorOr<ShellState> parse_shell_state(StringView text)
     state.menus = copy(json.get_string("menus"_sv).value_or(StringView {}));
     state.space = static_cast<int>(json.get_integer("space"_sv).value_or(0));
     state.space_count = static_cast<int>(json.get_integer("spaces"_sv).value_or(1));
-    state.mission_control = json.get_boolean("missionControl"_sv).value_or(false);
+    state.overview = json.get_boolean("overview"_sv).value_or(false);
     if (auto const* applications = json.get_array("applications"_sv)) {
         for (size_t i = 0; i < applications->size(); ++i) {
             auto const& one = applications->at(i);
@@ -417,10 +443,10 @@ void draw_logo(UI::Graphics& graphics, FloatRect const& shape, Color color)
 
 void post_notification(StringView application, StringView title, StringView body)
 {
-    auto port = IPC::look_up("com.vulture.usernoted"_sv);
+    auto port = IPC::look_up("com.vulture.notificationd"_sv);
     if (port.is_error())
         return;
-    NotificationCenterProxy center(port.release_value());
+    NotificationServiceProxy center(port.release_value());
     (void)center.post(application, title, body);
 }
 

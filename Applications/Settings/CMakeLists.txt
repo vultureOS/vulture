@@ -4,9 +4,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-vulture_add_application(SystemSettings
+vulture_add_application(Settings
     SOURCES main.cpp
-    NAME "System Settings"
-    IDENTIFIER com.vulture.SystemSettings
-    ICON SystemSettings
+    NAME "Settings"
+    IDENTIFIER com.vulture.Settings
+    ICON Settings
+    KIND "System Configuration"
     LIBRARIES LibDesktop)

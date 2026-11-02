@@ -268,9 +268,9 @@
             "labelText" : "#000000d8",
             "separator" : "#00000026"
         },
-        "spotlight" : { "fill" : "#f6f6f6e6", "selection" : "#0a84ff", "selectionText" : "#ffffff", "border" : "#00000014" },
+        "searchPanel" : { "fill" : "#f6f6f6e6", "selection" : "#0a84ff", "selectionText" : "#ffffff", "border" : "#00000014" },
         "notifications" : { "fill" : "#f6f6f6e6", "secondary" : "#00000099", "center" : "#f2f2f2e6" },
-        "controlCenter" : { "fill" : "#f6f6f6e6", "tile" : "#00000012", "tileOn" : "#0a84ff" },
+        "quickSettings" : { "fill" : "#f6f6f6e6", "tile" : "#00000012", "tileOn" : "#0a84ff" },
         "loginwindow" : {
             "text" : "#ffffff",
             "fieldFill" : "#ffffff33",
@@ -278,14 +278,19 @@
             "scrim" : "#00000033",
             "error" : "#ff453a"
         },
-        "launchpad" : { "text" : "#ffffff", "fill" : "#00000040" },
-        "finder" : { "desktopText" : "#ffffff", "selection" : "#00000024", "renameFill" : "#ffffff" },
+        "terminal" : { "background" : "#ffffff", "foreground" : "#000000", "bold" : "#000000", "cursor" : "#7f7f7f", "cursorText" : "#ffffff", "selection" : "#b4d5fe", "ansi0" : "#000000", "ansi1" : "#990000", "ansi2" : "#00a600", "ansi3" : "#999900", "ansi4" : "#0000b2", "ansi5" : "#b200b2", "ansi6" : "#00a6b2", "ansi7" : "#bfbfbf", "ansi8" : "#666666", "ansi9" : "#e50000", "ansi10" : "#00d900", "ansi11" : "#e5e500", "ansi12" : "#0000ff", "ansi13" : "#e500e5", "ansi14" : "#00e5e5", "ansi15" : "#e5e5e5" },
+        "viewer" : { "background" : "#ececec" },
+        "calculator" : { "background" : "#3a3a3c", "text" : "#ffffff", "digit" : "#656567", "digitPressed" : "#8f8f91", "function" : "#4d4d4f", "functionPressed" : "#6e6e70", "operator" : "#ff9f0a", "operatorPressed" : "#c97d08", "operatorActive" : "#ffc266", "gap" : "#00000059" },
+        "monitor" : { "graph" : "#0a84ff", "graphFill" : "#0a84ff40", "graphGrid" : "#00000014", "statsBackground" : "#ffffff" },
+        "disks" : { "used" : "#0a84ff", "free" : "#00000014" },
+        "launcher" : { "text" : "#ffffff", "fill" : "#00000040" },
+        "files" : { "desktopText" : "#ffffff", "selection" : "#00000024", "renameFill" : "#ffffff" },
         "settings" : { "group" : "#ffffff", "groupBorder" : "#00000014" }
     },
     "desktop" : {
         "minimizeSeconds" : 0.45,
         "spaceSlideSeconds" : 0.35,
-        "missionControl" : {
+        "overview" : {
             "seconds" : 0.3,
             "bar" : 96,
             "padding" : 16,

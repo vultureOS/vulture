@@ -7,7 +7,7 @@
     "MachServices" : {
         "com.vulture.windowserver" : true
     },
-    "LimitLoadToSessionType" : "Aqua",
+    "LimitLoadToSessionType" : "Graphical",
     "RunAtLoad" : true,
     "KeepAlive" : true,
     "ThrottleInterval" : 1

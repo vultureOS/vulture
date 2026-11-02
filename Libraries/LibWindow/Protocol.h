@@ -30,7 +30,7 @@ enum WindowFlags : u32 {
     // the traffic lights, over the client's pixels, and hands presses on to it (see
     // begin_move, for those that should move the window).
     WindowUnifiedTitle = 1 << 5,
-    // Though bare, it may be active and take the keyboard: Spotlight, Launchpad, and the
+    // Though bare, it may be active and take the keyboard: Search, Launcher, and the
     // desktop's own window.
     WindowCanBecomeKey = 1 << 6,
     // On every space.

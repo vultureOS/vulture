@@ -22,8 +22,10 @@ vulture_add_program(log SOURCES bin/log.cpp DESTINATION usr/bin LIBRARIES LibSer
 vulture_add_program(logger SOURCES bin/logger.cpp DESTINATION usr/bin LIBRARIES LibServices)
 vulture_add_program(notifyutil SOURCES bin/notifyutil.cpp DESTINATION usr/bin LIBRARIES LibServices)
 vulture_add_program(scutil SOURCES bin/scutil.cpp DESTINATION usr/sbin LIBRARIES LibServices)
+vulture_add_program(open SOURCES bin/open.cpp DESTINATION usr/bin LIBRARIES LibDesktop)
 vulture_add_program(pbcopy SOURCES bin/pbcopy.cpp DESTINATION usr/bin LIBRARIES LibServices)
 vulture_install_alias(pbcopy usr/bin pbpaste)
+vulture_add_program(afplay SOURCES bin/afplay.cpp DESTINATION usr/bin LIBRARIES LibAudio LibServices)
 
 # vulture_add_tool(<name> <directory> [<other names> <directory>]...):
 # bin/<name>.cpp, installed in <directory> (and under the other names,

@@ -128,13 +128,14 @@ public:
         m_uid = account.uid();
         prepare_home(account);
         StringView const programs[] = {
-            "/System/Library/CoreServices/SystemUIServer"_sv,
+            "/System/Library/CoreServices/DesktopShell"_sv,
             "/System/Library/CoreServices/Dock"_sv,
-            "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder"_sv,
+            "/System/Library/CoreServices/Files.app/Contents/MacOS/Files"_sv,
         };
         for (auto program : programs)
             spawn(account, program);
         m_running = true;
+        Platform::the().play_sound("login"_sv);
         printf("loginwindow: session started\n");
         os_log(session_log(), "Session started for %.*s", static_cast<int>(account.name().length()), account.name().characters_without_null_termination());
         fflush(stdout);

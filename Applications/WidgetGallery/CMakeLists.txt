@@ -10,4 +10,5 @@ vulture_add_application(WidgetGallery
     NAME "Widget Gallery"
     IDENTIFIER com.vulture.WidgetGallery
     ICON WidgetGallery
+    KIND "Control Catalog"
     LIBRARIES LibDesktop)

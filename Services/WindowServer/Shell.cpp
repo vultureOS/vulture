@@ -16,7 +16,7 @@
 #include <unistd.h>
 
 // The part of the server that makes a desktop out of windows: applications and their
-// menus, as told to the Dock and menu bar; minimizing; spaces; Mission Control. The
+// menus, as told to the Dock and menu bar; minimizing; spaces; Overview. The
 // programs of the desktop itself are clients like any other.
 
 namespace WindowServer {
@@ -334,7 +334,7 @@ void Server::send_shell_state()
     }
     MUST(state.set("space"_sv, JSON::Value(m_space)));
     MUST(state.set("spaces"_sv, JSON::Value(m_space_count)));
-    MUST(state.set("missionControl"_sv, JSON::Value(m_mission_control)));
+    MUST(state.set("overview"_sv, JSON::Value(m_overview)));
     auto applications = JSON::Value::array();
     for (auto const& client : m_clients) {
         if (client->application_name.is_empty())
@@ -494,17 +494,17 @@ bool Server::handle_hotkey(u16 code)
             return true;
         }
     }
-    if (m_mission_control && code == VULTURE_KEY_ESC) {
-        leave_mission_control(nullptr);
+    if (m_overview && code == VULTURE_KEY_ESC) {
+        leave_overview(nullptr);
         return true;
     }
     if (pressed == Window::ModifierControl) {
         switch (code) {
         case VULTURE_KEY_UP:
-            if (m_mission_control)
-                leave_mission_control(nullptr);
+            if (m_overview)
+                leave_overview(nullptr);
             else
-                enter_mission_control();
+                enter_overview();
             return true;
         case VULTURE_KEY_LEFT:
             if (m_space > 0)
@@ -547,14 +547,14 @@ void Server::cycle_applications(bool backward)
     activate_client(*applications[next]);
 }
 
-// ---- Spaces
+// ---- Desktops
 
-void Server::set_mission_control(IPC::Sender const&, bool shown)
+void Server::set_overview(IPC::Sender const&, bool shown)
 {
-    if (shown && !m_mission_control)
-        enter_mission_control();
-    else if (!shown && m_mission_control)
-        leave_mission_control(nullptr);
+    if (shown && !m_overview)
+        enter_overview();
+    else if (!shown && m_overview)
+        leave_overview(nullptr);
 }
 
 void Server::set_input_region(IPC::Sender const& sender, u32 id, i32 x, i32 y, i32 width, i32 height)
@@ -593,17 +593,17 @@ void Server::go_to_space(int space, bool animated)
     schedule_frame();
 }
 
-// ---- Mission Control
+// ---- Overview
 
-void Server::layout_mission_control()
+void Server::layout_overview()
 {
     // The windows of this space in a grid, in the work area, under the bar of spaces.
     auto points = m_screen.points();
-    float top = static_cast<float>(m_work_top) + m_theme.mission_control_bar;
+    float top = static_cast<float>(m_work_top) + m_theme.overview_bar;
     float bottom = static_cast<float>(points.height - m_work_bottom);
     float left = static_cast<float>(m_work_left);
     float right = static_cast<float>(points.width - m_work_right);
-    float padding = m_theme.mission_control_padding;
+    float padding = m_theme.overview_padding;
     size_t count = m_thumbnails.size();
     if (count == 0)
         return;
@@ -626,7 +626,7 @@ void Server::layout_mission_control()
     }
 }
 
-void Server::enter_mission_control()
+void Server::enter_overview()
 {
     m_thumbnails.clear();
     for (auto* window : m_windows) {
@@ -644,13 +644,13 @@ void Server::enter_mission_control()
         thumbnail.spread = thumbnail.home;
         m_thumbnails.append(move(thumbnail));
     }
-    layout_mission_control();
-    m_mission_control = true;
-    m_mission_control_leaving = false;
-    m_mission_control_chosen = nullptr;
-    m_mission_control_started = now_seconds();
-    m_mission_control_hover = -1;
-    m_mission_control_hover_space = -1;
+    layout_overview();
+    m_overview = true;
+    m_overview_leaving = false;
+    m_overview_chosen = nullptr;
+    m_overview_started = now_seconds();
+    m_overview_hover = -1;
+    m_overview_hover_space = -1;
     m_compositor.set_hides_normal_windows(true);
     start_animating();
     m_compositor.invalidate_all();
@@ -658,43 +658,43 @@ void Server::enter_mission_control()
     schedule_frame();
 }
 
-void Server::leave_mission_control(ServerWindow* to_activate)
+void Server::leave_overview(ServerWindow* to_activate)
 {
-    if (!m_mission_control || m_mission_control_leaving)
+    if (!m_overview || m_overview_leaving)
         return;
-    m_mission_control_leaving = true;
-    m_mission_control_chosen = to_activate;
-    m_mission_control_started = now_seconds();
+    m_overview_leaving = true;
+    m_overview_chosen = to_activate;
+    m_overview_started = now_seconds();
     start_animating();
 }
 
-void Server::update_mission_control_overlays()
+void Server::update_overview_overlays()
 {
-    float duration = m_theme.mission_control_seconds;
-    auto t = static_cast<float>((now_seconds() - m_mission_control_started) / static_cast<double>(duration));
+    float duration = m_theme.overview_seconds;
+    auto t = static_cast<float>((now_seconds() - m_overview_started) / static_cast<double>(duration));
     t = clamp(t, 0.0f, 1.0f);
     float amount = ease_out(t);
-    if (m_mission_control_leaving)
+    if (m_overview_leaving)
         amount = 1 - amount;
     Vector<Compositor::Overlay> overlays;
 
-    // Spaces along the top.
+    // Desktops along the top.
     auto points = m_screen.points();
-    float tile_width = m_theme.mission_control_tile_width;
-    float tile_height = m_theme.mission_control_tile_height;
-    float gap = m_theme.mission_control_padding;
+    float tile_width = m_theme.overview_tile_width;
+    float tile_height = m_theme.overview_tile_height;
+    float gap = m_theme.overview_padding;
     int tiles = m_space_count + 1;
     float total = static_cast<float>(tiles) * tile_width + static_cast<float>(tiles - 1) * gap;
     float x = (static_cast<float>(points.width) - total) / 2;
-    float y = (m_theme.mission_control_bar - tile_height) / 2 + static_cast<float>(m_work_top) - (1 - amount) * m_theme.mission_control_bar;
+    float y = (m_theme.overview_bar - tile_height) / 2 + static_cast<float>(m_work_top) - (1 - amount) * m_theme.overview_bar;
     for (int i = 0; i < tiles; ++i) {
         Compositor::Overlay tile;
         tile.kind = Compositor::Overlay::Kind::Tile;
         tile.rect = { x + static_cast<float>(i) * (tile_width + gap), y, tile_width, tile_height };
-        tile.radius = m_theme.mission_control_tile_radius;
+        tile.radius = m_theme.overview_tile_radius;
         bool current = i == m_space;
-        bool hovered = i == m_mission_control_hover_space;
-        tile.color = current ? m_theme.mission_control_tile_active : (hovered ? m_theme.mission_control_highlight : m_theme.mission_control_tile);
+        bool hovered = i == m_overview_hover_space;
+        tile.color = current ? m_theme.overview_tile_active : (hovered ? m_theme.overview_highlight : m_theme.overview_tile);
         StringBuilder label;
         if (i == m_space_count)
             label.append("+"_sv);
@@ -707,12 +707,12 @@ void Server::update_mission_control_overlays()
     for (size_t i = 0; i < m_thumbnails.size(); ++i) {
         auto const& thumbnail = m_thumbnails[i];
         auto rect = between(thumbnail.home, thumbnail.spread, amount);
-        if (static_cast<int>(i) == m_mission_control_hover) {
+        if (static_cast<int>(i) == m_overview_hover) {
             Compositor::Overlay ring;
             ring.kind = Compositor::Overlay::Kind::Tile;
             ring.rect = rect.inflated(3);
             ring.radius = m_theme.corner_radius + 3;
-            ring.color = m_theme.mission_control_highlight;
+            ring.color = m_theme.overview_highlight;
             overlays.append(move(ring));
         }
         Compositor::Overlay overlay;
@@ -723,24 +723,24 @@ void Server::update_mission_control_overlays()
         overlay.shadow = true;
         overlays.append(move(overlay));
     }
-    m_compositor.set_dim(m_theme.mission_control_dim.with_opacity(amount));
+    m_compositor.set_dim(m_theme.overview_dim.with_opacity(amount));
     m_compositor.set_overlays(move(overlays));
     m_compositor.invalidate_all();
 }
 
-bool Server::mission_control_pointer(IntPoint point, u32 pressed)
+bool Server::overview_pointer(IntPoint point, u32 pressed)
 {
-    if (m_mission_control_leaving)
+    if (m_overview_leaving)
         return true;
     auto points = m_screen.points();
     // What it is over: a space along the top, or a window.
-    float tile_width = m_theme.mission_control_tile_width;
-    float tile_height = m_theme.mission_control_tile_height;
-    float gap = m_theme.mission_control_padding;
+    float tile_width = m_theme.overview_tile_width;
+    float tile_height = m_theme.overview_tile_height;
+    float gap = m_theme.overview_padding;
     int tiles = m_space_count + 1;
     float total = static_cast<float>(tiles) * tile_width + static_cast<float>(tiles - 1) * gap;
     float x = (static_cast<float>(points.width) - total) / 2;
-    float y = (m_theme.mission_control_bar - tile_height) / 2 + static_cast<float>(m_work_top);
+    float y = (m_theme.overview_bar - tile_height) / 2 + static_cast<float>(m_work_top);
     int over_space = -1;
     for (int i = 0; i < tiles; ++i) {
         FloatRect tile { x + static_cast<float>(i) * (tile_width + gap), y, tile_width, tile_height };
@@ -752,30 +752,30 @@ bool Server::mission_control_pointer(IntPoint point, u32 pressed)
         if (m_thumbnails[i].spread.contains(point.to<float>()))
             over_window = static_cast<int>(i);
     }
-    if (over_space != m_mission_control_hover_space || over_window != m_mission_control_hover) {
-        m_mission_control_hover_space = over_space;
-        m_mission_control_hover = over_window;
-        update_mission_control_overlays();
+    if (over_space != m_overview_hover_space || over_window != m_overview_hover) {
+        m_overview_hover_space = over_space;
+        m_overview_hover = over_window;
+        update_overview_overlays();
     }
     if (!pressed)
         return true;
     if (over_space == m_space_count) {
         ++m_space_count;
-        update_mission_control_overlays();
+        update_overview_overlays();
         shell_state_changed();
         return true;
     }
     if (over_space >= 0) {
         go_to_space(over_space, false);
         // Its windows now.
-        leave_mission_control(nullptr);
+        leave_overview(nullptr);
         return true;
     }
     if (over_window >= 0) {
-        leave_mission_control(m_thumbnails[static_cast<size_t>(over_window)].window);
+        leave_overview(m_thumbnails[static_cast<size_t>(over_window)].window);
         return true;
     }
-    leave_mission_control(nullptr);
+    leave_overview(nullptr);
     return true;
 }
 
@@ -819,9 +819,9 @@ void Server::animation_tick()
             ++i;
         }
         still_going = still_going || !m_genies.is_empty();
-        if (!m_mission_control)
+        if (!m_overview)
             m_compositor.set_overlays(move(overlays));
-    } else if (!m_mission_control && !m_boot_screen) {
+    } else if (!m_overview && !m_boot_screen) {
         m_compositor.set_overlays({});
     }
 
@@ -853,17 +853,17 @@ void Server::animation_tick()
         m_compositor.invalidate_all();
     }
 
-    // Mission Control.
-    if (m_mission_control) {
-        bool finished = now - m_mission_control_started >= static_cast<double>(m_theme.mission_control_seconds);
-        update_mission_control_overlays();
-        if (finished && m_mission_control_leaving) {
-            m_mission_control = false;
-            m_mission_control_leaving = false;
+    // Overview.
+    if (m_overview) {
+        bool finished = now - m_overview_started >= static_cast<double>(m_theme.overview_seconds);
+        update_overview_overlays();
+        if (finished && m_overview_leaving) {
+            m_overview = false;
+            m_overview_leaving = false;
             m_compositor.set_hides_normal_windows(false);
             m_compositor.set_overlays({});
             m_compositor.set_dim(Color { 0, 0, 0, 0 });
-            auto* chosen = m_mission_control_chosen;
+            auto* chosen = m_overview_chosen;
             m_thumbnails.clear();
             if (chosen)
                 activate(chosen);

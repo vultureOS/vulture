@@ -92,6 +92,8 @@ int update(char const* image_path, char const* archive_path)
     }
     Tools::PopulateCounts counts;
     auto added = Tools::add_archive(*volume.value(), { archive.value().begin(), archive.value().size() }, counts);
+    if (!added.is_error())
+        added = Tools::remove_retired_files(*volume.value(), counts);
     auto committed = added.is_error() ? added : volume.value()->checkpoint();
     fclose(image);
     if (committed.is_error())

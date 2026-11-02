@@ -5,7 +5,7 @@
  */
 
 #include <Desktop.h>
-#include <FinderEndpoint.h>
+#include <FilesEndpoint.h>
 #include <LibIPC/Bootstrap.h>
 #include <LibIPC/Listener.h>
 #include <LibUI/Application.h>
@@ -26,8 +26,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-// Finder: folders as windows, and the desktop as a folder under them all. There is one
-// of it, which others reach at com.vulture.Finder to show them a folder.
+// Files: folders as windows, and the desktop as a folder under them all. There is one
+// of it, which others reach at com.vulture.Files to show them a folder.
 
 using namespace UI;
 using namespace Gfx;
@@ -224,7 +224,7 @@ ErrorOr<void> move_item(StringView from, StringView to)
     return remove_tree(from);
 }
 
-// What was last copied: Finder's own pasteboard, of whole files.
+// What was last copied: Files's own pasteboard, of whole files.
 Vector<String> s_copied_paths;
 
 // ---- The icons of a folder
@@ -326,10 +326,13 @@ public:
     {
         auto trash = joined(Desktop::home_directory().view(), ".Trash"_sv);
         mkdir(trash.characters(), 0755);
-        for (auto const& path : selected_paths()) {
+        auto paths = selected_paths();
+        for (auto const& path : paths) {
             auto name = free_name(trash.view(), last_component(path.view()));
             (void)move_item(path.view(), joined(trash.view(), name.view()).view());
         }
+        if (!paths.is_empty())
+            Platform::the().play_sound("trash"_sv);
         reload();
     }
 
@@ -372,7 +375,7 @@ public:
             }
             m_rename_field->set_hidden(false);
             m_rename_field->set_text(m_items[i].name.view());
-            m_rename_field->set_frame({ rect.x, rect.y + t.metric("finder.iconSize"_sv) + 6, rect.width, height_of_field });
+            m_rename_field->set_frame({ rect.x, rect.y + t.metric("files.iconSize"_sv) + 6, rect.width, height_of_field });
             if (window()) {
                 window()->make_first_responder(m_rename_field);
                 m_rename_field->select_all();
@@ -388,7 +391,7 @@ public:
             return { -1, -1 };
         int across = columns();
         int rows = (static_cast<int>(m_items.size()) + across - 1) / across;
-        return { -1, static_cast<float>(rows) * t.metric("finder.cellHeight"_sv) + 20 };
+        return { -1, static_cast<float>(rows) * t.metric("files.cellHeight"_sv) + 20 };
     }
 
     void draw(Graphics& graphics) override
@@ -397,10 +400,10 @@ public:
         if (!m_on_desktop)
             graphics.fill({ 0, 0, width(), height() }, t.color("textBackground"_sv));
         if (m_drop_target)
-            graphics.fill({ 0, 0, width(), height() }, t.color("finder.selection"_sv));
+            graphics.fill({ 0, 0, width(), height() }, t.color("files.selection"_sv));
         auto font = t.named_font("small"_sv);
         font.size = 12;
-        float icon_size = t.metric("finder.iconSize"_sv);
+        float icon_size = t.metric("files.iconSize"_sv);
         int scale = static_cast<int>(graphics.scale());
         float cap = Appearance::cap_height(font);
         for (size_t i = 0; i < m_items.size(); ++i) {
@@ -408,7 +411,7 @@ public:
             auto rect = item_rect(i);
             float icon_x = rect.x + (rect.width - icon_size) / 2;
             if (item.selected)
-                graphics.fill_rounded({ icon_x - 4, rect.y - 3, icon_size + 8, icon_size + 6 }, 5, t.color("finder.selection"_sv));
+                graphics.fill_rounded({ icon_x - 4, rect.y - 3, icon_size + 8, icon_size + 6 }, 5, t.color("files.selection"_sv));
             auto icon = Desktop::icon_named(item.icon.view(), static_cast<int>(icon_size), scale);
             if (icon)
                 graphics.painter().draw_bitmap(*icon, FloatRect { icon_x, rect.y, icon_size, icon_size });
@@ -421,7 +424,7 @@ public:
             FloatRect label { rect.x + (rect.width - label_width) / 2 - 4, rect.y + icon_size + 5, label_width + 8, 16 };
             if (item.selected)
                 graphics.fill_rounded(label, 4, t.color(window() && window()->is_key() ? "selectedContent"_sv : "selectedContentInactive"_sv));
-            auto text_color = item.selected && window() && window()->is_key() ? t.color("selectedContentText"_sv) : (m_on_desktop ? t.color("finder.desktopText"_sv) : t.color("label"_sv));
+            auto text_color = item.selected && window() && window()->is_key() ? t.color("selectedContentText"_sv) : (m_on_desktop ? t.color("files.desktopText"_sv) : t.color("label"_sv));
             graphics.draw_text_truncated(shown, font, { label.x + 4, label.y + (label.height + cap) / 2 }, label_width, text_color);
         }
     }
@@ -479,7 +482,7 @@ public:
         auto const& item = m_items[static_cast<size_t>(m_press_index)];
         m_press_index = -1;
         auto icon_name = MUST(String::from_view(item.icon.view()));
-        float size = tokens().metric("finder.iconSize"_sv);
+        float size = tokens().metric("files.iconSize"_sv);
         window()->begin_drag(s_file_type, ReadonlyBytes(reinterpret_cast<u8 const*>(item.path.characters()), item.path.length()), { size, size }, [icon_name = move(icon_name), size](Graphics& graphics) {
             auto icon = Desktop::icon_named(icon_name.view(), static_cast<int>(size), static_cast<int>(graphics.scale()));
             if (icon)
@@ -590,22 +593,22 @@ public:
 private:
     [[nodiscard]] int columns() const
     {
-        return max(static_cast<int>(width() / tokens().metric("finder.cellWidth"_sv)), 1);
+        return max(static_cast<int>(width() / tokens().metric("files.cellWidth"_sv)), 1);
     }
 
     [[nodiscard]] FloatRect item_rect(size_t index) const
     {
         auto const& t = tokens();
-        float cell_width = t.metric("finder.cellWidth"_sv);
+        float cell_width = t.metric("files.cellWidth"_sv);
         if (m_on_desktop) {
             // Down the right side of the screen, top first.
-            float cell_height = t.metric("finder.desktopCellHeight"_sv);
+            float cell_height = t.metric("files.desktopCellHeight"_sv);
             auto per_column = max(static_cast<int>((height() - 20) / cell_height), 1);
             int column = static_cast<int>(index) / per_column;
             int row = static_cast<int>(index) % per_column;
             return { width() - cell_width * static_cast<float>(column + 1) - 8, 12 + static_cast<float>(row) * cell_height, cell_width, cell_height };
         }
-        float cell_height = t.metric("finder.cellHeight"_sv);
+        float cell_height = t.metric("files.cellHeight"_sv);
         int across = columns();
         int column = static_cast<int>(index) % across;
         int row = static_cast<int>(index) / across;
@@ -725,41 +728,41 @@ private:
     Vector<FileItem> const* m_items { nullptr };
 };
 
-class FinderWindow;
+class FilesWindow;
 
-class FinderController {
+class FilesController {
 public:
     void open_new_window(StringView path);
-    void window_closed(FinderWindow&);
-    [[nodiscard]] FinderWindow* key_window();
+    void window_closed(FilesWindow&);
+    [[nodiscard]] FilesWindow* key_window();
 
 private:
-    Vector<NonnullOwnPtr<FinderWindow>> m_windows;
+    Vector<NonnullOwnPtr<FilesWindow>> m_windows;
 };
 
-class FinderContent final : public View {
+class FilesContent final : public View {
 public:
     void draw(Graphics& graphics) override
     {
         auto const& t = tokens();
-        float sidebar = t.metric("finder.sidebarWidth"_sv);
+        float sidebar = t.metric("files.sidebarWidth"_sv);
         graphics.fill({ sidebar, 0, width() - sidebar, height() }, t.color("windowBackground"_sv));
     }
 };
 
-class FinderWindow {
+class FilesWindow {
 public:
-    FinderWindow(FinderController& controller, StringView path, IntPoint at)
+    FilesWindow(FilesController& controller, StringView path, IntPoint at)
         : m_controller(controller)
     {
         auto const& t = tokens();
         m_window = adopt_own(*new UI::Window(last_component(path), { at.x, at.y, 860, 520 }, WS::WindowTitled | WS::WindowResizable | WS::WindowUnifiedTitle));
         m_window->set_transparent(true);
         m_window->set_sheet_top(t.metric("window.toolbarUnified"_sv));
-        auto& root = m_window->set_content<FinderContent>();
+        auto& root = m_window->set_content<FilesContent>();
         auto& split = root.add<SplitView>();
         m_split = &split;
-        float sidebar_width = t.metric("finder.sidebarWidth"_sv);
+        float sidebar_width = t.metric("files.sidebarWidth"_sv);
         m_sidebar = &split.add_pane<Sidebar>(sidebar_width, sidebar_width);
         m_sidebar->set_top_padding(t.metric("window.toolbarCompact"_sv));
         auto& right = split.add_pane<StackView>(0, 300, Axis::Vertical);
@@ -798,14 +801,14 @@ public:
 
         auto home = Desktop::home_directory();
         m_sidebar->add_section("Favorites"_sv);
-        add_place("Home"_sv, home.view(), Symbol::Folder);
-        add_place("Desktop"_sv, joined(home.view(), "Desktop"_sv).view(), Symbol::Folder);
+        add_place("Home"_sv, home.view(), Symbol::Home);
+        add_place("Desktop"_sv, joined(home.view(), "Desktop"_sv).view(), Symbol::Desktop);
         add_place("Documents"_sv, joined(home.view(), "Documents"_sv).view(), Symbol::File);
-        add_place("Downloads"_sv, joined(home.view(), "Downloads"_sv).view(), Symbol::Folder);
-        add_place("Applications"_sv, "/Applications"_sv, Symbol::Plus);
+        add_place("Downloads"_sv, joined(home.view(), "Downloads"_sv).view(), Symbol::Download);
+        add_place("Applications"_sv, "/Applications"_sv, Symbol::Applications);
         m_sidebar->add_section("Locations"_sv);
-        add_place("Vulture HD"_sv, "/"_sv, Symbol::File);
-        add_place("Trash"_sv, joined(home.view(), ".Trash"_sv).view(), Symbol::Minus);
+        add_place("Vulture HD"_sv, "/"_sv, Symbol::Drive);
+        add_place("Trash"_sv, joined(home.view(), ".Trash"_sv).view(), Symbol::Trash);
         m_sidebar->on_select = [this](size_t row) {
             if (m_syncing_sidebar)
                 return;
@@ -914,11 +917,11 @@ private:
     void update_material()
     {
         auto const& t = tokens();
-        MaterialRegion region { { 0, 0, static_cast<int>(t.metric("finder.sidebarWidth"_sv)), static_cast<int>(m_window->size().height) }, WS::Material::Sidebar };
+        MaterialRegion region { { 0, 0, static_cast<int>(t.metric("files.sidebarWidth"_sv)), static_cast<int>(m_window->size().height) }, WS::Material::Sidebar };
         m_window->set_materials(Span<MaterialRegion const>(&region, 1));
     }
 
-    FinderController& m_controller;
+    FilesController& m_controller;
     OwnPtr<UI::Window> m_window;
     SplitView* m_split { nullptr };
     Sidebar* m_sidebar { nullptr };
@@ -938,13 +941,13 @@ private:
     bool m_syncing_sidebar { false };
 };
 
-void FinderController::open_new_window(StringView path)
+void FilesController::open_new_window(StringView path)
 {
     int offset = static_cast<int>(m_windows.size()) * 28;
-    m_windows.append(adopt_own(*new FinderWindow(*this, path, { 180 + offset, 80 + offset })));
+    m_windows.append(adopt_own(*new FilesWindow(*this, path, { 180 + offset, 80 + offset })));
 }
 
-void FinderController::window_closed(FinderWindow& window)
+void FilesController::window_closed(FilesWindow& window)
 {
     // After this event is done with it.
     Platform::the().defer([this, &window] {
@@ -957,7 +960,7 @@ void FinderController::window_closed(FinderWindow& window)
     });
 }
 
-FinderWindow* FinderController::key_window()
+FilesWindow* FilesController::key_window()
 {
     for (auto& window : m_windows) {
         if (window->window().is_key())
@@ -966,9 +969,9 @@ FinderWindow* FinderController::key_window()
     return nullptr;
 }
 
-class FinderService final : public FinderStub {
+class FilesService final : public FilesStub {
 public:
-    explicit FinderService(FinderController& controller)
+    explicit FilesService(FilesController& controller)
         : m_controller(controller)
     {
     }
@@ -976,7 +979,7 @@ public:
     void open_folder(IPC::Sender const&, String path) override { m_controller.open_new_window(path.view()); }
 
 private:
-    FinderController& m_controller;
+    FilesController& m_controller;
 };
 
 }
@@ -993,14 +996,14 @@ int main(int argc, char** argv)
             folder = StringView(argv[i], strlen(argv[i]));
     }
     // There is one of it.
-    if (auto running = IPC::look_up("com.vulture.Finder"_sv); !running.is_error()) {
+    if (auto running = IPC::look_up("com.vulture.Files"_sv); !running.is_error()) {
         if (!folder.is_empty())
-            (void)FinderProxy(running.release_value()).open_folder(folder);
+            (void)FilesProxy(running.release_value()).open_folder(folder);
         return 0;
     }
-    auto application_or_error = Application::create("Finder"_sv, "com.vulture.Finder"_sv);
+    auto application_or_error = Application::create("Files"_sv, "com.vulture.Files"_sv);
     if (application_or_error.is_error()) {
-        fprintf(stderr, "Finder: cannot reach the window server\n");
+        fprintf(stderr, "Files: cannot reach the window server\n");
         return 1;
     }
     auto application = application_or_error.release_value();
@@ -1008,14 +1011,14 @@ int main(int argc, char** argv)
     if (s_still)
         set_motion_enabled(false);
 
-    FinderController controller;
-    FinderService service(controller);
+    FilesController controller;
+    FilesService service(controller);
     OwnPtr<IPC::Listener> listener;
     auto pair = IPC::create_port();
     if (!pair.is_error()) {
         auto ports = pair.release_value();
         listener = adopt_own(*new IPC::Listener(application->event_loop(), move(ports.receive), [&](IPC::ReceivedMessage& message) { (void)service.handle(message); }));
-        (void)IPC::register_service("com.vulture.Finder"_sv, move(ports.send));
+        (void)IPC::register_service("com.vulture.Files"_sv, move(ports.send));
     }
 
     auto home = Desktop::home_directory();
@@ -1037,15 +1040,17 @@ int main(int argc, char** argv)
     else
         controller.open_new_window(folder);
 
-    // What is under Finder's name in the menu bar.
-    auto menus = application->standard_menus();
+    // What is under Files's name in the menu bar.
+    // Part of the desktop: there is no quitting it.
+    auto menus = application->standard_menus(nullptr, false);
+    application->on_quit_request = [] { return false; };
     auto selected_view = [&]() -> FolderView* {
         if (auto* window = controller.key_window())
             return &window->icons();
         return desktop_window->is_key() ? &desktop : nullptr;
     };
     auto& file = *new Menu("File"_sv);
-    file.add_with_shortcut("New Finder Window"_sv, KeyN, "\xE2\x8C\x98N"_sv, [&controller, &home] { controller.open_new_window(home.view()); });
+    file.add_with_shortcut("New Files Window"_sv, KeyN, "\xE2\x8C\x98N"_sv, [&controller, &home] { controller.open_new_window(home.view()); });
     file.add_with_shortcut("New Folder"_sv, KeyN, "\xE2\x87\xA7\xE2\x8C\x98N"_sv, [selected_view] {
         if (auto* view = selected_view())
             view->new_folder();
@@ -1054,6 +1059,12 @@ int main(int argc, char** argv)
     file.add_with_shortcut("Open"_sv, KeyO, "\xE2\x8C\x98O"_sv, [selected_view] {
         if (auto* view = selected_view())
             view->open_selection();
+    });
+    file.add_with_shortcut("Close Window"_sv, KeyW, "\xE2\x8C\x98W"_sv, [desktop = desktop_window.ptr()] {
+        auto* window = Application::the().key_window();
+        // The desktop itself is no window to close.
+        if (window && window != desktop)
+            window->close();
     });
     file.add_separator();
     file.add_with_shortcut("Move to Trash"_sv, KeyBackspace, "\xE2\x8C\x98\xE2\x8C\xAB"_sv, [selected_view] {
@@ -1080,7 +1091,7 @@ int main(int argc, char** argv)
     go_item.submenu = adopt_own(go);
     application->set_main_menu(move(menus));
 
-    printf("finder: ready\n");
+    printf("files: ready\n");
     fflush(stdout);
     return application->exec();
 }

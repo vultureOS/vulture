@@ -157,4 +157,64 @@ ErrorOr<void> add_archive(Volume& volume, ReadonlyBytes archive, PopulateCounts&
     return result;
 }
 
+static constexpr StringView s_retired[] = {
+    "Applications/Activity Monitor.app"_sv,
+    "Applications/Archive Utility.app"_sv,
+    "Applications/Disk Utility.app"_sv,
+    "Applications/Launchpad.app"_sv,
+    "Applications/Preview.app"_sv,
+    "Applications/Software Center.app"_sv,
+    "Applications/TextEdit.app"_sv,
+    "Applications/WidgetGallery.app"_sv,
+    "System/Library/LaunchDaemons/com.vulture.WindowServerScene.plist"_sv,
+    "Applications/System Settings.app"_sv,
+    "System/Library/CoreServices/Finder.app"_sv,
+    "System/Library/CoreServices/SystemUIServer"_sv,
+    "System/Library/LaunchDaemons/com.vulture.mds.plist"_sv,
+    "System/Library/LaunchDaemons/com.vulture.pboard.plist"_sv,
+    "System/Library/LaunchDaemons/com.vulture.usernoted.plist"_sv,
+    "usr/libexec/mds"_sv,
+    "usr/libexec/pboard"_sv,
+    "usr/libexec/usernoted"_sv,
+    "System/Library/Icons/ActivityMonitor.vicns"_sv,
+    "System/Library/Icons/ArchiveUtility.vicns"_sv,
+    "System/Library/Icons/DiskUtility.vicns"_sv,
+    "System/Library/Icons/Finder.vicns"_sv,
+    "System/Library/Icons/Launchpad.vicns"_sv,
+    "System/Library/Icons/MissionControl.vicns"_sv,
+    "System/Library/Icons/Preview.vicns"_sv,
+    "System/Library/Icons/SoftwareCenter.vicns"_sv,
+    "System/Library/Icons/Spotlight.vicns"_sv,
+    "System/Library/Icons/SystemSettings.vicns"_sv,
+    "System/Library/Icons/TextEdit.vicns"_sv,
+};
+
+ErrorOr<void> remove_retired_files(Volume& volume, PopulateCounts& counts)
+{
+    for (auto path : s_retired) {
+        // Down to its directory; any part missing and there is nothing to do.
+        StringView name = path;
+        InodeNumber directory = root_directory;
+        bool found = true;
+        if (auto slash = path.find_last('/'); slash.has_value()) {
+            name = path.substring_view(slash.value() + 1);
+            path.substring_view(0, slash.value()).for_each_split_view('/', SplitBehavior::SkipEmpty, [&](StringView component) {
+                if (!found)
+                    return;
+                auto entry = volume.lookup(directory, component);
+                if (entry.is_error() || entry.value().type != type_directory) {
+                    found = false;
+                    return;
+                }
+                directory = entry.value().inode;
+            });
+        }
+        if (!found || volume.lookup(directory, name).is_error())
+            continue;
+        TRY(remove_tree(volume, directory, name));
+        ++counts.removed;
+    }
+    return {};
+}
+
 }

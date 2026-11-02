@@ -14,8 +14,8 @@
 #include <stdio.h>
 #include <string.h>
 
-// com.vulture.usernoted: what programs post goes to whoever shows it (the banners and
-// Notification Center), and stays until cleared.
+// com.vulture.notificationd: what programs post goes to whoever shows it (the banners and
+// Notifications), and stays until cleared.
 
 namespace {
 
@@ -27,7 +27,7 @@ struct Note {
     String body;
 };
 
-class Center final : public NotificationCenterStub {
+class Center final : public NotificationServiceStub {
 public:
     void post(IPC::Sender const&, String application, String title, String body) override
     {
@@ -70,9 +70,9 @@ private:
 int main()
 {
     signal(SIGPIPE, SIG_IGN);
-    auto port = IPC::check_in("com.vulture.usernoted"_sv);
+    auto port = IPC::check_in("com.vulture.notificationd"_sv);
     if (port.is_error()) {
-        fprintf(stderr, "usernoted: check_in: %s\n", strerror(port.error().code()));
+        fprintf(stderr, "notificationd: check_in: %s\n", strerror(port.error().code()));
         return 1;
     }
     Core::EventLoop loop;

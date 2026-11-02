@@ -79,7 +79,7 @@ private:
     void set_work_area(IPC::Sender const&, i32 top, i32 left, i32 bottom, i32 right) override;
     void register_hotkey(IPC::Sender const&, u16 code, u32 modifiers) override;
     i32 set_wallpaper(IPC::Sender const&, String name) override;
-    void set_mission_control(IPC::Sender const&, bool shown) override;
+    void set_overview(IPC::Sender const&, bool shown) override;
     void set_input_region(IPC::Sender const&, u32 window, i32 x, i32 y, i32 width, i32 height) override;
     void switch_space(IPC::Sender const&, i32 space) override;
     void inject_pointer(IPC::Sender const&, i32 x, i32 y, u32 buttons) override;
@@ -123,11 +123,11 @@ private:
     void cycle_applications(bool backward);
     [[nodiscard]] bool handle_hotkey(u16 code);
     void go_to_space(int space, bool animated);
-    void enter_mission_control();
-    void leave_mission_control(ServerWindow* to_activate);
-    void layout_mission_control();
-    void update_mission_control_overlays();
-    [[nodiscard]] bool mission_control_pointer(Gfx::IntPoint, u32 pressed);
+    void enter_overview();
+    void leave_overview(ServerWindow* to_activate);
+    void layout_overview();
+    void update_overview_overlays();
+    [[nodiscard]] bool overview_pointer(Gfx::IntPoint, u32 pressed);
     void start_animating();
     void animation_tick();
     void apply_wallpaper();
@@ -238,12 +238,12 @@ private:
         Gfx::FloatRect spread;
     };
     Vector<Thumbnail> m_thumbnails;
-    bool m_mission_control { false };
-    bool m_mission_control_leaving { false };
-    ServerWindow* m_mission_control_chosen { nullptr };
-    double m_mission_control_started { 0 };
-    int m_mission_control_hover { -1 };
-    int m_mission_control_hover_space { -1 };
+    bool m_overview { false };
+    bool m_overview_leaving { false };
+    ServerWindow* m_overview_chosen { nullptr };
+    double m_overview_started { 0 };
+    int m_overview_hover { -1 };
+    int m_overview_hover_space { -1 };
 
     bool m_boot_screen { false };
     double m_boot_started { 0 };

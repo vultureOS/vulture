@@ -10,9 +10,9 @@
 #include <string.h>
 #include <unistd.h>
 
-// pbcopy [-pboard general|ruler|find|font]: standard input onto the
+// pbcopy [-clipboardd general|ruler|find|font]: standard input onto the
 // pasteboard, as text.
-// pbpaste [-pboard ...] [-Prefer txt|rtf|ps]: the pasteboard's text to
+// pbpaste [-clipboardd ...] [-Prefer txt|rtf|ps]: the pasteboard's text to
 // standard output (nothing if there is none). One program, by name.
 
 namespace {
@@ -93,15 +93,15 @@ int main(int argc, char** argv)
     bool is_paste = strcmp(name, "pbpaste") == 0;
     char const* board = "general";
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "-pboard") == 0 && i + 1 < argc && is_board(argv[i + 1])) {
+        if (strcmp(argv[i], "-clipboardd") == 0 && i + 1 < argc && is_board(argv[i + 1])) {
             board = argv[++i];
         } else if (is_paste && strcmp(argv[i], "-Prefer") == 0 && i + 1 < argc) {
             ++i; // Text is all there is.
         } else {
             if (is_paste)
-                fprintf(stderr, "usage: pbpaste [-help] [-pboard {general | ruler | find | font}] [-Prefer {txt | rtf | ps}]\n");
+                fprintf(stderr, "usage: pbpaste [-help] [-clipboardd {general | ruler | find | font}] [-Prefer {txt | rtf | ps}]\n");
             else
-                fprintf(stderr, "usage: pbcopy [-help] [-pboard {general | ruler | find | font}]\n");
+                fprintf(stderr, "usage: pbcopy [-help] [-clipboardd {general | ruler | find | font}]\n");
             return strcmp(argv[i], "-help") == 0 ? 0 : 1;
         }
     }

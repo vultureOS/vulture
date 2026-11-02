@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <AudioEndpoint.h>
 #include <LibIPC/Bootstrap.h>
 #include <LibJSON/JSON.h>
 #include <LibUI/Appearance.h>
@@ -115,7 +116,7 @@ ErrorOr<NonnullOwnPtr<Application>> Application::create(StringView name, StringV
         if (item < raw->m_menu_items.size() && raw->m_menu_items[item]->action)
             raw->m_menu_items[item]->action();
     };
-    application->m_connection->on_quit_requested = [raw] { raw->quit(); };
+    application->m_connection->on_quit_requested = [raw] { raw->request_quit(); };
     if (!name.is_empty())
         (void)application->m_connection->server().set_application(name, identifier);
     // For golden screenshots: nothing moves or blinks in this program or what it starts.
@@ -207,7 +208,62 @@ void Application::publish_menus()
     (void)m_connection->server().set_menus(text.view());
 }
 
-NonnullOwnPtr<Menu> Application::standard_menus(Function<void()> on_about)
+AudioProxy* Application::audio()
+{
+    if (!m_audio) {
+        auto port = IPC::look_up("com.vulture.audioserver"_sv);
+        if (port.is_error())
+            return nullptr;
+        m_audio = adopt_own(*new AudioProxy(port.release_value()));
+    }
+    return m_audio.ptr();
+}
+
+void Application::play_sound(StringView name)
+{
+    auto* server = audio();
+    // If it has gone, it starts again: ask for it anew next time.
+    if (server && server->play_sound(name).is_error())
+        m_audio = nullptr;
+}
+
+Optional<u32> Application::output_volume()
+{
+    auto* server = audio();
+    if (!server)
+        return {};
+    auto answer = server->volume();
+    if (answer.is_error()) {
+        m_audio = nullptr;
+        return {};
+    }
+    return answer.value();
+}
+
+void Application::set_output_volume(u32 percent)
+{
+    auto* server = audio();
+    if (!server)
+        return;
+    if (server->set_volume(percent).is_error()) {
+        m_audio = nullptr;
+        return;
+    }
+    if (m_volume_tick_timer >= 0)
+        cancel_timer(m_volume_tick_timer);
+    m_volume_tick_timer = add_timer(120, false, [this] {
+        m_volume_tick_timer = -1;
+        play_sound("volume"_sv);
+    });
+}
+
+void Application::request_quit()
+{
+    if (!on_quit_request || on_quit_request())
+        quit();
+}
+
+NonnullOwnPtr<Menu> Application::standard_menus(Function<void()> on_about, bool can_quit)
 {
     auto menus = adopt_own(*new Menu);
     StringView cmd = "\xE2\x8C\x98"_sv;
@@ -241,8 +297,10 @@ NonnullOwnPtr<Menu> Application::standard_menus(Function<void()> on_about)
     application_menu.add_with_shortcut(hide_title.view(), KeyH, shown("H"_sv).view(), [this] {
         (void)m_connection->server().hide_application(static_cast<i32>(getpid()), true);
     });
-    application_menu.add_separator();
-    application_menu.add_with_shortcut(quit_title.view(), KeyQ, shown("Q"_sv).view(), [this] { quit(); });
+    if (can_quit) {
+        application_menu.add_separator();
+        application_menu.add_with_shortcut(quit_title.view(), KeyQ, shown("Q"_sv).view(), [this] { request_quit(); });
+    }
 
     auto& edit = menus->add_submenu("Edit"_sv);
     edit.add_with_shortcut("Undo"_sv, KeyZ, shown("Z"_sv).view(), [this] { (void)send_command("undo"_sv); });
@@ -336,7 +394,7 @@ ErrorOr<Vector<Platform::DirectoryEntry>> Application::list_directory(StringView
     Vector<DirectoryEntry> entries;
     while (auto* entry = readdir(directory)) {
         StringView name { entry->d_name, strlen(entry->d_name) };
-        // What Finder hides.
+        // What Files hides.
         if (name.starts_with('.'))
             continue;
         StringBuilder full;

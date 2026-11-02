@@ -83,6 +83,8 @@ public:
     enum class Kind : u8 {
         Open,
         Save,
+        // A folder: the one selected, or else the one showing.
+        OpenFolder,
     };
     // `then` gets the whole path chosen, or empty if cancelled.
     static void run(Window&, Kind, StringView directory, StringView suggested_name, Function<void(StringView)> then);

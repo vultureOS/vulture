@@ -365,6 +365,108 @@ void Graphics::draw_symbol(Symbol symbol, FloatRect const& rect, Color color, fl
         fill_circle(at(8, 12.6f), style.width * 0.62f, color);
         return;
     }
+    case Symbol::Home: {
+        Path house;
+        float const points[][2] = { { 8, 2.4f }, { 14.4f, 8.2f }, { 12.6f, 8.2f }, { 12.6f, 13.6f }, { 9.6f, 13.6f }, { 9.6f, 9.8f }, { 6.4f, 9.8f }, { 6.4f, 13.6f }, { 3.4f, 13.6f }, { 3.4f, 8.2f }, { 1.6f, 8.2f } };
+        house.move_to(at(points[0][0], points[0][1]));
+        for (size_t i = 1; i < array_size(points); ++i)
+            house.line_to(at(points[i][0], points[i][1]));
+        house.close();
+        m_painter.fill_path(house, color);
+        return;
+    }
+    case Symbol::Desktop: {
+        m_painter.fill_rounded_rect({ at(1.6f, 2.6f).x, at(1.6f, 2.6f).y, 12.8f * unit, 8.6f * unit }, 1.2f * unit, color);
+        path.move_to(at(8, 11));
+        path.line_to(at(8, 13.2f));
+        path.move_to(at(5.4f, 13.4f));
+        path.line_to(at(10.6f, 13.4f));
+        break;
+    }
+    case Symbol::Download: {
+        path.move_to(at(8, 2.4f));
+        path.line_to(at(8, 10.2f));
+        path.move_to(at(4.6f, 6.8f));
+        path.line_to(at(8, 10.2f));
+        path.line_to(at(11.4f, 6.8f));
+        path.move_to(at(3, 13.4f));
+        path.line_to(at(13, 13.4f));
+        break;
+    }
+    case Symbol::Applications: {
+        float const places[2] = { 2.2f, 8.8f };
+        for (float y : places) {
+            for (float x : places)
+                m_painter.fill_rounded_rect({ at(x, y).x, at(x, y).y, 5 * unit, 5 * unit }, 1.2f * unit, color);
+        }
+        return;
+    }
+    case Symbol::Trash: {
+        Path can;
+        can.move_to(at(3.8f, 5.4f));
+        can.line_to(at(12.2f, 5.4f));
+        can.line_to(at(11.3f, 14.2f));
+        can.line_to(at(4.7f, 14.2f));
+        can.close();
+        m_painter.fill_path(can, color);
+        path.move_to(at(2.8f, 3.9f));
+        path.line_to(at(13.2f, 3.9f));
+        path.move_to(at(6.4f, 3.6f));
+        path.line_to(at(6.8f, 2.2f));
+        path.line_to(at(9.2f, 2.2f));
+        path.line_to(at(9.6f, 3.6f));
+        style.width = 1.2f * unit;
+        break;
+    }
+    case Symbol::Drive: {
+        Path drive;
+        auto corner = at(1.4f, 4.6f);
+        drive.add_rounded_rect({ corner.x, corner.y, 13.2f * unit, 6.8f * unit }, 1.6f * unit);
+        drive.add_circle(at(11.6f, 8), 0.95f * unit);
+        m_painter.fill_path(drive, color, FillRule::EvenOdd);
+        return;
+    }
+    case Symbol::Speaker: {
+        Path cone;
+        cone.move_to(at(1.8f, 6));
+        cone.line_to(at(4.4f, 6));
+        cone.line_to(at(7.8f, 3));
+        cone.line_to(at(7.8f, 13));
+        cone.line_to(at(4.4f, 10));
+        cone.line_to(at(1.8f, 10));
+        cone.close();
+        m_painter.fill_path(cone, color);
+        // Two waves going out from it.
+        constexpr float wave_radii[] = { 2.6f, 5.2f };
+        for (float radius : wave_radii) {
+            constexpr int steps = 8;
+            for (int i = 0; i <= steps; ++i) {
+                float angle = -0.85f + 1.7f * static_cast<float>(i) / static_cast<float>(steps);
+                auto point = at(7.6f + radius * static_cast<float>(Math::cosine(static_cast<double>(angle))), 8 + radius * static_cast<float>(Math::sine(static_cast<double>(angle))));
+                if (i == 0)
+                    path.move_to(point);
+                else
+                    path.line_to(point);
+            }
+        }
+        break;
+    }
+    case Symbol::Refresh: {
+        // Most of a circle, and the head of the arrow on its end.
+        constexpr int steps = 18;
+        for (int i = 0; i <= steps; ++i) {
+            float angle = -0.6f + 5.0f * static_cast<float>(i) / static_cast<float>(steps);
+            auto point = at(8 + 5.2f * static_cast<float>(Math::cosine(static_cast<double>(angle))), 8 + 5.2f * static_cast<float>(Math::sine(static_cast<double>(angle))));
+            if (i == 0)
+                path.move_to(point);
+            else
+                path.line_to(point);
+        }
+        path.move_to(at(12.4f, 1.8f));
+        path.line_to(at(12.4f, 5));
+        path.line_to(at(9.2f, 5));
+        break;
+    }
     case Symbol::Folder: {
         Path folder;
         folder.move_to(at(2, 4.4f));

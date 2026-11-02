@@ -96,7 +96,7 @@ public:
     void set_overlay_font(Text::Font* font) { m_overlay_font = font; }
     // A picture of a window as it now is, title bar and all.
     [[nodiscard]] ErrorOr<NonnullRefPtr<Gfx::Bitmap>> snapshot(ServerWindow const&) const;
-    // Hides the windows below the Dock's level, for Mission Control.
+    // Hides the windows below the Dock's level, for Overview.
     void set_hides_normal_windows(bool hides) { m_hides_normal_windows = hides; }
     // A wallpaper by its colors.
     void set_wallpaper_colors(Vector<Gfx::Color> colors);

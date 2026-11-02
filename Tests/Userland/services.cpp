@@ -23,7 +23,7 @@
 #include <unistd.h>
 
 // The system services, each a vlaunchd job as at boot: logd, notifyd,
-// configd and pboard, in a vlaunchd of the test's own. A client (this
+// configd and clipboardd, in a vlaunchd of the test's own. A client (this
 // program with --client) runs `log stream`, then works each service through
 // its C interface and its tool (notify(3) and notifyutil, scutil, pbcopy and
 // pbpaste, os_log and log), and finally checks the stream showed what the
@@ -219,8 +219,8 @@ void check_pasteboard()
 {
     run("echo hello pasteboard | pbcopy");
     report("pbcopy and pbpaste", strcmp(run("pbpaste"), "hello pasteboard\n") == 0);
-    run("echo needle | pbcopy -pboard find");
-    report("boards are separate", strcmp(run("pbpaste -pboard find"), "needle\n") == 0 && strcmp(run("pbpaste"), "hello pasteboard\n") == 0);
+    run("echo needle | pbcopy -clipboardd find");
+    report("boards are separate", strcmp(run("pbpaste -clipboardd find"), "needle\n") == 0 && strcmp(run("pbpaste"), "hello pasteboard\n") == 0);
 
     // Big enough to go out of line.
     auto port = IPC::look_up("com.vulture.pasteboard"_sv);
@@ -245,7 +245,7 @@ void check_pasteboard()
     int status = as_user([] {
         int fd = open("/tmp/services-test/user-paste", O_WRONLY | O_CREAT | O_TRUNC, 0666);
         dup2(fd, STDOUT_FILENO);
-        execl("/usr/bin/pbpaste", "pbpaste", "-pboard", "find", nullptr);
+        execl("/usr/bin/pbpaste", "pbpaste", "-clipboardd", "find", nullptr);
         return 127;
     });
     report("another user's pasteboard is their own", status == 0 && read_file("user-paste")[0] == '\0');
@@ -275,7 +275,7 @@ int run_client()
     check_pasteboard();
 
     // What the stream saw.
-    for (int i = 0; i < 100 && !strstr(read_file("stream.out"), "pboard:"); ++i)
+    for (int i = 0; i < 100 && !strstr(read_file("stream.out"), "clipboardd:"); ++i)
         pause_milliseconds(20);
     pause_milliseconds(100);
     kill(streamer, SIGTERM);
@@ -287,8 +287,8 @@ int run_client()
     report("the stream shows logger", strstr(stream, "logger: tester: a message from logger") != nullptr);
     report("the stream shows notifyd", strstr(stream, "notifyd: [com.vulture.notifyd:server] com.vulture.test.ping posted by") != nullptr);
     report("the stream shows configd", strstr(stream, "configd: [com.vulture.SystemConfiguration:configd] ComputerName set to \"Test Machine\"") != nullptr);
-    report("the stream shows pboard", strstr(stream, "pboard: [com.vulture.pasteboard:server] ") != nullptr && strstr(stream, " Info        0x0 "));
-    if (!strstr(stream, "pboard:"))
+    report("the stream shows clipboardd", strstr(stream, "clipboardd: [com.vulture.pasteboard:server] ") != nullptr && strstr(stream, " Info        0x0 "));
+    if (!strstr(stream, "clipboardd:"))
         printf("stream:\n%s\n", stream);
 
     // log show: everything since logd started, its own start first.
@@ -336,9 +336,9 @@ int main(int argc, char** argv)
         "RunAtLoad" : true,
         "StandardErrorPath" : "/tmp/services-test/services.err"
     })");
-    write_file("pboard.plist", R"({
-        "Label" : "com.vulture.pboard",
-        "ProgramArguments" : [ "/usr/libexec/pboard" ],
+    write_file("clipboardd.plist", R"({
+        "Label" : "com.vulture.clipboardd",
+        "ProgramArguments" : [ "/usr/libexec/clipboardd" ],
         "MachServices" : { "com.vulture.pasteboard" : true },
         "UserName" : "nobody",
         "StandardErrorPath" : "/tmp/services-test/services.err"
@@ -393,7 +393,7 @@ int main(int argc, char** argv)
         "ok: the stream shows logger",
         "ok: the stream shows notifyd",
         "ok: the stream shows configd",
-        "ok: the stream shows pboard",
+        "ok: the stream shows clipboardd",
         "ok: log show",
         "ok: log show --process",
         "done",

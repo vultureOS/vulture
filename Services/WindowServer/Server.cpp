@@ -286,8 +286,8 @@ void Server::remove_window(ServerWindow& window)
     }
     m_genies.remove_all_matching([&](auto const& genie) { return genie.window == &window; });
     m_thumbnails.remove_all_matching([&](auto const& thumbnail) { return thumbnail.window == &window; });
-    if (m_mission_control_chosen == &window)
-        m_mission_control_chosen = nullptr;
+    if (m_overview_chosen == &window)
+        m_overview_chosen = nullptr;
     m_windows.remove_all_matching([&](auto* other) { return other == &window; });
     delete &window;
     // The next window down takes over.
@@ -974,7 +974,7 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
         schedule_frame();
         return;
     }
-    if (m_mission_control && mission_control_pointer(point, pressed)) {
+    if (m_overview && overview_pointer(point, pressed)) {
         update_cursor();
         schedule_frame();
         return;

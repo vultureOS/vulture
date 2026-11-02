@@ -1,8 +1,8 @@
 {
-    "Label" : "com.vulture.usernoted",
-    "ProgramArguments" : [ "/usr/libexec/usernoted" ],
-    "MachServices" : { "com.vulture.usernoted" : true },
-    "LimitLoadToSessionType" : "Aqua",
+    "Label" : "com.vulture.notificationd",
+    "ProgramArguments" : [ "/usr/libexec/notificationd" ],
+    "MachServices" : { "com.vulture.notificationd" : true },
+    "LimitLoadToSessionType" : "Graphical",
     "KeepAlive" : true,
     "RunAtLoad" : true,
     "ThrottleInterval" : 1

@@ -5,5 +5,5 @@
 #
 
 # The menu bar and what hangs off it: the system's menu, the application's menus, the
-# clock, Control Center, Notification Center, Spotlight.
-vulture_add_program(SystemUIServer SOURCES main.cpp DESTINATION System/Library/CoreServices LIBRARIES LibDesktop)
+# clock, Quick Settings, Notifications, Search.
+vulture_add_program(DesktopShell SOURCES main.cpp DESTINATION System/Library/CoreServices LIBRARIES LibDesktop)

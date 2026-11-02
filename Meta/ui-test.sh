@@ -64,7 +64,7 @@ done
 chat_shots() {
     grep '^screenshot ' "$source_dir/Tests/UI/$1.chat" | cut -d' ' -f2
 }
-for config in "gallery-2x 2560 1600 gallery uigallery" "gallery-1x 1280 800 gallery uigallery" "desktop-2x 2560 1600 desktop uidesktop"; do
+for config in "gallery-2x 2560 1600 gallery uigallery" "gallery-1x 1280 800 gallery uigallery" "desktop-2x 2560 1600 desktop uidesktop" "apps-2x 2560 1600 apps uidesktop"; do
     read -r name width height chat flag <<< "$config"
     rm -f "$out_dir/$name"-*.png
     if ! VULTURE_GPU_WIDTH="$width" VULTURE_GPU_HEIGHT="$height" VULTURE_SCREENSHOT_DEVICE=gpu0 VULTURE_SCREENSHOT_PREFIX="$out_dir/$name-" \
@@ -75,6 +75,8 @@ for config in "gallery-2x 2560 1600 gallery uigallery" "gallery-1x 1280 800 gall
         continue
     fi
     for shot in $(chat_shots "$chat"); do
+        # (Numbers that change from run to run: to look at, not to compare.)
+        case "$shot" in look-*) continue ;; esac
         # Written as QEMU gets around to it.
         for _ in $(seq 1 50); do
             [ -s "$out_dir/$name-$shot" ] && break

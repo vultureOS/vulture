@@ -208,7 +208,14 @@ add_custom_target(test-debug-boot
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-ui test-persistence)
+# What the sound device played, as QEMU recorded it.
+add_custom_target(test-sound
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/sound-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    DEPENDS host uefi target boot-archive
+    USES_TERMINAL
+    VERBATIM)
+
+add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-sound test-ui test-persistence)
 
 # M5's "done when": 100 power cuts at random moments while writing; each
 # must leave a disk that passes fsck and remounts with every committed

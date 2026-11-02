@@ -1,0 +1,206 @@
+# Every application, opened as a person would and put through its paces. Each screenshot
+# is compared with Tests/UI/Golden, but those named look-*: what they show changes from
+# run to run (process lists, the log, disk space), so those are for the eye.
+expect loginwindow: ready
+pause 0.5
+type vulture\r
+expect files: ready
+pause 2
+# Somewhere with the keyboard and no windows to hide behind: Files's goes first.
+key meta_l-w
+pause 0.6
+# --- Calculator ---
+key meta_l-spc
+expect search: shown
+pause 0.3
+type calculator
+pause 1
+type \r
+expect calculator: ready
+pause 1
+screenshot calculator.png
+type 12+34*2=
+pause 0.6
+screenshot calculator-sum.png
+type 1/0=
+pause 0.6
+screenshot calculator-error.png
+key meta_l-q
+pause 1
+# --- Text Editor: write something, save it ---
+key meta_l-spc
+expect search: shown
+pause 0.3
+type text
+pause 1
+type \r
+expect texteditor: ready
+pause 1
+screenshot text-editor.png
+type Dear reader,\r\rThis was typed into Text Editor, on an operating system written from nothing.\r
+pause 0.6
+screenshot text-editor-edited.png
+key meta_l-s
+pause 1
+screenshot text-editor-save.png
+key meta_l-a
+type note.txt\r
+pause 1
+screenshot text-editor-saved.png
+key meta_l-q
+pause 1
+# --- Terminal: what Text Editor saved, colors, and something full-screen ---
+key meta_l-spc
+expect search: shown
+pause 0.3
+type terminal
+pause 1
+type \r
+expect terminal: ready
+pause 1.5
+screenshot terminal.png
+type cat Documents/note.txt\r
+pause 0.6
+type printf '\033[31mred \033[32mgreen \033[1;34mbold blue \033[0;7minverse\033[0m \033[4munderlined\033[0m\n'\r
+pause 0.6
+type printf '\033[48;5;208m 256 \033[48;2;20;120;220m 24-bit \033[0m\n'\r
+pause 0.6
+screenshot terminal-text.png
+# --- Archiver, from there: a folder there and back ---
+type mkdir -p tree/sub; echo kept > tree/sub/file; ln -s sub/file tree/link\r
+pause 0.6
+type open -a 'Archiver' tree\r
+pause 2
+screenshot archiver-compressed.png
+key meta_l-q
+pause 1
+type rm -r tree; ls tree.tar.gz\r
+pause 0.6
+type open -a 'Archiver' tree.tar.gz\r
+pause 2
+key meta_l-q
+pause 1
+type cat tree/sub/file tree/link; clear; cat tree/sub/file tree/link\r
+pause 0.6
+screenshot archiver-expanded.png
+# --- Viewer ---
+type open /System/Library/Pictures/Dunes.png\r
+pause 1
+pause 1.5
+screenshot viewer.png
+key meta_l-equal
+pause 0.8
+screenshot viewer-zoomed.png
+key meta_l-q
+pause 1
+# --- Monitor: find a process, and end it ---
+type sleep 1000\r
+pause 0.5
+key meta_l-spc
+expect search: shown
+pause 0.3
+type monitor
+pause 1
+type \r
+expect monitor: ready
+pause 2.5
+screenshot look-monitor.png
+# Its search field, then the first row, then the button that quits it.
+pointer 24740 4325
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.3
+type sleep
+pause 0.8
+pointer 8192 7025
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.5
+screenshot look-monitor-found.png
+pointer 9454 4325
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.8
+screenshot look-monitor-asked.png
+type \r
+pause 1.5
+key meta_l-q
+pause 1
+# The sleep is over, and the terminal knows.
+type echo sleep ended with $?\r
+pause 0.5
+screenshot monitor-ended.png
+# And it told the log.
+type logger hello from the walkthrough\r
+pause 0.5
+# --- Console, Disks: real numbers ---
+key meta_l-spc
+expect search: shown
+pause 0.3
+type console
+pause 1
+type \r
+expect console: ready
+pause 1.5
+screenshot look-console.png
+pointer 24740 4325
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.3
+type walkthrough
+pause 0.8
+screenshot look-console-found.png
+key meta_l-q
+pause 1
+key meta_l-spc
+expect search: shown
+pause 0.3
+type disks
+pause 1
+type \r
+expect disks: ready
+pause 1.5
+screenshot look-disks.png
+key meta_l-q
+pause 1
+# --- Settings: the sound pane, the volume turned down and a sound played ---
+key meta_l-spc
+expect search: shown
+pause 0.3
+type settings
+pause 1
+type \r
+expect settings: Appearance
+pause 1
+pointer 6656 9257
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect settings: Sound
+pause 0.8
+screenshot settings-sound.png
+key meta_l-q
+pause 1
+# --- Software ---
+key meta_l-spc
+expect search: shown
+pause 0.3
+type software
+pause 1
+type \r
+expect software: ready
+pause 1.5
+screenshot software.png
+# Everything has quit, and none of it lingers.
+key meta_l-q
+pause 1
+screenshot done.png

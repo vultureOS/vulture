@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
-// pboard: the pasteboard (com.vulture.pasteboard). Boards are per user
+// clipboardd: the pasteboard (com.vulture.pasteboard). Boards are per user
 // (the kernel says who is asking), so one user never sees what another
 // copied. Each holds one item of each type it was given at once; every
 // change counts, as NSPasteboard's changeCount does.
@@ -132,7 +132,7 @@ int main()
     signal(SIGPIPE, SIG_IGN);
     auto port = IPC::check_in("com.vulture.pasteboard"_sv);
     if (port.is_error()) {
-        fprintf(stderr, "pboard: check_in: %s\n", strerror(port.error().code()));
+        fprintf(stderr, "clipboardd: check_in: %s\n", strerror(port.error().code()));
         return 1;
     }
     Core::EventLoop loop;

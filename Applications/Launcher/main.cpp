@@ -40,9 +40,9 @@ public:
         m_shown.clear();
         for (size_t i = 0; i < m_all.size(); ++i) {
             auto const& application = m_all[i];
-            if (application.identifier.view() == "com.vulture.launchpad"_sv)
+            if (application.identifier.view() == "com.vulture.launcher"_sv)
                 continue;
-            if (text.is_empty() || contains_ignoring_case(application.name.view(), text))
+            if (text.is_empty() || contains_ignoring_case(application.name.view(), text) || contains_ignoring_case(application.kind.view(), text))
                 m_shown.append(i);
         }
         m_page = 0;
@@ -53,9 +53,9 @@ public:
     void draw(Graphics& graphics) override
     {
         auto const& t = tokens();
-        float icon_size = t.metric("launchpad.iconSize"_sv);
-        float cell_width = t.metric("launchpad.cellWidth"_sv);
-        float cell_height = t.metric("launchpad.cellHeight"_sv);
+        float icon_size = t.metric("launcher.iconSize"_sv);
+        float cell_width = t.metric("launcher.cellWidth"_sv);
+        float cell_height = t.metric("launcher.cellHeight"_sv);
         auto font = t.named_font("body"_sv);
         size_t per_page = rows() * columns();
         size_t first = static_cast<size_t>(m_page) * per_page;
@@ -66,11 +66,11 @@ public:
             auto icon = Desktop::icon_named(application.icon.view(), static_cast<int>(icon_size), scale);
             float x = rect.x + (cell_width - icon_size) / 2;
             if (static_cast<int>(i) == m_selected)
-                graphics.fill_rounded({ x - 8, rect.y - 8, icon_size + 16, icon_size + 16 }, 18, t.color("launchpad.fill"_sv));
+                graphics.fill_rounded({ x - 8, rect.y - 8, icon_size + 16, icon_size + 16 }, 18, t.color("launcher.fill"_sv));
             if (icon)
                 graphics.painter().draw_bitmap(*icon, FloatRect { x, rect.y, icon_size, icon_size });
             float text_width = min(Appearance::text_width(font, application.name.view()), cell_width - 8);
-            graphics.draw_text_truncated(application.name.view(), font, { rect.x + (cell_width - text_width) / 2, rect.y + icon_size + 20 }, cell_width - 8, t.color("launchpad.text"_sv));
+            graphics.draw_text_truncated(application.name.view(), font, { rect.x + (cell_width - text_width) / 2, rect.y + icon_size + 20 }, cell_width - 8, t.color("launcher.text"_sv));
             (void)cell_height;
         }
         // A dot for each page.
@@ -79,7 +79,7 @@ public:
             float spacing = 18;
             float x = (width() - spacing * static_cast<float>(pages - 1)) / 2;
             for (int i = 0; i < pages; ++i)
-                graphics.fill_circle({ x + static_cast<float>(i) * spacing, height() - 20 }, 4, t.color("launchpad.text"_sv).with_opacity(i == m_page ? 1 : 0.35f));
+                graphics.fill_circle({ x + static_cast<float>(i) * spacing, height() - 20 }, 4, t.color("launcher.text"_sv).with_opacity(i == m_page ? 1 : 0.35f));
         }
     }
 
@@ -157,8 +157,8 @@ private:
         return false;
     }
 
-    [[nodiscard]] size_t columns() const { return static_cast<size_t>(tokens().metric("launchpad.columns"_sv)); }
-    [[nodiscard]] size_t rows() const { return max(static_cast<size_t>((height() - 40) / tokens().metric("launchpad.cellHeight"_sv)), static_cast<size_t>(1)); }
+    [[nodiscard]] size_t columns() const { return static_cast<size_t>(tokens().metric("launcher.columns"_sv)); }
+    [[nodiscard]] size_t rows() const { return max(static_cast<size_t>((height() - 40) / tokens().metric("launcher.cellHeight"_sv)), static_cast<size_t>(1)); }
     [[nodiscard]] int page_count() const
     {
         size_t per_page = rows() * columns();
@@ -168,8 +168,8 @@ private:
     [[nodiscard]] FloatRect cell_rect(size_t index) const
     {
         auto const& t = tokens();
-        float cell_width = t.metric("launchpad.cellWidth"_sv);
-        float cell_height = t.metric("launchpad.cellHeight"_sv);
+        float cell_width = t.metric("launcher.cellWidth"_sv);
+        float cell_height = t.metric("launcher.cellHeight"_sv);
         size_t across = columns();
         float total = static_cast<float>(across) * cell_width;
         float left = (width() - total) / 2;
@@ -233,15 +233,15 @@ public:
     void layout() override
     {
         auto const& t = tokens();
-        float search_width = t.metric("launchpad.searchWidth"_sv);
-        float top = t.metric("launchpad.topPadding"_sv);
+        float search_width = t.metric("launcher.searchWidth"_sv);
+        float top = t.metric("launcher.topPadding"_sv);
         m_search->set_frame({ (width() - search_width) / 2, top, search_width, 22 });
         m_grid->set_frame({ 0, top + 60, width(), height() - top - 60 });
     }
 
     void draw(Graphics& graphics) override
     {
-        graphics.fill({ 0, 0, width(), height() }, tokens().color("launchpad.fill"_sv));
+        graphics.fill({ 0, 0, width(), height() }, tokens().color("launcher.fill"_sv));
     }
 
 private:
@@ -267,7 +267,7 @@ int main(int argc, char** argv)
     if (still)
         set_motion_enabled(false);
     auto screen = Platform::the().screen_size();
-    auto window = adopt_own(*new UI::Window("Launchpad"_sv, { 0, 0, screen.width, screen.height }, WS::WindowBare | WS::WindowCanBecomeKey | WS::WindowSticky));
+    auto window = adopt_own(*new UI::Window("Launcher"_sv, { 0, 0, screen.width, screen.height }, WS::WindowBare | WS::WindowCanBecomeKey | WS::WindowSticky));
     window->set_transparent(true);
     window->backend().set_level(WS::LevelPopup);
     MaterialRegion material { { 0, 0, screen.width, screen.height }, WS::Material::UnderWindow };
@@ -282,7 +282,7 @@ int main(int argc, char** argv)
     window->show();
     window->update_layout_now();
     window->make_first_responder(&view.search());
-    printf("launchpad: shown\n");
+    printf("launcher: shown\n");
     fflush(stdout);
     return application->exec();
 }

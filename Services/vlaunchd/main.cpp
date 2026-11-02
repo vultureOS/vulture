@@ -119,14 +119,15 @@ int main(int argc, char** argv)
     bool ui_test = argc > 1 && strcmp(argv[1], "--ui-test") == 0;
     bool ui_gallery = argc > 1 && strcmp(argv[1], "--ui-gallery") == 0;
     bool ui_desktop = argc > 1 && strcmp(argv[1], "--ui-desktop") == 0;
-    if (ui_test || ui_gallery || ui_desktop) {
+    bool sound_test = argc > 1 && strcmp(argv[1], "--sound-test") == 0;
+    if (ui_test || ui_gallery || ui_desktop || sound_test) {
         printf("vlaunchd: vultureOS userland is up (process %d)\n", getpid());
         fflush(stdout);
         // The test's jobs alone, in a supervisor of their own: this process
         // only reaps, until the machine is switched off from outside.
         pid_t supervisor = fork();
         if (supervisor == 0) {
-            execl("/sbin/vlaunchd", "vlaunchd", "--directory", ui_desktop ? "/usr/tests/desktop" : (ui_gallery ? "/usr/tests/gallery" : "/usr/tests/ui"), nullptr);
+            execl("/sbin/vlaunchd", "vlaunchd", "--directory", sound_test ? "/usr/tests/sound" : (ui_desktop ? "/usr/tests/desktop" : (ui_gallery ? "/usr/tests/gallery" : "/usr/tests/ui")), nullptr);
             _exit(127);
         }
         for (;;)

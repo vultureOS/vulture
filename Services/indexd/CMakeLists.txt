@@ -4,5 +4,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-# The index behind Spotlight.
-vulture_add_program(mds SOURCES main.cpp DESTINATION usr/libexec LIBRARIES LibDesktop)
+# The index behind Search.
+vulture_add_program(indexd SOURCES main.cpp DESTINATION usr/libexec LIBRARIES LibDesktop)

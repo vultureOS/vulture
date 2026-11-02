@@ -24,7 +24,7 @@
 #include <unistd.h>
 
 // Along the top of the screen: the system's mark, the active application's name and
-// menus, and at the right Spotlight, Control Center and the clock. Each of those opens
+// menus, and at the right SearchPanel, Quick Settings and the clock. Each of those opens
 // a window of its own.
 
 using namespace UI;
@@ -55,7 +55,7 @@ String clock_text()
     return MUST(builder.to_string());
 }
 
-// ---- Spotlight
+// ---- SearchPanel
 
 struct SearchResult {
     String path;
@@ -88,9 +88,9 @@ public:
     void draw(Graphics& graphics) override
     {
         auto const& t = tokens();
-        float row = t.metric("spotlight.rowHeight"_sv);
-        float icon_size = t.metric("spotlight.iconSize"_sv);
-        float padding = t.metric("spotlight.padding"_sv);
+        float row = t.metric("searchPanel.rowHeight"_sv);
+        float icon_size = t.metric("searchPanel.iconSize"_sv);
+        float padding = t.metric("searchPanel.padding"_sv);
         auto font = t.named_font("body"_sv);
         float cap = Appearance::cap_height(font);
         for (size_t i = 0; i < m_results.size(); ++i) {
@@ -98,11 +98,11 @@ public:
             float y = static_cast<float>(i) * row;
             bool selected = static_cast<int>(i) == m_selected;
             if (selected)
-                graphics.fill_rounded({ 6, y + 1, width() - 12, row - 2 }, 8, t.color("spotlight.selection"_sv));
+                graphics.fill_rounded({ 6, y + 1, width() - 12, row - 2 }, 8, t.color("searchPanel.selection"_sv));
             auto icon = Desktop::icon_named(result.icon.view(), static_cast<int>(icon_size), static_cast<int>(graphics.scale()));
             if (icon)
                 graphics.painter().draw_bitmap(*icon, FloatRect { padding, y + (row - icon_size) / 2, icon_size, icon_size });
-            auto color = t.color(selected ? "spotlight.selectionText"_sv : "label"_sv);
+            auto color = t.color(selected ? "searchPanel.selectionText"_sv : "label"_sv);
             float text_x = padding + icon_size + 10;
             float baseline = y + (row + cap) / 2;
             graphics.draw_text(result.name.view(), font, { text_x, baseline }, color);
@@ -113,7 +113,7 @@ public:
 
     bool mouse_down(MouseEvent const& event) override
     {
-        auto row = static_cast<int>(event.position.y / tokens().metric("spotlight.rowHeight"_sv));
+        auto row = static_cast<int>(event.position.y / tokens().metric("searchPanel.rowHeight"_sv));
         if (row < 0 || static_cast<size_t>(row) >= m_results.size())
             return false;
         m_selected = row;
@@ -128,9 +128,9 @@ private:
     int m_selected { -1 };
 };
 
-class SpotlightField final : public TextField {
+class SearchPanelField final : public TextField {
 public:
-    SpotlightField()
+    SearchPanelField()
         : TextField({}, FieldStyle::Plain)
     {
     }
@@ -147,12 +147,12 @@ public:
     [[nodiscard]] bool shows_focus_ring() const override { return false; }
     void draw(Graphics& graphics) override
     {
-        // As a field, at the size of Spotlight: the toolkit's own, drawn large.
+        // As a field, at the size of SearchPanel: the toolkit's own, drawn large.
         auto const& t = tokens();
-        FontSpec font { t.metric("spotlight.fontSize"_sv), FontWeight::Regular, false };
+        FontSpec font { t.metric("searchPanel.fontSize"_sv), FontWeight::Regular, false };
         float baseline = (height() + Appearance::cap_height(font)) / 2;
         if (text().is_empty()) {
-            graphics.draw_text("Spotlight Search"_sv, font, { 0, baseline }, t.color("placeholder"_sv));
+            graphics.draw_text("Search"_sv, font, { 0, baseline }, t.color("placeholder"_sv));
         } else {
             graphics.draw_text(text(), font, { 0, baseline }, t.color("label"_sv));
         }
@@ -163,27 +163,27 @@ public:
     }
 };
 
-class Spotlight {
+class SearchPanel {
 public:
-    Spotlight()
+    SearchPanel()
     {
         auto const& t = tokens();
         auto screen = Platform::the().screen_size();
-        auto width = static_cast<int>(t.metric("spotlight.width"_sv));
-        auto field_height = static_cast<int>(t.metric("spotlight.fieldHeight"_sv));
-        auto row = static_cast<int>(t.metric("spotlight.rowHeight"_sv));
-        auto rows = static_cast<int>(t.metric("spotlight.maxResults"_sv));
+        auto width = static_cast<int>(t.metric("searchPanel.width"_sv));
+        auto field_height = static_cast<int>(t.metric("searchPanel.fieldHeight"_sv));
+        auto row = static_cast<int>(t.metric("searchPanel.rowHeight"_sv));
+        auto rows = static_cast<int>(t.metric("searchPanel.maxResults"_sv));
         m_full_height = field_height + row * rows + 8;
-        m_window = adopt_own(*new UI::Window("Spotlight"_sv,
-            { (screen.width - width) / 2, static_cast<int>(static_cast<float>(screen.height) * t.metric("spotlight.topFraction"_sv)), width, m_full_height },
+        m_window = adopt_own(*new UI::Window("Search"_sv,
+            { (screen.width - width) / 2, static_cast<int>(static_cast<float>(screen.height) * t.metric("searchPanel.topFraction"_sv)), width, m_full_height },
             WS::WindowBare | WS::WindowCanBecomeKey | WS::WindowSticky));
         m_window->set_transparent(true);
         m_window->backend().set_level(WS::LevelPopup);
         auto& face = m_window->root_view().add<Face>(*this);
         face.set_frame({ 0, 0, static_cast<float>(width), static_cast<float>(m_full_height) });
         m_face = &face;
-        float padding = t.metric("spotlight.padding"_sv);
-        m_field = &face.add<SpotlightField>();
+        float padding = t.metric("searchPanel.padding"_sv);
+        m_field = &face.add<SearchPanelField>();
         m_field->set_frame({ padding + 34, 0, static_cast<float>(width) - padding * 2 - 34, static_cast<float>(field_height) });
         m_results = &face.add<ResultsView>();
         m_results->set_frame({ 0, static_cast<float>(field_height) + 4, static_cast<float>(width), static_cast<float>(row * rows) });
@@ -231,7 +231,7 @@ public:
         resize_for_results();
         m_window->show();
         m_window->make_first_responder(m_field);
-        printf("spotlight: shown\n");
+        printf("search: shown\n");
         fflush(stdout);
     }
 
@@ -244,43 +244,43 @@ public:
 private:
     class Face final : public View {
     public:
-        explicit Face(Spotlight& spotlight)
-            : m_spotlight(spotlight)
+        explicit Face(SearchPanel& search_panel)
+            : m_search_panel(search_panel)
         {
         }
 
         void draw(Graphics& graphics) override
         {
             auto const& t = tokens();
-            float shown = static_cast<float>(m_spotlight.shown_height());
-            float radius = t.metric("spotlight.radius"_sv);
+            float shown = static_cast<float>(m_search_panel.shown_height());
+            float radius = t.metric("searchPanel.radius"_sv);
             FloatRect shape { 0, 0, width(), shown };
-            graphics.fill_rounded(shape, radius, t.color("spotlight.fill"_sv));
-            graphics.stroke_rounded(shape, radius, graphics.pixel(), t.color("spotlight.border"_sv));
-            float field = t.metric("spotlight.fieldHeight"_sv);
-            float padding = t.metric("spotlight.padding"_sv);
+            graphics.fill_rounded(shape, radius, t.color("searchPanel.fill"_sv));
+            graphics.stroke_rounded(shape, radius, graphics.pixel(), t.color("searchPanel.border"_sv));
+            float field = t.metric("searchPanel.fieldHeight"_sv);
+            float padding = t.metric("searchPanel.padding"_sv);
             graphics.draw_symbol(Symbol::Magnifier, { padding, (field - 24) / 2, 24, 24 }, t.color("secondaryLabel"_sv), 1.4f);
             if (shown > field)
                 graphics.fill({ 0, field, width(), 1 }, t.color("separator"_sv));
         }
 
     private:
-        Spotlight& m_spotlight;
+        SearchPanel& m_search_panel;
     };
 
     [[nodiscard]] int shown_height() const
     {
         auto const& t = tokens();
-        auto field = static_cast<int>(t.metric("spotlight.fieldHeight"_sv));
+        auto field = static_cast<int>(t.metric("searchPanel.fieldHeight"_sv));
         auto count = static_cast<int>(m_results->results().size());
-        return count == 0 ? field : field + 8 + count * static_cast<int>(t.metric("spotlight.rowHeight"_sv));
+        return count == 0 ? field : field + 8 + count * static_cast<int>(t.metric("searchPanel.rowHeight"_sv));
     }
 
     void resize_for_results()
     {
         auto const& t = tokens();
         auto height = shown_height();
-        MaterialRegion material { { 0, 0, m_window->frame().width, height }, WS::Material::Popover, static_cast<int>(t.metric("spotlight.radius"_sv)) };
+        MaterialRegion material { { 0, 0, m_window->frame().width, height }, WS::Material::Popover, static_cast<int>(t.metric("searchPanel.radius"_sv)) };
         m_window->set_materials(Span<MaterialRegion const>(&material, 1));
         m_window->backend().set_input_region({ 0, 0, m_window->frame().width, height });
         m_face->set_needs_display();
@@ -290,9 +290,9 @@ private:
     {
         Vector<SearchResult> results;
         auto text = m_field->text();
-        size_t limit = static_cast<size_t>(tokens().metric("spotlight.maxResults"_sv));
+        size_t limit = static_cast<size_t>(tokens().metric("searchPanel.maxResults"_sv));
         if (!text.is_empty()) {
-            auto port = IPC::look_up("com.vulture.mds"_sv);
+            auto port = IPC::look_up("com.vulture.indexd"_sv);
             if (!port.is_error()) {
                 SearchProxy search_service(port.release_value());
                 auto answer = search_service.query(text, static_cast<u32>(limit));
@@ -330,7 +330,7 @@ private:
 
     OwnPtr<UI::Window> m_window;
     View* m_face { nullptr };
-    SpotlightField* m_field { nullptr };
+    SearchPanelField* m_field { nullptr };
     ResultsView* m_results { nullptr };
     bool m_shown { false };
     int m_full_height { 0 };
@@ -356,7 +356,7 @@ public:
         float radius = t.metric("notifications.radius"_sv);
         graphics.fill_rounded({ 0, 0, width(), height() }, radius, t.color("notifications.fill"_sv));
         float icon = t.metric("notifications.iconSize"_sv);
-        auto picture = Desktop::icon_named("SystemSettings"_sv, static_cast<int>(icon), static_cast<int>(graphics.scale()));
+        auto picture = Desktop::icon_named("Settings"_sv, static_cast<int>(icon), static_cast<int>(graphics.scale()));
         if (picture)
             graphics.painter().draw_bitmap(*picture, FloatRect { 12, (height() - icon) / 2, icon, icon });
         float x = 12 + icon + 10;
@@ -390,16 +390,16 @@ public:
     }
 };
 
-class NotificationCenterPanel {
+class NotificationServicePanel {
 public:
-    NotificationCenterPanel()
+    NotificationServicePanel()
     {
         auto const& t = tokens();
         auto screen = Platform::the().screen_size();
         auto width = static_cast<int>(t.metric("notifications.centerWidth"_sv));
         float bar = t.metric("menubar.height"_sv);
         auto top = static_cast<int>(bar) + 4;
-        m_window = adopt_own(*new UI::Window("Notification Center"_sv, { screen.width - width - 8, top, width, screen.height - top - 8 }, WS::WindowBare | WS::WindowCanBecomeKey | WS::WindowSticky));
+        m_window = adopt_own(*new UI::Window("Notifications"_sv, { screen.width - width - 8, top, width, screen.height - top - 8 }, WS::WindowBare | WS::WindowCanBecomeKey | WS::WindowSticky));
         m_window->set_transparent(true);
         m_window->backend().set_level(WS::LevelPopup);
         auto& content = m_window->root_view().add<Content>();
@@ -430,10 +430,10 @@ public:
     void reload()
     {
         m_content->notes.clear();
-        auto port = IPC::look_up("com.vulture.usernoted"_sv);
+        auto port = IPC::look_up("com.vulture.notificationd"_sv);
         if (port.is_error())
             return;
-        NotificationCenterProxy center(port.release_value());
+        NotificationServiceProxy center(port.release_value());
         auto answer = center.all();
         if (answer.is_error())
             return;
@@ -489,7 +489,7 @@ private:
     bool m_shown { false };
 };
 
-// ---- Control Center
+// ---- Quick Settings
 
 class Tile final : public Control {
 public:
@@ -510,10 +510,10 @@ public:
     void draw(Graphics& graphics) override
     {
         auto const& t = tokens();
-        graphics.fill_rounded({ 0, 0, width(), height() }, t.metric("controlCenter.tileRadius"_sv), t.color("controlCenter.tile"_sv));
+        graphics.fill_rounded({ 0, 0, width(), height() }, t.metric("quickSettings.tileRadius"_sv), t.color("quickSettings.tile"_sv));
         float circle = 30;
         FloatPoint center { 12 + circle / 2, height() / 2 };
-        graphics.fill_circle(center, circle / 2, m_on ? t.color("controlCenter.tileOn"_sv) : t.color("controlCenter.tile"_sv));
+        graphics.fill_circle(center, circle / 2, m_on ? t.color("quickSettings.tileOn"_sv) : t.color("quickSettings.tile"_sv));
         auto symbol_color = m_on ? Color { 255, 255, 255, 255 } : t.color("label"_sv);
         graphics.draw_symbol(m_symbol, { center.x - 9, center.y - 9, 18, 18 }, symbol_color, 1.8f);
         auto font = t.named_font("callout"_sv);
@@ -530,26 +530,57 @@ private:
     bool m_on;
 };
 
-class ControlCenterPanel {
+// A slider with a name over it, in a tile as wide as the panel.
+class SliderTile final : public View {
 public:
-    ControlCenterPanel()
+    explicit SliderTile(StringView title)
+        : m_title(MUST(String::from_view(title)))
+    {
+        m_slider = &add<Slider>(0.0f, 100.0f, 0.0f);
+    }
+
+    [[nodiscard]] Slider& slider() { return *m_slider; }
+
+    void draw(Graphics& graphics) override
+    {
+        auto const& t = tokens();
+        graphics.fill_rounded({ 0, 0, width(), height() }, t.metric("quickSettings.tileRadius"_sv), t.color("quickSettings.tile"_sv));
+        auto font = t.named_font("callout"_sv);
+        font.weight = FontWeight::Medium;
+        graphics.draw_text_truncated(m_title.view(), font, { 12, 21 }, width() - 24, t.color("label"_sv));
+    }
+
+    void layout() override
+    {
+        float slider_height = m_slider->intrinsic_size().height;
+        m_slider->set_frame({ 12, height() - slider_height - 10, width() - 24, slider_height });
+    }
+
+private:
+    String m_title;
+    Slider* m_slider { nullptr };
+};
+
+class QuickSettingsPanel {
+public:
+    QuickSettingsPanel()
     {
         auto const& t = tokens();
         auto screen = Platform::the().screen_size();
-        auto width = static_cast<int>(t.metric("controlCenter.width"_sv));
-        auto height = static_cast<int>(t.metric("controlCenter.height"_sv));
+        auto width = static_cast<int>(t.metric("quickSettings.width"_sv));
+        auto height = static_cast<int>(t.metric("quickSettings.height"_sv));
         auto top = static_cast<int>(t.metric("menubar.height"_sv)) + 4;
-        m_window = adopt_own(*new UI::Window("Control Center"_sv, { screen.width - width - 8, top, width, height }, WS::WindowBare | WS::WindowCanBecomeKey | WS::WindowSticky));
+        m_window = adopt_own(*new UI::Window("Quick Settings"_sv, { screen.width - width - 8, top, width, height }, WS::WindowBare | WS::WindowCanBecomeKey | WS::WindowSticky));
         m_window->set_transparent(true);
         m_window->backend().set_level(WS::LevelPopup);
-        MaterialRegion material { { 0, 0, width, height }, WS::Material::Popover, static_cast<int>(t.metric("controlCenter.radius"_sv)) };
+        MaterialRegion material { { 0, 0, width, height }, WS::Material::Popover, static_cast<int>(t.metric("quickSettings.radius"_sv)) };
         m_window->set_materials(Span<MaterialRegion const>(&material, 1));
         auto& face = m_window->root_view().add<Face>();
         face.set_frame({ 0, 0, static_cast<float>(width), static_cast<float>(height) });
-        float padding = t.metric("controlCenter.padding"_sv);
+        float padding = t.metric("quickSettings.padding"_sv);
         auto& stack = face.add<StackView>(Axis::Vertical, 8, Alignment::Fill, Insets::all(padding));
         stack.set_frame({ 0, 0, static_cast<float>(width), static_cast<float>(height) });
-        float tile_height = t.metric("controlCenter.tileHeight"_sv);
+        float tile_height = t.metric("quickSettings.tileHeight"_sv);
         auto& dark = stack.add<Tile>("Dark Mode"_sv, Symbol::ClearCircle, Appearance::the().is_dark());
         dark.set_fixed_height(tile_height);
         dark.on_action = [&dark] {
@@ -564,10 +595,14 @@ public:
         quiet.set_fixed_height(tile_height);
         m_quiet = &quiet;
         quiet.on_action = [&quiet] { quiet.set_on(!quiet.is_on()); };
-        auto& settings = stack.add<Tile>("System Settings…"_sv, Symbol::Sidebar, false);
+        auto& sound = stack.add<SliderTile>("Sound"_sv);
+        sound.set_fixed_height(t.metric("quickSettings.sliderTileHeight"_sv));
+        m_volume = &sound.slider();
+        m_volume->on_action = [this] { Application::the().set_output_volume(static_cast<u32>(m_volume->value() + 0.5f)); };
+        auto& settings = stack.add<Tile>("Settings…"_sv, Symbol::Sidebar, false);
         settings.set_fixed_height(tile_height);
         settings.on_action = [this] {
-            (void)Desktop::open_path("/Applications/System Settings.app"_sv);
+            (void)Desktop::open_path("/Applications/Settings.app"_sv);
             m_shown = false;
             m_window->hide();
         };
@@ -582,10 +617,15 @@ public:
     void toggle()
     {
         m_shown = !m_shown;
-        if (m_shown)
+        if (m_shown) {
+            // Something else may have changed it.
+            auto percent = Application::the().output_volume();
+            m_volume->set_value(static_cast<float>(percent.value_or(0)));
+            m_volume->set_enabled(percent.has_value());
             m_window->show();
-        else
+        } else {
             m_window->hide();
+        }
     }
 
     [[nodiscard]] bool is_quiet() const { return m_quiet->is_on(); }
@@ -596,12 +636,13 @@ private:
         void draw(Graphics& graphics) override
         {
             auto const& t = tokens();
-            graphics.fill_rounded({ 0, 0, width(), height() }, t.metric("controlCenter.radius"_sv), t.color("controlCenter.fill"_sv));
+            graphics.fill_rounded({ 0, 0, width(), height() }, t.metric("quickSettings.radius"_sv), t.color("quickSettings.fill"_sv));
         }
     };
 
     OwnPtr<UI::Window> m_window;
     Tile* m_quiet { nullptr };
+    Slider* m_volume { nullptr };
     bool m_shown { false };
 };
 
@@ -612,20 +653,20 @@ public:
     // Banners give way to what opens from here.
     Function<void()> on_panel_opening;
 
-    MenuBarView(Spotlight& spotlight, NotificationCenterPanel& center, ControlCenterPanel& control)
-        : m_spotlight(spotlight)
+    MenuBarView(SearchPanel& search_panel, NotificationServicePanel& center, QuickSettingsPanel& control)
+        : m_search_panel(search_panel)
         , m_center(center)
         , m_control(control)
     {
         m_system_menu = adopt_own(*new Menu);
         m_system_menu->add("About This Computer"_sv, [] {
-            auto bundle = Desktop::read_bundle("/Applications/System Settings.app"_sv);
+            auto bundle = Desktop::read_bundle("/Applications/Settings.app"_sv);
             StringView arguments[1] = { "About"_sv };
             if (!bundle.is_error())
                 (void)Desktop::launch(bundle.value(), Span<StringView const>(arguments, 1));
         });
         m_system_menu->add_separator();
-        m_system_menu->add("System Settings…"_sv, [] { (void)Desktop::open_path("/Applications/System Settings.app"_sv); });
+        m_system_menu->add("Settings…"_sv, [] { (void)Desktop::open_path("/Applications/Settings.app"_sv); });
         m_system_menu->add_separator();
         m_system_menu->add("Restart…"_sv, [] { Desktop::restart(); });
         m_system_menu->add("Shut Down…"_sv, [] { Desktop::shut_down(); });
@@ -676,7 +717,7 @@ public:
             float padding = t.metric("menubar.itemPadding"_sv);
             graphics.draw_text(item.title.view(), item.bold ? bold : font, { item.left + padding, baseline }, text);
         }
-        // From the right: the clock, Control Center, Spotlight.
+        // From the right: the clock, Quick Settings, SearchPanel.
         float right = width() - t.metric("menubar.rightPadding"_sv);
         float clock_width = Appearance::text_width(font, m_clock.view());
         m_clock_rect = { right - clock_width - 6, 0, clock_width + 12, height() };
@@ -710,7 +751,7 @@ public:
             return false;
         }
         if (m_search_rect.contains(event.position)) {
-            m_spotlight.toggle();
+            m_search_panel.toggle();
             return false;
         }
         layout_items();
@@ -828,9 +869,9 @@ private:
         }
     }
 
-    Spotlight& m_spotlight;
-    NotificationCenterPanel& m_center;
-    ControlCenterPanel& m_control;
+    SearchPanel& m_search_panel;
+    NotificationServicePanel& m_center;
+    QuickSettingsPanel& m_control;
     Desktop::ShellState m_state;
     OwnPtr<Menu> m_system_menu;
     Vector<NonnullOwnPtr<Menu>> m_menus;
@@ -855,7 +896,7 @@ int main(int argc, char** argv)
     }
     auto application_or_error = Application::create();
     if (application_or_error.is_error()) {
-        fprintf(stderr, "SystemUIServer: cannot reach the window server\n");
+        fprintf(stderr, "DesktopShell: cannot reach the window server\n");
         return 1;
     }
     auto application = application_or_error.release_value();
@@ -869,9 +910,9 @@ int main(int argc, char** argv)
     if (auto saved = preferences.string("wallpaper"_sv); saved.has_value())
         (void)server.set_wallpaper(saved.value());
 
-    Spotlight spotlight;
-    NotificationCenterPanel center;
-    ControlCenterPanel control;
+    SearchPanel search_panel;
+    NotificationServicePanel center;
+    QuickSettingsPanel control;
 
     auto screen = Platform::the().screen_size();
     auto bar_height = static_cast<int>(tokens().metric("menubar.height"_sv));
@@ -880,7 +921,7 @@ int main(int argc, char** argv)
     window->backend().set_level(WS::LevelMenuBar);
     MaterialRegion material { { 0, 0, screen.width, bar_height }, WS::Material::MenuBar };
     window->set_materials(Span<MaterialRegion const>(&material, 1));
-    auto& bar = window->root_view().add<MenuBarView>(spotlight, center, control);
+    auto& bar = window->root_view().add<MenuBarView>(search_panel, center, control);
     bar.set_frame({ 0, 0, static_cast<float>(screen.width), static_cast<float>(bar_height) });
     bar.tick_clock();
     window->show();
@@ -892,9 +933,9 @@ int main(int argc, char** argv)
             bar.set_state(state.release_value());
     };
     (void)server.subscribe_shell();
-    application->connection().on_hotkey = [&spotlight](u16 code, u32) {
+    application->connection().on_hotkey = [&search_panel](u16 code, u32) {
         if (code == KeySpace)
-            spotlight.toggle();
+            search_panel.toggle();
     };
     (void)server.register_hotkey(KeySpace, WS::ModifierCommand);
     if (!s_still)
@@ -923,6 +964,7 @@ int main(int argc, char** argv)
             return;
         banner.set_note(application_name, title, body);
         banner_window->show();
+        application->play_sound("notification"_sv);
         printf("notification: %.*s\n", static_cast<int>(title.length()), title.characters_without_null_termination());
         fflush(stdout);
         if (banner_timer >= 0)
@@ -938,17 +980,17 @@ int main(int argc, char** argv)
     };
     int events[2];
     OwnPtr<IPC::Listener> notifications_listener;
-    auto center_port = IPC::look_up("com.vulture.usernoted"_sv);
+    auto center_port = IPC::look_up("com.vulture.notificationd"_sv);
     if (!center_port.is_error()) {
         auto pair = IPC::create_port();
         if (!pair.is_error()) {
             auto ports = pair.release_value();
             notifications_listener = adopt_own(*new IPC::Listener(application->event_loop(), move(ports.receive), [&](IPC::ReceivedMessage& message) { (void)listener.handle(message); }));
-            (void)NotificationCenterProxy(center_port.release_value()).subscribe(move(ports.send));
+            (void)NotificationServiceProxy(center_port.release_value()).subscribe(move(ports.send));
         }
     }
     (void)events;
-    printf("systemuiserver: ready\n");
+    printf("desktopshell: ready\n");
     fflush(stdout);
     return application->exec();
 }

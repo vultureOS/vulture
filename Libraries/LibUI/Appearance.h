@@ -79,7 +79,7 @@ public:
     [[nodiscard]] bool has_metric(StringView key) const { return m_metrics.contains(key); }
     [[nodiscard]] bool has_list(StringView key) const { return m_lists.contains(key); }
 
-    // The accent replaced (as System Settings would). Whatever is drawn in the accent
+    // The accent replaced (as Settings would). Whatever is drawn in the accent
     // (selection, default buttons, switches, ...) moves to its hue, keeping how light or
     // deep each of them was against the theme's own accent.
     void set_accent(Gfx::Color);

@@ -56,16 +56,16 @@ struct Theme {
     // Motion and the desktop's overlays.
     float minimize_seconds { 0 };
     float space_slide_seconds { 0 };
-    float mission_control_seconds { 0 };
-    float mission_control_bar { 0 };
-    float mission_control_padding { 0 };
-    float mission_control_tile_width { 0 };
-    float mission_control_tile_height { 0 };
-    float mission_control_tile_radius { 0 };
-    Gfx::Color mission_control_dim;
-    Gfx::Color mission_control_tile;
-    Gfx::Color mission_control_tile_active;
-    Gfx::Color mission_control_highlight;
+    float overview_seconds { 0 };
+    float overview_bar { 0 };
+    float overview_padding { 0 };
+    float overview_tile_width { 0 };
+    float overview_tile_height { 0 };
+    float overview_tile_radius { 0 };
+    Gfx::Color overview_dim;
+    Gfx::Color overview_tile;
+    Gfx::Color overview_tile_active;
+    Gfx::Color overview_highlight;
     float boot_seconds { 0 };
     float boot_bar_width { 0 };
     float boot_bar_height { 0 };

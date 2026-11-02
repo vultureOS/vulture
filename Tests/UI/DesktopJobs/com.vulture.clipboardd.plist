@@ -1,6 +1,6 @@
 {
-    "Label" : "com.vulture.pboard",
-    "ProgramArguments" : [ "/usr/libexec/pboard" ],
+    "Label" : "com.vulture.clipboardd",
+    "ProgramArguments" : [ "/usr/libexec/clipboardd" ],
     "MachServices" : { "com.vulture.pasteboard" : true },
     "RunAtLoad" : true,
     "StandardErrorPath" : "/dev/console"

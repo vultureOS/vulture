@@ -160,7 +160,7 @@ void draw_magnifier(Canvas& c, float cx, float cy, float radius, float weight, C
 
 using DrawIcon = void (*)(Canvas&);
 
-void draw_finder(Canvas& c)
+void draw_files(Canvas& c)
 {
     c.app_base(rgb(0x5ac8fa), rgb(0x0a60d0));
     folder_shape(c, 0.22f, 0.27f, 0.56f, 0.44f, rgb(0xffffff, 170), rgb(0xffffff), rgb(0xe6f0fb));
@@ -175,7 +175,7 @@ void draw_settings(Canvas& c)
     draw_gear(c, 0.5f, 0.5f, 0.13f, 0.095f, 8, rgb(0x6d6d72), rgb(0xe5e5ea));
 }
 
-void draw_launchpad(Canvas& c)
+void draw_launcher(Canvas& c)
 {
     c.app_base(rgb(0x4c4c52), rgb(0x1c1c1e));
     Color const colors[9] = { rgb(0xff3b30), rgb(0xff9500), rgb(0xffcc00), rgb(0x34c759), rgb(0x00c7be), rgb(0x0a84ff), rgb(0x5856d6), rgb(0xaf52de), rgb(0xff2d55) };
@@ -198,7 +198,7 @@ void draw_terminal(Canvas& c)
     c.line(0.42f, 0.60f, 0.60f, 0.60f, 0.04f, rgb(0xf2f2f7));
 }
 
-void draw_textedit(Canvas& c)
+void draw_text_editor(Canvas& c)
 {
     c.app_base(rgb(0xf2f2f7), rgb(0xd1d1d6));
     c.rounded(0.26f, 0.16f, 0.48f, 0.68f, 0.02f, rgb(0xffffff));
@@ -241,16 +241,16 @@ void draw_activity(Canvas& c)
     c.app_base(rgb(0x2c2c2e), rgb(0x000000));
     for (int i = 1; i < 4; ++i)
         c.fill_rect(0.16f, 0.16f + static_cast<float>(i) * 0.17f, 0.68f, 0.006f, rgb(0x30d158, 60));
-    Path pulse;
+    Path monitor;
     FloatPoint const points[] = { { 0.16f, 0.56f }, { 0.32f, 0.56f }, { 0.38f, 0.40f }, { 0.46f, 0.72f }, { 0.54f, 0.28f }, { 0.60f, 0.60f }, { 0.66f, 0.50f }, { 0.84f, 0.50f } };
-    pulse.move_to(c.at(points[0].x, points[0].y));
+    monitor.move_to(c.at(points[0].x, points[0].y));
     for (size_t i = 1; i < array_size(points); ++i)
-        pulse.line_to(c.at(points[i].x, points[i].y));
+        monitor.line_to(c.at(points[i].x, points[i].y));
     StrokeStyle style;
     style.width = 0.028f * c.size();
     style.join = LineJoin::Round;
     style.cap = LineCap::Round;
-    c.painter().stroke_path(pulse, style, rgb(0x30d158));
+    c.painter().stroke_path(monitor, style, rgb(0x30d158));
 }
 
 void draw_console(Canvas& c)
@@ -309,13 +309,13 @@ void draw_gallery(Canvas& c)
     c.circle(0.45f, 0.68f, 0.045f, rgb(0xffffff));
 }
 
-void draw_spotlight(Canvas& c)
+void draw_search(Canvas& c)
 {
     c.app_base(rgb(0xc7c7cc), rgb(0x8e8e93));
     draw_magnifier(c, 0.45f, 0.45f, 0.17f, 0.05f, rgb(0xffffff));
 }
 
-void draw_mission_control(Canvas& c)
+void draw_overview(Canvas& c)
 {
     c.app_base(rgb(0x7d7aff), rgb(0x3634a3));
     c.rounded(0.20f, 0.24f, 0.28f, 0.2f, 0.02f, rgb(0xffffff, 230));
@@ -391,21 +391,21 @@ struct IconDefinition {
 };
 
 IconDefinition const s_icons[] = {
-    { "Finder", draw_finder },
-    { "SystemSettings", draw_settings },
-    { "Launchpad", draw_launchpad },
+    { "Files", draw_files },
+    { "Settings", draw_settings },
+    { "Launcher", draw_launcher },
     { "Terminal", draw_terminal },
-    { "TextEdit", draw_textedit },
-    { "Preview", draw_preview },
+    { "TextEditor", draw_text_editor },
+    { "Viewer", draw_preview },
     { "Calculator", draw_calculator },
-    { "ActivityMonitor", draw_activity },
+    { "Monitor", draw_activity },
     { "Console", draw_console },
-    { "DiskUtility", draw_disk },
-    { "ArchiveUtility", draw_archive },
-    { "SoftwareCenter", draw_software },
+    { "Disks", draw_disk },
+    { "Archiver", draw_archive },
+    { "Software", draw_software },
     { "WidgetGallery", draw_gallery },
-    { "Spotlight", draw_spotlight },
-    { "MissionControl", draw_mission_control },
+    { "Search", draw_search },
+    { "Overview", draw_overview },
     { "Folder", draw_folder },
     { "Document", draw_document },
     { "Trash", draw_trash },
@@ -423,6 +423,60 @@ void write_file(StringView path, ReadonlyBytes bytes)
     fclose(file);
 }
 
+}
+
+// A picture for Preview to open from the start: dunes at dusk, in nobody's style but ours.
+bool write_sample_picture(StringView directory)
+{
+    constexpr int width = 1600, height = 1000;
+    auto bitmap = MUST(Bitmap::create({ width, height }));
+    Painter painter(*bitmap);
+    GradientStop const stops[] = {
+        { 0, Color { 34, 31, 78, 255 } },
+        { 0.55f, Color { 197, 88, 112, 255 } },
+        { 1, Color { 252, 190, 120, 255 } },
+    };
+    Path whole;
+    whole.add_rect({ 0, 0, width, height });
+    painter.fill_path(whole, Gradient::linear({ 0, 0 }, { 0, static_cast<float>(height) }, { stops, array_size(stops) }));
+    Canvas canvas(painter, static_cast<float>(width));
+    canvas.circle(0.68f, 0.30f, 0.055f, Color { 255, 236, 200, 255 });
+    struct Dune {
+        float base;
+        float rise;
+        float phase;
+        Color color;
+    };
+    Dune const dunes[] = {
+        { 0.70f, 0.055f, 0.4f, Color { 150, 70, 104, 255 } },
+        { 0.80f, 0.060f, 1.9f, Color { 104, 50, 92, 255 } },
+        { 0.90f, 0.050f, 3.2f, Color { 66, 36, 78, 255 } },
+    };
+    for (auto const& dune : dunes) {
+        Path path;
+        path.move_to(FloatPoint { 0, static_cast<float>(height) });
+        constexpr int steps = 96;
+        for (int i = 0; i <= steps; ++i) {
+            float x = static_cast<float>(i) / static_cast<float>(steps);
+            float wave = static_cast<float>(Math::sine(static_cast<double>(x * 7.0f + dune.phase))) + 0.35f * static_cast<float>(Math::sine(static_cast<double>(x * 17.0f + dune.phase * 2)));
+            path.line_to(FloatPoint { x * static_cast<float>(width), (dune.base + dune.rise * wave) * static_cast<float>(height) });
+        }
+        path.line_to(FloatPoint { static_cast<float>(width), static_cast<float>(height) });
+        path.close();
+        painter.fill_path(path, dune.color);
+    }
+    auto png = MUST(Image::encode_png(*bitmap));
+    StringBuilder name;
+    name.append(directory);
+    name.append("/Dunes.png"_sv);
+    auto path = MUST(name.to_string());
+    FILE* file = fopen(path.characters(), "wb");
+    if (!file || fwrite(png.data(), 1, png.size(), file) != png.size()) {
+        printf("mkicons: cannot write %s\n", path.characters());
+        return false;
+    }
+    fclose(file);
+    return true;
 }
 
 int main(int argc, char** argv)
@@ -458,5 +512,5 @@ int main(int argc, char** argv)
         path.append(".vicns"_sv);
         write_file(path.view(), file.span());
     }
-    return 0;
+    return write_sample_picture(directory) ? 0 : 1;
 }

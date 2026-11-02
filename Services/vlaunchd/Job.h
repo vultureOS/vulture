@@ -34,7 +34,7 @@ namespace Launchd {
 //   StandardInPath, StandardOutPath, StandardErrorPath  (/dev/null)
 //   Umask                 its file creation mask
 //   ExitTimeOut           seconds between SIGTERM and SIGKILL when stopped (20)
-//   LimitLoadToSessionType  "Aqua": only when the machine boots to the graphical
+//   LimitLoadToSessionType  "Graphical": only when the machine boots to the graphical
 //                         session (the boot flag "gui")
 //   MachServices          { "name": true, ... }: services the job provides.
 //                         Found through the bootstrap port; the job is
