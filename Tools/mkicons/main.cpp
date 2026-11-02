@@ -298,6 +298,17 @@ void draw_software(Canvas& c)
     c.rounded(0.29f, 0.68f, 0.42f, 0.05f, 0.025f, rgb(0xffffff));
 }
 
+void draw_installer(Canvas& c)
+{
+    c.app_base(rgb(0x8e8e93), rgb(0x48484a));
+    // A disk, with something going on to it.
+    c.rounded(0.22f, 0.54f, 0.56f, 0.2f, 0.045f, rgb(0xffffff));
+    c.circle(0.68f, 0.64f, 0.022f, rgb(0x34c759));
+    c.line(0.5f, 0.2f, 0.5f, 0.42f, 0.055f, rgb(0xffffff));
+    c.line(0.39f, 0.33f, 0.5f, 0.44f, 0.055f, rgb(0xffffff));
+    c.line(0.61f, 0.33f, 0.5f, 0.44f, 0.055f, rgb(0xffffff));
+}
+
 void draw_gallery(Canvas& c)
 {
     c.app_base(rgb(0xbf5af2), rgb(0xff375f));
@@ -403,6 +414,7 @@ IconDefinition const s_icons[] = {
     { "Disks", draw_disk },
     { "Archiver", draw_archive },
     { "Software", draw_software },
+    { "Installer", draw_installer },
     { "WidgetGallery", draw_gallery },
     { "Search", draw_search },
     { "Overview", draw_overview },

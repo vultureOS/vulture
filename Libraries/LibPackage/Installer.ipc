@@ -8,6 +8,10 @@ endpoint Installer
     install(String name) =|
     remove(String name) =|
     subscribe(Port events) =|
+    // Disks that could be installed on: JSON, a list of { "name" : "disk1", "bytes" : ... }.
+    disks() => (String json)
+    // Erases this one, and puts this system on it. It reports as "system".
+    install_system(String disk) =|
 }
 
 endpoint InstallerEvents

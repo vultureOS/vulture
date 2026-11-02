@@ -20,6 +20,9 @@
 // With more than one archive, a partition each, for a disk that boots more
 // than one kind of machine: the rest is shared equally, and the kernel finds
 // its own by what's in System/Library/CoreServices/Architecture.
+//
+// With a kernel8.img among the FILEs, the disk is for a Raspberry Pi too, whose
+// firmware also gets to find it in the old kind of partition table.
 
 using namespace VultureFS;
 
@@ -95,6 +98,10 @@ int main(int argc, char** argv)
         { VultureFS::partition_type, "vultureOS"_sv, data_first + data_each, data_each },
     };
     ErrorOr<void> result = Tools::write_partition_table(image, size, Span<Tools::PartitionSpec const>(partitions, 1 + archives.size()));
+    for (auto const& file : files) {
+        if (!result.is_error() && file.path.view() == "kernel8.img"_sv)
+            result = Tools::add_partition_to_mbr(image, Tools::partition_start_sector, esp_sectors);
+    }
     if (!result.is_error())
         result = Tools::write_fat32(image, Tools::partition_start_sector, esp_sectors, "EFI"_sv, files);
     if (result.is_error()) {

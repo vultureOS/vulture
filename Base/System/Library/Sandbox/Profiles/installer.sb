@@ -1,0 +1,4 @@
+# Asks installd for everything, and the login session to restart afterwards.
+include application
+service com.vulture.installd
+service com.vulture.loginwindow

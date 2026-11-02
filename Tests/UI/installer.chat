@@ -1,0 +1,45 @@
+# Putting the system on a blank disk, with the Installer: every step of it, as a person would.
+expect loginwindow: ready
+pause 0.5
+type vulture\r
+expect files: ready
+pause 2
+key meta_l-w
+pause 0.5
+key meta_l-spc
+expect search: shown
+pause 0.3
+type installer
+pause 1
+type \r
+expect installer: ready
+pause 1.5
+screenshot introduction.png
+pointer 22170 21709
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect installer: destination
+pause 1
+pointer 16384 11010
+pause 0.3
+button left down
+pause 0.2
+button left up
+pause 0.6
+screenshot destination.png
+pointer 22170 21709
+pause 0.3
+button left down
+pause 0.2
+button left up
+expect installer: asking
+pause 1
+screenshot asking.png
+type \r
+expect installer: installing
+screenshot installing.png
+expect installer: installed
+pause 1
+screenshot summary.png

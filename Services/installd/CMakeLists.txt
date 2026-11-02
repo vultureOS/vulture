@@ -5,4 +5,4 @@
 #
 
 # Puts software on the system, for those who may. What the Software application asks.
-vulture_add_program(installd SOURCES main.cpp DESTINATION usr/libexec LIBRARIES LibPackage LibCore)
+vulture_add_program(installd SOURCES main.cpp DESTINATION usr/libexec LIBRARIES LibPackage LibCore LibJSON)

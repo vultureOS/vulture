@@ -112,6 +112,32 @@ else
     status=1
 fi
 
+# ---- The Installer: through its window, onto a blank disk, which then has to be all that's needed.
+target="$out/installed.img"
+rm -f "$target"
+dd if=/dev/zero of="$target" bs=1048576 count=0 seek=4096 2> /dev/null
+if VULTURE_SCREENSHOT_PREFIX="$out/installer-" \
+    "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --gui --fresh-disk --boot-args netguitest \
+    --chat "$source_dir/Tests/UI/installer.chat" --timeout 120 -- \
+    -drive "if=none,id=target,format=raw,file=$target" -device virtio-blk-pci,drive=target > "$out/installer.log" 2>&1; then
+    echo "hardware-test: ok: the Installer, onto a blank disk"
+    if "$build_dir/host/Tools/vfs/fsck.vfs" "$target" > "$out/fsck.log" 2>&1; then
+        echo "hardware-test: ok: what it wrote is sound, by fsck"
+    else
+        echo "hardware-test: FAIL: fsck of the installed disk; see $out/fsck.log" >&2
+        status=1
+    fi
+    if "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --image "$target" --expect "loginwindow: ready" --timeout 60 > "$out/installed-boot.log" 2>&1; then
+        echo "hardware-test: ok: and that disk boots by itself"
+    else
+        echo "hardware-test: FAIL: the installed disk doesn't boot; see $out/installed-boot.log" >&2
+        status=1
+    fi
+else
+    echo "hardware-test: FAIL: the Installer; see $out/installer.log" >&2
+    status=1
+fi
+
 # ---- A PC's own keyboard and mouse, on PS/2: a mouse being what only says how far it moved.
 if [ "${architecture:-aarch64}" = x86_64 ]; then
     if VULTURE_REAL_DEVICES=1 VULTURE_KEEP_VIRTIO_DISPLAY=1 VULTURE_PS2_INPUT=1 "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --gui --fresh-disk \

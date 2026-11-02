@@ -219,6 +219,18 @@ ErrorOr<void> write_partition_table(FILE* file, u64 size, Span<PartitionSpec con
     return {};
 }
 
+ErrorOr<void> add_partition_to_mbr(FILE* file, u64 first_sector, u64 sector_count)
+{
+    constexpr u8 fat32_with_lba = 0x0c;
+    constexpr size_t first_entry = 446;
+    // The protective entry stops where this starts, as tables like this usually do.
+    MBREntry protective { 0, { 0, 2, 0 }, 0xee, { 0xff, 0xff, 0xff }, 1, static_cast<u32>(first_sector - 1) };
+    MBREntry fat32 { 0, { 0xff, 0xff, 0xff }, fat32_with_lba, { 0xff, 0xff, 0xff }, static_cast<u32>(first_sector), static_cast<u32>(sector_count) };
+    TRY(write_at(file, first_entry, &protective, sizeof(protective)));
+    TRY(write_at(file, first_entry + sizeof(MBREntry), &fat32, sizeof(fat32)));
+    return {};
+}
+
 ErrorOr<Partition> create_disk_image(FILE* file, u64 size, StringView partition_name)
 {
     if (size / sector_size < partition_start_sector + 2048)

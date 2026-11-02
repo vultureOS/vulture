@@ -101,6 +101,10 @@ extern u8 const efi_system_partition_type[16];
 // (primary and backup) listing the partitions.
 ErrorOr<void> write_partition_table(FILE*, u64 size, Span<PartitionSpec const>);
 
+// For a disk a Raspberry Pi will start from: its firmware may only read the old kind of partition table, so that
+// lists this partition (FAT32) too, after the entry that says there's a GPT. UEFI goes by that entry.
+ErrorOr<void> add_partition_to_mbr(FILE*, u64 first_sector, u64 sector_count);
+
 // The same with one vultureFS partition filling the disk.
 ErrorOr<Partition> create_disk_image(FILE*, u64 size, StringView partition_name);
 

@@ -153,6 +153,7 @@
     "monitor" : { "width" : 860, "height" : 560, "statsHeight" : 112, "statsPadding" : 14, "graphWidth" : 240, "graphSamples" : 90, "refreshMilliseconds" : 2000 },
     "console" : { "width" : 900, "height" : 560, "limit" : 5000, "statusHeight" : 24 },
     "disks" : { "width" : 780, "height" : 460, "sidebarWidth" : 200, "barHeight" : 20, "barRadius" : 5, "padding" : 20, "iconSize" : 64 },
+    "installer" : { "width" : 620, "height" : 440, "sidebarWidth" : 170, "stepHeight" : 30, "stepDot" : 9, "stepInset" : 20, "stepTop" : 60, "padding" : 24, "buttonBarHeight" : 60, "diskRowHeight" : 54, "diskRowRadius" : 8 },
     "archiver" : { "width" : 460, "height" : 300, "iconSize" : 64 },
     "software" : { "width" : 780, "height" : 540, "sidebarWidth" : 180, "rowHeight" : 64, "iconSize" : 44, "padding" : 16 },
     "launcher" : { "iconSize" : 88, "cellWidth" : 170, "cellHeight" : 150, "columns" : 7, "searchWidth" : 260, "topPadding" : 40 },

@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/API/POSIX/sysctl.h>
+#include <LibJSON/JSON.h>
+#include <dirent.h>
+#include <string.h>
+#include <sys/sysctl.h>
 #include <InstallerEndpoint.h>
 #include <LibBase/OwnPtr.h>
 #include <LibCore/Account.h>
@@ -29,6 +34,7 @@
 namespace {
 
 enum class JobKind {
+    InstallSystem,
     Refresh,
     Install,
     Remove,
@@ -38,6 +44,85 @@ struct Job {
     JobKind kind;
     String name;
 };
+
+// Disks, as opposed to partitions of them: "disk3", which isn't "disk3s1".
+[[nodiscard]] bool is_disk_name(StringView name)
+{
+    if (!name.starts_with("disk"_sv) || name.length() == 4)
+        return false;
+    for (size_t i = 4; i < name.length(); ++i) {
+        if (name[i] < '0' || name[i] > '9')
+            return false;
+    }
+    return true;
+}
+
+// Whether anything on it is in use: the disk this was started from, for one.
+[[nodiscard]] bool is_in_use(StringView disk)
+{
+    size_t length = 0;
+    if (sysctlbyname("vfs.mounts", nullptr, &length, nullptr, 0) != 0)
+        return true;
+    Vector<u8> records;
+    if (records.try_resize(length).is_error())
+        return true;
+    if (sysctlbyname("vfs.mounts", records.data(), &length, nullptr, 0) != 0)
+        return true;
+    for (size_t at = 0; at + sizeof(vulture_mount_info) <= length; at += sizeof(vulture_mount_info)) {
+        auto const* mount = reinterpret_cast<vulture_mount_info const*>(records.data() + at);
+        StringView const device(mount->device, strnlen(mount->device, sizeof(mount->device)));
+        if (device == disk || (device.starts_with(disk) && device.length() > disk.length() && device[disk.length()] == 's'))
+            return true;
+    }
+    return false;
+}
+
+template<typename Callback>
+void for_each_available_disk(Callback callback)
+{
+    DIR* devices = opendir("/dev");
+    if (!devices)
+        return;
+    while (auto* entry = readdir(devices)) {
+        StringView const name(entry->d_name, strlen(entry->d_name));
+        if (!is_disk_name(name) || is_in_use(name))
+            continue;
+        StringBuilder path;
+        path.append("/dev/"_sv);
+        path.append(name);
+        path.append('\0');
+        int fd = open(path.view().characters_without_null_termination(), O_RDONLY | O_CLOEXEC);
+        if (fd < 0)
+            continue;
+        off_t const size = lseek(fd, 0, SEEK_END);
+        close(fd);
+        if (size > 0)
+            callback(name, static_cast<u64>(size));
+    }
+    closedir(devices);
+}
+
+[[nodiscard]] String describe_disks()
+{
+    auto list = JSON::Value::array();
+    for_each_available_disk([&](StringView name, u64 size) {
+        auto entry = JSON::Value::object();
+        MUST(entry.set("name"_sv, MUST(JSON::Value::string(name))));
+        MUST(entry.set("bytes"_sv, JSON::Value(static_cast<i64>(size))));
+        MUST(list.append(move(entry)));
+    });
+    return MUST(list.serialize());
+}
+
+[[nodiscard]] bool is_available_disk(StringView disk)
+{
+    bool found = false;
+    for_each_available_disk([&](StringView name, u64) {
+        if (name == disk)
+            found = true;
+    });
+    return found;
+}
 
 class Installer final : public InstallerStub {
 public:
@@ -74,6 +159,24 @@ public:
             return;
         }
         enqueue({ JobKind::Remove, move(name) });
+    }
+
+    String disks(IPC::Sender const&) override
+    {
+        return describe_disks();
+    }
+
+    void install_system(IPC::Sender const& sender, String disk) override
+    {
+        if (!may_change_things(sender)) {
+            refused("system"_sv, sender);
+            return;
+        }
+        if (!is_available_disk(disk.view())) {
+            tell([&](InstallerEventsProxy& listener) { return listener.finished("system"_sv, false, "That disk can't be used."_sv); });
+            return;
+        }
+        enqueue({ JobKind::InstallSystem, move(disk) });
     }
 
     void subscribe(IPC::Sender const&, IPC::Port events) override
@@ -150,6 +253,14 @@ private:
     {
         ErrorOr<void> result = Error::from_string_literal("nothing done");
         switch (m_current.kind) {
+        case JobKind::InstallSystem: {
+            // A program of its own, which says these same things.
+            dup2(out, 1);
+            char const* arguments[] = { "/usr/libexec/vinstall", m_current.name.characters(), nullptr };
+            execv(arguments[0], const_cast<char* const*>(arguments));
+            result = Error::from_errno(errno);
+            break;
+        }
         case JobKind::Refresh:
             result = Package::refresh();
             break;
@@ -208,7 +319,7 @@ private:
             u32 percent = 0;
             for (size_t i = 2; i < line.length(); ++i)
                 percent = percent * 10 + static_cast<u32>(line[i] - '0');
-            tell([&](InstallerEventsProxy& listener) { return listener.progress(m_current.name.view(), percent); });
+            tell([&](InstallerEventsProxy& listener) { return listener.progress(reported_name(), percent); });
         } else if (line[0] == 'S') {
             m_finished_said = true;
             finished_job(true, {});
@@ -218,10 +329,31 @@ private:
         }
     }
 
+    // A package goes by its name; installing the system goes by "system", whatever the disk is called.
+    StringView reported_name() const
+    {
+        return m_current.kind == JobKind::InstallSystem ? "system"_sv : m_current.name.view();
+    }
+
+    char const* job_verb() const
+    {
+        switch (m_current.kind) {
+        case JobKind::Refresh:
+            return "refresh";
+        case JobKind::Install:
+            return "install";
+        case JobKind::Remove:
+            return "remove";
+        case JobKind::InstallSystem:
+            return "install system on";
+        }
+        return "";
+    }
+
     void finished_job(bool succeeded, StringView message)
     {
-        os_log(m_log, "%s %s: %s", m_current.kind == JobKind::Refresh ? "refresh" : (m_current.kind == JobKind::Install ? "install" : "remove"), m_current.name.characters(), succeeded ? "done" : "failed");
-        tell([&](InstallerEventsProxy& listener) { return listener.finished(m_current.name.view(), succeeded, message); });
+        os_log(m_log, "%s %s: %s", job_verb(), m_current.name.characters(), succeeded ? "done" : "failed");
+        tell([&](InstallerEventsProxy& listener) { return listener.finished(reported_name(), succeeded, message); });
         tell([](InstallerEventsProxy& listener) { return listener.changed(); });
     }
 
