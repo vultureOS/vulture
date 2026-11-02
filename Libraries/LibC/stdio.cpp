@@ -144,6 +144,12 @@ static void put(FILE* file, char const* data, size_t length)
             file->error = true;
         return;
     }
+    // What wouldn't fit anyway goes straight out, in one piece: a disk could otherwise see every block in parts.
+    if (length >= BUFSIZ) {
+        if (flush(file) != 0 || !write_all(file->fd, data, length))
+            file->error = true;
+        return;
+    }
     for (size_t i = 0; i < length; ++i) {
         file->write_buffer[file->write_length++] = data[i];
         if (file->write_length == BUFSIZ || (file->buffering == Buffering::Line && data[i] == '\n'))
@@ -676,6 +682,20 @@ size_t fread(void* buffer, size_t size, size_t count, FILE* file)
     size_t done = 0;
     FileLocker locker(file);
     while (done < total) {
+        // With nothing kept, what wouldn't fit in the buffer anyway comes straight in, in one piece.
+        if (file != stdin && file->read_position == file->read_length && total - done >= BUFSIZ) {
+            ssize_t result = read(file->fd, bytes + done, total - done);
+            if (result < 0) {
+                file->error = true;
+                break;
+            }
+            if (result == 0) {
+                file->eof = true;
+                break;
+            }
+            done += static_cast<size_t>(result);
+            continue;
+        }
         int character = getc_unlocked(file);
         if (character == EOF)
             break;
