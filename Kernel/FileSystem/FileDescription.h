@@ -13,6 +13,9 @@ namespace Kernel {
 
 class Pipe;
 class Port;
+namespace Net {
+class Socket;
+}
 
 // An open file: what a file descriptor points to. Descriptors duplicated
 // by dup() or fork() share one description, and with it the file offset.
@@ -22,6 +25,7 @@ public:
     [[nodiscard]] static ErrorOr<NonnullRefPtr<FileDescription>> create_for_pipe(NonnullRefPtr<Pipe>, bool is_writer);
     // A right to a port: the receive right, or a send right.
     [[nodiscard]] static ErrorOr<NonnullRefPtr<FileDescription>> create_for_port(NonnullRefPtr<Port>, bool receive_right);
+    [[nodiscard]] static ErrorOr<NonnullRefPtr<FileDescription>> create_for_socket(NonnullRefPtr<Net::Socket>);
     ~FileDescription();
 
     ErrorOr<size_t> read(IOBuffer const&, size_t count);
@@ -45,6 +49,7 @@ public:
     void set_status_flags(int flags);
     [[nodiscard]] Inode* inode() const { return m_inode.ptr(); }
     [[nodiscard]] Port* port() const { return m_port.ptr(); }
+    [[nodiscard]] Net::Socket* socket() const { return m_socket.ptr(); }
     [[nodiscard]] bool is_port_receive_right() const { return m_port && m_is_port_receiver; }
     [[nodiscard]] bool is_port_send_right() const { return m_port && !m_is_port_receiver; }
     [[nodiscard]] bool is_readable() const { return (m_flags & O_ACCMODE) != O_WRONLY; }
@@ -58,6 +63,7 @@ private:
     bool m_is_pipe_writer { false };
     RefPtr<Port> m_port;
     bool m_is_port_receiver { false };
+    RefPtr<Net::Socket> m_socket;
     int m_flags { 0 };
     mutable Mutex m_lock;
     u64 m_offset { 0 };

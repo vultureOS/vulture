@@ -154,4 +154,22 @@ void dump_registers(FormatSink& sink, TrapFrame const& frame)
     format_to(sink, "  esr {:#010x}  spsr {:#010x}\n", frame.esr, frame.spsr);
 }
 
+u64 hardware_capabilities()
+{
+    constexpr u64 capability_aes = 1 << 3;
+    constexpr u64 capability_pmull = 1 << 4;
+    constexpr u64 capability_sha2 = 1 << 6;
+    u64 isar0;
+    asm volatile("mrs %0, id_aa64isar0_el1" : "=r"(isar0));
+    u64 capabilities = 0;
+    u64 const aes = (isar0 >> 4) & 0xf;
+    if (aes >= 1)
+        capabilities |= capability_aes;
+    if (aes >= 2)
+        capabilities |= capability_pmull;
+    if (((isar0 >> 12) & 0xf) >= 1)
+        capabilities |= capability_sha2;
+    return capabilities;
+}
+
 }

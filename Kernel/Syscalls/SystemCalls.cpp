@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/API/POSIX/socket.h>
+#include <Kernel/Net/NetworkStack.h>
+#include <Kernel/Net/Socket.h>
+#include <Kernel/Net/TCP.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/poll.h>
 #include <Kernel/API/POSIX/sysctl.h>
@@ -152,6 +156,17 @@ ErrorOr<FlatPtr> Process::sys_poll(TrapFrame&, SyscallArguments const& arguments
     }
 }
 
+static void add_connection_row(Net::Socket& socket, Vector<u8>& rows)
+{
+    vulture_connection_info info {};
+    if (!socket.describe(info))
+        return;
+    size_t offset = rows.size();
+    if (rows.try_resize(offset + sizeof(info)).is_error())
+        return;
+    __builtin_memcpy(rows.begin() + offset, &info, sizeof(info));
+}
+
 // sysctl by name: "kern.ostype", "hw.ncpu"... A value is read into
 // `old_buffer` (its size in and out through `old_length_address`), and
 // for writable ones (kern.hostname, by root) set from `new_buffer`.
@@ -231,6 +246,48 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
             TRY(table.try_resize(offset + sizeof(info)));
             __builtin_memcpy(table.begin() + offset, &info, sizeof(info));
         }
+    } else if (name == "hw.optional.hwcap"_sv) {
+        // What the processor can do, for programs to choose code by: bits as in AT_HWCAP.
+        set_number(Arch::hardware_capabilities());
+    } else if (name == "net.interfaces"_sv) {
+        auto& stack = Net::NetworkStack::the();
+        MutexLocker locker(stack.lock());
+        for (auto& interface : stack.interfaces()) {
+            vulture_interface_info info {};
+            auto interface_name = interface->name();
+            __builtin_memcpy(info.name, interface_name.characters_without_null_termination(), min<size_t>(interface_name.length(), sizeof(info.name) - 1));
+            __builtin_memcpy(info.mac, interface->mac().bytes, 6);
+            info.mtu = interface->mtu();
+            info.flags = VULTURE_IFF_UP | VULTURE_IFF_RUNNING | (interface->is_loopback() ? VULTURE_IFF_LOOPBACK : VULTURE_IFF_BROADCAST);
+            info.address = __builtin_bswap32(interface->address.value);
+            info.netmask = __builtin_bswap32(interface->netmask.value);
+            info.gateway = __builtin_bswap32(interface->gateway.value);
+            info.received_packets = interface->received_packets;
+            info.received_bytes = interface->received_bytes;
+            info.sent_packets = interface->sent_packets;
+            info.sent_bytes = interface->sent_bytes;
+            info.dropped_packets = interface->dropped_packets;
+            size_t offset = table.size();
+            TRY(table.try_resize(offset + sizeof(info)));
+            __builtin_memcpy(table.begin() + offset, &info, sizeof(info));
+        }
+    } else if (name == "net.connections"_sv) {
+        auto& stack = Net::NetworkStack::the();
+        MutexLocker locker(stack.lock());
+        Net::TCPSocket::for_each([](Net::TCPSocket& socket, void* rows) { add_connection_row(socket, *static_cast<Vector<u8>*>(rows)); }, &table);
+        Net::UDPSocket::for_each([](Net::UDPSocket& socket, void* rows) { add_connection_row(socket, *static_cast<Vector<u8>*>(rows)); }, &table);
+    } else if (name == "net.inet.debug.drop_one_in"_sv) {
+        // Lose one packet of every N on loopback, to test what is done about loss. For root.
+        if (new_buffer) {
+            if (!m_credentials.is_superuser())
+                return Error::from_errno(EPERM);
+            if (new_length != sizeof(u32))
+                return Error::from_errno(EINVAL);
+            auto rate = TRY(copy_from_user<u32>(new_buffer));
+            MutexLocker locker(Net::NetworkStack::the().lock());
+            Net::NetworkStack::the().set_drop_rate(rate);
+        }
+        set_number(0u);
     } else if (name == "vfs.mounts"_sv) {
         TRY(VirtualFileSystem::for_each_mount_point([](void* context, FileSystem& file_system, StringView path) -> ErrorOr<void> {
             auto& rows = *static_cast<Vector<u8>*>(context);
@@ -255,7 +312,7 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
     } else {
         return Error::from_errno(ENOENT);
     }
-    result = name == "kern.proc.all"_sv || name == "vfs.mounts"_sv ? ReadonlyBytes { table.begin(), table.size() } : ReadonlyBytes { value, value_length };
+    result = name == "kern.proc.all"_sv || name == "vfs.mounts"_sv || name == "net.interfaces"_sv || name == "net.connections"_sv ? ReadonlyBytes { table.begin(), table.size() } : ReadonlyBytes { value, value_length };
     if (old_length_address) {
         auto room = TRY(copy_from_user<u64>(old_length_address));
         if (old_buffer) {

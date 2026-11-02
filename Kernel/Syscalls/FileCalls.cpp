@@ -42,6 +42,8 @@ ErrorOr<FlatPtr> Process::sys_ioctl(TrapFrame&, SyscallArguments const& argument
         description->set_status_flags(non_blocking ? (description->flags() | O_NONBLOCK) : (description->flags() & ~O_NONBLOCK));
         return 0;
     }
+    if (description->socket())
+        return socket_ioctl(request, arguments.values[2]);
     auto* inode = description->inode();
     if (!inode)
         return Error::from_errno(ENOTTY);

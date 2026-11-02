@@ -9,6 +9,8 @@
 #include <Kernel/IPC/Port.h>
 #include <Kernel/FileSystem/FileSystem.h>
 #include <Kernel/FileSystem/Pipe.h>
+#include <Kernel/Net/Socket.h>
+#include <Kernel/Tasks/Process.h>
 #include <LibBase/New.h>
 
 namespace Kernel {
@@ -50,8 +52,19 @@ ErrorOr<NonnullRefPtr<FileDescription>> FileDescription::create_for_port(Nonnull
     return adopt_ref(*description);
 }
 
+ErrorOr<NonnullRefPtr<FileDescription>> FileDescription::create_for_socket(NonnullRefPtr<Net::Socket> socket)
+{
+    auto* description = new (Base::nothrow) FileDescription(O_RDWR);
+    if (!description)
+        return Error::from_errno(ENOMEM);
+    description->m_socket = move(socket);
+    return adopt_ref(*description);
+}
+
 FileDescription::~FileDescription()
 {
+    if (m_socket)
+        m_socket->detach();
     if (m_inode)
         m_inode->description_closed();
     if (m_pipe)
@@ -62,6 +75,8 @@ FileDescription::~FileDescription()
 
 bool FileDescription::can_read() const
 {
+    if (m_socket)
+        return m_socket->can_read();
     if (m_port)
         return m_is_port_receiver && m_port->can_receive();
     if (m_pipe)
@@ -71,6 +86,8 @@ bool FileDescription::can_read() const
 
 bool FileDescription::can_write() const
 {
+    if (m_socket)
+        return m_socket->can_write();
     if (m_port)
         return !m_is_port_receiver && m_port->can_send();
     if (m_pipe)
@@ -80,6 +97,8 @@ bool FileDescription::can_write() const
 
 bool FileDescription::is_hung_up() const
 {
+    if (m_socket)
+        return m_socket->is_hung_up();
     if (m_port)
         return m_is_port_receiver ? !m_port->has_senders() : !m_port->has_receiver();
     if (m_pipe)
@@ -99,6 +118,8 @@ ErrorOr<size_t> FileDescription::read(IOBuffer const& buffer, size_t count)
         return Error::from_errno(EINVAL); // Ports take port_receive().
     if (!is_readable())
         return Error::from_errno(EBADF);
+    if (m_socket)
+        return m_socket->receive(buffer, count, 0, nullptr, m_flags & O_NONBLOCK);
     if (m_pipe)
         return m_pipe->read(buffer, count, m_flags & O_NONBLOCK);
     auto metadata = m_inode->metadata();
@@ -122,6 +143,16 @@ ErrorOr<size_t> FileDescription::write(IOBuffer const& buffer, size_t count)
         return Error::from_errno(EINVAL); // Ports take port_send().
     if (!is_writable())
         return Error::from_errno(EBADF);
+    if (m_socket) {
+        auto sent = m_socket->send(buffer, count, 0, nullptr, m_flags & O_NONBLOCK);
+        if (sent.is_error() && sent.error().code() == EPIPE && !m_socket->wants_no_sigpipe()) {
+            if (auto* process = Process::current()) {
+                vulture_siginfo info {};
+                process->send_signal(SIGPIPE, info);
+            }
+        }
+        return sent;
+    }
     if (m_pipe)
         return m_pipe->write(buffer, count, m_flags & O_NONBLOCK);
     auto metadata = m_inode->metadata();
@@ -142,7 +173,7 @@ ErrorOr<size_t> FileDescription::read_at(IOBuffer const& buffer, size_t count, u
 {
     if (!is_readable())
         return Error::from_errno(EBADF);
-    if (m_pipe || m_port)
+    if (m_pipe || m_port || m_socket)
         return Error::from_errno(ESPIPE);
     auto metadata = m_inode->metadata();
     if (metadata.type == InodeType::Directory)
@@ -156,14 +187,14 @@ ErrorOr<size_t> FileDescription::write_at(IOBuffer const& buffer, size_t count, 
 {
     if (!is_writable())
         return Error::from_errno(EBADF);
-    if (m_pipe || m_port || m_inode->metadata().type == InodeType::CharacterDevice)
+    if (m_pipe || m_port || m_socket || m_inode->metadata().type == InodeType::CharacterDevice)
         return Error::from_errno(ESPIPE);
     return m_inode->write(offset, count, buffer);
 }
 
 ErrorOr<i64> FileDescription::seek(i64 offset, int origin)
 {
-    if (m_pipe || m_port || m_inode->metadata().type == InodeType::CharacterDevice)
+    if (m_pipe || m_port || m_socket || m_inode->metadata().type == InodeType::CharacterDevice)
         return Error::from_errno(ESPIPE);
     MutexLocker locker(m_lock);
     i64 base = 0;
@@ -188,7 +219,7 @@ ErrorOr<i64> FileDescription::seek(i64 offset, int origin)
 
 ErrorOr<vulture_stat> FileDescription::stat() const
 {
-    if (m_port) {
+    if (m_port || m_socket) {
         // A port shows as a socket would: not a file, not a pipe.
         vulture_stat result {};
         result.st_mode = S_IFSOCK | 0600;

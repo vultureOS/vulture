@@ -21,6 +21,9 @@
 
 namespace Kernel::Arch {
 
+// What the processor offers user programs, as bits of AT_HWCAP: see Libraries/LibCrypto.
+[[nodiscard]] u64 hardware_capabilities();
+
 // Stops this CPU for good, with interrupts masked.
 [[noreturn]] void halt();
 

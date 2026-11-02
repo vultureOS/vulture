@@ -30,6 +30,11 @@ add_executable(Kernel
     Debug/Panic.cpp
     Debug/Symbols.cpp
     Devices/Audio/VirtIOSound.cpp
+    Devices/Net/VirtIONet.cpp
+    Net/NetworkStack.cpp
+    Net/Socket.cpp
+    Net/TCP.cpp
+    Syscalls/SocketCalls.cpp
     Devices/Graphics/VirtIOGPU.cpp
     Devices/Input/Input.cpp
     Devices/Input/VirtIOInput.cpp

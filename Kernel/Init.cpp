@@ -14,6 +14,7 @@
 #include <Kernel/Console/BootScreen.h>
 #include <Kernel/Console/TextConsole.h>
 #include <Kernel/Devices/Audio/Audio.h>
+#include <Kernel/Net/NetworkStack.h>
 #include <Kernel/Devices/Graphics/Graphics.h>
 #include <Kernel/Devices/Input/Input.h>
 #include <Kernel/Debug/KernelLog.h>
@@ -255,6 +256,7 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     initialize_graphics();
     initialize_input();
     initialize_audio();
+    Net::NetworkStack::initialize();
     initialize_storage();
     if (!mount_root_file_system(boot_info)) {
         dmesgln("Userland: no root disk and no boot archive, so no init");
@@ -280,11 +282,15 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
 
     // Boot flags that make vlaunchd run tests: "utest" the userland tests,
     // "crashtest" and "persisttest" the storage tests.
-    StringView init_arguments[3] = { "/sbin/vlaunchd"_sv, {}, {} };
+    // ("utest=NAME" runs that one alone.)
+    StringView init_arguments[4] = { "/sbin/vlaunchd"_sv, {}, {}, {} };
     size_t argument_count = 1;
-    if (arguments.has_flag("utest"_sv))
+    if (arguments.has_flag("utest"_sv)) {
         init_arguments[argument_count++] = "--test"_sv;
-    else if (arguments.has_flag("crashtest"_sv))
+    } else if (auto only_test = arguments.value("utest"_sv); only_test.has_value()) {
+        init_arguments[argument_count++] = "--test"_sv;
+        init_arguments[argument_count++] = only_test.value();
+    } else if (arguments.has_flag("crashtest"_sv))
         init_arguments[argument_count++] = "--crash-test"_sv;
     else if (arguments.has_flag("persisttest"_sv))
         init_arguments[argument_count++] = "--persist-test"_sv;
@@ -296,6 +302,10 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
         init_arguments[argument_count++] = "--ui-desktop"_sv;
     else if (arguments.has_flag("soundtest"_sv))
         init_arguments[argument_count++] = "--sound-test"_sv;
+    else if (arguments.has_flag("nettest"_sv))
+        init_arguments[argument_count++] = "--network-test"_sv;
+    else if (arguments.has_flag("netguitest"_sv))
+        init_arguments[argument_count++] = "--network-gui-test"_sv;
     else if (!arguments.has_flag("console"_sv))
         // The desktop, unless asked for the text console: what an image must do, having
         // no boot arguments. (vlaunchd falls back on the console if there is no screen.)
