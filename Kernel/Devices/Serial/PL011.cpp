@@ -5,7 +5,7 @@
  */
 
 #include <Kernel/Arch/InterruptController.h>
-#include <Kernel/Devices/Serial/PL011.h>
+#include <Kernel/Devices/Serial/BootSerial.h>
 #include <Kernel/Interrupts/InterruptHandlers.h>
 
 namespace Kernel {
@@ -59,9 +59,9 @@ void PL011::handle_interrupt()
     m_registers[interrupt_clear_register] = receive_interrupts;
 }
 
-PL011& boot_serial()
+BootSerial& boot_serial()
 {
-    static PL011 serial;
+    static BootSerial serial;
     return serial;
 }
 

@@ -5,7 +5,7 @@
  */
 
 #include <Kernel/Arch/Timer.h>
-#include <Kernel/Arch/aarch64/MMIO.h>
+#include <Kernel/Arch/Power.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Interrupts/InterruptHandlers.h>
 #include <Kernel/Memory/MemoryManager.h>
@@ -63,28 +63,15 @@ u64 nanoseconds_from_ticks(u64 ticks)
 
 void initialize_wall_clock(DeviceTree::FlattenedDeviceTree const& device_tree)
 {
-    // The Arm PL031 real-time clock: its data register counts seconds.
-    auto node = device_tree.find_compatible_node("arm,pl031"_sv);
-    if (!node.has_value()) {
+    auto const seconds = Arch::read_real_time_clock(device_tree);
+    if (!seconds.has_value()) {
         dmesgln("Clock: no real-time clock; the time counts from 0 at boot");
         return;
     }
-    auto reg = device_tree.reg(node.value(), 0);
-    if (!reg.has_value()) {
-        dmesgln("Clock: the real-time clock has no registers");
-        return;
-    }
-    auto registers = memory_manager().map_mmio(PhysicalAddress(reg->address), reg->size);
-    if (registers.is_error()) {
-        dmesgln("Clock: cannot map the real-time clock: {}", registers.error());
-        return;
-    }
-    constexpr size_t data_register = 0x00;
-    u64 seconds = AArch64::mmio_read32(registers.value() + data_register);
-    u64 counter_now = nanoseconds_from_ticks(now());
-    s_epoch_at_counter_zero = seconds * nanoseconds_per_second - counter_now;
+    u64 const counter_now = nanoseconds_from_ticks(now());
+    s_epoch_at_counter_zero = seconds.value() * nanoseconds_per_second - counter_now;
     s_has_wall_clock = true;
-    dmesgln("Clock: PL031 real-time clock reads {} seconds since 1970", seconds);
+    dmesgln("Clock: the real-time clock reads {} seconds since 1970", seconds.value());
 }
 
 bool has_wall_clock()

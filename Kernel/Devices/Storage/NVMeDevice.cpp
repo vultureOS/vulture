@@ -6,7 +6,7 @@
 
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Arch/InterruptController.h>
-#include <Kernel/Arch/aarch64/MMIO.h>
+#include <Kernel/Arch/MMIO.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Devices/Storage/StorageControllers.h>
 #include <Kernel/Interrupts/InterruptHandlers.h>
@@ -23,10 +23,10 @@
 
 namespace Kernel {
 
-using AArch64::mmio_read32;
-using AArch64::mmio_read64;
-using AArch64::mmio_write32;
-using AArch64::mmio_write64;
+using Arch::mmio_read32;
+using Arch::mmio_read64;
+using Arch::mmio_write32;
+using Arch::mmio_write64;
 
 namespace {
 
@@ -86,7 +86,7 @@ void barrier_before_doorbell()
 {
     // The entry (in normal memory) must be visible before the device
     // learns of it.
-    asm volatile("dsb sy" ::: "memory");
+    Arch::device_barrier();
 }
 
 class QueuePair {
@@ -122,7 +122,7 @@ public:
         u16 status = slot->status;
         if ((status & 1) != (m_phase ? 1 : 0))
             return {};
-        asm volatile("dmb ish" ::: "memory");
+        Arch::memory_barrier();
         Completion completion;
         completion.result = slot->result;
         completion.submission_head = slot->submission_head;

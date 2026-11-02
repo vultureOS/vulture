@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#if defined(__x86_64__)
+#    include <Kernel/Arch/x86_64/APIC.h>
+#    include <Kernel/Firmware/ACPI.h>
+#endif
 #include <Kernel/Memory/Compressor.h>
 #include <Kernel/Security/Privacy.h>
 #include <Kernel/Security/CodeSigning.h>
@@ -29,7 +33,7 @@
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Debug/Panic.h>
 #include <Kernel/Debug/Symbols.h>
-#include <Kernel/Devices/Serial/PL011.h>
+#include <Kernel/Devices/Serial/BootSerial.h>
 #include <Kernel/Devices/Storage/BlockDevice.h>
 #include <Kernel/FileSystem/BootArchive.h>
 #include <Kernel/FileSystem/DevFS.h>
@@ -79,6 +83,8 @@ static StringView region_type_name(API::MemoryRegionType type)
         return "kernel file"_sv;
     case API::MemoryRegionType::BootArchive:
         return "boot archive"_sv;
+    case API::MemoryRegionType::LowMemory:
+        return "low memory"_sv;
     case API::MemoryRegionType::LoaderReclaimable:
         return "loader reclaimable"_sv;
     }
@@ -113,6 +119,7 @@ static void print_memory_map(API::BootInfo const& boot_info)
     dmesgln("Usable memory: {}", usable_text.view());
 }
 
+#if !defined(__x86_64__)
 static void print_machine(DeviceTree::FlattenedDeviceTree const& tree)
 {
     auto root = tree.find_node_by_path("/"_sv);
@@ -123,6 +130,7 @@ static void print_machine(DeviceTree::FlattenedDeviceTree const& tree)
         name = tree.find_property(root.value(), "compatible"_sv);
     dmesgln("Machine: {} (device tree, {} KiB)", name.has_value() ? name->as_string() : "unknown"_sv, tree.total_size() / KiB);
 }
+#endif
 
 template<typename T>
 static T must(StringView what, ErrorOr<T>&& result)
@@ -441,7 +449,11 @@ static void initialize_interrupts_and_time(DeviceTree::FlattenedDeviceTree const
         static char const constant[] = "constants stay constant";
         *const_cast<char volatile*>(&constant[0]) = 'X';
     } else if (kind == "data-execute"_sv) {
+#if defined(__x86_64__)
+        static u32 data[4] = { 0x90909090, 0x90909090, 0x000000c3, 0 };
+#else
         static u32 data[4] = { 0xd503201f, 0xd503201f, 0xd65f03c0, 0 };
+#endif
         reinterpret_cast<void (*)()>(data)();
     } else {
         dmesgln("Unknown fault kind");
@@ -469,11 +481,19 @@ extern "C" [[noreturn, gnu::no_stack_protector]] void kernel_main(API::BootInfo 
 
     auto& log = kernel_log();
     log.initialize();
+#if defined(__x86_64__)
+    if (boot_info.serial.type == API::SerialType::UART16550) {
+        auto& serial = boot_serial();
+        serial.initialize(boot_info.serial.physical_base);
+        log.attach_serial(&serial);
+    }
+#else
     if (boot_info.serial.type == API::SerialType::PL011) {
         auto& serial = boot_serial();
         serial.initialize(API::direct_map_base + boot_info.serial.physical_base);
         log.attach_serial(&serial);
     }
+#endif
     Symbols::initialize(boot_info.kernel_file, boot_info.kernel_slide);
 
     BootArguments arguments { StringView(boot_info.command_line) };
@@ -495,7 +515,7 @@ extern "C" [[noreturn, gnu::no_stack_protector]] void kernel_main(API::BootInfo 
             BootScreen::set_progress(framebuffer, percent);
     };
 
-    dmesgln("vultureOS {} - vultureKernel (aarch64)", VULTURE_VERSION_STRING);
+    dmesgln("vultureOS {} - vultureKernel ({})", VULTURE_VERSION_STRING, Arch::architecture_name());
     FixedStringBuilder<160> cpu;
     Arch::describe_cpu(cpu);
     dmesgln("CPU: {}", cpu.view());
@@ -515,11 +535,20 @@ extern "C" [[noreturn, gnu::no_stack_protector]] void kernel_main(API::BootInfo 
     initialize_memory(boot_info, framebuffer);
     show_progress(40);
 
+#if defined(__x86_64__)
+    // A PC describes itself with ACPI's tables, and has no tree. The functions below take one for
+    // the architecture that does.
+    if (!ACPI::initialize(PhysicalAddress(boot_info.acpi_rsdp)))
+        panic("no ACPI tables: vultureKernel needs them to find its hardware"_sv);
+    Arch::set_low_memory(PhysicalAddress(boot_info.low_memory));
+    auto const tree = DeviceTree::FlattenedDeviceTree::empty();
+#else
     auto& mm = memory_manager();
     if (mm.device_tree().is_empty())
         panic("no device tree: vultureKernel needs one to find its hardware"_sv);
     auto tree = must("device tree"_sv, DeviceTree::FlattenedDeviceTree::parse(mm.device_tree()));
     print_machine(tree);
+#endif
 
     initialize_interrupts_and_time(tree);
     if (auto result = Arch::initialize_power_management(tree); result.is_error())

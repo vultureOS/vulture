@@ -13,13 +13,19 @@ using System::Syscall;
 static_assert(static_cast<unsigned long>(Syscall::sigreturn) == 16, "the restorer below hard-codes the sigreturn number");
 
 // Where a signal handler returns to. The kernel left the signal frame's
-// address in x19 (callee-saved, so the handler kept it); sigreturn finds
-// the frame there and resumes the interrupted code.
+// address in a callee-saved register (x19, or rbx), so the handler kept it;
+// sigreturn finds the frame there and resumes the interrupted code.
 extern "C" [[gnu::naked]] void __vulture_signal_restorer()
 {
+#if defined(__x86_64__)
+    asm volatile("movl $16, %eax\n"
+                 "syscall\n"
+                 "ud2\n");
+#else
     asm volatile("mov x8, #16\n"
                  "svc #0\n"
                  "brk #0\n");
+#endif
 }
 
 static int check(long result)

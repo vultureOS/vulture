@@ -4,19 +4,23 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#include <Kernel/Arch/aarch64/MMIO.h>
+#include <Kernel/Arch/MMIO.h>
 #include <Kernel/Bus/PCI/PCI.h>
+#if defined(__x86_64__)
+#    include <Kernel/Arch/x86_64/APIC.h>
+#    include <Kernel/Firmware/ACPI.h>
+#endif
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <LibDeviceTree/FlattenedDeviceTree.h>
 
 namespace Kernel::PCI {
 
-using AArch64::mmio_read16;
-using AArch64::mmio_read32;
-using AArch64::mmio_read8;
-using AArch64::mmio_write16;
-using AArch64::mmio_write32;
+using Arch::mmio_read16;
+using Arch::mmio_read32;
+using Arch::mmio_read8;
+using Arch::mmio_write16;
+using Arch::mmio_write32;
 
 static Vector<Device> s_devices;
 static u64 s_ecam_physical = 0;
@@ -75,6 +79,138 @@ void Device::enable_memory_and_bus_mastering() const
     // Memory space, bus master; legacy interrupts left enabled.
     write16(0x04, (read16(0x04) | 0x2 | 0x4) & ~(1 << 10));
 }
+
+// Goes through every function of every device on these buses.
+template<typename Callback>
+static ErrorOr<void> scan_buses(FlatPtr base, u32 first_bus, u32 last_bus, Callback callback)
+{
+    for (u32 bus = first_bus; bus <= last_bus; ++bus) {
+        for (u8 slot = 0; slot < 32; ++slot) {
+            for (u8 function = 0; function < 8; ++function) {
+                FlatPtr configuration = base + ((static_cast<FlatPtr>(bus - first_bus) << 20) | (static_cast<FlatPtr>(slot) << 15) | (static_cast<FlatPtr>(function) << 12));
+                if (mmio_read16(configuration) == 0xffff) {
+                    if (function == 0)
+                        break;
+                    continue;
+                }
+                Device device(configuration, static_cast<u8>(bus), slot, function);
+                callback(device);
+                TRY(s_devices.try_append(device));
+                // Single-function devices answer for function 0 only.
+                if (function == 0 && !(device.read8(0x0e) & 0x80))
+                    break;
+            }
+        }
+    }
+    return {};
+}
+
+#if defined(__x86_64__)
+
+ErrorOr<void> initialize(DeviceTree::FlattenedDeviceTree const&)
+{
+    for (auto const& segment : ACPI::pci_segments()) {
+        // Only one, on anything this runs on. (Servers can have more, which would take numbering them.)
+        if (segment.segment != 0)
+            continue;
+        s_ecam_physical = segment.base;
+        s_bus_count = static_cast<u32>(segment.last_bus) - segment.first_bus + 1;
+        // The table's address is for bus 0, whichever the first it covers.
+        u64 const physical = segment.base + (static_cast<u64>(segment.first_bus) << 20);
+        FlatPtr const base = TRY(memory_manager().map_mmio(PhysicalAddress(physical), static_cast<size_t>(s_bus_count) << 20));
+        TRY(scan_buses(base, segment.first_bus, segment.last_bus, [](Device&) { }));
+    }
+    if (s_bus_count == 0)
+        return Error::from_string_literal("no PCI Express segment in the ACPI tables");
+    return {};
+}
+
+namespace {
+
+// (Drivers keep copies of a Device, and they're all the one device.)
+struct MessageInterrupt {
+    u32 location;
+    u32 vector;
+};
+Vector<MessageInterrupt> s_message_interrupts;
+
+}
+
+bool Device::uses_message_table() const
+{
+    bool enabled = false;
+    for_each_capability([&](u8 id, u8 offset) {
+        if (id == 0x11)
+            enabled = read16(offset + 2) & (1 << 15);
+    });
+    return enabled;
+}
+
+Optional<u32> Device::interrupt() const
+{
+    u32 const location = (static_cast<u32>(m_bus) << 16) | (static_cast<u32>(m_slot) << 8) | m_function;
+    for (auto const& known : s_message_interrupts) {
+        if (known.location == location)
+            return known.vector;
+    }
+    Optional<u8> plain;
+    Optional<u8> table;
+    for_each_capability([&](u8 id, u8 offset) {
+        if (id == 0x05)
+            plain = offset;
+        else if (id == 0x11)
+            table = offset;
+    });
+    if (!plain.has_value() && !table.has_value()) {
+        dmesgln("PCI: {:02x}:{:02x}.{} has no message interrupts", m_bus, m_slot, m_function);
+        return {};
+    }
+    auto vector = X86_64::allocate_message_vector();
+    if (vector.is_error()) {
+        dmesgln("PCI: {:02x}:{:02x}.{}: {}", m_bus, m_slot, m_function, vector.error());
+        return {};
+    }
+    u64 const address = X86_64::message_address();
+    u32 const data = X86_64::message_data(vector.value());
+    if (plain.has_value()) {
+        u16 const offset = plain.value();
+        u16 const control = read16(offset + 2);
+        write32(offset + 4, static_cast<u32>(address));
+        bool const wide = control & (1 << 7);
+        if (wide) {
+            write32(offset + 8, static_cast<u32>(address >> 32));
+            write16(offset + 12, static_cast<u16>(data));
+        } else {
+            write16(offset + 8, static_cast<u16>(data));
+        }
+        // One vector, on: nothing else in the control word is ours to choose.
+        write16(offset + 2, (control & ~static_cast<u16>(0x70)) | 1);
+    } else {
+        u16 const offset = table.value();
+        u16 const control = read16(offset + 2);
+        u32 const table_location = read32(offset + 4);
+        auto const bar_of_table = this->bar(static_cast<u8>(table_location & 7));
+        u64 const physical = bar_of_table.address + (table_location & ~7u);
+        // Every entry starts masked; the only one used is the first.
+        auto const mapped = memory_manager().map_mmio(PhysicalAddress(align_down<u64>(physical, page_size)), page_size);
+        if (mapped.is_error()) {
+            dmesgln("PCI: {:02x}:{:02x}.{}: {}", m_bus, m_slot, m_function, mapped.error());
+            return {};
+        }
+        FlatPtr const entry = mapped.value() + (physical % page_size);
+        mmio_write32(entry + 0, static_cast<u32>(address));
+        mmio_write32(entry + 4, static_cast<u32>(address >> 32));
+        mmio_write32(entry + 8, data);
+        mmio_write32(entry + 12, 0);
+        write16(offset + 2, (control | (1 << 15)) & ~static_cast<u16>(1 << 14));
+    }
+    // The old way of interrupting, off.
+    write16(0x04, read16(0x04) | (1 << 10));
+    s_message_interrupts.append({ location, vector.value() });
+    return vector.value();
+}
+
+#else
 
 // The GIC interrupt for a device's INTx pin, from the host bridge's
 // interrupt-map (masked by interrupt-map-mask).
@@ -136,27 +272,22 @@ ErrorOr<void> initialize(DeviceTree::FlattenedDeviceTree const& tree)
     s_ecam_physical = ecam->address;
     s_bus_count = last_bus - first_bus + 1;
     FlatPtr base = TRY(memory_manager().map_mmio(PhysicalAddress(ecam->address), static_cast<size_t>(s_bus_count) << 20));
-
-    for (u32 bus = first_bus; bus <= last_bus; ++bus) {
-        for (u8 slot = 0; slot < 32; ++slot) {
-            for (u8 function = 0; function < 8; ++function) {
-                FlatPtr configuration = base + ((static_cast<FlatPtr>(bus - first_bus) << 20) | (static_cast<FlatPtr>(slot) << 15) | (static_cast<FlatPtr>(function) << 12));
-                if (mmio_read16(configuration) == 0xffff) {
-                    if (function == 0)
-                        break;
-                    continue;
-                }
-                Device device(configuration, static_cast<u8>(bus), slot, function);
-                device.m_interrupt = route_interrupt(tree, bridge.value(), static_cast<u8>(bus), slot, function, device.interrupt_pin());
-                TRY(s_devices.try_append(device));
-                // Single-function devices answer for function 0 only.
-                if (function == 0 && !(device.read8(0x0e) & 0x80))
-                    break;
-            }
-        }
-    }
-    return {};
+    return scan_buses(base, first_bus, last_bus, [&](Device& device) {
+        device.m_interrupt = route_interrupt(tree, bridge.value(), device.bus(), device.slot(), device.function(), device.interrupt_pin());
+    });
 }
+
+Optional<u32> Device::interrupt() const
+{
+    return m_interrupt;
+}
+
+bool Device::uses_message_table() const
+{
+    return false;
+}
+
+#endif
 
 Vector<Device>& devices()
 {

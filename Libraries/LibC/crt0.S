@@ -11,6 +11,15 @@
 
 .text
 .global _start
+#if defined(__x86_64__)
+.type _start, @function
+_start:
+    xorl %ebp, %ebp
+    movq %rsp, %rdi
+    andq $-16, %rsp
+    call __libc_start
+    ud2
+#else
 .type _start, %function
 _start:
     bti c
@@ -19,6 +28,7 @@ _start:
     mov x0, sp
     bl __libc_start
     brk #0
+#endif
 .size _start, . - _start
 
 // Each program (and each library) has its own: C++ destructors registered

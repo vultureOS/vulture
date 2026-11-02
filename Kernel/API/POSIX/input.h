@@ -27,6 +27,8 @@ struct vulture_input_event {
 #define VULTURE_INPUT_ABSOLUTE_MAXIMUM 32767
 #define VULTURE_ABS_X 0x00
 #define VULTURE_ABS_Y 0x01
+#define VULTURE_REL_X 0x00
+#define VULTURE_REL_Y 0x01
 #define VULTURE_REL_HWHEEL 0x06
 #define VULTURE_REL_WHEEL 0x08
 

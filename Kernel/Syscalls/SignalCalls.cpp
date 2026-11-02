@@ -167,8 +167,8 @@ ErrorOr<FlatPtr> Process::sys_sigreturn(TrapFrame& frame, SyscallArguments const
         return 0;
     }
     Thread::current().m_signal_mask.store(saved_mask.value() & ~(bit(SIGKILL) | bit(SIGSTOP)));
-    // The dispatcher stores this in x0: give back the restored x0.
-    return Arch::syscall_argument(frame, 0);
+    // The dispatcher stores this as the result: give back the register as it was restored.
+    return Arch::syscall_result(frame);
 }
 
 ErrorOr<FlatPtr> Process::sys_sigsuspend(TrapFrame&, SyscallArguments const& arguments)

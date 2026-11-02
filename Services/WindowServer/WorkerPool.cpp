@@ -18,7 +18,11 @@ constexpr int spin_iterations = 20000;
 
 void pause_processor()
 {
+#if defined(__x86_64__)
+    asm volatile("pause");
+#else
     asm volatile("yield");
+#endif
 }
 
 }

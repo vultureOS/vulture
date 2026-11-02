@@ -21,6 +21,7 @@ enum class LoaderMemoryType : u32 {
     KernelFile,
     BootArchive,
     LoaderReclaimable,
+    LowMemory,
 };
 
 // Allocates zeroed whole pages. Firmware identity-maps memory, so the

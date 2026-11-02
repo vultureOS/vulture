@@ -4,8 +4,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#include <Boot/Arch/aarch64/Handoff.h>
-#include <Boot/Arch/aarch64/PageTableBuilder.h>
+#if defined(__x86_64__)
+#    include <Boot/Arch/x86_64/Handoff.h>
+#    include <Boot/Arch/x86_64/PageTableBuilder.h>
+#else
+#    include <Boot/Arch/aarch64/Handoff.h>
+#    include <Boot/Arch/aarch64/PageTableBuilder.h>
+#endif
 #include <Boot/BootVolume.h>
 #include <Boot/Console.h>
 #include <Boot/KernelLoader.h>
@@ -19,9 +24,16 @@
 namespace Boot {
 
 namespace API = Kernel::API;
-using AArch64::Access;
-using AArch64::MemoryAttribute;
-using AArch64::PageTableBuilder;
+#if defined(__x86_64__)
+namespace MachineCode = X86_64;
+static constexpr StringView architecture_name = "x86_64"_sv;
+#else
+namespace MachineCode = AArch64;
+static constexpr StringView architecture_name = "aarch64"_sv;
+#endif
+using MachineCode::Access;
+using MachineCode::MemoryAttribute;
+using MachineCode::PageTableBuilder;
 
 static constexpr char16_t kernel_path[] = u"\\System\\Library\\Kernels\\vulture";
 static constexpr char16_t boot_archive_path[] = u"\\System\\Library\\Kernels\\vulture.bootarchive";
@@ -37,8 +49,13 @@ static UEFI::SystemTable* s_system_table = nullptr;
         s_system_table->BootServices->WaitForEvent(1, &input->WaitForKey, &index);
     }
     s_system_table->RuntimeServices->ResetSystem(UEFI::ResetType::EfiResetShutdown, UEFI::StatusCode::Success, 0, nullptr);
-    for (;;)
+    for (;;) {
+#if defined(__x86_64__)
+        asm volatile("hlt");
+#else
         asm volatile("wfi");
+#endif
+    }
 }
 
 [[noreturn]] static void fail(StringView step, Error const& error)
@@ -209,7 +226,13 @@ static u64 choose_kernel_slide(UEFI::BootServices& boot_services, Optional<Loade
     constexpr u64 alignment = 64 * KiB;
     constexpr u64 choices = 16384;
     u64 random;
+#if defined(__x86_64__)
+    u32 low, high;
+    asm volatile("rdtsc" : "=a"(low), "=d"(high));
+    random = (static_cast<u64>(high) << 32) | low;
+#else
     asm volatile("mrs %0, cntpct_el0" : "=r"(random));
+#endif
     void* interface = nullptr;
     if (!UEFI::is_error(boot_services.LocateProtocol(&UEFI::rng_protocol_guid, nullptr, &interface)) && interface) {
         u64 from_firmware = 0;
@@ -308,14 +331,19 @@ static void exit_boot_services(UEFI::Handle image_handle, UEFI::BootServices& bo
             return;
     }
     // The console may already be gone; all that is left is to stop.
-    for (;;)
+    for (;;) {
+#if defined(__x86_64__)
+        asm volatile("hlt");
+#else
         asm volatile("wfi");
+#endif
+    }
 }
 
 [[noreturn]] static void boot(UEFI::Handle image_handle, Console& console)
 {
     auto& boot_services = *s_system_table->BootServices;
-    unwrap("checking the CPU"_sv, AArch64::check_cpu());
+    unwrap("checking the CPU"_sv, MachineCode::check_cpu());
 
     auto volume = unwrap("opening the boot volume"_sv, BootVolume::open(image_handle, boot_services));
     auto kernel_file = unwrap("reading the kernel"_sv, volume.load(kernel_path, LoaderMemoryType::KernelFile));
@@ -350,6 +378,14 @@ static void exit_boot_services(UEFI::Handle image_handle, UEFI::BootServices& bo
         boot_info.acpi_rsdp = reinterpret_cast<u64>(rsdp);
     boot_info.uefi_system_table = reinterpret_cast<u64>(s_system_table);
     collect_device_tree(boot_services, boot_info);
+#if defined(__x86_64__)
+    // A PC's serial port has always been here. (If it isn't, the kernel finds out.)
+    boot_info.serial = { 0x3f8, API::SerialType::UART16550, 0 };
+    // Below 1 MiB, as other processors start in a mode that can't reach further. Without it they don't start.
+    UEFI::PhysicalAddress low_memory = 0xf'f000;
+    if (!UEFI::is_error(boot_services.AllocatePages(UEFI::AllocateType::MaxAddress, static_cast<UEFI::MemoryType>(LoaderMemoryType::LowMemory), 4, &low_memory)))
+        boot_info.low_memory = low_memory;
+#endif
     collect_entropy(boot_services, boot_info);
     set_command_line(boot_info, boot_args);
     auto display = choose_display_mode(boot_services);
@@ -364,6 +400,8 @@ static void exit_boot_services(UEFI::Handle image_handle, UEFI::BootServices& bo
     print_label(console, "Serial"_sv);
     if (boot_info.serial.type == API::SerialType::PL011)
         console.println("PL011 at {:#x}", boot_info.serial.physical_base);
+    else if (boot_info.serial.type == API::SerialType::UART16550)
+        console.println("16550 at port {:#x}", boot_info.serial.physical_base);
     else
         console.println("none found");
     print_label(console, "Firmware"_sv);
@@ -380,7 +418,12 @@ static void exit_boot_services(UEFI::Handle image_handle, UEFI::BootServices& bo
     // means everything allocated so far is covered by the direct map.
     unwrap("reading the memory map"_sv, memory_map.refresh(boot_services));
     auto kernel_tables = unwrap("creating page tables"_sv, PageTableBuilder::create(boot_services));
+#if defined(__x86_64__)
+    // There's one set of tables for both halves here.
+    auto& identity_tables = kernel_tables;
+#else
     auto identity_tables = unwrap("creating page tables"_sv, PageTableBuilder::create(boot_services));
+#endif
     unwrap("mapping physical memory"_sv, map_physical_memory(kernel_tables, memory_map));
     unwrap("mapping the kernel"_sv, map_kernel(kernel_tables, image, kernel));
 
@@ -390,14 +433,14 @@ static void exit_boot_services(UEFI::Handle image_handle, UEFI::BootServices& bo
         auto attribute = framebuffer_attribute(memory_map, framebuffer.physical_base);
         unwrap("mapping the framebuffer"_sv, kernel_tables.map(API::direct_map_base + base, base, size, attribute, Access::ReadWrite));
     }
-    if (boot_info.serial.type != API::SerialType::None && !is_in_direct_map(memory_map, boot_info.serial.physical_base)) {
+    if (boot_info.serial.type == API::SerialType::PL011 && !is_in_direct_map(memory_map, boot_info.serial.physical_base)) {
         u64 base = align_down<u64>(boot_info.serial.physical_base, UEFI::page_size);
         unwrap("mapping the serial port"_sv, kernel_tables.map(API::direct_map_base + base, base, UEFI::page_size, MemoryAttribute::Device, Access::ReadWrite));
     }
 
     // The trampoline keeps running at its physical address while the MMU
     // switches over, so it needs an identity mapping (it may cross a page).
-    u64 trampoline_page = align_down<u64>(AArch64::trampoline_address(), UEFI::page_size);
+    u64 trampoline_page = align_down<u64>(MachineCode::trampoline_address(), UEFI::page_size);
     unwrap("mapping the handoff code"_sv, identity_tables.map(trampoline_page, trampoline_page, 2 * UEFI::page_size, MemoryAttribute::Normal, Access::ReadExecute));
 
     // From here on the firmware is gone: no more console output.
@@ -405,6 +448,9 @@ static void exit_boot_services(UEFI::Handle image_handle, UEFI::BootServices& bo
     exit_boot_services(image_handle, boot_services, memory_map);
     boot_info.memory_map_entries = convert_memory_map(memory_map, Span<API::MemoryRegion>(regions, region_capacity));
 
+#if defined(__x86_64__)
+    MachineCode::enter_kernel({ kernel_tables.root(), kernel.entry, API::direct_map_base + boot_info_address });
+#else
     // Make sure everything the kernel reads first is in memory, and that the
     // copied kernel code is visible to instruction fetch.
     AArch64::synchronize_instruction_cache(kernel.physical_base, kernel.size);
@@ -418,6 +464,7 @@ static void exit_boot_services(UEFI::Handle image_handle, UEFI::BootServices& bo
 
     auto state = AArch64::make_handoff_state(identity_tables.root(), kernel_tables.root(), kernel.entry, API::direct_map_base + boot_info_address);
     AArch64::enter_kernel(state);
+#endif
 }
 
 }
@@ -434,7 +481,7 @@ extern "C" UEFI::Status efi_main(UEFI::Handle image_handle, UEFI::SystemTable* s
     g_console = &console;
     console.clear();
     console.set_color(UEFI::TextColor::White);
-    console.println("vultureOS {} - VultureBoot (aarch64)", VULTURE_VERSION_STRING);
+    console.println("vultureOS {} - VultureBoot ({})", VULTURE_VERSION_STRING, architecture_name);
     console.set_color(UEFI::TextColor::DarkGray);
     console.println("--------------------------------------------------\n");
     console.set_color(UEFI::TextColor::LightGray);

@@ -39,6 +39,11 @@ void return_to_user(TrapFrame& frame)
     aarch64_return_to_user(&frame);
 }
 
+void prepare_user_function_entry(TrapFrame&)
+{
+    // A call leaves nothing on the stack here.
+}
+
 u64 syscall_number(TrapFrame const& frame)
 {
     return frame.x[8];
@@ -53,6 +58,11 @@ u64 syscall_argument(TrapFrame const& frame, size_t index)
 void set_syscall_result(TrapFrame& frame, u64 value)
 {
     frame.x[0] = value;
+}
+
+u64 syscall_result(TrapFrame const& frame)
+{
+    return frame.x[0];
 }
 
 void set_fork_child_result(TrapFrame& frame)

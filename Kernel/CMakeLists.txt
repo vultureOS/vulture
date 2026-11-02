@@ -4,22 +4,44 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-set(linker_script ${CMAKE_CURRENT_SOURCE_DIR}/Arch/aarch64/linker.ld)
+set(linker_script ${CMAKE_CURRENT_SOURCE_DIR}/Arch/${CMAKE_SYSTEM_PROCESSOR}/linker.ld)
+
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    set(arch_sources
+        Arch/x86_64/APIC.cpp
+        Arch/x86_64/Boot.S
+        Arch/x86_64/CPU.cpp
+        Arch/x86_64/Entry.S
+        Arch/x86_64/Exceptions.cpp
+        Arch/x86_64/PageTable.cpp
+        Arch/x86_64/Power.cpp
+        Arch/x86_64/SMP.cpp
+        Arch/x86_64/ThreadContext.cpp
+        Arch/x86_64/UserAccess.S
+        Arch/x86_64/UserContext.cpp
+        Devices/Input/PS2.cpp
+        Devices/Serial/UART16550.cpp
+        Firmware/ACPI.cpp)
+else()
+    set(arch_sources
+        Arch/aarch64/Boot.S
+        Arch/aarch64/CPU.cpp
+        Arch/aarch64/ContextSwitch.S
+        Arch/aarch64/Exceptions.cpp
+        Arch/aarch64/GICv3.cpp
+        Arch/aarch64/GenericTimer.cpp
+        Arch/aarch64/PSCI.cpp
+        Arch/aarch64/PageTable.cpp
+        Arch/aarch64/SMP.cpp
+        Arch/aarch64/ThreadContext.cpp
+        Arch/aarch64/UserAccess.S
+        Arch/aarch64/UserContext.cpp
+        Arch/aarch64/Vectors.S
+        Devices/Serial/PL011.cpp)
+endif()
 
 add_executable(Kernel
-    Arch/aarch64/Boot.S
-    Arch/aarch64/CPU.cpp
-    Arch/aarch64/ContextSwitch.S
-    Arch/aarch64/Exceptions.cpp
-    Arch/aarch64/GICv3.cpp
-    Arch/aarch64/GenericTimer.cpp
-    Arch/aarch64/PSCI.cpp
-    Arch/aarch64/PageTable.cpp
-    Arch/aarch64/SMP.cpp
-    Arch/aarch64/ThreadContext.cpp
-    Arch/aarch64/UserAccess.S
-    Arch/aarch64/UserContext.cpp
-    Arch/aarch64/Vectors.S
+    ${arch_sources}
     BootArguments.cpp
     Bus/PCI/PCI.cpp
     Console/BootScreen.cpp
@@ -45,7 +67,6 @@ add_executable(Kernel
     Devices/Graphics/VirtIOGPU.cpp
     Devices/Input/Input.cpp
     Devices/Input/VirtIOInput.cpp
-    Devices/Serial/PL011.cpp
     Devices/Storage/BlockDevice.cpp
     Devices/Storage/NVMeDevice.cpp
     Devices/Storage/Storage.cpp
@@ -135,7 +156,7 @@ target_link_options(Kernel PRIVATE
     -Wl,-z,max-page-size=4096
     -Wl,--build-id=none)
 
-target_link_libraries(Kernel PRIVATE LibArchive LibCompress LibCrypto LibDeviceTree LibELF LibVultureFS LibBase LibBaseFreestanding)
+target_link_libraries(Kernel PRIVATE LibACPI LibArchive LibCompress LibCrypto LibDeviceTree LibELF LibVultureFS LibBase LibBaseFreestanding)
 
 # The key the system's seal is checked with: see Tools/vseal, and Security/Seal.h.
 set(VULTURE_SIGNING_DIR ${VULTURE_HOST_TOOLS}/../../signing CACHE PATH "Where the key that signs the system is")

@@ -311,6 +311,9 @@ void post_input_event(u16 type, u16 code, i32 value)
 }
 
 void initialize_virtio_input();
+#if defined(__x86_64__)
+void initialize_ps2_input();
+#endif
 
 void initialize_input()
 {
@@ -322,6 +325,9 @@ void initialize_input()
     if (auto added = DevFS::the().add_device("input"_sv, adopt_ref(*static_cast<Inode*>(device))); added.is_error())
         dmesgln("Input: {}", added.error());
     initialize_virtio_input();
+#if defined(__x86_64__)
+    initialize_ps2_input();
+#endif
 }
 
 }

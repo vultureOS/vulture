@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "NativeMachine.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -732,7 +733,7 @@ void environment()
     REQUIRE(staff && staff->gr_gid == 20, "getgrnam()");
 
     struct utsname name;
-    REQUIRE(uname(&name) == 0 && strcmp(name.sysname, "vultureOS") == 0 && strcmp(name.machine, "arm64") == 0, "uname()");
+    REQUIRE(uname(&name) == 0 && strcmp(name.sysname, "vultureOS") == 0 && strcmp(name.machine, NATIVE_MACHINE) == 0, "uname()");
     char host[256];
     REQUIRE(gethostname(host, sizeof(host)) == 0 && strcmp(host, name.nodename) == 0, "gethostname() is uname()'s nodename");
     REQUIRE(sysconf(_SC_NPROCESSORS_ONLN) >= 1 && sysconf(_SC_OPEN_MAX) >= 20 && sysconf(_SC_ARG_MAX) >= 4096, "sysconf() limits");

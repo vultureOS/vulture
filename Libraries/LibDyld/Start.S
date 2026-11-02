@@ -9,6 +9,28 @@
 // dyld_main loads and links everything and returns the program's entry
 // point, which then starts with that same stack, as if nothing came first.
 
+#if defined(__x86_64__)
+
+.text
+.global _dyld_start
+.type _dyld_start, @function
+_dyld_start:
+    xorl %ebp, %ebp
+    movq %rsp, %r12
+    andq $-16, %rsp
+    // Nothing that takes an absolute address works until this has run.
+    leaq __ehdr_start(%rip), %rdi
+    leaq _DYNAMIC(%rip), %rsi
+    call dyld_relocate_self
+    movq %r12, %rdi
+    call dyld_main
+    movq %r12, %rsp
+    xorl %edx, %edx
+    jmpq *%rax
+.size _dyld_start, . - _dyld_start
+
+#else
+
 .text
 .global _dyld_start
 .type _dyld_start, %function
@@ -40,3 +62,5 @@ dyld_tlsdesc_static:
     ldr x0, [x0, #8]
     ret
 .size dyld_tlsdesc_static, . - dyld_tlsdesc_static
+
+#endif

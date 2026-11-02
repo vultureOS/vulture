@@ -16,11 +16,15 @@
 namespace Kernel::API {
 
 constexpr u64 boot_info_magic = 0x464e49544f4f4256; // "VBOOTINF"
-constexpr u32 boot_info_version = 2;
+constexpr u32 boot_info_version = 3;
 
 // All of physical memory is mapped here, so physical address P is at
 // direct_map_base + P.
+#if defined(__x86_64__)
+constexpr u64 direct_map_base = 0xffff'8000'0000'0000;
+#else
 constexpr u64 direct_map_base = 0xffff'0000'0000'0000;
+#endif
 
 enum class MemoryRegionType : u32 {
     Usable = 1,
@@ -34,6 +38,8 @@ enum class MemoryRegionType : u32 {
     KernelFile,
     BootArchive,
     LoaderReclaimable,
+    // Kept by the loader below 1 MiB, for starting processors on x86_64.
+    LowMemory,
 };
 
 struct MemoryRegion {
@@ -66,6 +72,7 @@ struct FramebufferInfo {
 enum class SerialType : u32 {
     None,
     PL011,
+    UART16550, // physical_base is an I/O port.
 };
 
 struct SerialInfo {
@@ -94,6 +101,7 @@ struct BootInfo {
     PhysicalRange device_tree; // A copy made by the loader; empty if none.
     u64 acpi_rsdp; // 0 if the firmware has no ACPI tables.
     u64 uefi_system_table;
+    u64 low_memory; // Four pages below 1 MiB, for starting processors on x86_64. 0 if none.
 
     FramebufferInfo framebuffer; // format is None without a linear framebuffer.
     SerialInfo serial;
@@ -106,6 +114,6 @@ struct BootInfo {
 
 static_assert(sizeof(MemoryRegion) == 24);
 // Pins the layout: the PE loader and the ELF kernel must agree on it.
-static_assert(sizeof(BootInfo) == 504);
+static_assert(sizeof(BootInfo) == 512);
 
 }

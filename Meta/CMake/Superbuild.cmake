@@ -25,6 +25,10 @@ endif()
 set(VULTURE_LLVM_ROOT ${vulture_default_llvm_root} CACHE PATH "LLVM 22 installation providing clang")
 set(VULTURE_LLD_ROOT ${vulture_default_lld_root} CACHE PATH "LLD 22 installation providing ld.lld and lld-link")
 
+# What to build for: a build directory holds one. (cmake -B build-x86_64 -DVULTURE_ARCH=x86_64)
+set(VULTURE_ARCH aarch64 CACHE STRING "The architecture to build for: aarch64 or x86_64")
+set_property(CACHE VULTURE_ARCH PROPERTY STRINGS aarch64 x86_64)
+
 set(VULTURE_ESP_DIR ${CMAKE_BINARY_DIR}/esp)
 
 # vulture_add_part(<part> TOOLCHAIN <name> [INSTALL_DIR <dir>] [DEPENDS <parts...>])
@@ -69,13 +73,13 @@ vulture_add_part(host TOOLCHAIN host)
 # Both install into the EFI System Partition staging tree: the loader in
 # EFI/BOOT, the kernel in System/Library/Kernels.
 # (The kernel needs a host tool for the key the system is sealed with.)
-vulture_add_part(target TOOLCHAIN vulture-aarch64 INSTALL_DIR ${VULTURE_ESP_DIR} DEPENDS host)
-vulture_add_part(uefi TOOLCHAIN vulture-uefi-aarch64 INSTALL_DIR ${VULTURE_ESP_DIR})
+vulture_add_part(target TOOLCHAIN vulture-${VULTURE_ARCH} INSTALL_DIR ${VULTURE_ESP_DIR} DEPENDS host)
+vulture_add_part(uefi TOOLCHAIN vulture-uefi-${VULTURE_ARCH} INSTALL_DIR ${VULTURE_ESP_DIR})
 # Programs install into the root filesystem staging tree, which is packed
 # into the boot archive the kernel mounts as /.
 set(VULTURE_ROOT_DIR ${CMAKE_BINARY_DIR}/root)
 # It needs the host's ipcc for its IPC endpoints.
-vulture_add_part(userland TOOLCHAIN vulture-aarch64 INSTALL_DIR ${VULTURE_ROOT_DIR} DEPENDS host)
+vulture_add_part(userland TOOLCHAIN vulture-${VULTURE_ARCH} INSTALL_DIR ${VULTURE_ROOT_DIR} DEPENDS host)
 
 # The root also has the kernel where macOS keeps it (the loader boots the
 # copy on the ESP), without its debug information.

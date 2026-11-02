@@ -55,7 +55,7 @@ ErrorOr<FlatPtr> Process::sys_uname(TrapFrame&, SyscallArguments const& argument
     }
     copy_string(name.release, VULTURE_VERSION_STRING ""_sv);
     copy_string(name.version, "vultureOS " VULTURE_VERSION_STRING " (vultureKernel)"_sv);
-    copy_string(name.machine, "arm64"_sv);
+    copy_string(name.machine, Arch::machine_name());
     TRY(copy_to_user(arguments.values[0], name));
     return 0;
 }
@@ -210,7 +210,9 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
     } else if (name == "kern.osrelease"_sv) {
         set_string(VULTURE_VERSION_STRING ""_sv);
     } else if (name == "kern.version"_sv) {
-        set_string("vultureOS " VULTURE_VERSION_STRING " (vultureKernel, aarch64)"_sv);
+        StringBuilder version;
+        version.appendff("vultureOS {} (vultureKernel, {})", VULTURE_VERSION_STRING ""_sv, Arch::architecture_name());
+        set_string(version.view());
     } else if (name == "kern.hostname"_sv) {
         if (new_buffer) {
             if (!m_credentials.is_superuser())
@@ -272,10 +274,12 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
             }
         }
         set_number(static_cast<i32>(0));
+    } else if (name == "machdep.cpu.emulated"_sv) {
+        set_number(static_cast<i32>(Arch::is_emulated_in_software() ? 1 : 0));
     } else if (name == "hw.pagesize"_sv) {
         set_number(static_cast<i32>(page_size));
     } else if (name == "hw.machine"_sv) {
-        set_string("arm64"_sv);
+        set_string(Arch::machine_name());
     } else if (name == "kern.proc.all"_sv) {
         for (auto& process : all()) {
             // From inside a sandbox, it is the only thing there is.

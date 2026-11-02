@@ -161,7 +161,11 @@ ErrorOr<FlatPtr> Process::sys_thread_create(TrapFrame&, SyscallArguments const& 
         return Error::from_errno(EAGAIN);
     auto thread = created.release_value();
     Arch::prepare_user_entry(thread->user_trap_frame(), entry, stack_top);
+    Arch::prepare_user_function_entry(thread->user_trap_frame());
     Arch::set_user_entry_argument(thread->user_trap_frame(), reinterpret_cast<FlatPtr>(parameters.argument));
+    // (On x86_64, an address that doesn't exist would fault in the kernel, when it is loaded.)
+    if (!is_user_range(reinterpret_cast<FlatPtr>(parameters.thread_pointer), 1))
+        return Error::from_errno(EINVAL);
     Arch::set_user_thread_pointer(thread->m_context, reinterpret_cast<FlatPtr>(parameters.thread_pointer));
     thread->m_signal_mask.store(creator.m_signal_mask.load());
     thread->m_clear_tid_address = tid_address;
@@ -229,6 +233,15 @@ ErrorOr<FlatPtr> Process::sys_thread_kill(TrapFrame&, SyscallArguments const& ar
     info.si_code = SI_USER;
     info.si_pid = m_pid;
     send_signal_to_thread(*target, signal, info);
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_set_thread_pointer(TrapFrame&, SyscallArguments const& arguments)
+{
+    FlatPtr const pointer = arguments.values[0];
+    if (!is_user_range(pointer, 1))
+        return Error::from_errno(EINVAL);
+    Arch::set_current_user_thread_pointer(pointer);
     return 0;
 }
 

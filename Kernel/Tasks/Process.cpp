@@ -554,7 +554,7 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
         return Error::from_errno(ENOEXEC);
     auto const& image = image_or_error.value();
     auto const& header = image.header();
-    if ((header.e_type != ELF::ET_EXEC && header.e_type != ELF::ET_DYN) || header.e_machine != ELF::EM_AARCH64)
+    if ((header.e_type != ELF::ET_EXEC && header.e_type != ELF::ET_DYN) || header.e_machine != ELF::EM_NATIVE)
         return Error::from_errno(ENOEXEC);
 
     // Is this something that may run at all?
@@ -582,7 +582,7 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
             return Error::from_errno(ENOEXEC);
         interpreter_image = parsed.release_value();
         auto const& interpreter_header = interpreter_image->header();
-        if ((interpreter_header.e_type != ELF::ET_EXEC && interpreter_header.e_type != ELF::ET_DYN) || interpreter_header.e_machine != ELF::EM_AARCH64)
+        if ((interpreter_header.e_type != ELF::ET_EXEC && interpreter_header.e_type != ELF::ET_DYN) || interpreter_header.e_machine != ELF::EM_NATIVE)
             return Error::from_errno(ENOEXEC);
         for (auto const& inner : interpreter_image->program_headers()) {
             if (inner.p_type == ELF::PT_INTERP)
@@ -1299,7 +1299,9 @@ void Process::report_crash(TrapFrame const& frame, int signal, vulture_siginfo c
         dmesgln("  fault address {:p}", info.si_addr);
 
     TrapFrame user_view = frame;
+#if defined(__aarch64__)
     user_view.sp = frame.user_sp;
+#endif
     FixedStringBuilder<2048> registers;
     Arch::dump_registers(registers, user_view);
     kernel_log().write(registers.view());

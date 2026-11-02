@@ -32,6 +32,12 @@ constexpr Elf64_Half ET_DYN = 3;
 
 constexpr Elf64_Half EM_X86_64 = 62;
 constexpr Elf64_Half EM_AARCH64 = 183;
+// What programs here are built for.
+#if defined(__x86_64__)
+constexpr Elf64_Half EM_NATIVE = EM_X86_64;
+#else
+constexpr Elf64_Half EM_NATIVE = EM_AARCH64;
+#endif
 
 constexpr Elf64_Word PT_LOAD = 1;
 constexpr Elf64_Word PT_DYNAMIC = 2;
@@ -88,6 +94,13 @@ constexpr i64 DT_FLAGS = 30;
 constexpr i64 DT_TEXTREL = 22;
 
 // AArch64 relocations.
+constexpr u32 R_X86_64_NONE = 0;
+constexpr u32 R_X86_64_64 = 1;
+constexpr u32 R_X86_64_COPY = 5;
+constexpr u32 R_X86_64_GLOB_DAT = 6;
+constexpr u32 R_X86_64_JUMP_SLOT = 7;
+constexpr u32 R_X86_64_RELATIVE = 8;
+constexpr u32 R_X86_64_TPOFF64 = 18;
 constexpr u32 R_AARCH64_NONE = 0;
 constexpr u32 R_AARCH64_ABS64 = 257;
 constexpr u32 R_AARCH64_COPY = 1024;
@@ -96,6 +109,24 @@ constexpr u32 R_AARCH64_JUMP_SLOT = 1026;
 constexpr u32 R_AARCH64_RELATIVE = 1027;
 constexpr u32 R_AARCH64_TLS_TPREL64 = 1030;
 constexpr u32 R_AARCH64_TLSDESC = 1031;
+// The ones for what programs here are built for.
+#if defined(__x86_64__)
+constexpr u32 R_NATIVE_NONE = R_X86_64_NONE;
+constexpr u32 R_NATIVE_ABS64 = R_X86_64_64;
+constexpr u32 R_NATIVE_COPY = R_X86_64_COPY;
+constexpr u32 R_NATIVE_GLOB_DAT = R_X86_64_GLOB_DAT;
+constexpr u32 R_NATIVE_JUMP_SLOT = R_X86_64_JUMP_SLOT;
+constexpr u32 R_NATIVE_RELATIVE = R_X86_64_RELATIVE;
+constexpr u32 R_NATIVE_TPOFF = R_X86_64_TPOFF64;
+#else
+constexpr u32 R_NATIVE_NONE = R_AARCH64_NONE;
+constexpr u32 R_NATIVE_ABS64 = R_AARCH64_ABS64;
+constexpr u32 R_NATIVE_COPY = R_AARCH64_COPY;
+constexpr u32 R_NATIVE_GLOB_DAT = R_AARCH64_GLOB_DAT;
+constexpr u32 R_NATIVE_JUMP_SLOT = R_AARCH64_JUMP_SLOT;
+constexpr u32 R_NATIVE_RELATIVE = R_AARCH64_RELATIVE;
+constexpr u32 R_NATIVE_TPOFF = R_AARCH64_TLS_TPREL64;
+#endif
 
 constexpr u32 elf64_r_sym(u64 info) { return static_cast<u32>(info >> 32); }
 constexpr u32 elf64_r_type(u64 info) { return static_cast<u32>(info & 0xffffffff); }

@@ -75,37 +75,10 @@ void secondary_processor_main(void* argument)
     Scheduler::run_secondary_processor();
 }
 
-// The hardware ids of the processors in /cpus, in device tree order.
-static size_t find_processors(DeviceTree::FlattenedDeviceTree const& device_tree, u64 (&hardware_ids)[Processor::max_count])
-{
-    size_t count = 0;
-    bool in_cpus = false;
-    auto result = device_tree.for_each_node([&](DeviceTree::Node const& node) {
-        if (node.depth == 1) {
-            if (in_cpus)
-                return DeviceTree::IterationDecision::Break;
-            in_cpus = node.name == "cpus"_sv;
-            return DeviceTree::IterationDecision::Continue;
-        }
-        if (!in_cpus || node.depth != 2)
-            return DeviceTree::IterationDecision::Continue;
-        auto device_type = device_tree.find_property(node, "device_type"_sv);
-        if (!device_type.has_value() || device_type->as_string() != "cpu"_sv)
-            return DeviceTree::IterationDecision::Continue;
-        auto reg = device_tree.reg(node, 0);
-        if (reg.has_value() && count < Processor::max_count)
-            hardware_ids[count++] = reg->address;
-        return DeviceTree::IterationDecision::Continue;
-    });
-    if (result.is_error())
-        dmesgln("SMP: unreadable device tree ({})", result.error());
-    return count;
-}
-
 void Processor::start_secondary_processors(DeviceTree::FlattenedDeviceTree const& device_tree)
 {
     u64 hardware_ids[max_count];
-    size_t listed = find_processors(device_tree, hardware_ids);
+    size_t listed = Arch::list_processors(device_tree, hardware_ids, max_count);
     s_listed_count = max<u32>(static_cast<u32>(listed), 1);
     bool all_reported = true;
 

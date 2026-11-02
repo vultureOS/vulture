@@ -11,6 +11,8 @@
 
 #if defined(__aarch64__)
 #include <Kernel/Arch/aarch64/CPUInlines.h>
+#elif defined(__x86_64__)
+#include <Kernel/Arch/x86_64/CPUInlines.h>
 #else
 #error "Unsupported architecture"
 #endif
@@ -35,6 +37,14 @@ void describe_hardening_features(FormatSink&);
 void set_user_pointer_key(u64 low, u64 high);
 // What the above add to hardware_capabilities().
 [[nodiscard]] u64 hardware_capabilities_extra();
+
+// The name of this architecture, as uname(3) and the log have it.
+[[nodiscard]] StringView machine_name();
+[[nodiscard]] StringView architecture_name();
+
+// Whether this is a machine being emulated in software, as far as it can tell: what's fast enough for
+// real hardware and a hypervisor can't be expected of it.
+[[nodiscard]] bool is_emulated_in_software();
 
 // Stops this CPU for good, with interrupts masked.
 [[noreturn]] void halt();

@@ -278,7 +278,7 @@ bool map_library(int fd, Object& object, char* reason, size_t reason_size)
         copy_string(reason, reason_size, "not an ELF file");
         return false;
     }
-    if (header.e_type != ET_DYN || header.e_machine != EM_AARCH64 || header.e_phentsize != sizeof(Elf64_Phdr) || header.e_phnum > 64) {
+    if (header.e_type != ET_DYN || header.e_machine != EM_NATIVE || header.e_phentsize != sizeof(Elf64_Phdr) || header.e_phnum > 64) {
         copy_string(reason, reason_size, "incompatible architecture or not a library");
         return false;
     }
@@ -498,7 +498,9 @@ bool resolve(char const* name, u64& address, Object const** where = nullptr, Obj
 // after the two words of the control block. A variable's address is the
 // thread pointer plus its module's offset plus its offset in the module.
 
+#if defined(__aarch64__)
 extern "C" u8 dyld_tlsdesc_static[];
+#endif
 
 System::ThreadLocalImage s_tls_image { nullptr, 0, 16 };
 
@@ -506,24 +508,27 @@ System::ThreadLocalImage s_tls_image { nullptr, 0, 16 };
 alignas(64) u8 s_small_tls_image[1024];
 alignas(64) u8 s_small_tls_block[1024];
 
-// Each module's offset, from what the static linker assumes for the program:
-// 16 bytes on, then up to an address that agrees with the segment's own
-// modulo its alignment.
+// Each module's offset, from what the static linker assumes for the program.
 void assign_tls_offsets()
 {
-    u64 end = sizeof(System::ThreadControlBlock);
+    u64 end = 0;
     u64 alignment = 16;
     for (size_t i = 0; i < s_object_count; ++i) {
         auto& object = s_objects[i];
         if (!object.tls_memory_size)
             continue;
         u64 virtual_address = object.tls_address - object.bias;
-        object.tls_offset = end + ((virtual_address - end) & (object.tls_alignment - 1));
-        end = object.tls_offset + object.tls_memory_size;
+        u64 const place = System::next_tls_offset(end, virtual_address, object.tls_memory_size, object.tls_alignment);
+        object.tls_offset = System::tls_pointer_offset(place);
+#if defined(__x86_64__)
+        end = place;
+#else
+        end = place + object.tls_memory_size;
+#endif
         if (object.tls_alignment > alignment)
             alignment = object.tls_alignment;
     }
-    s_tls_image.size = end;
+    s_tls_image.size = System::tls_image_size(end, alignment);
     s_tls_image.alignment = alignment;
 }
 
@@ -535,8 +540,9 @@ void set_up_first_thread()
     u8* block = s_small_tls_block;
     u64 size = s_tls_image.size;
     u64 alignment = s_tls_image.alignment;
-    if (size > sizeof(s_small_tls_image) || alignment > 64) {
-        u64 room = align_up(size * 2 + alignment * 2);
+    u64 const storage = System::thread_storage_size(size);
+    if (size > sizeof(s_small_tls_image) || storage > sizeof(s_small_tls_block) || alignment > 64) {
+        u64 room = align_up(size + storage + alignment * 2);
         long mapped = call(Syscall::mmap, 0, room, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, static_cast<unsigned long>(-1), 0);
         if (mapped < 0)
             fail("out of memory setting up thread-local storage");
@@ -547,16 +553,12 @@ void set_up_first_thread()
     for (size_t i = 0; i < s_object_count; ++i) {
         auto const& object = s_objects[i];
         auto const* source = reinterpret_cast<u8 const*>(object.tls_address);
+        u64 const place = System::tls_image_index(object.tls_offset, size);
         for (u64 byte = 0; byte < object.tls_file_size; ++byte)
-            image[object.tls_offset + byte] = source[byte];
+            image[place + byte] = source[byte];
     }
     s_tls_image.data = image;
-    for (u64 byte = 0; byte < size; ++byte)
-        block[byte] = image[byte];
-    auto* control = reinterpret_cast<System::ThreadControlBlock*>(block);
-    control->image = &s_tls_image;
-    control->thread = nullptr;
-    System::set_thread_control_block(control);
+    System::set_thread_control_block(System::initialize_thread_storage(block, s_tls_image));
 }
 
 // The offset from the thread pointer of a thread-local symbol that `object`
@@ -592,16 +594,17 @@ void relocate_table(Object const& object, Elf64_Rela const* table, u64 size)
         u32 type = elf64_r_type(relocation.r_info);
         u32 symbol_index = elf64_r_sym(relocation.r_info);
         auto* place = reinterpret_cast<u64*>(object.bias + relocation.r_offset);
-        if (type == R_AARCH64_NONE)
+        if (type == R_NATIVE_NONE)
             continue;
-        if (type == R_AARCH64_RELATIVE) {
+        if (type == R_NATIVE_RELATIVE) {
             *place = object.bias + static_cast<u64>(relocation.r_addend);
             continue;
         }
-        if (type == R_AARCH64_TLS_TPREL64) {
+        if (type == R_NATIVE_TPOFF) {
             *place = tls_offset_of(object, symbol_index) + static_cast<u64>(relocation.r_addend);
             continue;
         }
+#if defined(__aarch64__)
         if (type == R_AARCH64_TLSDESC) {
             // Two words: what to call, and what it hands back from its
             // descriptor. All the storage is static, so that is the offset.
@@ -609,7 +612,8 @@ void relocate_table(Object const& object, Elf64_Rela const* table, u64 size)
             place[0] = reinterpret_cast<u64>(dyld_tlsdesc_static);
             continue;
         }
-        if (type != R_AARCH64_GLOB_DAT && type != R_AARCH64_JUMP_SLOT && type != R_AARCH64_ABS64 && type != R_AARCH64_COPY) {
+#endif
+        if (type != R_NATIVE_GLOB_DAT && type != R_NATIVE_JUMP_SLOT && type != R_NATIVE_ABS64 && type != R_NATIVE_COPY) {
             char message[300] = "unsupported relocation type ";
             append_number(message, sizeof(message), type);
             append_string(message, sizeof(message), " in ");
@@ -622,7 +626,7 @@ void relocate_table(Object const& object, Elf64_Rela const* table, u64 size)
             char const* name = object.strings + symbol.st_name;
             Object const* where = nullptr;
             // A copy relocation takes its data from wherever else it is.
-            bool found = resolve(name, value, &where, type == R_AARCH64_COPY ? &object : nullptr);
+            bool found = resolve(name, value, &where, type == R_NATIVE_COPY ? &object : nullptr);
             if (!found && elf64_st_bind(symbol.st_info) == STB_LOCAL && symbol.st_shndx != SHN_UNDEF) {
                 value = object.bias + symbol.st_value;
                 found = true;
@@ -639,7 +643,7 @@ void relocate_table(Object const& object, Elf64_Rela const* table, u64 size)
                     fail(message);
                 }
             }
-            if (type == R_AARCH64_COPY) {
+            if (type == R_NATIVE_COPY) {
                 auto const* source = reinterpret_cast<u8 const*>(value);
                 auto* destination = reinterpret_cast<u8*>(place);
                 for (u64 byte = 0; byte < symbol.st_size; ++byte)
@@ -684,7 +688,7 @@ extern "C" void dyld_relocate_self(u64 base, u64 const* dynamic)
         u64 const offset = table[i * 3];
         u64 const info = table[i * 3 + 1];
         u64 const addend = table[i * 3 + 2];
-        if ((info & 0xffffffff) == 1027) // R_AARCH64_RELATIVE
+        if ((info & 0xffffffff) == R_NATIVE_RELATIVE)
             *reinterpret_cast<u64*>(base + offset) = base + addend;
     }
 }

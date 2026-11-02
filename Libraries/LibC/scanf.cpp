@@ -121,8 +121,11 @@ int digit_value(int character, int base)
     return value < base ? value : -1;
 }
 
-int scan(Source& source, char const* format, va_list arguments)
+int scan(Source& source, char const* format, va_list given_arguments)
 {
+    // (On some architectures, what was passed here isn't of the type it says it is.)
+    va_list arguments;
+    va_copy(arguments, given_arguments);
     int assigned = 0;
     bool any_input = false;
     for (char const* cursor = format; *cursor; ++cursor) {

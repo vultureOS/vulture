@@ -37,6 +37,4 @@ private:
     void* m_receiver_context { nullptr };
 };
 
-PL011& boot_serial();
-
 }

@@ -7,8 +7,8 @@
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Memory/UserAccess.h>
 
-extern "C" u64 aarch64_copy_user(void* destination, void const* source, u64 size);
-extern "C" i64 aarch64_copy_user_string(char* destination, char const* source, u64 capacity);
+extern "C" u64 arch_copy_user(void* destination, void const* source, u64 size);
+extern "C" i64 arch_copy_user_string(char* destination, char const* source, u64 capacity);
 
 namespace {
 
@@ -38,7 +38,7 @@ ErrorOr<void> copy_from_user(void* destination, FlatPtr source, size_t size)
         return {};
     if (!is_user_range(source, size))
         return Error::from_errno(EFAULT);
-    if (aarch64_copy_user(destination, reinterpret_cast<void const*>(source), size) != 0)
+    if (arch_copy_user(destination, reinterpret_cast<void const*>(source), size) != 0)
         return Error::from_errno(EFAULT);
     return {};
 }
@@ -49,7 +49,7 @@ ErrorOr<void> copy_to_user(FlatPtr destination, void const* source, size_t size)
         return {};
     if (!is_user_range(destination, size))
         return Error::from_errno(EFAULT);
-    if (aarch64_copy_user(reinterpret_cast<void*>(destination), source, size) != 0)
+    if (arch_copy_user(reinterpret_cast<void*>(destination), source, size) != 0)
         return Error::from_errno(EFAULT);
     return {};
 }
@@ -62,7 +62,7 @@ ErrorOr<size_t> copy_string_from_user(FlatPtr source, char* buffer, size_t capac
     if (!is_user_range(source, 1))
         return Error::from_errno(EFAULT);
     size_t limit = min<size_t>(capacity, MemoryLayout::user_space_end - source);
-    i64 result = aarch64_copy_user_string(buffer, reinterpret_cast<char const*>(source), limit);
+    i64 result = arch_copy_user_string(buffer, reinterpret_cast<char const*>(source), limit);
     if (result == -1)
         return Error::from_errno(EFAULT);
     if (result == -2)

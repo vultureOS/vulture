@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Arch/aarch64/MMIO.h>
+#include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Arch/CPU.h>
 #include <Kernel/Arch/Power.h>
 #include <Kernel/Arch/aarch64/PSCI.h>
@@ -143,6 +145,26 @@ void reboot()
     if (is_available())
         call(system_reset);
     halt();
+}
+
+}
+
+namespace Kernel::Arch {
+
+Optional<u64> read_real_time_clock(DeviceTree::FlattenedDeviceTree const& device_tree)
+{
+    // The Arm PL031: its data register counts seconds.
+    auto node = device_tree.find_compatible_node("arm,pl031"_sv);
+    if (!node.has_value())
+        return {};
+    auto reg = device_tree.reg(node.value(), 0);
+    if (!reg.has_value())
+        return {};
+    auto registers = memory_manager().map_mmio(PhysicalAddress(reg->address), reg->size);
+    if (registers.is_error())
+        return {};
+    constexpr size_t data_register = 0x00;
+    return static_cast<u64>(AArch64::mmio_read32(registers.value() + data_register));
 }
 
 }

@@ -83,19 +83,26 @@ void set_up_static_thread_local_storage(unsigned long* stack)
         if (headers[i].p_type == ELF::PT_TLS)
             segment = &headers[i];
     }
-    unsigned long offset = sizeof(System::ThreadControlBlock);
     unsigned long alignment = 16;
-    unsigned long size = offset;
+    unsigned long end = 0;
+    unsigned long offset = 0;
     if (segment) {
         unsigned long segment_alignment = segment->p_align ? segment->p_align : 1;
-        offset += (segment->p_vaddr - offset) & (segment_alignment - 1);
-        size = offset + segment->p_memsz;
+        unsigned long const place = System::next_tls_offset(0, segment->p_vaddr, segment->p_memsz, segment_alignment);
+        offset = System::tls_pointer_offset(place);
+#if defined(__x86_64__)
+        end = place;
+#else
+        end = place + segment->p_memsz;
+#endif
         alignment = segment_alignment > alignment ? segment_alignment : alignment;
     }
+    unsigned long const size = System::tls_image_size(end, alignment);
+    unsigned long const storage = System::thread_storage_size(size);
     u8* image = s_small_tls_image;
     u8* block = s_small_tls_block;
-    if (size > sizeof(s_small_tls_image) || alignment > 64) {
-        unsigned long room = (size * 2 + alignment * 2 + 4095) & ~4095ul;
+    if (size > sizeof(s_small_tls_image) || storage > sizeof(s_small_tls_block) || alignment > 64) {
+        unsigned long room = (size + storage + alignment * 2 + 4095) & ~4095ul;
         long mapped = System::syscall(System::Syscall::mmap, 0, room, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, static_cast<unsigned long>(-1), 0);
         if (mapped < 0)
             __builtin_trap();
@@ -104,16 +111,12 @@ void set_up_static_thread_local_storage(unsigned long* stack)
     }
     if (segment) {
         auto const* source = reinterpret_cast<u8 const*>(segment->p_vaddr);
+        unsigned long const place = System::tls_image_index(offset, size);
         for (unsigned long byte = 0; byte < segment->p_filesz; ++byte)
-            image[offset + byte] = source[byte];
+            image[place + byte] = source[byte];
     }
-    for (unsigned long byte = 0; byte < size; ++byte)
-        block[byte] = image[byte];
     s_tls_image = { image, size, alignment };
-    auto* control = reinterpret_cast<System::ThreadControlBlock*>(block);
-    control->image = &s_tls_image;
-    control->thread = nullptr;
-    System::set_thread_control_block(control);
+    System::set_thread_control_block(System::initialize_thread_storage(block, s_tls_image));
 }
 
 }

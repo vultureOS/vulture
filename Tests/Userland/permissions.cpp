@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "NativeMachine.h"
 #include "Test.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -25,7 +26,7 @@ void test_system_information()
 {
     struct utsname name {};
     CHECK(uname(&name) == 0);
-    CHECK(strcmp(name.sysname, "vultureOS") == 0 && strcmp(name.machine, "arm64") == 0);
+    CHECK(strcmp(name.sysname, "vultureOS") == 0 && strcmp(name.machine, NATIVE_MACHINE) == 0);
     int processors = 0;
     size_t length = sizeof(processors);
     CHECK(sysctlbyname("hw.ncpu", &processors, &length, nullptr, 0) == 0 && processors == 8);

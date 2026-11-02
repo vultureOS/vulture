@@ -7,8 +7,8 @@
 #
 #   host    tools and unit tests that run on the build machine
 #   uefi    VultureBoot, the UEFI loader (PE32+)
-#   target    the kernel (ELF, AArch64)
-#   userland  programs and libraries that run in user mode (ELF, AArch64)
+#   target    the kernel (ELF, for the architecture being built)
+#   userland  programs and libraries that run in user mode (ELF, likewise)
 #
 # Configuring this directory without VULTURE_PART sets up the superbuild,
 # which drives every part and provides the run/test targets.
@@ -31,6 +31,7 @@ include(Meta/CMake/Flags.cmake)
 if(VULTURE_PART STREQUAL "host")
     enable_testing()
     add_subdirectory(Libraries/LibAnimation)
+    add_subdirectory(Libraries/LibACPI)
     add_subdirectory(Libraries/LibArchive)
     add_subdirectory(Libraries/LibAudio)
     add_subdirectory(Libraries/LibBase)
@@ -58,6 +59,7 @@ elseif(VULTURE_PART STREQUAL "uefi")
     add_subdirectory(Boot)
 elseif(VULTURE_PART STREQUAL "target")
     enable_language(ASM)
+    add_subdirectory(Libraries/LibACPI)
     add_subdirectory(Libraries/LibBase)
     add_subdirectory(Libraries/LibDeviceTree)
     add_subdirectory(Libraries/LibArchive)

@@ -62,7 +62,9 @@ KERNEL_TEST(memory, loader_memory_was_reclaimed)
 {
     KTEST_EXPECT(memory_manager().reclaimed_bytes() > 0);
     KTEST_EXPECT(memory_manager().memory_map().size() > 0);
+#if !defined(__x86_64__)
     KTEST_EXPECT(memory_manager().device_tree().size() > 0);
+#endif
 }
 
 }

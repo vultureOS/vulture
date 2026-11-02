@@ -6,7 +6,10 @@
 
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Debug/KernelLog.h>
-#include <Kernel/Devices/Serial/PL011.h>
+#if defined(__x86_64__)
+#    include <Kernel/Arch/x86_64/APIC.h>
+#endif
+#include <Kernel/Devices/Serial/BootSerial.h>
 #include <Kernel/FileSystem/Poll.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/UserAccess.h>
@@ -379,6 +382,16 @@ public:
 
 RefPtr<ConsoleTTY> s_console;
 
+#if defined(__x86_64__)
+// COM1's: an ISA interrupt.
+Optional<u32> serial_interrupt()
+{
+    auto vector = X86_64::allocate_isa_vector(4);
+    if (vector.is_error())
+        return {};
+    return vector.value();
+}
+#else
 // The PL011's interrupt, from the device tree.
 Optional<u32> serial_interrupt()
 {
@@ -400,6 +413,7 @@ Optional<u32> serial_interrupt()
     // GIC: shared peripheral interrupts from 32, private ones from 16.
     return static_cast<u32>(number.value() + (type.value() == 0 ? 32 : 16));
 }
+#endif
 
 }
 

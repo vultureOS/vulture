@@ -5,7 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
-#include <Kernel/Arch/aarch64/MMIO.h>
+#include <Kernel/Arch/MMIO.h>
 #include <Kernel/Devices/VirtIO/VirtIO.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
@@ -13,7 +13,7 @@
 
 namespace Kernel::VirtIO {
 
-using namespace AArch64;
+using namespace Arch;
 
 namespace {
 
@@ -163,9 +163,9 @@ ErrorOr<u16> Queue::submit(Span<Buffer const> buffers)
     auto* available = reinterpret_cast<AvailableRing*>(physical_to_virtual(available_ring()));
     available->ring[available->index % m_size] = head;
     // The descriptors and ring entry before the index the device polls.
-    asm volatile("dmb ish" ::: "memory");
+    memory_barrier();
     available->index = static_cast<u16>(available->index + 1);
-    asm volatile("dsb sy" ::: "memory");
+    device_barrier();
     return head;
 }
 
@@ -176,7 +176,7 @@ Optional<Completion> Queue::take_completion()
     if (used->index == m_last_used)
         return {};
     // Read the entry only after seeing the index that covers it.
-    asm volatile("dmb ish" ::: "memory");
+    memory_barrier();
     u32 element_id = used->ring[m_last_used % m_size].id;
     u32 element_length = used->ring[m_last_used % m_size].length;
     m_last_used = static_cast<u16>(m_last_used + 1);
@@ -261,8 +261,11 @@ ErrorOr<u64> Device::initialize(u64 wanted)
     mmio_write8(m_common + device_status, status_acknowledge | status_driver | status_features_ok);
     if (!(mmio_read8(m_common + device_status) & status_features_ok))
         return Error::from_string_literal("virtio: the device rejected the features");
-    // Legacy (INTx) interrupts: no MSI-X vectors.
-    mmio_write16(m_common + msix_config, no_vector);
+    // Everything through the first MSI-X entry if that's how it interrupts, and otherwise no MSI-X
+    // vectors, for legacy (INTx) interrupts.
+    (void)m_pci.interrupt();
+    m_message_vector = m_pci.uses_message_table() ? 0 : no_vector;
+    mmio_write16(m_common + msix_config, m_message_vector);
     return accepted;
 }
 
@@ -275,7 +278,7 @@ ErrorOr<NonnullOwnPtr<Queue>> Device::setup_queue(u16 index, u16 maximum_size)
     size = min(size, maximum_size);
     auto queue = TRY(Queue::create(index, size));
     mmio_write16(m_common + queue_size, size);
-    mmio_write16(m_common + queue_msix_vector, no_vector);
+    mmio_write16(m_common + queue_msix_vector, m_message_vector);
     write64(m_common + queue_descriptors, queue->descriptors().get());
     write64(m_common + queue_driver, queue->available_ring().get());
     write64(m_common + queue_device, queue->used_ring().get());
@@ -296,6 +299,10 @@ void Device::notify(Queue const& queue)
 
 u8 Device::read_interrupt_status()
 {
+    // It isn't set by interrupts that come as messages, which aren't shared: it can only be this
+    // device, and it can be anything.
+    if (m_message_vector != no_vector)
+        return 3;
     return mmio_read8(m_isr);
 }
 

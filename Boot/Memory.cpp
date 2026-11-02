@@ -67,6 +67,8 @@ MemoryRegionType region_type(u32 firmware_type)
         return MemoryRegionType::KernelFile;
     case to_underlying(LoaderMemoryType::BootArchive):
         return MemoryRegionType::BootArchive;
+    case to_underlying(LoaderMemoryType::LowMemory):
+        return MemoryRegionType::LowMemory;
     case to_underlying(LoaderMemoryType::LoaderReclaimable):
         return MemoryRegionType::LoaderReclaimable;
     }

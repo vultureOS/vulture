@@ -4,7 +4,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Boots vultureOS in QEMU's AArch64 "virt" machine with UEFI firmware.
+# Boots vultureOS in QEMU with UEFI firmware: its AArch64 "virt" machine, or x86_64 "q35",
+# whichever the build directory is for.
 #
 #   Meta/run.sh [options] [-- extra QEMU arguments]
 #
@@ -135,7 +136,10 @@ if [ -n "$image" ] && { [ "$debug" -eq 1 ] || [ "$gui" -eq 0 ]; }; then
     echo "run.sh: an image has no boot arguments: it boots to the desktop, without debug logs" >&2
 fi
 
-qemu="${QEMU:-qemu-system-aarch64}"
+# What the build directory is for.
+architecture="$(sed -n 's/^VULTURE_ARCH:[A-Z]*=//p' "$build_dir/CMakeCache.txt" 2>/dev/null || true)"
+architecture="${architecture:-aarch64}"
+qemu="${QEMU:-qemu-system-$architecture}"
 # (Another kernel can be booted by giving its own copy of this, as sanitized-kernel-test.sh does.)
 esp_dir="${VULTURE_ESP_DIR:-$build_dir/esp}"
 
@@ -145,15 +149,18 @@ esp_dir="${VULTURE_ESP_DIR:-$build_dir/esp}"
 if [ -z "$accelerator" ]; then
     case "$(uname -s)-$(uname -m)" in
         Darwin-arm64)
-            if [ "$(sysctl -n kern.hv_support 2>/dev/null)" = "1" ]; then accelerator="hvf"; else accelerator="tcg"; fi ;;
-        Linux-aarch64)
-            if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then accelerator="kvm"; else accelerator="tcg"; fi ;;
+            if [ "$architecture" = aarch64 ] && [ "$(sysctl -n kern.hv_support 2>/dev/null)" = "1" ]; then accelerator="hvf"; else accelerator="tcg"; fi ;;
+        Linux-aarch64 | Linux-x86_64)
+            if [ "$(uname -m)" = "$architecture" ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then accelerator="kvm"; else accelerator="tcg"; fi ;;
         *) accelerator="tcg" ;;
     esac
 fi
 # Emulated, everything takes several times as long.
+chat_pause_scale=1
 if [ "$accelerator" = "tcg" ]; then
     timeout_seconds=$((timeout_seconds * ${VULTURE_TCG_TIMEOUT_SCALE:-8}))
+    # (Including what a chat is pausing for: an animation that takes the time it takes.)
+    chat_pause_scale="${VULTURE_TCG_PAUSE_SCALE:-4}"
 fi
 
 # The UEFI firmware for QEMU's virt machine and the template of its variable
@@ -162,12 +169,25 @@ fi
 firmware_code="${VULTURE_FIRMWARE_CODE:-}"
 firmware_vars="${VULTURE_FIRMWARE_VARS:-}"
 if [ -z "$firmware_code" ] || [ -z "$firmware_vars" ]; then
-    for candidate in \
-        "${VULTURE_FIRMWARE_DIR:-/nonexistent}/edk2-aarch64-code.fd:${VULTURE_FIRMWARE_DIR:-/nonexistent}/edk2-arm-vars.fd" \
-        "/opt/homebrew/share/qemu/edk2-aarch64-code.fd:/opt/homebrew/share/qemu/edk2-arm-vars.fd" \
-        "/usr/local/share/qemu/edk2-aarch64-code.fd:/usr/local/share/qemu/edk2-arm-vars.fd" \
-        "/usr/share/qemu/edk2-aarch64-code.fd:/usr/share/qemu/edk2-arm-vars.fd" \
-        "/usr/share/AAVMF/AAVMF_CODE.fd:/usr/share/AAVMF/AAVMF_VARS.fd"; do
+    if [ "$architecture" = x86_64 ]; then
+        candidates=(
+            "${VULTURE_FIRMWARE_DIR:-/nonexistent}/edk2-x86_64-code.fd:${VULTURE_FIRMWARE_DIR:-/nonexistent}/edk2-i386-vars.fd"
+            "/opt/homebrew/share/qemu/edk2-x86_64-code.fd:/opt/homebrew/share/qemu/edk2-i386-vars.fd"
+            "/usr/local/share/qemu/edk2-x86_64-code.fd:/usr/local/share/qemu/edk2-i386-vars.fd"
+            "/usr/share/qemu/edk2-x86_64-code.fd:/usr/share/qemu/edk2-i386-vars.fd"
+            "/usr/share/OVMF/OVMF_CODE_4M.fd:/usr/share/OVMF/OVMF_VARS_4M.fd"
+            "/usr/share/OVMF/OVMF_CODE.fd:/usr/share/OVMF/OVMF_VARS.fd"
+        )
+    else
+        candidates=(
+            "${VULTURE_FIRMWARE_DIR:-/nonexistent}/edk2-aarch64-code.fd:${VULTURE_FIRMWARE_DIR:-/nonexistent}/edk2-arm-vars.fd"
+            "/opt/homebrew/share/qemu/edk2-aarch64-code.fd:/opt/homebrew/share/qemu/edk2-arm-vars.fd"
+            "/usr/local/share/qemu/edk2-aarch64-code.fd:/usr/local/share/qemu/edk2-arm-vars.fd"
+            "/usr/share/qemu/edk2-aarch64-code.fd:/usr/share/qemu/edk2-arm-vars.fd"
+            "/usr/share/AAVMF/AAVMF_CODE.fd:/usr/share/AAVMF/AAVMF_VARS.fd"
+        )
+    fi
+    for candidate in "${candidates[@]}"; do
         if [ -f "${candidate%%:*}" ] && [ -f "${candidate#*:}" ]; then
             firmware_code="${candidate%%:*}"
             firmware_vars="${candidate#*:}"
@@ -176,14 +196,16 @@ if [ -z "$firmware_code" ] || [ -z "$firmware_vars" ]; then
     done
 fi
 if [ -z "$firmware_code" ] || [ ! -f "$firmware_code" ] || [ ! -f "$firmware_vars" ]; then
-    echo "run.sh: no AArch64 UEFI firmware found; install QEMU (brew install qemu, or apt install qemu-efi-aarch64)" >&2
+    echo "run.sh: no $architecture UEFI firmware found; install QEMU (brew install qemu, or apt install qemu-efi-aarch64 or ovmf)" >&2
     echo "        or set VULTURE_FIRMWARE_CODE and VULTURE_FIRMWARE_VARS" >&2
     exit 1
 fi
 state_dir="$build_dir/qemu"
 kernels_dir="$esp_dir/System/Library/Kernels"
 
-for required in "$esp_dir/EFI/BOOT/BOOTAA64.EFI" "$kernels_dir/vulture"; do
+boot_file=BOOTAA64.EFI
+[ "$architecture" = x86_64 ] && boot_file=BOOTX64.EFI
+for required in "$esp_dir/EFI/BOOT/$boot_file" "$kernels_dir/vulture"; do
     if [ ! -f "$required" ]; then
         echo "run.sh: $required is missing; build first with: ninja -C $build_dir" >&2
         exit 1
@@ -302,9 +324,15 @@ if "$qemu" -device help 2>/dev/null | grep -q virtio-sound-pci; then
     audio_args=(-audiodev "$audio_backend" -device virtio-sound-pci,audiodev=sound0)
 fi
 
-args=(
+if [ "$architecture" = x86_64 ]; then
+    machine_args=(-machine q35)
+else
     # acpi=off makes the firmware publish a device tree, which the kernel uses for hardware discovery.
-    -machine virt,gic-version=3,acpi=off
+    machine_args=(-machine virt,gic-version=3,acpi=off)
+fi
+
+args=(
+    "${machine_args[@]}"
     -smp 8
     -m "$memory_size"
     -drive "if=pflash,format=raw,unit=0,readonly=on,file=$firmware_code"
@@ -327,7 +355,12 @@ args=(
 
 case "$accelerator" in
     hvf | kvm) args+=(-accel "$accelerator" -cpu host) ;;
-    tcg) args+=(-accel tcg,thread=multi -cpu max,pauth-impdef=on) ;;
+    tcg)
+        if [ "$architecture" = x86_64 ]; then
+            args+=(-accel tcg,thread=multi -cpu max)
+        else
+            args+=(-accel tcg,thread=multi -cpu max,pauth-impdef=on)
+        fi ;;
     *) echo "run.sh: unknown accelerator '$accelerator' (hvf, kvm or tcg)" >&2; exit 2 ;;
 esac
 
@@ -537,7 +570,8 @@ advance_chat() {
                 chat_index=$((chat_index + 1))
                 ;;
             "pause "*)
-                sleep "${step#pause }"
+                # (Not the moments between the two clicks of a double click, which have a time limit.)
+                sleep "$(awk "BEGIN { pause = ${step#pause }; if (pause < 0.3) print pause; else print pause * $chat_pause_scale }")"
                 chat_index=$((chat_index + 1))
                 ;;
             "screenshot "*)

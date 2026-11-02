@@ -85,7 +85,7 @@ T* physical_to_virtual(PhysicalAddress address)
 inline PhysicalAddress virtual_to_physical(void const* pointer)
 {
     auto address = reinterpret_cast<FlatPtr>(pointer);
-    VERIFY(address >= API::direct_map_base && address < API::direct_map_base + (1ull << 47));
+    VERIFY(address >= API::direct_map_base && address < API::direct_map_base + MemoryLayout::direct_map_size);
     return PhysicalAddress(address - API::direct_map_base);
 }
 

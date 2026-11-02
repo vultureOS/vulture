@@ -59,15 +59,19 @@ static void print_frame(size_t index, FlatPtr address, FlatPtr lookup_address)
 static void print_backtrace(FlatPtr pc, bool pc_is_return_address, FlatPtr frame_pointer)
 {
     dmesgln("Backtrace:");
+#if defined(__aarch64__)
     // (A return address may be signed: see below.)
     pc |= 0xffff'0000'0000'0000;
+#endif
     print_frame(0, pc, pc_is_return_address ? pc - 4 : pc);
     for (size_t index = 1; index < max_backtrace_frames && is_valid_frame_pointer(frame_pointer); ++index) {
         auto record = *reinterpret_cast<Arch::StackFrame const*>(frame_pointer);
+#if defined(__aarch64__)
         // A signed return address has the signature in its top bits: an address up there has
         // those all set otherwise.
         if (record.return_address != 0)
             record.return_address |= 0xffff'0000'0000'0000;
+#endif
         if (record.return_address == 0)
             break;
         print_frame(index, record.return_address, record.return_address - 4);

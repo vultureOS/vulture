@@ -1,5 +1,6 @@
 # Build output
 /build/
+/build-*/
 
 # Left over from the Rust tree (see the v0.1-rust tag)
 /target/

@@ -276,6 +276,11 @@ void PageTable::destroy()
     m_table_pages = 0;
 }
 
+void finish_remapping_kernel_range(FlatPtr, size_t)
+{
+    // Done already: unmap() reached every processor as it went.
+}
+
 void activate_kernel_page_table(PageTable const& table)
 {
     // One sequence, with no memory accesses in between: the old and new

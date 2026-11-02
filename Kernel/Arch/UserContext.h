@@ -20,6 +20,9 @@ void prepare_user_entry(TrapFrame&, FlatPtr entry, FlatPtr stack_pointer);
 
 // What a new thread's entry function receives as its argument.
 void set_user_entry_argument(TrapFrame&, u64);
+// A function, rather than a program's first instruction, is about to be entered: leaves the stack as
+// a call would have.
+void prepare_user_function_entry(TrapFrame&);
 
 // Enters user mode through `frame`, which must sit at the top of the
 // current thread's kernel stack.
@@ -28,6 +31,7 @@ void set_user_entry_argument(TrapFrame&, u64);
 [[nodiscard]] u64 syscall_number(TrapFrame const&);
 [[nodiscard]] u64 syscall_argument(TrapFrame const&, size_t index);
 void set_syscall_result(TrapFrame&, u64);
+[[nodiscard]] u64 syscall_result(TrapFrame const&);
 // For fork: the child sees 0.
 void set_fork_child_result(TrapFrame&);
 

@@ -17,7 +17,7 @@ static constexpr u64 kernel_space_start = 0xffff'8000'0000'0000;
 // relocations, applied here before any of it runs.
 static ErrorOr<void> apply_relocations(ELF::Image const& image, LoadedKernel const& kernel, u64 lowest)
 {
-    constexpr u64 relocation_relative = 1027; // R_AARCH64_RELATIVE
+    constexpr u64 relocation_relative = ELF::R_NATIVE_RELATIVE;
     u64 table = 0;
     u64 table_size = 0;
     for (auto const& segment : image.program_headers()) {
@@ -58,8 +58,8 @@ static ErrorOr<void> apply_relocations(ELF::Image const& image, LoadedKernel con
 ErrorOr<LoadedKernel> load_kernel(ELF::Image const& image, UEFI::BootServices& boot_services, u64 slide)
 {
     auto const& header = image.header();
-    if (header.e_machine != ELF::EM_AARCH64)
-        return Error::from_string_literal("kernel is not an AArch64 executable");
+    if (header.e_machine != ELF::EM_NATIVE)
+        return Error::from_string_literal("kernel is not an executable for this processor");
     if (header.e_type != ELF::ET_EXEC && header.e_type != ELF::ET_DYN)
         return Error::from_string_literal("kernel is not an executable");
     // One linked for its address stays there.

@@ -44,10 +44,10 @@
 9997:
 .endm
 
-/* u64 aarch64_copy_user(void* destination, void const* source, u64 size): 0, or 1 on a fault. */
-.global aarch64_copy_user
-.type aarch64_copy_user, %function
-aarch64_copy_user:
+/* u64 arch_copy_user(void* destination, void const* source, u64 size): 0, or 1 on a fault. */
+.global arch_copy_user
+.type arch_copy_user, %function
+arch_copy_user:
     USER_ACCESS_BEGIN
     cbz x2, 2f
     /* Eight bytes at a time while both are aligned, then bytes. */
@@ -71,16 +71,16 @@ aarch64_copy_user:
 4:  USER_ACCESS_END
     mov x0, #1
     ret
-.size aarch64_copy_user, . - aarch64_copy_user
+.size arch_copy_user, . - arch_copy_user
 
 /*
- * i64 aarch64_copy_user_string(char* destination, char const* source, u64 capacity):
+ * i64 arch_copy_user_string(char* destination, char const* source, u64 capacity):
  * the length (without the terminator) once a NUL was copied; -1 on a fault;
  * -2 if no NUL appeared within `capacity` bytes.
  */
-.global aarch64_copy_user_string
-.type aarch64_copy_user_string, %function
-aarch64_copy_user_string:
+.global arch_copy_user_string
+.type arch_copy_user_string, %function
+arch_copy_user_string:
     USER_ACCESS_BEGIN
     mov x4, #0
 1:  cmp x4, x2
@@ -99,4 +99,4 @@ aarch64_copy_user_string:
 4:  USER_ACCESS_END
     mov x0, #-1
     ret
-.size aarch64_copy_user_string, . - aarch64_copy_user_string
+.size arch_copy_user_string, . - arch_copy_user_string

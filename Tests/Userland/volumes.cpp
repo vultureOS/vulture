@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "NativeMachine.h"
 #include "Test.h"
 #include <dirent.h>
 #include <errno.h>
@@ -31,7 +32,7 @@ int main()
 
     // The loader is a PE image; FAT names match without regard to case.
     char header[2] {};
-    int loader = open("/Volumes/EFI/efi/boot/bootaa64.efi", O_RDONLY);
+    int loader = open("/Volumes/EFI/efi/boot/" NATIVE_LOADER_LOWER, O_RDONLY);
     CHECK(loader >= 0);
     CHECK(read(loader, header, 2) == 2 && header[0] == 'M' && header[1] == 'Z');
     close(loader);

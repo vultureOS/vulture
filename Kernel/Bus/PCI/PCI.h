@@ -15,10 +15,10 @@ namespace DeviceTree {
 class FlattenedDeviceTree;
 }
 
-// PCI Express through ECAM (configuration space mapped as memory), as
-// described by a "pci-host-ecam-generic" device tree node. The firmware has
-// already assigned BAR addresses; legacy INTx interrupts are routed through
-// the node's interrupt-map.
+// PCI Express through ECAM (configuration space mapped as memory), as described by a
+// "pci-host-ecam-generic" device tree node, or by ACPI's MCFG table on a PC. The firmware has
+// already assigned BAR addresses. Interrupts: on Arm, legacy INTx, routed through the node's
+// interrupt-map; on a PC, message interrupts, which every PCI Express device has.
 
 namespace Kernel::PCI {
 
@@ -64,8 +64,11 @@ public:
         }
     }
 
-    // The GIC interrupt its INTx pin is wired to.
-    [[nodiscard]] Optional<u32> interrupt() const { return m_interrupt; }
+    // The interrupt to register a handler for and enable: the GIC interrupt its INTx pin is wired to,
+    // or on a PC, a vector for its message interrupts, set up the first time this is asked.
+    [[nodiscard]] Optional<u32> interrupt() const;
+    // Interrupts come by MSI-X, entry 0 (some devices have to be told so).
+    [[nodiscard]] bool uses_message_table() const;
 
 private:
     friend ErrorOr<void> initialize(DeviceTree::FlattenedDeviceTree const&);

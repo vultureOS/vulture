@@ -34,6 +34,15 @@
 
 namespace {
 
+void pause_briefly()
+{
+#if defined(__x86_64__)
+    asm volatile("pause");
+#else
+    asm volatile("yield");
+#endif
+}
+
 using System::Syscall;
 
 void pause_milliseconds(long milliseconds)
@@ -854,7 +863,7 @@ void* spin_until_told(void* argument)
 {
     auto* flag = static_cast<int volatile*>(argument);
     while (!*flag)
-        asm volatile("yield");
+        pause_briefly();
     return nullptr;
 }
 
@@ -882,7 +891,7 @@ void test_signals()
             return reinterpret_cast<void*>(1);
         pthread_sigmask(SIG_UNBLOCK, &set, nullptr);
         while (!stop)
-            asm volatile("yield");
+            pause_briefly();
         return nullptr;
     },
         nullptr);
@@ -974,11 +983,44 @@ void test_signals()
 // FP registers survive a handler that uses them, and fork.
 void clobber_floating_point(int)
 {
+#if defined(__x86_64__)
+    asm volatile("pxor %%xmm7, %%xmm7\n"
+                 "pxor %%xmm8, %%xmm8\n"
+                 "pcmpeqd %%xmm15, %%xmm15"
+        : : : "xmm7", "xmm8", "xmm15");
+#else
     asm volatile("fmov d16, xzr\n"
                  "fmov d8, xzr\n"
                  "movi v31.16b, #0xff"
         : : : "v8", "v16", "v31");
+#endif
     s_handled_signal = SIGUSR2;
+}
+
+// A raw system call, with `value` in a floating-point register across it, which it returns as `out`.
+long syscall_with_value_in_fp_register(Syscall number, unsigned long a0, unsigned long a1, unsigned long value, unsigned long& out)
+{
+#if defined(__x86_64__)
+    unsigned long result = static_cast<unsigned long>(number);
+    asm volatile("movq %[value], %%xmm7\n"
+                 "syscall\n"
+                 "movq %%xmm7, %[out]\n"
+        : [out] "=r"(out), "+a"(result)
+        : [value] "r"(value), "D"(a0), "S"(a1)
+        : "rcx", "r11", "xmm7", "memory");
+    return static_cast<long>(result);
+#else
+    register unsigned long x8 asm("x8") = static_cast<unsigned long>(number);
+    register unsigned long x0 asm("x0") = a0;
+    register unsigned long x1 asm("x1") = a1;
+    asm volatile("fmov d16, %[value]\n"
+                 "svc #0\n"
+                 "fmov %[out], d16\n"
+        : [out] "=r"(out), "+r"(x0)
+        : [value] "r"(value), "r"(x8), "r"(x1)
+        : "v16", "memory");
+    return static_cast<long>(x0);
+#endif
 }
 
 void test_floating_point_state()
@@ -986,36 +1028,19 @@ void test_floating_point_state()
     install(SIGUSR2, clobber_floating_point);
     unsigned long value = 0x1234'5678'9abc'def0;
     unsigned long out = 0;
-    {
-        register unsigned long x8 asm("x8") = static_cast<unsigned long>(Syscall::thread_kill);
-        register unsigned long x0 asm("x0") = static_cast<unsigned long>(gettid());
-        register unsigned long x1 asm("x1") = SIGUSR2;
-        s_handled_signal = 0;
-        asm volatile("fmov d16, %[value]\n"
-                     "svc #0\n"
-                     "fmov %[out], d16\n"
-            : [out] "=r"(out), "+r"(x0)
-            : [value] "r"(value), "r"(x8), "r"(x1)
-            : "v16", "memory");
-    }
+    s_handled_signal = 0;
+    (void)syscall_with_value_in_fp_register(Syscall::thread_kill, static_cast<unsigned long>(gettid()), SIGUSR2, value, out);
     CHECK(s_handled_signal == SIGUSR2);
     CHECK(out == value);
     install(SIGUSR2, SIG_DFL);
 
     // A raw fork, for what the kernel alone does.
     int status = in_child([&] {
-        register unsigned long x8 asm("x8") = static_cast<unsigned long>(Syscall::fork);
-        register unsigned long x0 asm("x0") = 0;
         unsigned long seen = 0;
-        asm volatile("fmov d16, %[value]\n"
-                     "svc #0\n"
-                     "fmov %[seen], d16\n"
-            : [seen] "=r"(seen), "+r"(x0)
-            : [value] "r"(value), "r"(x8)
-            : "v16", "memory");
-        if (x0 != 0) {
+        long const child = syscall_with_value_in_fp_register(Syscall::fork, 0, 0, value, seen);
+        if (child != 0) {
             int inner = 0;
-            waitpid(static_cast<pid_t>(x0), &inner, 0);
+            waitpid(static_cast<pid_t>(child), &inner, 0);
             return WIFEXITED(inner) ? WEXITSTATUS(inner) : 99;
         }
         _exit(seen == value ? 0 : 1);
@@ -1166,7 +1191,7 @@ void test_process_ends_with_threads()
     pid_t spinner = fork();
     if (spinner == 0) {
         for (;;)
-            asm volatile("yield");
+            pause_briefly();
     }
     pause_milliseconds(10);
     long started = now_microseconds();

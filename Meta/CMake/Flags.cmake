@@ -60,11 +60,18 @@ elseif(VULTURE_PART STREQUAL "userland")
         -O2
         -fstack-protector-strong
         -mstack-protector-guard=global
-        -mbranch-protection=pac-ret+bti
         -mno-omit-leaf-frame-pointer
-        -mno-outline-atomics
         -fno-unwind-tables
         -fno-asynchronous-unwind-tables)
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+        vulture_add_cxx_options(
+            -mbranch-protection=pac-ret+bti
+            -mno-outline-atomics)
+    else()
+        # All thread-local storage is allocated when a program starts, so there's no need for
+        # a function to look it up.
+        vulture_add_cxx_options(-ftls-model=initial-exec)
+    endif()
     include_directories(BEFORE SYSTEM ${VULTURE_SOURCE_ROOT}/Libraries/LibC)
 elseif(VULTURE_PART STREQUAL "target")
     # The kernel keeps frame pointers in every function, leaves included, so
@@ -76,12 +83,18 @@ elseif(VULTURE_PART STREQUAL "target")
         -fPIE
         -fstack-protector-strong
         -mstack-protector-guard=global
-        -mbranch-protection=pac-ret+b-key+bti
         -mgeneral-regs-only
         -mno-omit-leaf-frame-pointer
-        -mno-outline-atomics
         -fno-unwind-tables
         -fno-asynchronous-unwind-tables)
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+        vulture_add_cxx_options(
+            -mbranch-protection=pac-ret+b-key+bti
+            -mno-outline-atomics)
+    else()
+        # Interrupts run on the same stack, so nothing can be kept below the stack pointer.
+        vulture_add_cxx_options(-mno-red-zone)
+    endif()
     # A second flavor of the kernel, for tests (Meta/sanitized-kernel-test.sh): undefined behavior
     # and heap mistakes end in a panic. The checks go through functions, Kernel/Debug/Sanitizers.cpp,
     # rather than shadow memory at a fixed address.

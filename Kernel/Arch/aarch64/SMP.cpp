@@ -7,9 +7,11 @@
 #include <Kernel/Arch/SMP.h>
 #include <Kernel/Arch/aarch64/PSCI.h>
 #include <Kernel/Arch/aarch64/SystemRegisters.h>
+#include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
 #include <Kernel/Tasks/Processor.h>
+#include <LibDeviceTree/FlattenedDeviceTree.h>
 
 // A secondary processor starts in secondary_entry (Boot.S) with its MMU
 // off, so it runs at a physical address. To turn the MMU on underneath
@@ -102,6 +104,33 @@ ErrorOr<void> start_processor(u64 hardware_id, FlatPtr stack_top, SecondaryEntry
 
     auto entry_physical = memory_manager().physical_address_of_kernel_image(secondary_entry);
     return AArch64::PSCI::cpu_on(hardware_id, entry_physical.get(), slot_address.get());
+}
+
+size_t list_processors(DeviceTree::FlattenedDeviceTree const& device_tree, u64* hardware_ids, size_t capacity)
+{
+    // In /cpus, in device tree order.
+    size_t count = 0;
+    bool in_cpus = false;
+    auto result = device_tree.for_each_node([&](DeviceTree::Node const& node) {
+        if (node.depth == 1) {
+            if (in_cpus)
+                return DeviceTree::IterationDecision::Break;
+            in_cpus = node.name == "cpus"_sv;
+            return DeviceTree::IterationDecision::Continue;
+        }
+        if (!in_cpus || node.depth != 2)
+            return DeviceTree::IterationDecision::Continue;
+        auto device_type = device_tree.find_property(node, "device_type"_sv);
+        if (!device_type.has_value() || device_type->as_string() != "cpu"_sv)
+            return DeviceTree::IterationDecision::Continue;
+        auto reg = device_tree.reg(node, 0);
+        if (reg.has_value() && count < capacity)
+            hardware_ids[count++] = reg->address;
+        return DeviceTree::IterationDecision::Continue;
+    });
+    if (result.is_error())
+        dmesgln("SMP: unreadable device tree ({})", result.error());
+    return count;
 }
 
 void finish_starting_processors()

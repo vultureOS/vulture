@@ -11,6 +11,50 @@
  * could change them in between.
  */
 
+#if defined(__x86_64__)
+
+.text
+
+/* void ktest_fill_vector_registers(u64 seed): xmm<n> = { seed + n, ~(seed + n) } */
+.global ktest_fill_vector_registers
+.type ktest_fill_vector_registers, @function
+ktest_fill_vector_registers:
+    subq $16, %rsp
+.irp n, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+    leaq \n(%rdi), %rax
+    movq %rax, (%rsp)
+    notq %rax
+    movq %rax, 8(%rsp)
+    movdqu (%rsp), %xmm\n
+.endr
+    addq $16, %rsp
+    ret
+.size ktest_fill_vector_registers, . - ktest_fill_vector_registers
+
+/* u64 ktest_count_wrong_vector_registers(u64 seed): halves that differ */
+.global ktest_count_wrong_vector_registers
+.type ktest_count_wrong_vector_registers, @function
+ktest_count_wrong_vector_registers:
+    subq $16, %rsp
+    xorl %ecx, %ecx
+.irp n, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+    movdqu %xmm\n, (%rsp)
+    leaq \n(%rdi), %rax
+    leaq 1(%rcx), %rdx
+    cmpq %rax, (%rsp)
+    cmovneq %rdx, %rcx
+    notq %rax
+    leaq 1(%rcx), %rdx
+    cmpq %rax, 8(%rsp)
+    cmovneq %rdx, %rcx
+.endr
+    addq $16, %rsp
+    movq %rcx, %rax
+    ret
+.size ktest_count_wrong_vector_registers, . - ktest_count_wrong_vector_registers
+
+#else
+
 .text
 
 /* void ktest_fill_vector_registers(u64 seed): v<n> = { seed + n, ~(seed + n) } */
@@ -44,3 +88,5 @@ ktest_count_wrong_vector_registers:
     mov x0, x3
     ret
 .size ktest_count_wrong_vector_registers, . - ktest_count_wrong_vector_registers
+
+#endif

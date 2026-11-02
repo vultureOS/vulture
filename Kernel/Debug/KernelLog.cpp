@@ -7,7 +7,6 @@
 #include <Kernel/Arch/CPU.h>
 #include <Kernel/Console/TextConsole.h>
 #include <Kernel/Debug/KernelLog.h>
-#include <Kernel/Devices/Serial/PL011.h>
 
 namespace Kernel {
 
@@ -16,7 +15,7 @@ void KernelLog::initialize()
     m_start_counter = Arch::monotonic_counter();
 }
 
-void KernelLog::attach_serial(PL011* serial)
+void KernelLog::attach_serial(BootSerial* serial)
 {
     m_serial = serial;
 }

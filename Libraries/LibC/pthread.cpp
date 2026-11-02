@@ -39,7 +39,11 @@ constexpr size_t page_size = 4096;
 // macOS's for threads other than the main one.
 constexpr size_t default_stack_size = 512 * 1024;
 // The main thread's stack, as the kernel sets it up.
+#if defined(__x86_64__)
+constexpr FlatPtr main_stack_top = 0x0000'7fff'ffff'0000;
+#else
 constexpr FlatPtr main_stack_top = 0x0000'8000'0000'0000;
+#endif
 constexpr size_t main_stack_size = 8 * 1024 * 1024;
 
 enum ThreadState : unsigned {
@@ -61,7 +65,11 @@ size_t align_up(size_t value, size_t alignment)
 
 void pause_processor()
 {
+#if defined(__x86_64__)
+    asm volatile("pause");
+#else
     asm volatile("yield");
+#endif
 }
 
 }
@@ -292,7 +300,8 @@ int pthread_create(pthread_t* result, pthread_attr_t const* attributes, void* (*
 
     // Low to high: guard, stack, TLS block, record.
     size_t below = given_stack ? 0 : align_up(guard_size, page_size) + align_up(stack_size, page_size);
-    size_t total = align_up(below + alignment + image->size + 16 + sizeof(vulture_pthread), page_size);
+    size_t const storage = System::thread_storage_size(image->size);
+    size_t total = align_up(below + alignment + storage + 16 + sizeof(vulture_pthread), page_size);
     long mapped = System::syscall(Syscall::mmap, 0, total, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, static_cast<unsigned long>(-1), 0);
     if (mapped < 0)
         return EAGAIN;
@@ -301,10 +310,8 @@ int pthread_create(pthread_t* result, pthread_attr_t const* attributes, void* (*
         System::syscall(Syscall::mprotect, static_cast<unsigned long>(mapped), align_up(guard_size, page_size), PROT_NONE);
 
     auto block = align_up(reinterpret_cast<FlatPtr>(mapping + below), alignment);
-    memcpy(reinterpret_cast<void*>(block), image->data, image->size);
-    auto* control = reinterpret_cast<System::ThreadControlBlock*>(block);
-    auto* thread = reinterpret_cast<pthread_t>(align_up(block + image->size, 16));
-    control->image = image;
+    auto* control = System::initialize_thread_storage(reinterpret_cast<void*>(block), *image);
+    auto* thread = reinterpret_cast<pthread_t>(align_up(block + storage, 16));
     control->thread = thread;
 
     auto stack_top = given_stack ? (reinterpret_cast<FlatPtr>(given_stack) + stack_size) & ~static_cast<FlatPtr>(15) : reinterpret_cast<FlatPtr>(mapping + below);

@@ -90,6 +90,7 @@ private:
     FlatPtr m_common { 0 };
     FlatPtr m_notify { 0 };
     FlatPtr m_isr { 0 };
+    u16 m_message_vector { 0xffff };
     FlatPtr m_device_config { 0 };
     u32 m_notify_multiplier { 0 };
 };

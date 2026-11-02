@@ -174,6 +174,7 @@ ErrorOr<KernelStack> MemoryManager::allocate_kernel_stack()
             return result.release_error();
         }
     }
+    Arch::finish_remapping_kernel_range(stack.bottom, stack.top - stack.bottom);
     return stack;
 }
 

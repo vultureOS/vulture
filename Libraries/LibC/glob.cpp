@@ -252,6 +252,8 @@ int glob(char const* pattern, int flags, int (*error_function)(char const*, int)
 {
     Results results;
     size_t offsets = (flags & GLOB_DOOFFS) ? result->gl_offs : 0;
+    // globfree() goes by this, and without the flag nobody was asked to set it.
+    result->gl_offs = offsets;
     if (flags & GLOB_APPEND) {
         results.paths = result->gl_pathv;
         results.count = result->gl_pathc + offsets;

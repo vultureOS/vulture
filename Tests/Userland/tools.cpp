@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "NativeMachine.h"
 #include "Test.h"
 #include <stdio.h>
 #include <string.h>
@@ -111,7 +112,7 @@ Case const s_cases[] = {
 
     // The system.
     { "uname", "vultureOS\n", 0 },
-    { "uname -m", "arm64\n", 0 },
+    { "uname -m", NATIVE_MACHINE "\n", 0 },
     { "id -u; id -un; whoami; id -g; groups", "0\nroot\nroot\n0\nwheel\n", 0 },
     { "id", "uid=0(root) gid=0(wheel) groups=0(wheel)\n", 0 },
     { "env -i A=1 B=2 /usr/bin/env", "A=1\nB=2\n", 0 },

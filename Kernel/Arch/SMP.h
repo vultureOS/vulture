@@ -8,6 +8,10 @@
 
 #include <LibBase/Error.h>
 
+namespace DeviceTree {
+class FlattenedDeviceTree;
+}
+
 namespace Kernel::Arch {
 
 using SecondaryEntry = void (*)(void* argument);
@@ -20,5 +24,8 @@ ErrorOr<void> start_processor(u64 hardware_id, FlatPtr stack_top, SecondaryEntry
 // Releases what start_processor() needed, once every processor it started
 // is running kernel code.
 void finish_starting_processors();
+
+// The hardware IDs of every processor in the machine, as the firmware lists them. Returns how many.
+[[nodiscard]] size_t list_processors(DeviceTree::FlattenedDeviceTree const&, u64* hardware_ids, size_t capacity);
 
 }

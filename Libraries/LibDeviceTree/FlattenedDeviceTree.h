@@ -53,6 +53,8 @@ enum class IterationDecision {
 class FlattenedDeviceTree {
 public:
     [[nodiscard]] static ErrorOr<FlattenedDeviceTree> parse(ReadonlyBytes blob);
+    // A tree with nothing in it, for a machine that doesn't have one.
+    [[nodiscard]] static FlattenedDeviceTree empty() { return FlattenedDeviceTree {}; }
 
     [[nodiscard]] size_t total_size() const { return m_blob.size(); }
 

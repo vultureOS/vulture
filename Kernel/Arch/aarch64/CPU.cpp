@@ -9,6 +9,21 @@
 
 namespace Kernel::Arch {
 
+StringView machine_name()
+{
+    return "arm64"_sv;
+}
+
+StringView architecture_name()
+{
+    return "aarch64"_sv;
+}
+
+bool is_emulated_in_software()
+{
+    return false;
+}
+
 void halt()
 {
     asm volatile("msr daifset, #0xf");

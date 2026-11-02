@@ -5,8 +5,8 @@
 #
 
 add_executable(VultureBoot
-    Arch/aarch64/Handoff.cpp
-    Arch/aarch64/PageTableBuilder.cpp
+    Arch/${CMAKE_SYSTEM_PROCESSOR}/Handoff.cpp
+    Arch/${CMAKE_SYSTEM_PROCESSOR}/PageTableBuilder.cpp
     BootVolume.cpp
     Console.cpp
     KernelLoader.cpp

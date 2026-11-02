@@ -78,18 +78,29 @@ struct vulture_siginfo {
 #define CLD_CONTINUED 6
 
 // Pushed on the user stack when a handler runs; sigreturn restores from it.
-// x19 holds its address when the handler is called (the restorer passes it
-// back), and it is also the handler's third argument.
+// A callee-saved register (x19, or rbx) holds its address when the handler is
+// called (the restorer passes it back), and it is also the handler's third
+// argument.
 struct vulture_signal_frame {
+#if defined(__x86_64__)
+    unsigned long long rax, rbx, rcx, rdx, rsi, rdi, rbp;
+    unsigned long long r8, r9, r10, r11, r12, r13, r14, r15;
+#else
     unsigned long long x[31];
+#endif
     unsigned long long sp;
     unsigned long long pc;
     unsigned long long pstate;
     unsigned long long saved_mask;
     unsigned long long magic;
     struct vulture_siginfo info;
+#if defined(__x86_64__)
+    // As fxsave64 writes it.
+    unsigned long long fp_state[64];
+#else
     // q0-q31, FPCR and FPSR: a handler may use them freely.
     unsigned long long fp_state[66];
+#endif
 };
 
 // sigaltstack(): another stack for handlers installed with SA_ONSTACK, for

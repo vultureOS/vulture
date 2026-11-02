@@ -8,6 +8,8 @@
 
 #if defined(__aarch64__)
 #include <Kernel/Arch/aarch64/ThreadContext.h>
+#elif defined(__x86_64__)
+#include <Kernel/Arch/x86_64/ThreadContext.h>
 #else
 #error "Unsupported architecture"
 #endif

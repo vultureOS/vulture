@@ -9,7 +9,7 @@
  * LibSystem its numbers from this list: SYSCALL(name, argument count).
  * Numbers are positions in the list, so only ever append.
  *
- * Calling convention (AArch64): SVC #0 with the number in x8 and arguments
+ * Calling convention (see Documentation/Syscalls.md): on AArch64, SVC #0 with the number in x8 and arguments
  * in x0-x5; the result comes back in x0, a negative errno on failure.
  */
 
@@ -116,3 +116,4 @@ SYSCALL(getsockopt, 5)
 SYSCALL(shutdown, 2)
 SYSCALL(sandbox_apply, 2)
 SYSCALL(sandbox_check, 3)
+SYSCALL(set_thread_pointer, 1)

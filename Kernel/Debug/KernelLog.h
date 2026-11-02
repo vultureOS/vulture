@@ -6,12 +6,13 @@
 
 #pragma once
 
+#include <Kernel/Devices/Serial/BootSerial.h>
+
 #include <Kernel/Locking/SpinLock.h>
 #include <LibBase/Format.h>
 
 namespace Kernel {
 
-class PL011;
 class TextConsole;
 
 // Kernel messages: always to the serial port, and to the screen when a
@@ -21,7 +22,7 @@ class TextConsole;
 class KernelLog final : public FormatSink {
 public:
     void initialize();
-    void attach_serial(PL011*);
+    void attach_serial(BootSerial*);
     void attach_console(TextConsole*);
 
     void write(StringView) override;
@@ -36,7 +37,7 @@ public:
     void enter_panic_mode() { m_panic_mode.store(true); }
 
 private:
-    PL011* m_serial { nullptr };
+    BootSerial* m_serial { nullptr };
     TextConsole* m_console { nullptr };
     u64 m_start_counter { 0 };
     SpinLock m_lock;

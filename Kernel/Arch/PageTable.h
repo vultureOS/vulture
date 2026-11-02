@@ -36,8 +36,9 @@ public:
     // changing an existing mapping is an error.
     ErrorOr<void> map(FlatPtr virtual_address, PhysicalAddress, size_t size, MemoryType, Protection);
 
-    // Removes page (not block) mappings and flushes them from every
-    // processor's TLB.
+    // Removes page (not block) mappings, and flushes them from this processor's TLB, and every other's
+    // by the time finish_remapping() has been called for these addresses. It may be called with
+    // interrupts masked and locks held, where another processor can't be made to do anything.
     void unmap(FlatPtr virtual_address, size_t size);
 
     [[nodiscard]] Optional<PhysicalAddress> translate(FlatPtr virtual_address) const;
@@ -69,6 +70,10 @@ private:
     PhysicalAddress m_root;
     size_t m_table_pages { 0 };
 };
+
+// Addresses the kernel unmapped some time ago have now been mapped again: no processor may still be
+// using what they were. With interrupts enabled.
+void finish_remapping_kernel_range(FlatPtr virtual_address, size_t size);
 
 // Makes `table` this processor's kernel (upper-half) translation table.
 void activate_kernel_page_table(PageTable const&);
