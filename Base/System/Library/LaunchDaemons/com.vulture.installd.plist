@@ -1,0 +1,8 @@
+{
+    "Label" : "com.vulture.installd",
+    "ProgramArguments" : [ "/usr/libexec/installd" ],
+    "MachServices" : { "com.vulture.installd" : true },
+    "KeepAlive" : true,
+    "RunAtLoad" : true,
+    "ThrottleInterval" : 1
+}

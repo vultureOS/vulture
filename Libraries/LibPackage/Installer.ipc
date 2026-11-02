@@ -1,0 +1,18 @@
+// The installer (com.vulture.installd): what puts software on the system, for those who may.
+endpoint Installer
+{
+    // What there is: JSON, { "available" : [...], "installed" : [...], "problem" : "..." }.
+    catalog() => (String json)
+    // Asks the repositories again. The answer comes as an event.
+    refresh() =|
+    install(String name) =|
+    remove(String name) =|
+    subscribe(Port events) =|
+}
+
+endpoint InstallerEvents
+{
+    changed() =|
+    progress(String name, u32 percent) =|
+    finished(String name, bool succeeded, String message) =|
+}

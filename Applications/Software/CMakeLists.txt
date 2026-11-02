@@ -10,4 +10,4 @@ vulture_add_application(Software
     IDENTIFIER com.vulture.Software
     ICON Software
     KIND "Applications"
-    LIBRARIES LibDesktop)
+    LIBRARIES LibDesktop LibPackage)
