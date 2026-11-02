@@ -25,7 +25,7 @@ See [Architecture](Architecture.md) for the design behind these steps.
 | **M11 Apps + audio** | ✅ 2026-11-02 | Terminal (LibVT), Text Editor, Viewer, Calculator, Monitor, Console, Disks, Archiver (tar and gzip), Software; virtio-sound, LibAudio (mixer, sounds made from sine waves, WAV), AudioServer, `afplay`; alert, notification, trash, login and volume sounds, a Sound pane and a Quick Settings slider | Each app's UI test passes; sound plays through QEMU. Verified by `ninja check`: `test-ui` (a walkthrough of every application at 2x, 189 steps, real keyboard and pointer, golden screenshots) and `test-sound` (a 440 Hz tone sent through the server is found, 1.2 s of it, in what QEMU recorded the device playing) |
 | **M12 Network** | ✅ 2026-11-02 | virtio-net; ARP, IPv4, ICMP, UDP and TCP (window scaling, Reno, fast retransmit, RFC 6298 timers); BSD sockets with macOS's structures; `ipconfigd` (DHCP); a resolver (`getaddrinfo`, `/etc/hosts`, CNAMEs); LibCrypto (AES-GCM, in hardware where it can be, ChaCha20-Poly1305, HKDF, X25519, Ed25519, RSA and ECDSA checks on P-256 and P-384); LibTLS (TLS 1.3 client, X.509 chains); LibHTTP; `curl`, `ping`, `host`, `ifconfig`, `netstat`, `nc`, `shasum`; signed packages (`pkg`, `installd`, Software's Get and Remove), Settings' Network pane | `curl https://example.com` works; crypto test vectors pass; a package installs from a test repo. Verified by `ninja check` (`test-host`: RFC vectors and OpenSSL's answers; `test-userland`: `sockets`, with 4 MiB through one packet in 23 lost, and `crypto`; `test-network`: 48 checks against this machine's servers, then Software's Get, run and Remove with the real pointer) and `ninja test-internet` (`curl https://example.com`, over the real internet, certificate checked) |
 | **M13 Hardening** | ✅ 2026-11-02 | W^X, ASLR + KASLR, PAN/PXN/UXN, PAC/BTI, stack protector, kernel UBSan + KASAN-style shadow, sandbox profiles, privacy prompts, code signing at exec, sealed System volume, memory compressor | Mitigation suite passes. Verified by `ninja check` (`test-userland`: `hardening`, `sandbox`, `privacy`, `compressor`; `test-hardening`: each deliberate attack on the kernel ends in the panic that catches it, each change to a sealed file is caught, BTI under emulation as this host has none; `test-sanitized-kernel`: what is planted is found, and nothing else in the kernel's tests or userland's; `test-compressor`: half as much memory again as a 1 GiB and a 512 MiB machine have, every byte checked; `test-network`: a package's first try at Documents asks, and the answer is kept) |
-| **M14 x86_64 + real hardware** | | `Arch/x86_64`, ACPI + AML subset, BOOTX64.EFI; AHCI, xHCI + USB HID/storage, e1000e, Intel HDA, PS/2; Raspberry Pi 4/5; Installer | One image boots in QEMU x86_64, on a real PC and on a Pi |
+| **M14 x86_64 + real hardware** | ✅ in QEMU, 2026-11-02; real hardware untested | `Arch/x86_64`, ACPI + AML subset, BOOTX64.EFI; AHCI, xHCI + USB HID/storage, e1000e, Intel HDA, PS/2; Raspberry Pi 4/5; Installer | One image boots in QEMU x86_64, on a real PC and on a Pi. **Verified in QEMU, on both architectures and QEMU's Pi 4; never run on a real PC or a real Pi, or on any Pi 5, as none were to hand.** Verified by `ninja check` (`test-hardware`: every driver through QEMU's model of the device, the Installer onto a blank disk that then boots alone, `fsck` clean; `test-raspberry-pi`: see [Raspberry Pi](RaspberryPi.md)) and, on x86_64, `test-kernel`, `test-userland` (45 programs) and the desktop's walkthrough against AArch64's golden screenshots; one disk boots both. A Pi has no USB, network or sound yet: at a real one, the login window would be as far as it gets without a serial console |
 
 Rules that apply from M1 onward:
 
@@ -65,6 +65,21 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on.
 
 ## Findings so far
 
+- **M14:** A second architecture checks the first. `glob()` had left a field uninitialized, which AArch64's
+  registers happened to hide; a `va_list` taken by reference in `scanf` only worked there too. Kernel stacks freed with
+  interrupts masked could be reused with a stale TLB entry on another processor, as x86 has no broadcast
+  invalidation: AArch64's `tlbi ...is` had been doing that for free. The two architectures' desktops matched each
+  other's golden screenshots, 23 of 23, with no change to the tolerance. Real devices' models each had a story: QEMU's
+  HD Audio stops answering after the first verb unless the response interrupt is on, whether it's used or not; PS/2's
+  configuration byte, read with the ports disabled, says they're disabled, and writing that back keeps them so; QEMU's
+  `ramfb` offers a 2048×2048 mode, which is why the loader now wants a screen's shape. The Installer found that
+  `fwrite` copied a byte at a time through a 1 KiB buffer, so that a 4 KiB block reached the disk as four
+  read-modify-writes, at 0.5 MB/s; large transfers now go straight through, for everyone. Its confirmation found what
+  should have been found long ago: Escape chose an alert's last button, which for "Save, Cancel, Don't Save" was
+  "Don't Save", and in the Installer would have been "Erase and Install". It's now only ever the one called Cancel. On the
+  Pi, `.bss` directly after the image is the payload, on the machine that loads it where it was linked; the kernel, the
+  scheduler and every userland test then ran unchanged on a GICv2 and a processor with no PAN, PAC or BTI.
+  Nothing here says anything about a real machine's firmware, caches or silicon: see the row above.
 - **M0:** With `-machine virt,acpi=off` the firmware publishes a device tree
   (no ACPI tables), as planned. `virtio-gpu-pci` only offers a blit-only GOP,
   so `Meta/run.sh` uses `ramfb`, which gives a linear BGRX8 framebuffer for

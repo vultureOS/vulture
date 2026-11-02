@@ -18,7 +18,7 @@
 |---|---|
 | Language | C++23 (clang), freestanding, no exceptions, no RTTI, plus a thin layer of assembly |
 | Toolchain | Homebrew `llvm@22` (clang), `lld@22` (ld.lld, lld-link), CMake + Ninja, QEMU + edk2 |
-| First architecture | AArch64 on QEMU `virt` with HVF; x86_64 follows in M14 |
+| Architectures | AArch64 first, on QEMU `virt` with HVF; x86_64 since M14. A build directory holds one: `cmake -S . -B build-x86_64 -G Ninja -DVULTURE_ARCH=x86_64` |
 | Look | macOS Sonoma/Sequoia; see [Design System](DesignSystem.md) |
 | Assets | Inter (SIL OFL) as the system font, JetBrains Mono (OFL) for Terminal; all icons, wallpapers and sounds original |
 
@@ -78,6 +78,8 @@ ExternalProject over the same source tree and adds these targets:
 | `ninja -C build test-sound` | Records what the sound device plays, and looks for a tone sent through the sound server in it (`Meta/sound-test.sh`) |
 | `ninja -C build test-network` | DHCP, DNS, HTTP, TLS (each cipher and group, and each way a certificate can be wrong), signed packages by `pkg` and by Software, against servers on this machine (`Meta/network-test.sh`) |
 | `ninja -C build test-hardening` | Each deliberate attack on the kernel ends in the panic that catches it; each change to a sealed file or a signed program is refused; PAC and BTI under emulation (`Meta/hardening-test.sh`) |
+| `ninja -C build test-hardware` | Devices real machines have, through the drivers that use them, with no virtio: AHCI disks, a USB stick behind a hub, USB and PS/2 input, e1000e, Intel HD Audio, the firmware's framebuffer; and the Installer, from its window onto a blank disk, which then boots alone (`Meta/hardware-test.sh`, either architecture) |
+| `ninja -C build test-raspberry-pi` | QEMU's Raspberry Pi 4, from `kernel8.img`: the kernel's and userland's tests, a serial login, the login window against a golden screenshot, and the SD card across a restart (`Meta/raspberry-pi-test.sh`). AArch64 builds only |
 | `ninja -C build test-compressor` | Programs using half as much memory again as a 1 GiB and a 512 MiB machine have, every byte checked; and then more than will compress, which ends the biggest one and nothing else (`Meta/compressor-test.sh`) |
 | `ninja -C build test-sanitized-kernel` | The kernel built with UBSan and KASAN-style heap checks: these catch what is planted, and find nothing in the kernel's tests or userland's (`Meta/sanitized-kernel-test.sh`) |
 | `ninja -C build check` | All of the above tests |
@@ -91,7 +93,14 @@ are installed, and takes ninja targets as arguments (`--check` adds `check`).
 `Meta/run.sh` also takes `--boot-args` (the kernel command line, for example
 `-v` for a verbose boot), `--memory` (how much the machine has) and, with `--headless`, `--screenshot FILE` to save
 the screen as PNG and `--wait-for-exit` to require that the guest powers
-itself off.
+itself off. `--real-devices` boots with what real machines have instead of virtio, `--image FILE` from a whole
+disk, and `--raspberry-pi` on QEMU's Pi 4.
+
+`Meta/make-universal-image.sh` makes one disk that starts both AArch64 and x86_64 machines: the firmware of each
+finds its own loader on the EFI System Partition, the loader its own kernel (`vulture.<arch>`, with
+`vulture.bootarchive.<arch>`), and the kernel its own vultureFS partition, by what's in
+`System/Library/CoreServices/Architecture`. `Meta/make-raspberry-pi-image.sh` makes one for a Pi: see
+[Raspberry Pi](RaspberryPi.md).
 
 Kernel command line words:
 
@@ -130,7 +139,7 @@ header dependency tracking.
  ─────────────────────────────── syscalls (SVC) + Mach-style ports ───────────────────────────────
  Kernel       Hybrid (XNU-style): monolithic core for speed + port IPC for services
               Memory · Tasks/Scheduler · VFS (vultureFS, FAT32, tmpfs, devfs) · Net (TCP/IP) · Security · DeviceKit drivers
- Arch         aarch64 (EL1, GICv3, generic timer, PSCI) · x86_64 later
+ Arch         aarch64 (EL1, GICv2/v3, generic timer, PSCI or spin table) · x86_64 (APIC, ACPI)
  Boot         VultureBoot (our UEFI loader) → BootInfo → kernel
 ```
 
@@ -141,9 +150,10 @@ as a stub.
 
 ```
 Meta/          build system (CMake parts, toolchains), run.sh, CI
-Tools/         host C++ tools: mkarchive (M4); mkvfs, fsck.vfs, mkimage (M5); ipcc, imgdiff, generators later
-Boot/          VultureBoot UEFI loader: Arch/aarch64 (page tables, handoff), UEFI definitions
-Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page tables, GICv3, timer, PSCI, SMP)
+Tools/         host C++ tools: mkarchive (M4); mkvfs, fsck.vfs, mkimage (M5); ipcc, imgdiff, mkpiimage, mkfdt; generators
+Boot/          VultureBoot UEFI loader: Arch/<arch> (page tables, handoff), UEFI definitions; RaspberryPi (kernel8.img's stub)
+Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page tables, GICv2 and v3, timer, PSCI, spin table, SMP;
+               x86_64: entry, IDT, GDT, page tables, APIC, ACPI power, SMP) · Firmware (ACPI)
                Console (framebuffer, font, boot screen) · Debug (log, panic, symbols) · Devices/Serial
                Interrupts · Locking · Memory (buddy, physical memory, heap, memory manager)
                Tasks (Processor, Thread, Scheduler, Process) · Syscalls · Bus/PCI · Devices (VirtIO, Storage)
@@ -154,7 +164,7 @@ Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem (libSystem
                LibGfx (drawing) · LibText (fonts) · LibImage · LibCompress · LibWindow (windows, for programs)
                LibUI (pranaUI) … later
 Services/      vlaunchd (process 1, M6); logd · notifyd · configd · clipboardd (M7); WindowServer (M8); Dock …  (M10+)
-Applications/  Files · Terminal · Text Editor · Preview · Settings · WidgetGallery …              (M9+)
+Applications/  Files · Terminal · Text Editor · Viewer · Settings · Installer · WidgetGallery …   (M9+)
 Utilities/     vsh and the command-line tools (bin/), login and accounts                               (M6)
 Base/          root filesystem skeleton, themes, fonts, icons, wallpapers, sounds                    (M5+)
 Tests/         host unit tests, kernel tests, userland suites (Userland; posix.cpp is the POSIX subset),
@@ -416,6 +426,24 @@ macOS-style at the top, real Unix underneath:
   waiting carries on. Statistics are in `vm.compressor.*`, and in Monitor. Limits: a page shared
   with another process isn't compressed, nor are private copies of file pages, and the file
   cache doesn't give up memory.
+- **x86_64 (M14).** The same kernel above `Kernel/Arch`. Below it: a trampoline for starting processors from real
+  mode, in four low pages the loader sets aside; x2APIC where there is one, the local APIC's one-shot timer calibrated
+  against a TSC that's calibrated by HPET or the PIT; MSI vectors for devices (MSI-X entry 0 where there's no MSI);
+  SMEP and SMAP where AArch64 has PAN and PXN, with no equivalent of PAC or BTI; `%gs` for the processor area. ACPI
+  finds the rest (`Firmware/ACPI`): MADT, MCFG, HPET, FADT. `LibACPI/AML` walks AML without running it, for `_S5_`
+  and plain `_PRT`s; a `_PRT` computed by a method isn't understood, so devices without MSI on such a machine get no
+  interrupts. Programs: TLS variant 2 by way of `set_thread_pointer`, and an `-ftls-model=initial-exec` build.
+- **Real devices (M14).** AHCI (`Devices/Storage/AHCIDevice`; 64-bit controllers only in full); e1000e and its relatives
+  (`Devices/Net/E1000`; tested on the 82574L, with others listed by ID and untested, as I217 and I219 have a PHY to wake);
+  Intel HD Audio (`Devices/Audio/IntelHDA`: walks the codec to a DAC with an output); xHCI (`Devices/USB/XHCI`) with hubs,
+  HID keyboards and pointers, and bulk-only SCSI disks; PS/2 on x86 (`Devices/Input/PS2`); 16550 serial; the firmware's
+  framebuffer when there's no GPU to drive (`Devices/Graphics/FirmwareDisplay`: a shadow in memory and a pointer drawn
+  in software); and a Raspberry Pi's SD card. Each is tested through QEMU's model of it, which is not the hardware: see
+  the Roadmap for what real machines have and haven't had the chance to show.
+- **Installer (M14).** `Applications/Installer` asks; `installd`, which runs as root, checks that the disk isn't in use and
+  runs `/usr/libexec/vinstall`, which does as `mkimage` does (the same code, from `Tools/vfs`) on the machine itself: a GPT,
+  the EFI System Partition this system started from, and a vultureFS volume from the boot archive that's on it. The seal
+  goes with the archive, so what's installed is as verifiable as what it came from.
 - **Debugging.** Serial log, embedded symbol table, symbolized backtraces
   (continuing through exceptions via a frame record in each trap frame),
   `VERIFY`, QEMU's GDB stub (`Meta/run.sh --gdb`), and the `ktest` boot mode.

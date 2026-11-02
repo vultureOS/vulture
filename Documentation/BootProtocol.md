@@ -2,7 +2,7 @@
 
 How VultureBoot starts the kernel. Implemented in M1: `Boot/` is the loader,
 `Kernel/API/BootInfo.h` is the contract, and `Kernel/Arch/aarch64/Boot.S` is
-the kernel's side of the handoff.
+the kernel's side of the handoff. x86_64 and the Raspberry Pi are at the end.
 
 ## Firmware and loader
 
@@ -34,6 +34,9 @@ the kernel's side of the handoff.
 | `\System\Library\Kernels\vulture` | The kernel: ELF64, AArch64, `ET_EXEC`, linked for the upper half | yes |
 | `\System\Library\Kernels\vulture.bootarchive` | Boot archive: the root filesystem as a ustar file, mounted read-only at `/` | no (without it, no userland starts) |
 | `\System\Library\Kernels\boot-args` | Kernel command line as plain text, like macOS's `boot-args` | no |
+
+On a disk for more than one kind of machine, `\EFI\BOOT\BOOTX64.EFI` is there too, and each loader first tries
+`vulture.<arch>` and `vulture.bootarchive.<arch>`: `aarch64` or `x86_64`.
 
 `Meta/run.sh --boot-args "..."` writes the `boot-args` file.
 
@@ -126,26 +129,28 @@ copied code.
 - The kernel then turns off lower-half translation (TCR_EL1.EPD0), so null
   and other low addresses fault.
 
-## `BootInfo` (version 1)
+## `BootInfo` (version 3)
 
 All fields are fixed-width, because the PE loader and the ELF kernel must lay
-the structure out identically; `static_assert(sizeof(BootInfo) == 496)` pins
+the structure out identically; `static_assert(sizeof(BootInfo) == 512)` pins
 it. Addresses are physical unless named otherwise.
 
 | Field | Meaning |
 |---|---|
-| `magic`, `version`, `size` | `"VBOOTINF"`, 1, 496; the kernel halts on a mismatch |
+| `magic`, `version`, `size` | `"VBOOTINF"`, 3, 512; the kernel halts on a mismatch |
 | `memory_map`, `memory_map_entries` | The `MemoryRegion` array (base, length, type) |
 | `kernel_image`, `kernel_virtual_base`, `kernel_slide` | Where the segments are, the lowest segment's address, and how far that is from the address it was linked at. The loader chooses the slide from the firmware's random numbers, and applies the kernel's relative relocations; the boot word `nokaslr` makes it 0 |
 | `kernel_file` | The ELF file, for symbolizing backtraces |
 | `boot_archive` | Empty when there is none |
 | `device_tree` | The loader's copy; empty when the firmware has none |
 | `acpi_rsdp` | 0 when there is none |
-| `uefi_system_table` | For runtime services later |
+| `uefi_system_table` | For runtime services later; 0 on a Raspberry Pi |
+| `low_memory` | Four pages below 1 MiB, for starting processors on x86_64; 0 elsewhere |
 | `framebuffer` | Base, size, width, height, pitch, format (`None` without a linear framebuffer) |
-| `serial` | Base and type (`PL011`, or `None`) |
+| `serial` | Base and type (`PL011`; `UART16550`, whose base is an I/O port; or `None`) |
 | `entropy_size`, `entropy` | Up to 64 random bytes (for KASLR in M13) |
-| `command_line` | Null-terminated contents of `boot-args`, at most 255 characters |
+| `storage_clock_hz` | What drives the SD controller, if only the firmware knows; otherwise 0 |
+| `command_line` | Null-terminated contents of `boot-args`, at most 247 characters |
 
 ## Kernel command line
 
@@ -160,3 +165,31 @@ it. Addresses are physical unless named otherwise.
 | `nocodesign` | Run anything, signed or not |
 | `crashtest`, `persisttest` | Start vlaunchd's storage tests (see `Meta/storage-test.sh`) |
 | `fault=KIND` | End the boot with a deliberate failure, to test crash reporting: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (a panic in a timer interrupt) or `processor` (a panic on processor 1) |
+
+## x86_64
+
+The same loader, as `\EFI\BOOT\BOOTX64.EFI`, and the same `BootInfo`; these differ:
+
+- It runs in long mode with the firmware's tables, and builds one set of its own for both halves
+  (`Boot/Arch/x86_64`). The direct map is at `0xffff'8000'0000'0000`.
+- The serial port is assumed to be the 16550 at I/O port `0x3f8`. If it isn't there, the kernel finds out.
+- It sets aside four pages below 1 MiB as `LowMemory`, for the trampoline other processors start in.
+- There's no device tree: the kernel gets the machine from ACPI, through `acpi_rsdp`.
+- It picks the largest graphics mode of a screen's shape (between 6:5 and 12:5), as QEMU's `ramfb` also offers a large square.
+- The kernel starts with interrupts off, with `rdi` = the address of `BootInfo` in the direct map.
+
+## Raspberry Pi
+
+There's no UEFI, so no loader: the firmware loads `kernel8.img` and jumps to it. That file starts with `Boot/RaspberryPi`,
+a stub that does the loader's job with what's there instead. See [Raspberry Pi](RaspberryPi.md) for the rest.
+
+| Here | On a Pi |
+|---|---|
+| The firmware loads the kernel from a file | It's in `kernel8.img`, after the stub, where the firmware put it: `kernel_file` and `boot_archive` point there |
+| `GetMemoryMap` | `/memory` in the device tree, less `/memreserve/` entries, `/reserved-memory`, the first page (where other processors wait) and the framebuffer |
+| GOP | The firmware's mailbox, tags `0x48003` and on. The memory is the video core's, so it's mapped non-cacheable |
+| `EFI_RNG_PROTOCOL` | `/chosen`'s `rng-seed` and `kaslr-seed`, and the RNG200 |
+| `boot-args` | `/chosen/bootargs`: `cmdline.txt`, after what the firmware adds itself. If it's too long the start goes |
+| Starts at EL1 | Starts at EL2, and comes down |
+
+It allocates from the first 1 GiB, which is all it maps as memory, and hands over in the same way, by the same code.

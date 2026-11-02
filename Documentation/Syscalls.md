@@ -14,6 +14,12 @@ its dispatcher and LibSystem its numbers from it, so they cannot disagree.
 
 Numbers are positions in `Syscalls.def`: only ever append to it.
 
+## Calling convention (x86_64)
+
+- `syscall`, with the call number in `rax` and up to six arguments in `rdi`, `rsi`, `rdx`, `r10`, `r8` and `r9`.
+- The result comes back in `rax`, in the same form. `rcx` and `r11` are overwritten, as `syscall` does that;
+  every other register is preserved.
+
 ## Rules the kernel keeps
 
 - **User pointers are checked.** An address outside user space, or memory
@@ -76,7 +82,8 @@ Numbers are positions in `Syscalls.def`: only ever append to it.
 | `setsockopt`, `getsockopt` | fd, level, name, value*, size(*) | `SO_REUSEADDR`, `SO_BROADCAST`, `SO_RCVTIMEO`, `SO_SNDTIMEO`, `SO_ERROR`, `SO_NOSIGPIPE`, `TCP_NODELAY`, `IP_TTL`, `IP_BOUND_IF` |
 | `shutdown` | fd, how | |
 | `sched_yield`, `clock_gettime`, `nanosleep` | | |
-| `uname`, `getrandom`, `sysctl` | | `sysctl` by name: `kern.*` (including `kern.proc.all`, every process), `hw.*`, `vfs.mounts`, `security.*` (`seal.active`, `code.enforced`, and for root `code.trust`, `code.distrust`, `process.third-party`), `vm.compressor.*` (`pages`, `pool_bytes`, `stored_bytes`, `compressions`, `decompressions`, `zero_pages`, `rejected`, and for root `sweep`, which compresses the calling process's memory now) |
+| `uname`, `getrandom`, `sysctl` | | `sysctl` by name: `kern.*` (including `kern.proc.all`, every process), `hw.*`, `vfs.mounts`, `security.*` (`seal.active`, `code.enforced`, and for root `code.trust`, `code.distrust`, `process.third-party`), `vm.compressor.*` (`pages`, `pool_bytes`, `stored_bytes`, `compressions`, `decompressions`, `zero_pages`, `rejected`, and for root `sweep`, which compresses the calling process's memory now), `machdep.cpu.emulated` (whether this is running on an emulated processor, for what can't be expected of one) |
+| `set_thread_pointer` | address | Where this thread's thread-local storage is: `FS` on x86_64, where programs can't set that for themselves as they can `TPIDR_EL0` |
 | `sandbox_apply` | profile*, length | Applies a profile to the calling process, on top of any it has already (`EINVAL` if it doesn't parse) |
 | `sandbox_check` | pid, service*, length | Whether that process's sandbox lets it look up the service (`EPERM` if not, `ESRCH` if there's no such process): how vlaunchd decides |
 | `reboot` | how | Root: restart or power off (vlaunchd does it, after stopping every job) |

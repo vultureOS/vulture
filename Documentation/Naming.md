@@ -23,6 +23,7 @@ has to learn a new word to find it.
 | **Disks** | Disks and volumes |
 | **Archiver** | Archives: compress and expand |
 | **Software** | What is installed, and what can be |
+| **Installer** | Puts the system on a disk |
 
 Words like Terminal, Calculator, Console and Dock are the ordinary names for these things
 everywhere, and stay. An application's `KIND` (in its `CMakeLists.txt`) is what else Search

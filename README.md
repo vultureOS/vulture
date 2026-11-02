@@ -5,43 +5,29 @@ Everything inside it is built from scratch in this repository: bootloader,
 kernel, C library, graphics, fonts rasterizer, UI framework, window server,
 desktop and apps.
 
-**Status:** milestone M6 is done: vultureOS is a working Unix system, with
-a text login on the console.
+**Status:** all fourteen milestones of the [Roadmap](Documentation/Roadmap.md) are done, in QEMU. It has
+never run on a real PC or a real Raspberry Pi, and QEMU's models of devices aren't the devices, so expect
+to find problems on real machines.
 
-- VultureBoot, our own UEFI loader, loads the kernel on AArch64 and hands it
-  the machine: memory map, framebuffer, device tree and serial port.
-- The kernel boots to a macOS-style boot screen, or a verbose log with `-v`.
-  It runs all 8 processors, schedules threads preemptively by QoS class
-  (173 ns context switch), and keeps time without a periodic tick.
-- Programs run in their own address spaces, dynamically linked against
-  `/usr/lib/libSystem.B.dylib` by our dynamic linker, `/usr/lib/dyld`. A
-  crashing program is killed alone, with a symbolized crash report.
-- Files live on vultureFS, our copy-on-write filesystem with checksummed
-  metadata, on virtio-blk or NVMe disks; 100 power cuts in a row while
-  writing leave it consistent.
-- `vlaunchd` is process 1, as launchd is on macOS: it keeps the jobs of
-  `/System/Library/LaunchDaemons` running, getty on the console among them.
-- Log in as `vulture` (password `vulture`) to `vsh`, a shell with zsh's
-  look and job control, and about 70 commands in the places macOS keeps
-  them (`ls`, `grep`, `sed`, `find`, `ps`, `sudo`, ...). Root has no
-  password, as on macOS: use `sudo`.
-- Programs talk through Mach-style ports, with messages described in an
-  interface language (`ipcc`) and services found by name through vlaunchd.
-  The system services are there: `logd` (`log stream`, `log show`), `notifyd`
-  (`notify(3)`, `notifyutil`), `configd` (`scutil`) and `clipboardd` (`pbcopy`,
-  `pbpaste`).
-- Processes have threads: `pthread_*`, `thread_local`, futexes, each thread
-  with its own signal mask and alternate stack.
-- PranaWindowServer composes windows at 60 fps at 2560×1600, with shadows,
-  continuous corners, blurred materials and traffic lights, drawing and setting
-  type with our own rasterizer and font engine (`Meta/run.sh`).
-- Every push is built on macOS and Linux by GitHub Actions; `ninja check`
-  runs the unit tests, the kernel tests, 36 userland suites (among them our
-  [POSIX conformance subset](Documentation/POSIX.md): 208 requirements), a
-  console login typed over the serial line and on the keyboard, golden screenshots
-  of the window server, and the storage tests.
-
-Next is M9, pranaUI. See the [Roadmap](Documentation/Roadmap.md).
+- **It starts** on AArch64 and x86_64 through VultureBoot, our own UEFI loader, and on a Raspberry Pi 4 or 5
+  from `kernel8.img`. One disk can start all of them.
+- **The kernel** runs every processor, schedules threads preemptively by QoS class, keeps files on vultureFS, a
+  copy-on-write filesystem with checksummed metadata that has survived 100 power cuts in a row, and compresses
+  memory rather than swapping. It has W^X, ASLR and KASLR, PAN, PXN, PAC, BTI, SMEP and SMAP where the processor
+  does, a sealed system, signed programs, sandboxes and privacy prompts.
+- **Unix:** `vlaunchd` is process 1; dynamically linked programs with threads; `vsh`, with zsh's look and job control;
+  about 70 commands where macOS keeps them; Mach-style ports and system services; TCP/IP, TLS 1.3, `curl` and signed packages.
+- **The desktop:** PranaWindowServer composes at 60 fps at 2560×1600, with shadows and blurred materials, drawing
+  and setting type with our own rasterizer and font engine. On that are pranaUI, the login window, menu bar, Dock, Files,
+  Search, Overview, Launcher, notifications, Settings; and Terminal, Text Editor, Viewer, Calculator, Monitor, Console,
+  Disks, Archiver, Software and Installer. Log in as `vulture`, password `vulture`.
+- **Drivers:** virtio for QEMU; NVMe, AHCI, xHCI with USB HID and disks, e1000e, Intel HD Audio, PS/2, the firmware's
+  framebuffer, and on a Pi an SD card. On a Pi there's no USB, network or sound yet: see
+  [Raspberry Pi](Documentation/RaspberryPi.md).
+- **Tests:** `ninja check` runs the unit tests, the kernel's tests, 45 userland programs (among them our
+  [POSIX conformance subset](Documentation/POSIX.md): 208 requirements), logins typed at the console, golden
+  screenshots of everything on screen, deliberate attacks on the kernel, a sanitized kernel, and the devices above.
+  Every push is built on macOS and Linux, for both architectures, by GitHub Actions.
 
 ## Requirements
 
@@ -114,6 +100,8 @@ ninja -C build check      # unit tests + headless boot, crash and kernel tests
 - The system is on the network through QEMU's NAT: `curl https://example.com`, `ping`, `pkg`.
   `VULTURE_NET_OPTIONS=hostfwd=tcp::8022-:22` forwards a port to it.
 - `Meta/run.sh --boot-args -v` boots verbosely.
+- For x86_64, `Meta/build.sh --build-dir build-x86_64 --arch x86_64`, then `Meta/run.sh --build-dir build-x86_64`.
+- `Meta/run.sh --real-devices` boots with what real machines have instead of virtio, and `--raspberry-pi` on QEMU's Pi 4.
 - [Documentation/Naming.md](Documentation/Naming.md) says what each application and
   service is called, and why those names.
 - `Meta/run.sh --help` lists the other options, such as software emulation
@@ -126,6 +114,7 @@ ninja -C build check      # unit tests + headless boot, crash and kernel tests
 - [Roadmap](Documentation/Roadmap.md): milestones, performance budgets, risks
 - [Architecture](Documentation/Architecture.md): design, build system, repository layout
 - [Boot Protocol](Documentation/BootProtocol.md): how VultureBoot starts the kernel
+- [Raspberry Pi](Documentation/RaspberryPi.md): making a disk for one, and what is and isn't known to work
 - [System Calls](Documentation/Syscalls.md): the calling convention and the calls
 - [vultureFS](Documentation/VultureFS.md): the filesystem, on disk and in the kernel
 - [Design System](Documentation/DesignSystem.md): the macOS look, and how it is measured and locked
