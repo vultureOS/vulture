@@ -25,4 +25,11 @@ add_subdirectory(LibUI)
 add_subdirectory(LibVT)
 add_subdirectory(Applications)
 add_subdirectory(LibVultureFS)
+add_subdirectory(Tools)
 add_subdirectory(WindowServer)
+
+# The Parity Ledger's rules: Meta/parity.py.
+find_program(VULTURE_PYTHON python3)
+if(VULTURE_PYTHON)
+    add_test(NAME Parity COMMAND ${VULTURE_PYTHON} -I ${VULTURE_SOURCE_ROOT}/Tests/Parity/test_parity.py)
+endif()

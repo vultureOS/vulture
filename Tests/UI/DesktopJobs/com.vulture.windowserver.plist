@@ -1,7 +1,0 @@
-{
-    "Label" : "com.vulture.windowserver",
-    "ProgramArguments" : [ "/System/Library/CoreServices/WindowServer" ],
-    "MachServices" : { "com.vulture.windowserver" : true },
-    "RunAtLoad" : true,
-    "StandardErrorPath" : "/dev/console"
-}

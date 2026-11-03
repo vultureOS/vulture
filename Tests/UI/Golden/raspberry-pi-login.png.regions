@@ -1,0 +1,2 @@
+# This login window isn't told to hold still, so its caret blinks.
+ignore 539 384 6 21 the password field's caret

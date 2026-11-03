@@ -1,7 +1,0 @@
-{
-    "Label" : "com.vulture.indexd",
-    "ProgramArguments" : [ "/usr/libexec/indexd" ],
-    "MachServices" : { "com.vulture.indexd" : true },
-    "RunAtLoad" : true,
-    "StandardErrorPath" : "/dev/console"
-}

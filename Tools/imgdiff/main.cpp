@@ -4,18 +4,20 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "Compare.h"
 #include <LibBase/Format.h>
 #include <LibBase/StringView.h>
 #include <LibBase/Vector.h>
 #include <LibGfx/Bitmap.h>
 #include <LibImage/Image.h>
 
-// imgdiff [--max-channel N] [--max-percent P] [--output FILE] A.png B.png
+// imgdiff [--max-channel N] [--max-percent P] [--max-cluster C] [--regions FILE] [--output FILE] A.png B.png
 //
-// Do the two images match, as golden tests count it: no channel of any pixel
-// off by more than N (default 2), or at most P percent of pixels off by more
-// (default 0.1). Exit status 0 if they do, 1 if not, 2 for trouble. --output
-// writes the difference, amplified, for a person to look at.
+// Do the two images match, as golden tests count it? See Compare.h for the rules: no channel of any pixel off by more
+// than N (default 2), or at most P percent of pixels off by more (default 0.1); no touching group of more than C of those
+// (default 8, -1 for no limit); and what FILE says about particular regions, A.png.regions if it isn't given and that's
+// there, so that a golden's regions go with it wherever it's compared. Exit status 0 if they do, 1 if not, 2 for trouble.
+// --output writes the difference, amplified, for a person to look at.
 
 extern "C" {
 struct FILE;
@@ -44,10 +46,6 @@ void outln(CheckedFormatString<Base::TypeIdentity<Args>...> format, Args const&.
     output.write("\n"_sv);
 }
 
-}
-
-namespace {
-
 bool read_file(char const* path, Vector<u8>& bytes)
 {
     FILE* file = fopen(path, "rb");
@@ -68,17 +66,21 @@ bool read_file(char const* path, Vector<u8>& bytes)
 
 int main(int argc, char** argv)
 {
-    int max_channel = 2;
-    double max_percent = 0.1;
+    ImgDiff::Options options;
     char const* output_path = nullptr;
+    char const* regions_path = nullptr;
     char const* paths[2] = {};
     int path_count = 0;
     for (int i = 1; i < argc; ++i) {
         StringView argument { argv[i] };
         if (argument == "--max-channel"_sv && i + 1 < argc) {
-            max_channel = atoi(argv[++i]);
+            options.max_channel = atoi(argv[++i]);
         } else if (argument == "--max-percent"_sv && i + 1 < argc) {
-            max_percent = atof(argv[++i]);
+            options.max_percent = atof(argv[++i]);
+        } else if (argument == "--max-cluster"_sv && i + 1 < argc) {
+            options.max_cluster = atoi(argv[++i]);
+        } else if (argument == "--regions"_sv && i + 1 < argc) {
+            regions_path = argv[++i];
         } else if (argument == "--output"_sv && i + 1 < argc) {
             output_path = argv[++i];
         } else if (path_count < 2) {
@@ -88,10 +90,34 @@ int main(int argc, char** argv)
         }
     }
     if (path_count != 2) {
-        outln("usage: imgdiff [--max-channel N] [--max-percent P] [--output FILE] A.png B.png");
+        outln("usage: imgdiff [--max-channel N] [--max-percent P] [--max-cluster C] [--regions FILE] [--output FILE] A.png B.png");
         return 2;
     }
-    NonnullRefPtr<Gfx::Bitmap> const* images[2] = {};
+    // Beside the first picture, which is the golden.
+    char beside[1024] = {};
+    if (!regions_path) {
+        StringView const golden { paths[0] };
+        constexpr auto suffix = ".regions"_sv;
+        if (golden.length() + suffix.length() < sizeof(beside)) {
+            __builtin_memcpy(beside, golden.characters_without_null_termination(), golden.length());
+            __builtin_memcpy(beside + golden.length(), suffix.characters_without_null_termination(), suffix.length());
+            beside[golden.length() + suffix.length()] = 0;
+        }
+    }
+    Vector<u8> text;
+    bool const have_regions = regions_path ? read_file(regions_path, text) : read_file(beside, text);
+    if (regions_path && !have_regions) {
+        outln("imgdiff: cannot read {}", StringView(regions_path));
+        return 2;
+    }
+    if (have_regions) {
+        auto regions = ImgDiff::parse_regions(StringView(text.span()));
+        if (regions.is_error()) {
+            outln("imgdiff: {}: {}", StringView(regions_path ? regions_path : beside), regions.error());
+            return 2;
+        }
+        options.regions = regions.release_value();
+    }
     RefPtr<Gfx::Bitmap> decoded[2];
     for (int i = 0; i < 2; ++i) {
         Vector<u8> bytes;
@@ -106,7 +132,6 @@ int main(int argc, char** argv)
         }
         decoded[i] = image.release_value();
     }
-    (void)images;
     auto const& a = *decoded[0];
     auto const& b = *decoded[1];
     if (a.size() != b.size()) {
@@ -114,34 +139,15 @@ int main(int argc, char** argv)
         return 1;
     }
     auto difference = MUST(Gfx::Bitmap::create(a.size()));
-    u64 total = static_cast<u64>(a.width()) * static_cast<u64>(a.height());
-    u64 off = 0;
-    int worst = 0;
-    int worst_x = 0, worst_y = 0;
-    for (int y = 0; y < a.height(); ++y) {
-        for (int x = 0; x < a.width(); ++x) {
-            Gfx::Pixel pa = a.pixel_at(x, y), pb = b.pixel_at(x, y);
-            auto distance = [](u8 first, u8 second) { return first > second ? first - second : second - first; };
-            int red = distance(Gfx::pixel_red(pa), Gfx::pixel_red(pb));
-            int green = distance(Gfx::pixel_green(pa), Gfx::pixel_green(pb));
-            int blue = distance(Gfx::pixel_blue(pa), Gfx::pixel_blue(pb));
-            int alpha = distance(Gfx::pixel_alpha(pa), Gfx::pixel_alpha(pb));
-            int most = max(max(red, green), max(blue, alpha));
-            if (most > worst) {
-                worst = most;
-                worst_x = x;
-                worst_y = y;
-            }
-            if (most > max_channel)
-                ++off;
-            auto amplified = [](int value) { return static_cast<u8>(min(value * 16, 255)); };
-            difference->set_pixel_at(x, y, Gfx::make_pixel(amplified(red), amplified(green), amplified(blue), 255));
-        }
+    auto const result = ImgDiff::compare(a, b, options, difference.ptr());
+
+    outln("imgdiff: {} of {} pixels differ by more than {} ({} may); the worst by {} at {},{}: {}", result.off, result.total, options.max_channel, result.allowed, result.worst, result.worst_x, result.worst_y, result.matches() ? "match"_sv : "DIFFERENT"_sv);
+    if (!result.cluster_ok)
+        outln("imgdiff: {} touching pixels are off, around {},{} ({} may be)", result.largest_cluster, result.cluster_x, result.cluster_y, options.max_cluster);
+    for (auto const& failure : result.strict_failures) {
+        auto const& region = options.regions[failure.region_index];
+        outln("imgdiff: strict region \"{}\" has {} pixels off, the first at {},{}", region.name.view(), failure.off, failure.first_x, failure.first_y);
     }
-    double percent = total ? 100.0 * static_cast<double>(off) / static_cast<double>(total) : 0;
-    bool matches = percent <= max_percent;
-    auto allowed = static_cast<u64>(static_cast<double>(total) * max_percent / 100);
-    outln("imgdiff: {} of {} pixels differ by more than {} ({} may); the worst by {} at {},{}: {}", off, total, max_channel, allowed, worst, worst_x, worst_y, matches ? "match"_sv : "DIFFERENT"_sv);
     if (output_path) {
         auto encoded = MUST(Image::encode_png(*difference));
         FILE* file = fopen(output_path, "wb");
@@ -150,5 +156,5 @@ int main(int argc, char** argv)
         fwrite(encoded.data(), 1, encoded.size(), file);
         fclose(file);
     }
-    return matches ? 0 : 1;
+    return result.matches() ? 0 : 1;
 }
