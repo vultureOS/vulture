@@ -353,6 +353,8 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
         init_arguments[argument_count++] = "--ui-gallery"_sv;
     else if (arguments.has_flag("uidesktop"_sv))
         init_arguments[argument_count++] = "--ui-desktop"_sv;
+    else if (arguments.has_flag("uibudgets"_sv))
+        init_arguments[argument_count++] = "--ui-budgets"_sv;
     else if (arguments.has_flag("soundtest"_sv))
         init_arguments[argument_count++] = "--sound-test"_sv;
     else if (arguments.has_flag("nettest"_sv))
@@ -374,6 +376,11 @@ static void initialize_interrupts_and_time(DeviceTree::FlattenedDeviceTree const
 {
     must("interrupt controller"_sv, Arch::initialize_interrupt_controller(tree));
     must("timer"_sv, Time::initialize(tree));
+    // (For measuring how long a boot took: the clock programs read doesn't start here.)
+    {
+        u64 const microseconds = Time::nanoseconds_from_ticks(kernel_log().start_counter()) / 1000;
+        dmesgln("Time: the kernel started at {}.{:06} on the clock", microseconds / 1'000'000, microseconds % 1'000'000);
+    }
     Time::initialize_wall_clock(tree);
     Processor::current().initialize_this_processor();
     Arch::enable_interrupts();

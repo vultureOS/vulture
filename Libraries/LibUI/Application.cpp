@@ -16,6 +16,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -29,6 +30,21 @@ using namespace Gfx;
 namespace {
 
 Application* s_application;
+
+// When something's measuring how long this program took to get going (VULTURE_REPORT_LAUNCH).
+void report_launch_once()
+{
+    static bool s_reported = false;
+    if (s_reported)
+        return;
+    s_reported = true;
+    if (!getenv("VULTURE_REPORT_LAUNCH"))
+        return;
+    timespec now {};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    printf("launch: first window on screen at %lld.%06ld\n", static_cast<long long>(now.tv_sec), static_cast<long>(now.tv_nsec / 1000));
+    fflush(stdout);
+}
 
 class ServerBackend final : public WindowBackend {
 public:
@@ -53,7 +69,10 @@ public:
         };
         m_window->on_close = [this] { m_owner.handle_close_request(); };
         m_window->on_activation = [this](bool active) { m_owner.handle_activation(active); };
-        m_window->on_presented = [this] { m_owner.handle_presented(); };
+        m_window->on_presented = [this] {
+            report_launch_once();
+            m_owner.handle_presented();
+        };
         m_window->on_drag = [this](::Window::DragEvent const& event) {
             m_owner.handle_drag(event.phase, event.position.to<float>(), event.type, event.data);
         };

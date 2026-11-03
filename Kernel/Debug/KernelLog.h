@@ -29,6 +29,8 @@ public:
     // Text from programs: as is (no timestamps), under the lock.
     void write_raw(StringView);
 
+    [[nodiscard]] u64 start_counter() const { return m_start_counter; }
+
     // Starts a line with the time since boot: "[    0.001234] ".
     void begin_line();
 

@@ -88,6 +88,7 @@ private:
     void inject_pointer(IPC::Sender const&, i32 x, i32 y, u32 buttons) override;
     WindowServerEndpoint::StatisticsAnswer statistics(IPC::Sender const&) override;
     WindowServerEndpoint::CaptureAnswer capture(IPC::Sender const&) override;
+    WindowServerEndpoint::InputLatencyAnswer input_latency(IPC::Sender const&) override;
     WindowServerEndpoint::RequestAccessibilityAnswer request_accessibility(IPC::Sender const&) override;
     void publish_accessibility(IPC::Sender const&, u32 generation, String json) override;
     WindowServerEndpoint::AccessibilityAnswer accessibility(IPC::Sender const&, u32 generation) override;
@@ -208,6 +209,13 @@ private:
     Client* m_active_application { nullptr };
     bool m_shell_state_pending { false };
     u32 m_accessibility_generation { 0 };
+    // For input_latency: when the pointer last moved, whether that moved a window not yet on the screen, and how long
+    // those took, in half-milliseconds, the last for anything longer.
+    u64 m_pointer_moved_at { 0 };
+    u64 m_latency_started { 0 };
+    static constexpr size_t latency_buckets = 256;
+    u64 m_latency_counts[latency_buckets] {};
+    u64 m_latency_worst { 0 };
     Gfx::IntPoint m_minimize_target { 0, 0 };
     int m_work_top { 0 };
     int m_work_left { 0 };

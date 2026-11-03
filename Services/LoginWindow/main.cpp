@@ -299,6 +299,8 @@ private:
 
 int main(int argc, char** argv)
 {
+    // How long a boot took is measured by this (Meta/budgets.sh).
+    setenv("VULTURE_REPORT_LAUNCH", "1", 1);
     signal(SIGPIPE, SIG_IGN);
     signal(SIGCHLD, SIG_IGN);
     for (int i = 1; i < argc; ++i) {

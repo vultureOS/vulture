@@ -1,0 +1,41 @@
+{
+    "about": "Every check in Tests/Userland/posix.cpp that comes out differently on a real Mac, and why. Meta/oracle-test.sh fails on a difference that isn't here, and on anything here that's no longer a difference. kind: 'test' (the check itself assumes this system), 'mac' (the Mac departs from POSIX, or chose differently, and this system keeps to POSIX), 'chosen' (a deliberate difference), or 'to do' (the Mac is right, and milestone says when).",
+    "differences": [
+        {
+            "check": "environment: the tests run as root",
+            "kind": "test",
+            "why": "The test programs run as root here, as vlaunchd starts them. On the Mac, it's whoever ran it."
+        },
+        {
+            "check": "environment: getpwnam()",
+            "kind": "test",
+            "why": "It looks up the account this system comes with. A Mac has no user called vulture."
+        },
+        {
+            "check": "environment: uname()",
+            "kind": "chosen",
+            "why": "This system's name is vultureOS, not Darwin. Its machine, arm64, is the same."
+        },
+        {
+            "check": "memory: sysconf(_SC_PAGESIZE)",
+            "kind": "chosen",
+            "why": "Apple silicon Macs use 16 KiB pages. This system uses 4 KiB on every machine, which is what it can count on x86_64 and a Raspberry Pi having."
+        },
+        {
+            "check": "memory: writing to read-only memory: SIGSEGV",
+            "kind": "mac",
+            "why": "POSIX says SIGSEGV for writing where access isn't allowed, and that's what this system does. On Apple silicon, macOS sends SIGBUS for it."
+        },
+        {
+            "check": "terminals: tcgetattr() of a non-terminal: ENOTTY",
+            "kind": "mac",
+            "why": "POSIX says ENOTTY. For /dev/null, macOS says ENODEV."
+        },
+        {
+            "check": "directories: chdir(); getcwd() reports it",
+            "kind": "to do",
+            "milestone": "M19",
+            "why": "On a Mac /tmp is a symbolic link to /private/tmp, so getcwd() reports /private/tmp/... . Here /tmp is a directory in its own right. It should come with the System and Data volumes' layout."
+        }
+    ]
+}

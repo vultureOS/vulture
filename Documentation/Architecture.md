@@ -130,15 +130,15 @@ header dependency tracking.
 ## System layers
 
 ```
- Apps         Files · Terminal · Text Editor · Preview · Settings · Monitor · Software …
- Desktop      LoginWindow · SystemUI (menu bar) · Dock · Search · Overview · Notification/Quick Settings
+ Apps         Files · Terminal · Text Editor · Viewer · Settings · Monitor · Software …
+ Desktop      LoginWindow · DesktopShell (menu bar, Search, notifications) · Dock · Overview · Quick Settings
  Frameworks   pranaUI (AppKit-like) · LibAnimation · LibGfx (Quartz-2D-like) · LibText (CoreText-like) · LibImage
- Core libs    LibCore (run loop, JSON plists) · LibIPC (+ipcc IDL) · LibCrypto/TLS/HTTP · LibUnicode · LibVT · LibAudio
- Runtime      LibC · LibM · LibCxxRT · LibSystem (syscalls; libSystem.B.dylib) · dyld · LibBase (shared with kernel)
- Services     vlaunchd (PID 1) · logd · notifyd · configd · PranaWindowServer · AudioServer · Indexer · Pasteboard
+ Core libs    LibCore (run loop, JSON plists) · LibIPC (+ipcc IDL) · LibCrypto/TLS/HTTP · LibVT · LibAudio
+ Runtime      LibC (math included) · LibCxxRT · LibSystem (syscalls; libSystem.B.dylib) · dyld · LibBase (shared with kernel)
+ Services     vlaunchd (PID 1) · logd · notifyd · configd · PranaWindowServer · AudioServer · indexd · clipboardd
  ─────────────────────────────── syscalls (SVC) + Mach-style ports ───────────────────────────────
  Kernel       Hybrid (XNU-style): monolithic core for speed + port IPC for services
-              Memory · Tasks/Scheduler · VFS (vultureFS, FAT32, tmpfs, devfs) · Net (TCP/IP) · Security · DeviceKit drivers
+              Memory · Tasks/Scheduler · VFS (vultureFS, FAT32, tmpfs, devfs) · Net (TCP/IP) · Security · Devices
  Arch         aarch64 (EL1, GICv2/v3, generic timer, PSCI or spin table) · x86_64 (APIC, ACPI)
  Boot         VultureBoot (our UEFI loader) → BootInfo → kernel
 ```
@@ -177,9 +177,9 @@ Documentation/ these documents
 macOS-style at the top, real Unix underneath:
 
 - `/Applications/*.app`, `/System/Library/{Kernels,CoreServices,Frameworks,LaunchDaemons,LaunchAgents,Fonts,Themes,Sounds,Desktop Pictures}`, `/Library`, `/Users/<name>/{Desktop,Documents,Downloads,Library}`, `/Volumes`
-- `/bin`, `/sbin`, `/usr/{bin,lib,share/man}`, `/private/{etc,var,tmp}` with symlinks at `/etc`, `/var` and `/tmp`, and `/dev` (devfs)
-- App bundles: `Name.app/Contents/{Info.json, Executable/, Resources/}`
-- The System volume is read-only and sealed; user data lives on the Data volume.
+- `/bin`, `/sbin`, `/usr/{bin,lib,share/man}`, `/private/{etc,var,tmp}` with symlinks at `/etc` and `/var`, and `/dev` (devfs)
+- App bundles: `Name.app/Contents/{Info.plist, MacOS/, Resources/}`
+- Today there's one volume, with what's sealed checked file by file, and `/tmp` is a directory of its own. Separate System and Data volumes, and `/tmp` where a Mac has it, come with vultureFS 2 (M19).
 
 ## Kernel design
 

@@ -124,13 +124,13 @@ add_custom_target(compile-commands ALL
     VERBATIM)
 
 add_custom_target(test-host
-    COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR}/host --output-on-failure
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-host ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR}/host --output-on-failure
     DEPENDS host
     USES_TERMINAL
     VERBATIM)
 
 add_custom_target(test-boot
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-boot ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
         --expect "Memory map"
         --expect "8 of 8 processors online"
         --expect "vultureKernel: boot complete"
@@ -141,7 +141,7 @@ add_custom_target(test-boot
 
 # A deliberate fault must produce a symbolized, demangled backtrace.
 add_custom_target(test-panic
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-panic ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
         --boot-args "fault=data-abort"
         --expect "KERNEL PANIC: Data abort (write) at 0x0000000000000010: translation fault, level 0"
         --expect "Kernel::trigger_deliberate_fault"
@@ -153,7 +153,7 @@ add_custom_target(test-panic
 # The in-kernel tests ("ktest"): allocators, locks, timers and processors
 # under stress on all 8 virtual CPUs. The guest powers itself off afterwards.
 add_custom_target(test-kernel
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-kernel ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
         --boot-args "ktest"
         --wait-for-exit
         --timeout 120
@@ -166,7 +166,7 @@ add_custom_target(test-kernel
 # /usr/tests (fork, copy-on-write, exec, signals, memory, files...), checks
 # how each ended, and powers the machine off.
 add_custom_target(test-userland
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-userland ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
         --boot-args "utest"
         --wait-for-exit
         --timeout 120
@@ -180,7 +180,7 @@ add_custom_target(test-userland
 # suspended and continued; logging out brings getty back; sudo poweroff
 # shuts down through vlaunchd.
 add_custom_target(test-login
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-login ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
         --chat ${CMAKE_SOURCE_DIR}/Tests/Console/login.chat
         --wait-for-exit
         --timeout 120
@@ -191,13 +191,13 @@ add_custom_target(test-login
 # Storage: files written by one boot are there for the next; vultureFS
 # checked with fsck.vfs after each.
 add_custom_target(test-persistence
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/storage-test.sh --build-dir ${CMAKE_BINARY_DIR} persistence
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-persistence ${CMAKE_SOURCE_DIR}/Meta/storage-test.sh --build-dir ${CMAKE_BINARY_DIR} persistence
     DEPENDS host uefi target boot-archive test-userland
     USES_TERMINAL
     VERBATIM)
 
 add_custom_target(test-keyboard
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-keyboard ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
         --chat ${CMAKE_SOURCE_DIR}/Tests/Console/keyboard.chat
         --wait-for-exit
         --timeout 120
@@ -208,21 +208,21 @@ add_custom_target(test-keyboard
 # Golden screenshots: the scene in Tests/UI, composed by the window server, must
 # match what is in Tests/UI/Golden (Meta/ui-test.sh --update, after looking).
 add_custom_target(test-ui
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/ui-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-ui ${CMAKE_SOURCE_DIR}/Meta/ui-test.sh --build-dir ${CMAKE_BINARY_DIR}
     DEPENDS host uefi target boot-archive test-keyboard
     USES_TERMINAL
     VERBATIM)
 
 # What Meta/run.sh and Meta/run_debug.sh boot. (--gui: headless, it would be the console.)
 add_custom_target(test-desktop-boot
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless --gui
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-desktop-boot ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless --gui
         --expect "loginwindow: ready"
         --timeout 60
     DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
 add_custom_target(test-debug-boot
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless --gui --debug
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-debug-boot ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless --gui --debug
         --expect "process: 1 execs /sbin/vlaunchd"
         --expect "vlaunchd: (com.vulture.WindowServer"
         --expect "[com.vulture.windowserver:server] Starting"
@@ -234,28 +234,28 @@ add_custom_target(test-debug-boot
 
 # What the sound device played, as QEMU recorded it.
 add_custom_target(test-sound
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/sound-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-sound ${CMAKE_SOURCE_DIR}/Meta/sound-test.sh --build-dir ${CMAKE_BINARY_DIR}
     DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
 
 # What the kernel's protections do when tested on purpose.
 add_custom_target(test-hardening
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/hardening-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-hardening ${CMAKE_SOURCE_DIR}/Meta/hardening-test.sh --build-dir ${CMAKE_BINARY_DIR}
     DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
 
 # The drivers for what real machines have, on QEMU's models of it.
 add_custom_target(test-hardware
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/hardware-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-hardware ${CMAKE_SOURCE_DIR}/Meta/hardware-test.sh --build-dir ${CMAKE_BINARY_DIR}
     DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
 
 # Using more memory than the machine has, and running out with nothing left to compress.
 add_custom_target(test-compressor
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/compressor-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-compressor ${CMAKE_SOURCE_DIR}/Meta/compressor-test.sh --build-dir ${CMAKE_BINARY_DIR}
     DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
@@ -263,7 +263,7 @@ add_custom_target(test-compressor
 # The kernel, built again with UBSan and KASAN-style heap checks: they must catch what is planted,
 # and find nothing in the kernel's tests or the userland's.
 add_custom_target(test-sanitized-kernel
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/sanitized-kernel-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-sanitized-kernel ${CMAKE_SOURCE_DIR}/Meta/sanitized-kernel-test.sh --build-dir ${CMAKE_BINARY_DIR}
     DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
@@ -271,12 +271,12 @@ add_custom_target(test-sanitized-kernel
 # TCP, DNS, TLS, HTTP and signed packages, against servers on this machine. And then the real
 # thing, for those with an internet connection: not in check, as not everyone has one to hand.
 add_custom_target(test-network
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/network-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-network ${CMAKE_SOURCE_DIR}/Meta/network-test.sh --build-dir ${CMAKE_BINARY_DIR}
     DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
 add_custom_target(test-internet
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-internet ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
         --chat ${CMAKE_SOURCE_DIR}/Tests/Network/internet.chat
         --timeout 90
     DEPENDS host uefi target boot-archive
@@ -284,18 +284,55 @@ add_custom_target(test-internet
     VERBATIM)
 
 add_custom_target(test-raspberry-pi
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/raspberry-pi-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-raspberry-pi ${CMAKE_SOURCE_DIR}/Meta/raspberry-pi-test.sh --build-dir ${CMAKE_BINARY_DIR}
     DEPENDS host uefi target boot-archive raspberry-pi
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-sound test-network test-hardening test-compressor test-hardware test-raspberry-pi test-sanitized-kernel test-ui test-persistence)
+# What a machine with no serial port can still tell you: see Kernel/Debug/DiskLog.h.
+add_custom_target(test-disk-log
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-disk-log ${CMAKE_SOURCE_DIR}/Meta/disk-log-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    DEPENDS host uefi target boot-archive
+    USES_TERMINAL
+    VERBATIM)
+
+# The same checks on this Mac and on this system, and what differs between them explained. (Only on a Mac: elsewhere it says
+# so, and doesn't count for anything.)
+add_custom_target(test-oracle
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-oracle ${CMAKE_SOURCE_DIR}/Meta/oracle-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    DEPENDS host uefi target boot-archive
+    USES_TERMINAL
+    VERBATIM)
+
+# The test harness itself: reboots, hot-plugging, fingers, displays, things running on this machine, and a walkthrough
+# that finds everything by what it says.
+add_custom_target(test-harness
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-harness ${CMAKE_SOURCE_DIR}/Meta/harness-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    DEPENDS host uefi target boot-archive
+    USES_TERMINAL
+    VERBATIM)
+
+# The budgets that take a whole running system to measure. They say if they're over; only not measuring is a failure.
+add_custom_target(budgets
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} budgets ${CMAKE_SOURCE_DIR}/Meta/budgets.sh --build-dir ${CMAKE_BINARY_DIR}
+    DEPENDS host uefi target boot-archive
+    USES_TERMINAL
+    VERBATIM)
+
+# How close to a Mac this is, from the last results of everything above: Documentation/Parity.md.
+find_program(VULTURE_PYTHON python3)
+add_custom_target(parity
+    COMMAND ${VULTURE_PYTHON} -I ${CMAKE_SOURCE_DIR}/Meta/parity.py --build-dir ${CMAKE_BINARY_DIR}
+    USES_TERMINAL
+    VERBATIM)
+
+add_custom_target(check DEPENDS test-disk-log test-oracle test-harness test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-sound test-network test-hardening test-compressor test-hardware test-raspberry-pi test-sanitized-kernel test-ui test-persistence)
 
 # M5's "done when": 100 power cuts at random moments while writing; each
 # must leave a disk that passes fsck and remounts with every committed
 # file intact. Not part of check, for its length.
 add_custom_target(test-crash
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/storage-test.sh --build-dir ${CMAKE_BINARY_DIR} crash 100
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-crash ${CMAKE_SOURCE_DIR}/Meta/storage-test.sh --build-dir ${CMAKE_BINARY_DIR} crash 100
     DEPENDS host uefi target boot-archive
     USES_TERMINAL
     VERBATIM)
@@ -304,7 +341,7 @@ add_custom_target(test-crash
 # every processor for 60 seconds, then all stopped and joined. Not part of
 # check, for its length.
 add_custom_target(test-soak
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-soak ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
         --boot-args "ktest=scheduler.thousand ktest-seconds=60"
         --wait-for-exit
         --timeout 180
@@ -315,7 +352,7 @@ add_custom_target(test-soak
 
 # Performance numbers: context switches, round trips, thread creation.
 add_custom_target(bench
-    COMMAND ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} bench ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
         --boot-args "ktest=bench"
         --wait-for-exit
         --timeout 60

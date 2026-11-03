@@ -10,3 +10,5 @@ vulture_add_program(ui-scene SOURCES scene.cpp DESTINATION usr/tests LIBRARIES L
 install(DIRECTORY Jobs/ DESTINATION usr/tests/ui)
 install(DIRECTORY GalleryJobs/ DESTINATION usr/tests/gallery)
 install(DIRECTORY DesktopJobs/ DESTINATION usr/tests/desktop)
+install(DIRECTORY BudgetJobs/ DESTINATION usr/tests/budget-jobs)
+vulture_add_program(budgets SOURCES budgets.cpp DESTINATION usr/tests)

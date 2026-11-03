@@ -124,10 +124,11 @@ int main(int argc, char** argv)
     bool ui_test = argc > 1 && strcmp(argv[1], "--ui-test") == 0;
     bool ui_gallery = argc > 1 && strcmp(argv[1], "--ui-gallery") == 0;
     bool ui_desktop = argc > 1 && strcmp(argv[1], "--ui-desktop") == 0;
+    bool ui_budgets = argc > 1 && strcmp(argv[1], "--ui-budgets") == 0;
     bool sound_test = argc > 1 && strcmp(argv[1], "--sound-test") == 0;
     bool network_test = argc > 1 && strcmp(argv[1], "--network-test") == 0;
     bool network_gui_test = argc > 1 && strcmp(argv[1], "--network-gui-test") == 0;
-    if (ui_test || ui_gallery || ui_desktop || sound_test || network_test || network_gui_test) {
+    if (ui_test || ui_gallery || ui_desktop || ui_budgets || sound_test || network_test || network_gui_test) {
         printf("vlaunchd: vultureOS userland is up (process %d)\n", getpid());
         fflush(stdout);
         // The test's jobs alone, in a supervisor of their own: this process
@@ -135,8 +136,8 @@ int main(int argc, char** argv)
         pid_t supervisor = fork();
         if (supervisor == 0) {
             // The desktop's walkthroughs are of the real system: everything it runs, with only what they must change.
-            if (ui_desktop)
-                execl("/sbin/vlaunchd", "vlaunchd", "--gui", "--directory", "/usr/tests/desktop", "--directory", "/System/Library/LaunchDaemons", "--directory", "/Library/LaunchDaemons", nullptr);
+            if (ui_desktop || ui_budgets)
+                execl("/sbin/vlaunchd", "vlaunchd", "--gui", "--directory", ui_budgets ? "/usr/tests/budget-jobs" : "/usr/tests/desktop", "--directory", "/System/Library/LaunchDaemons", "--directory", "/Library/LaunchDaemons", nullptr);
             else
                 execl("/sbin/vlaunchd", "vlaunchd", "--directory", network_gui_test ? "/usr/tests/network-gui" : network_test ? "/usr/tests/network" : sound_test ? "/usr/tests/sound" : (ui_gallery ? "/usr/tests/gallery" : "/usr/tests/ui"), nullptr);
             _exit(127);

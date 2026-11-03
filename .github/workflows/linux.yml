@@ -3,9 +3,9 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Builds vultureOS on Linux (Ubuntu, x86_64) with LLVM 22 from apt.llvm.org
-# and runs every test: the host unit tests, then vultureOS booted in QEMU
-# (boot, panic, kernel, userland and persistence tests), emulated (TCG).
+# Builds vultureOS on Linux (Ubuntu, x86_64) with LLVM 22 from apt.llvm.org,
+# for both architectures. That's all it does: the tests are run locally, by
+# ninja check.
 
 name: Linux
 

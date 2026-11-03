@@ -57,13 +57,12 @@ credentials and permissions (`permissions`), threads (`threads`), BSD sockets
 ## Not yet
 
 These POSIX interfaces are not there yet, and arrive with the milestones
-that need them:
+that need them (most of them with M16: see [Roadmap](Roadmap.md)):
 
 - Thread cancellation (`pthread_cancel`, `pthread_setcancelstate`,
   `pthread_testcancel`), and synchronization across processes
   (`PTHREAD_PROCESS_SHARED`, named semaphores): futexes are private to a process.
-- Sockets and networking: `socket` and friends, `getaddrinfo`, Unix domain
-  sockets (M12; between processes here, ports do that job).
+- Unix domain sockets (M16). Sockets over a network and `getaddrinfo` have been here since M12.
 - The `*at` family (`openat`, `fstatat`, `unlinkat`, ...) and `fchdir`.
 - Interval timers (`setitimer`, `getitimer`, `timer_create`), `waitid`,
   `sigqueue` and real-time signals.
@@ -74,3 +73,12 @@ that need them:
 
 Resource limits are reported and may be lowered, but are not enforced
 beyond the kernel's own (64 open files per process, an 8 MiB stack).
+
+## Compared with a real Mac
+
+The same 208 checks also run on the Mac this is built on, compiled for it from the same source, and every difference has to be
+explained: `ninja test-oracle` fails otherwise, and also if an explanation no longer applies. See
+`Tests/Parity/posix-differences.json`. On macOS 26.4 a Mac meets 201 of them. Of the 7 it doesn't, 3 are the checks assuming
+this system (they run as root, look up its account and expect its name), 2 are where macOS itself differs from POSIX (`SIGBUS`
+rather than `SIGSEGV`, `ENODEV` rather than `ENOTTY`), 1 is a choice (4 KiB pages everywhere, where Apple silicon has 16 KiB),
+and 1 is something to change here: `/tmp` should be a symbolic link to `/private/tmp`, as it comes with M19's volumes.

@@ -1,0 +1,7 @@
+{
+    "Label" : "com.vulture.test.budgets",
+    "ProgramArguments" : [ "/usr/tests/budgets" ],
+    "StandardOutPath" : "/dev/console",
+    "StandardErrorPath" : "/dev/console",
+    "RunAtLoad" : true
+}

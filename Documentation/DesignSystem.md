@@ -97,7 +97,7 @@ translucent surfaces stay cheap when nothing behind them moves.
 | Menu bar | menu bar |
 | Popover / menu | menus, popovers, Search |
 | Sidebar | Files and Settings sidebars |
-| HUD | volume and brightness overlays |
+| HUD | nothing yet: for the volume and brightness overlays, which come with M24 |
 | Under-window | Dock shelf, Notifications |
 
 ## Assets

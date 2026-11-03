@@ -59,6 +59,8 @@ void require(bool ok, char const* what, int line)
     if (ok) {
         ++s_area_passed;
         ++s_total_passed;
+        // Each by name, for comparing with what a real Mac says (Meta/oracle-test.sh).
+        printf("posix: %s: ok: %s\n", s_area, what);
         return;
     }
     ++s_area_failed;

@@ -167,6 +167,12 @@ void Server::render_frame()
             render_chrome(*window);
     }
     m_compositor.render();
+    if (m_latency_started != 0) {
+        u64 const took = now_microseconds() - m_latency_started;
+        m_latency_started = 0;
+        m_latency_counts[min<u64>(took / 500, latency_buckets - 1)] += 1;
+        m_latency_worst = max(m_latency_worst, took);
+    }
     // What the clients presented is on screen: they may draw on.
     for (auto* window : m_windows) {
         if (!window->present_pending || !window->client)
@@ -614,6 +620,26 @@ WindowServerEndpoint::StatisticsAnswer Server::statistics(IPC::Sender const&)
     return { m_compositor.frames(), m_compositor.compose_microseconds(), m_compositor.flush_microseconds(), m_compositor.pixels() };
 }
 
+WindowServerEndpoint::InputLatencyAnswer Server::input_latency(IPC::Sender const&)
+{
+    WindowServerEndpoint::InputLatencyAnswer answer {};
+    for (auto count : m_latency_counts)
+        answer.count += count;
+    u64 const at_percentile = answer.count - answer.count / 100;
+    u64 seen = 0;
+    for (size_t i = 0; i < latency_buckets; ++i) {
+        seen += m_latency_counts[i];
+        if (seen >= at_percentile && answer.count != 0) {
+            answer.p99_microseconds = (i + 1) * 500;
+            break;
+        }
+    }
+    answer.worst_microseconds = m_latency_worst;
+    __builtin_memset(m_latency_counts, 0, sizeof(m_latency_counts));
+    m_latency_worst = 0;
+    return answer;
+}
+
 WindowServerEndpoint::CaptureAnswer Server::capture(IPC::Sender const& sender)
 {
     WindowServerEndpoint::CaptureAnswer answer {};
@@ -803,6 +829,8 @@ void Server::move_window_to(ServerWindow& window, IntRect frame)
 {
     if (window.frame == frame)
         return;
+    if (m_latency_started == 0)
+        m_latency_started = m_pointer_moved_at;
     if (window.visible)
         m_compositor.invalidate_window(window);
     bool resized = window.frame.size() != frame.size();
@@ -1051,6 +1079,7 @@ void Server::send_mouse(ServerWindow& window, MouseKind kind, IntPoint point, u3
 
 void Server::pointer_changed(IntPoint point, u32 buttons)
 {
+    m_pointer_moved_at = now_microseconds();
     auto points = m_screen.points();
     point.x = clamp(point.x, 0, points.width - 1);
     point.y = clamp(point.y, 0, points.height - 1);

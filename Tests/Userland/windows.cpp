@@ -422,6 +422,7 @@ void test_drag_rate(Client& client)
     client.pointer(grab_x, grab_y, Window::ButtonLeft);
     client.settle(40);
 
+    (void)client.connection->server().input_latency();
     auto before = MUST(client.connection->server().statistics());
     u64 started = now_microseconds();
     constexpr u64 duration = 5'000'000;
@@ -436,6 +437,7 @@ void test_drag_rate(Client& client)
         elapsed = now_microseconds() - started;
     }
     auto after = MUST(client.connection->server().statistics());
+    auto latency = MUST(client.connection->server().input_latency());
     client.pointer(0, 0, 0);
     u64 frames = after.frames - before.frames;
     double seconds = static_cast<double>(elapsed) / 1'000'000.0;
@@ -445,6 +447,10 @@ void test_drag_rate(Client& client)
     u64 pixels = frames ? (after.pixels - before.pixels) / frames : 0;
     printf("rate: %d.%d frames per second at %dx%d; per frame %llu us composing, %llu us flushing, %llu pixels\n", static_cast<int>(rate), static_cast<int>(rate * 10) % 10, size.width * s, size.height * s,
         static_cast<unsigned long long>(compose), static_cast<unsigned long long>(flush), static_cast<unsigned long long>(pixels));
+    printf("budget: drag frames: %d.%d fps\n", static_cast<int>(rate), static_cast<int>(rate * 10) % 10);
+    printf("budget: input to flush p99: %d.%d ms\n", static_cast<int>(latency.p99_microseconds / 1000), static_cast<int>(latency.p99_microseconds % 1000 / 100));
+    printf("budget: input to flush worst: %d.%d ms\n", static_cast<int>(latency.worst_microseconds / 1000), static_cast<int>(latency.worst_microseconds % 1000 / 100));
+    printf("budget: input timed: %llu moves\n", static_cast<unsigned long long>(latency.count));
     fflush(stdout);
     // (Which isn't something to ask of a whole machine emulated in software.)
     int emulated = 0;
@@ -490,6 +496,13 @@ int main(int argc, char** argv)
         return run_client();
     if (argc > 2 && strcmp(argv[1], "--doomed-client") == 0)
         return run_doomed_client(atoi(argv[2]));
+    // Only the drag, on the window server that's there: see Meta/budgets.sh.
+    if (argc > 1 && strcmp(argv[1], "--budget") == 0) {
+        Client client;
+        client.connection = MUST(Window::Connection::connect(client.loop));
+        test_drag_rate(client);
+        return 0;
+    }
 
     system("rm -rf /tmp/windows-test");
     mkdir(s_directory, 0755);

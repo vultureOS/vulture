@@ -114,6 +114,7 @@ ninja -C build check      # unit tests + headless boot, crash and kernel tests
 
 - [Roadmap](Documentation/Roadmap.md): what comes next, performance budgets, risks
 - [Roadmap 1](Documentation/Roadmap-1.md): M0 to M14, and what each of them found
+- [Parity](Documentation/Parity.md): how close to macOS this is, feature by feature, from the last test results
 - [Architecture](Documentation/Architecture.md): design, build system, repository layout
 - [Boot Protocol](Documentation/BootProtocol.md): how VultureBoot starts the kernel
 - [Raspberry Pi](Documentation/RaspberryPi.md): making a disk for one, and what is and isn't known to work

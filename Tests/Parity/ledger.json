@@ -1,0 +1,2638 @@
+{
+    "about": "What macOS does, a row each: see Meta/parity.py for what the rest of this means, and Documentation/Parity.md for how it stands. A feature with nothing but a milestone is absent. Add rows when something is thought of; claim one only with the test that proves it.",
+    "areas": [
+        {
+            "name": "Windows",
+            "rows": [
+                {
+                    "feature": "Title bar, with traffic lights",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-settings.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Rounded corners and a shadow",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "scene-2x.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Move a window by its title bar",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "scene-dragged.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Resize a window",
+                    "claim": "partial",
+                    "missing": "from every edge and corner, with the right pointer on each, is to be checked by name",
+                    "milestone": "M23",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "windows: rate"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Minimize, into the Dock",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-minimized.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-restored.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Zoom with the green button",
+                    "claim": "partial",
+                    "missing": "its menu, full screen and tiling from it",
+                    "milestone": "M23",
+                    "proof": [
+                        {
+                            "suite": "test-userland"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Close and quit from the keyboard",
+                    "claim": "partial",
+                    "missing": "Hide, Hide Others",
+                    "milestone": "M23",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "monday.chat",
+                                "key meta_l-q"
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Tile by dragging to an edge or corner",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Tile by holding Option",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Move & Resize in the Window menu",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Tiled windows resize together",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Full screen, in a Space of its own",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Split View",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Tabs in a window, and Merge All Windows",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Cmd-Tab between applications",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Cmd-` between windows",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Click the wallpaper to reveal the desktop",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Stage (Stage Manager)",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "An application that's stopped answering gets the spinning pointer",
+                    "milestone": "M21"
+                },
+                {
+                    "feature": "Not Responding, in Force Quit",
+                    "milestone": "M21"
+                },
+                {
+                    "feature": "Windows animate while their application is busy",
+                    "milestone": "M21"
+                },
+                {
+                    "feature": "Windows come back when an application or the session does",
+                    "milestone": "M26"
+                }
+            ]
+        },
+        {
+            "name": "Spaces and Overview",
+            "rows": [
+                {
+                    "feature": "Overview of the windows on this Space",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-overview.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "More than one desktop, and going between them",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-overview-spaces.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-second-space.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "App Exposé",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Hot corners",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Drag a window to another Space",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Remove and reorder Spaces",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Spaces on each display",
+                    "milestone": "M23"
+                },
+                {
+                    "feature": "Swipe between Spaces",
+                    "milestone": "M22"
+                }
+            ]
+        },
+        {
+            "name": "Dock",
+            "rows": [
+                {
+                    "feature": "Applications, with magnification",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-desktop.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "The Trash",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-desktop.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Open applications from it",
+                    "claim": "partial",
+                    "missing": "the bounce while starting isn't checked",
+                    "milestone": "M24",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m15-rulers.chat",
+                                "click button \"Settings\""
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Hide automatically",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "On the left or the right",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "Folder stacks",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "Recent applications",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "Menus from a tile",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "Drag in and out",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "Badges",
+                    "milestone": "M24"
+                }
+            ]
+        },
+        {
+            "name": "Menu bar",
+            "rows": [
+                {
+                    "feature": "The active application's menus",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-menu-file.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "The system menu",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-menu-system.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Keys reach a menu that's open, whoever's it is",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m15-rulers.chat",
+                                "key esc"
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Menu extras, as programs of their own",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "Force Quit Applications",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "Help menu search over commands",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "Move menu extras about",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "About This Computer",
+                    "claim": "partial",
+                    "missing": "it starts another Settings if one's open: an application should run once (M26)",
+                    "milestone": "M24",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m15-rulers.chat",
+                                "click menuitem \"About This Computer\""
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Recent Items",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "The Services menu",
+                    "milestone": "M26"
+                }
+            ]
+        },
+        {
+            "name": "Control Center and notifications",
+            "rows": [
+                {
+                    "feature": "Quick Settings",
+                    "claim": "partial",
+                    "missing": "Wi-Fi, Bluetooth, Display, Focus and Now Playing; customizing it",
+                    "milestone": "M24",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-quick-settings.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Notifications: banners and a list",
+                    "claim": "partial",
+                    "missing": "grouping, actions, per-application settings, and keeping them across a reboot",
+                    "milestone": "M24",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-notification.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-notification-list.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Do Not Disturb and other Focus modes",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "Widgets on the desktop",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "Widgets in Notification Center",
+                    "milestone": "M24"
+                }
+            ]
+        },
+        {
+            "name": "Login and sessions",
+            "rows": [
+                {
+                    "feature": "Log in with a password",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-login.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-login-wrong.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Log out",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-logged-out.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "monday.chat",
+                                "click menuitem \"Log Out\""
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Create an account",
+                    "milestone": "M25"
+                },
+                {
+                    "feature": "Lock screen",
+                    "milestone": "M25"
+                },
+                {
+                    "feature": "Screen saver",
+                    "milestone": "M25"
+                },
+                {
+                    "feature": "Fast user switching",
+                    "milestone": "M25"
+                },
+                {
+                    "feature": "First-run Setup",
+                    "milestone": "M25"
+                },
+                {
+                    "feature": "Login Items",
+                    "milestone": "M25"
+                },
+                {
+                    "feature": "Dynamic wallpapers",
+                    "milestone": "M25"
+                },
+                {
+                    "feature": "Start-up sound",
+                    "milestone": "M25"
+                },
+                {
+                    "feature": "Wallpapers",
+                    "claim": "partial",
+                    "missing": "only five made from gradients; none that change through the day",
+                    "milestone": "M25",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-wallpaper.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "A boot screen",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-desktop-boot"
+                        },
+                        {
+                            "suite": "test-debug-boot",
+                            "output": "loginwindow: ready"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Files",
+            "rows": [
+                {
+                    "feature": "Icon view",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-files-documents.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "List view",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-files-list.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "New Folder",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-files-new-folder.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Sidebar of places",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m15-rulers.chat",
+                                "click radio \"List\""
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Desktop icons' window behind everything",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-desktop.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Drag files about",
+                    "claim": "partial",
+                    "missing": "moving between windows and to the Trash is unit-tested only",
+                    "milestone": "M27",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        }
+                    ]
+                },
+                {
+                    "feature": "The Trash",
+                    "claim": "partial",
+                    "missing": "Put Back, and Empty Trash",
+                    "milestone": "M27",
+                    "proof": [
+                        {
+                            "suite": "test-ui"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Column view",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Gallery view",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Tabs",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Path bar",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Status bar",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Preview pane",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Get Info",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Colour tags",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Copy progress and conflict dialogs",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Compress and Expand",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Aliases",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Instant duplicates through clones",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Quick Actions",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Smart Folders",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Recents",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Spring-loaded folders",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Stacks on the desktop",
+                    "milestone": "M27"
+                },
+                {
+                    "feature": "Volumes on the Desktop",
+                    "milestone": "M27"
+                }
+            ]
+        },
+        {
+            "name": "Documents",
+            "rows": [
+                {
+                    "feature": "Open and Save panels",
+                    "claim": "partial",
+                    "missing": "tags, search and sidebars in them; access granted across the sandbox",
+                    "milestone": "M26",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "monday.chat",
+                                "ax-expect button \"Save\""
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "A registry of types, with default applications",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "Open With",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "Autosave",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "Revert To",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "An application only runs once",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "An embedded database",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "The Share menu",
+                    "milestone": "M31"
+                }
+            ]
+        },
+        {
+            "name": "Search",
+            "rows": [
+                {
+                    "feature": "Find applications by name",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-search.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Find a file that was only just saved",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "monday.chat",
+                                "ax-expect row \"monday.txt\""
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "An index that lasts across reboots",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "Notices changes as they happen",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "Metadata and importers",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "mdfind and mdls",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "Calculations and settings in the results",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "Definitions in the results",
+                    "milestone": "M31"
+                }
+            ]
+        },
+        {
+            "name": "Quick View",
+            "rows": [
+                {
+                    "feature": "Spacebar on a file shows it",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "Thumbnails",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "Plugins, in a sandbox",
+                    "milestone": "M26"
+                },
+                {
+                    "feature": "PDFs and images in it",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "Audio and video in it",
+                    "milestone": "M35"
+                }
+            ]
+        },
+        {
+            "name": "The look",
+            "rows": [
+                {
+                    "feature": "Control sizes and corners, measured against AppKit",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host",
+                            "output": "LibUI"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Light and dark",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-settings-dark.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m15-rulers.chat",
+                                "click radio \"Dark\""
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Accent colours",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "gallery-1x-colors-dark.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Blur and vibrancy",
+                    "claim": "partial",
+                    "missing": "the values aren't measured",
+                    "milestone": "M28",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "scene-2x.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "The pointer",
+                    "claim": "partial",
+                    "missing": "the wait cursor (M21). Catalina's style, by choice",
+                    "milestone": "M21",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "cursors.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Symbols",
+                    "claim": "partial",
+                    "missing": "many are stand-ins: Settings' sidebar shows \"+\" for Keyboard and \"?\" for Notifications",
+                    "milestone": "M28",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m15-rulers-about.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Application icons",
+                    "claim": "partial",
+                    "missing": "not a full set, nor checked against Sequoia's icon shape",
+                    "milestone": "M28",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-desktop.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Window shadows, measured",
+                    "milestone": "M28"
+                },
+                {
+                    "feature": "Materials, measured",
+                    "milestone": "M28"
+                },
+                {
+                    "feature": "Focus rings, measured",
+                    "milestone": "M28"
+                },
+                {
+                    "feature": "Inactive controls, measured",
+                    "milestone": "M28"
+                },
+                {
+                    "feature": "Menu rows, measured",
+                    "milestone": "M28"
+                },
+                {
+                    "feature": "Every desktop token, measured",
+                    "milestone": "M28"
+                },
+                {
+                    "feature": "Motion curves, measured",
+                    "milestone": "M28"
+                },
+                {
+                    "feature": "Every token says where it came from",
+                    "milestone": "M28"
+                },
+                {
+                    "feature": "Emoji",
+                    "milestone": "M18"
+                }
+            ]
+        },
+        {
+            "name": "Text and languages",
+            "rows": [
+                {
+                    "feature": "Latin text, with kerning",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibText"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Text fields and undo",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Unicode normalization",
+                    "milestone": "M17"
+                },
+                {
+                    "feature": "Case folding",
+                    "milestone": "M17"
+                },
+                {
+                    "feature": "Word and sentence boundaries",
+                    "milestone": "M17"
+                },
+                {
+                    "feature": "Line breaking by Unicode's rules",
+                    "milestone": "M17"
+                },
+                {
+                    "feature": "Bidirectional text",
+                    "milestone": "M17"
+                },
+                {
+                    "feature": "Dates and numbers for other locales",
+                    "milestone": "M17"
+                },
+                {
+                    "feature": "A real iconv",
+                    "milestone": "M17"
+                },
+                {
+                    "feature": "Language & Region",
+                    "milestone": "M17"
+                },
+                {
+                    "feature": "Arabic and Hebrew",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Indic scripts",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Thai",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Hangul",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Chinese and Japanese",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Font fallback",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Variable fonts",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Colour glyphs",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Rich text in text views",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Other keyboard layouts",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Dead keys",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Press and hold for accents",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Input methods",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Emoji & Symbols picker",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Spell check",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Autocorrect",
+                    "milestone": "M18"
+                },
+                {
+                    "feature": "Text replacements",
+                    "milestone": "M18"
+                }
+            ]
+        },
+        {
+            "name": "Input",
+            "rows": [
+                {
+                    "feature": "Keyboard and pointer",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-keyboard"
+                        },
+                        {
+                            "suite": "test-ui"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Scrolling with momentum",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Drag and drop",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Clipboard",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Keyboard shortcuts for menus",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "monday.chat",
+                                "key meta_l-s"
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Gestures",
+                    "milestone": "M22"
+                },
+                {
+                    "feature": "Natural scrolling",
+                    "milestone": "M22"
+                },
+                {
+                    "feature": "Mouse and Trackpad settings",
+                    "milestone": "M22"
+                }
+            ]
+        },
+        {
+            "name": "Settings",
+            "rows": [
+                {
+                    "feature": "Appearance",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-settings.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Wallpaper",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-wallpaper.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Sound",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "apps-2x-settings-sound.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "About",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m15-rulers-about.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Network",
+                    "claim": "partial",
+                    "missing": "it can't change anything (M32)",
+                    "milestone": "M32",
+                    "proof": [
+                        {
+                            "suite": "test-network"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Keyboard",
+                    "claim": "partial",
+                    "missing": "one toggle and a list (M18)",
+                    "milestone": "M18",
+                    "proof": [
+                        {
+                            "suite": "test-ui"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Notifications",
+                    "claim": "partial",
+                    "missing": "only a button to test them (M24)",
+                    "milestone": "M24",
+                    "proof": [
+                        {
+                            "suite": "test-ui"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Privacy & Security",
+                    "claim": "partial",
+                    "missing": "only Desktop, Documents and Downloads (M43)",
+                    "milestone": "M43",
+                    "proof": [
+                        {
+                            "suite": "test-network"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Users",
+                    "claim": "partial",
+                    "missing": "it can't change anything (M25)",
+                    "milestone": "M25",
+                    "proof": [
+                        {
+                            "suite": "test-ui"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Desktop & Dock",
+                    "claim": "partial",
+                    "missing": "few of its settings (M24)",
+                    "milestone": "M24",
+                    "proof": [
+                        {
+                            "suite": "test-ui"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Storage",
+                    "milestone": "M20"
+                },
+                {
+                    "feature": "Startup Disk",
+                    "milestone": "M20"
+                },
+                {
+                    "feature": "Displays",
+                    "milestone": "M22"
+                },
+                {
+                    "feature": "Night Shift",
+                    "milestone": "M22"
+                },
+                {
+                    "feature": "Sharing",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "Date & Time",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "Accessibility",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "Energy",
+                    "milestone": "M45"
+                },
+                {
+                    "feature": "Wi-Fi",
+                    "milestone": "H3"
+                },
+                {
+                    "feature": "Bluetooth",
+                    "milestone": "H3"
+                }
+            ]
+        },
+        {
+            "name": "Applications",
+            "rows": [
+                {
+                    "feature": "Terminal",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "apps-2x-terminal.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "monday.chat",
+                                "ax-expect textarea \"Terminal\" ~ monday-42"
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Terminal: tabs, splits and profiles",
+                    "claim": "partial",
+                    "missing": "none of these",
+                    "milestone": "M31",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "apps-2x-terminal-text.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Text Editor",
+                    "claim": "partial",
+                    "missing": "rich text, Find, tables, RTF",
+                    "milestone": "M31",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "apps-2x-text-editor-saved.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Viewer",
+                    "claim": "partial",
+                    "missing": "PDFs, markup, editing",
+                    "milestone": "M30",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "apps-2x-viewer.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Calculator",
+                    "claim": "partial",
+                    "missing": "scientific, programmer, history",
+                    "milestone": "M31",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "apps-2x-calculator-sum.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Monitor",
+                    "claim": "partial",
+                    "missing": "tabs for memory, energy, disk and network",
+                    "milestone": "M31",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "apps-2x-monitor-ended.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Console",
+                    "claim": "partial",
+                    "missing": "logs that last, crash reports",
+                    "milestone": "M31",
+                    "proof": [
+                        {
+                            "suite": "test-ui"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Disks",
+                    "claim": "partial",
+                    "missing": "erase, partition, repair, mount",
+                    "milestone": "M20",
+                    "proof": [
+                        {
+                            "suite": "test-ui"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Archiver",
+                    "claim": "partial",
+                    "missing": "zip, and everything but tar and gzip",
+                    "milestone": "M30",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "apps-2x-archiver-compressed.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "apps-2x-archiver-expanded.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Software",
+                    "claim": "partial",
+                    "missing": "there's no repository to get anything from (M41)",
+                    "milestone": "M41",
+                    "proof": [
+                        {
+                            "suite": "test-network"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Installer",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-hardware",
+                            "output": "the Installer, onto a blank disk"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Notes",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "Reminders",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "Calendar",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "Contacts",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "Clock",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "Stickies",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "Dictionary",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "Fonts",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "Color Meter",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "System Information",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "Passwords",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "Screenshot",
+                    "milestone": "M24"
+                },
+                {
+                    "feature": "Mail",
+                    "milestone": "M33"
+                },
+                {
+                    "feature": "Music",
+                    "milestone": "M34"
+                },
+                {
+                    "feature": "Voice Memos",
+                    "milestone": "M34"
+                },
+                {
+                    "feature": "Player",
+                    "milestone": "M35"
+                },
+                {
+                    "feature": "Photos",
+                    "milestone": "M36"
+                },
+                {
+                    "feature": "Browser",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "Studio",
+                    "milestone": "M42"
+                },
+                {
+                    "feature": "Profiler",
+                    "milestone": "M29"
+                },
+                {
+                    "feature": "Help",
+                    "milestone": "M29"
+                }
+            ]
+        },
+        {
+            "name": "Formats",
+            "rows": [
+                {
+                    "feature": "PNG and JPEG",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibImage"
+                        }
+                    ]
+                },
+                {
+                    "feature": "WAV",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host",
+                            "output": "LibAudio"
+                        }
+                    ]
+                },
+                {
+                    "feature": "tar and gzip",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host",
+                            "output": "LibArchive"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibCompress"
+                        }
+                    ]
+                },
+                {
+                    "feature": "zip, from the command line",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "GIF",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "WebP",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "TIFF",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "BMP",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "SVG",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "ICC colour management",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "xz",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "bzip2",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "zstd",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "brotli",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "PDF, reading",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "PDF, writing",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "zip in Archiver",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "MP3",
+                    "milestone": "M34"
+                },
+                {
+                    "feature": "FLAC",
+                    "milestone": "M34"
+                },
+                {
+                    "feature": "ALAC",
+                    "milestone": "M34"
+                },
+                {
+                    "feature": "Vorbis",
+                    "milestone": "M34"
+                },
+                {
+                    "feature": "Opus",
+                    "milestone": "M34"
+                },
+                {
+                    "feature": "AIFF",
+                    "milestone": "M34"
+                },
+                {
+                    "feature": "AAC, if it's decided on",
+                    "milestone": "M34"
+                },
+                {
+                    "feature": "MP4 and MOV",
+                    "milestone": "M35"
+                },
+                {
+                    "feature": "WebM and MKV",
+                    "milestone": "M35"
+                },
+                {
+                    "feature": "VP9",
+                    "milestone": "M35"
+                },
+                {
+                    "feature": "AV1",
+                    "milestone": "M35"
+                },
+                {
+                    "feature": "H.264, if it's decided on",
+                    "milestone": "M35"
+                },
+                {
+                    "feature": "HEIC, if it's decided on",
+                    "milestone": "M36"
+                }
+            ]
+        },
+        {
+            "name": "Printing",
+            "rows": [
+                {
+                    "feature": "A print dialog with a preview",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "Save as PDF, everywhere",
+                    "milestone": "M30"
+                },
+                {
+                    "feature": "Network printers, by IPP",
+                    "milestone": "M33"
+                },
+                {
+                    "feature": "Finding printers on the network",
+                    "milestone": "M33"
+                }
+            ]
+        },
+        {
+            "name": "Network",
+            "rows": [
+                {
+                    "feature": "Ethernet, DHCP and DNS",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-network",
+                            "output": "net-test: ok: a router from DHCP"
+                        },
+                        {
+                            "suite": "test-network",
+                            "output": "net-test: ok: a name server from DHCP"
+                        }
+                    ]
+                },
+                {
+                    "feature": "TCP, UDP and ICMP over IPv4",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-network",
+                            "output": "net-test: ok: ping"
+                        },
+                        {
+                            "suite": "test-userland",
+                            "output": "sockets: tcp_basics"
+                        }
+                    ]
+                },
+                {
+                    "feature": "TLS 1.3 client, checking certificates",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-network"
+                        }
+                    ]
+                },
+                {
+                    "feature": "HTTP/1.1",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-network",
+                            "output": "net-test: ok: http"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Unix-domain sockets",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "IPv6",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "IP fragments",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "TCP SACK and timestamps",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "TLS 1.2",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "A TLS server",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "TLS session resumption",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "HTTP/2",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "gzip and brotli over HTTP",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "WebSocket",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "Cookies",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "mDNS and DNS-SD",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "NTP",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "A firewall",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "SSH client",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "SSH server",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "SFTP",
+                    "milestone": "M32"
+                },
+                {
+                    "feature": "IMAP and SMTP",
+                    "milestone": "M33"
+                },
+                {
+                    "feature": "Connect to Server, by SFTP",
+                    "milestone": "M33"
+                },
+                {
+                    "feature": "Connect to Server, by SMB",
+                    "milestone": "M33"
+                }
+            ]
+        },
+        {
+            "name": "The web",
+            "rows": [
+                {
+                    "feature": "HTML, parsed to the letter of the spec",
+                    "milestone": "M37"
+                },
+                {
+                    "feature": "The DOM",
+                    "milestone": "M37"
+                },
+                {
+                    "feature": "CSS: selectors and the cascade",
+                    "milestone": "M37"
+                },
+                {
+                    "feature": "Block and inline layout",
+                    "milestone": "M37"
+                },
+                {
+                    "feature": "Tables",
+                    "milestone": "M37"
+                },
+                {
+                    "feature": "Flexbox",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "Grid",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "Floats and positioning",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "Transforms, transitions and filters",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "Web fonts",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "SVG",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "Forms",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "Tabs in a sandbox of their own",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "Reader",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "Downloads",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "Private windows",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "Password autofill",
+                    "milestone": "M38"
+                },
+                {
+                    "feature": "JavaScript",
+                    "milestone": "M39"
+                },
+                {
+                    "feature": "Regular expressions, with Unicode",
+                    "milestone": "M39"
+                },
+                {
+                    "feature": "Intl",
+                    "milestone": "M39"
+                },
+                {
+                    "feature": "DOM APIs from JavaScript",
+                    "milestone": "M40"
+                },
+                {
+                    "feature": "fetch",
+                    "milestone": "M40"
+                },
+                {
+                    "feature": "Canvas",
+                    "milestone": "M40"
+                },
+                {
+                    "feature": "Local storage and IndexedDB",
+                    "milestone": "M40"
+                },
+                {
+                    "feature": "Workers",
+                    "milestone": "M40"
+                },
+                {
+                    "feature": "Video and audio in a page",
+                    "milestone": "M40"
+                },
+                {
+                    "feature": "WebAssembly",
+                    "milestone": "M40"
+                },
+                {
+                    "feature": "A basic inspector",
+                    "milestone": "M40"
+                }
+            ]
+        },
+        {
+            "name": "Filesystem",
+            "rows": [
+                {
+                    "feature": "vultureFS: copy-on-write, checksummed metadata",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host",
+                            "output": "LibVultureFS"
+                        },
+                        {
+                            "suite": "test-persistence",
+                            "output": "storage-test: persistence: PASS"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Files survive reboots",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-persistence",
+                            "output": "storage-test: persistence: PASS"
+                        }
+                    ]
+                },
+                {
+                    "feature": "A sealed system",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-hardening",
+                            "output": "seal: a changed file can't be run"
+                        }
+                    ]
+                },
+                {
+                    "feature": "FAT, reading",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-disk-log",
+                            "output": "a partition that can't be written is left alone"
+                        }
+                    ]
+                },
+                {
+                    "feature": "More than 28 GiB",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "Extended attributes",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "ACLs",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "Clones",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "Snapshots",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "Case-insensitive names",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "/tmp where a Mac has it",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "Compression",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "File data checksums",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "FSEvents",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "System and Data volumes",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "A sealed system, checked block by block",
+                    "milestone": "M19"
+                },
+                {
+                    "feature": "Plug in a USB stick",
+                    "milestone": "M20"
+                },
+                {
+                    "feature": "Eject",
+                    "milestone": "M20"
+                },
+                {
+                    "feature": "FAT, writing",
+                    "milestone": "M20"
+                },
+                {
+                    "feature": "exFAT",
+                    "milestone": "M20"
+                },
+                {
+                    "feature": "ISO 9660",
+                    "milestone": "M20"
+                },
+                {
+                    "feature": "Disk images",
+                    "milestone": "M20"
+                },
+                {
+                    "feature": "diskutil and hdiutil",
+                    "milestone": "M20"
+                },
+                {
+                    "feature": "Disk encryption",
+                    "milestone": "M43"
+                },
+                {
+                    "feature": "Backups",
+                    "milestone": "M43"
+                },
+                {
+                    "feature": "Recovery",
+                    "milestone": "M43"
+                }
+            ]
+        },
+        {
+            "name": "Kernel and POSIX",
+            "rows": [
+                {
+                    "feature": "Every processor",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-boot",
+                            "output": "8 of 8 processors online"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Copy-on-write fork, demand paging",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Threads",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "threads: "
+                        }
+                    ]
+                },
+                {
+                    "feature": "Dynamic linking",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland"
+                        }
+                    ]
+                },
+                {
+                    "feature": "The POSIX checks, and each difference from a real Mac explained",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: posix: every difference is explained"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Memory compression",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-compressor",
+                            "output": "compressor-test: PASS"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Mach-style ports",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "ports: round trip"
+                        }
+                    ]
+                },
+                {
+                    "feature": "launchd-style jobs",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland"
+                        }
+                    ]
+                },
+                {
+                    "feature": "A panic's report, kept for a machine with no serial port",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-disk-log",
+                            "output": "a panic's report is in Logs/panic.txt"
+                        }
+                    ]
+                },
+                {
+                    "feature": "dlopen",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "kqueue",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "select",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "socketpair",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "shm_open",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "Shared anonymous mmap",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "madvise",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "setitimer",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "The *at calls",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "readv and writev",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "Thousands of open files",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "mount and unmount",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "ptrace",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "Core dumps",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "The file cache gives memory back",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "QoS boosts and priority inheritance",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "wchar.h",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "fenv.h",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "pthread cancellation",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "Process-shared locks",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "awk",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "tar",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "gzip",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "diff and patch",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "cmp",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "dd",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "file",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "vi",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "make",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "top",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "killall",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "man",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "defaults",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "launchctl",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "plutil",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "ditto",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "sw_vers",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "system_profiler",
+                    "milestone": "M16"
+                },
+                {
+                    "feature": "open and scutil",
+                    "claim": "partial",
+                    "missing": "scutil is a small part of a Mac's",
+                    "milestone": "M16",
+                    "proof": [
+                        {
+                            "suite": "test-userland"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Security and privacy",
+            "rows": [
+                {
+                    "feature": "W^X, ASLR, KASLR",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-hardening",
+                            "output": "the kernel moves"
+                        }
+                    ]
+                },
+                {
+                    "feature": "PAC and BTI, where the processor has them",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-hardening",
+                            "output": "emulated: utest=hardening"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Stack protector, kernel sanitizers",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-hardening",
+                            "output": "fault=stack-smash"
+                        },
+                        {
+                            "suite": "test-sanitized-kernel",
+                            "output": "sanitized-kernel-test: PASS"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Sandboxes",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "sandbox"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Signed packages",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-network"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Privacy prompts",
+                    "claim": "partial",
+                    "missing": "Camera, Microphone, Contacts, Calendar, Screen Recording, Full Disk Access; and services acting for an application",
+                    "milestone": "M43",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "privacy"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Code signing",
+                    "claim": "partial",
+                    "missing": "only whole files the system vouches for: not signatures of a program's own (M41, M43)",
+                    "milestone": "M43",
+                    "proof": [
+                        {
+                            "suite": "test-hardening"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Keychain",
+                    "milestone": "M31"
+                },
+                {
+                    "feature": "Developer Mode",
+                    "milestone": "M41"
+                },
+                {
+                    "feature": "A first-launch check",
+                    "milestone": "M43"
+                },
+                {
+                    "feature": "Containers for each application",
+                    "milestone": "M43"
+                },
+                {
+                    "feature": "UEFI Secure Boot",
+                    "milestone": "M43"
+                },
+                {
+                    "feature": "Software Update, with rollback",
+                    "milestone": "M43"
+                }
+            ]
+        },
+        {
+            "name": "Accessibility",
+            "rows": [
+                {
+                    "feature": "An accessibility tree",
+                    "claim": "partial",
+                    "missing": "many custom views say little",
+                    "milestone": "M44",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m15-rulers.chat",
+                                "click row \"Wallpaper\""
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Full keyboard navigation",
+                    "claim": "partial",
+                    "missing": "not of everything",
+                    "milestone": "M44",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Reduce Motion",
+                    "milestone": "M21"
+                },
+                {
+                    "feature": "Screen Reader",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "Speech",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "Zoom",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "Reduce Transparency",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "Increase Contrast",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "Colour filters",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "Sticky Keys",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "Slow Keys",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "Mouse Keys",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "Right-to-left interface",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "Other languages' translations",
+                    "milestone": "M44"
+                }
+            ]
+        },
+        {
+            "name": "Developer",
+            "rows": [
+                {
+                    "feature": "A shell",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-login"
+                        }
+                    ]
+                },
+                {
+                    "feature": "A log, and log show",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland"
+                        }
+                    ]
+                },
+                {
+                    "feature": "A debugger",
+                    "milestone": "M29"
+                },
+                {
+                    "feature": "sample and leaks",
+                    "milestone": "M29"
+                },
+                {
+                    "feature": "Symbolicated crash reports",
+                    "milestone": "M29"
+                },
+                {
+                    "feature": "\"Quit unexpectedly\"",
+                    "milestone": "M29"
+                },
+                {
+                    "feature": "Man pages",
+                    "milestone": "M29"
+                },
+                {
+                    "feature": "Ports",
+                    "milestone": "M41"
+                },
+                {
+                    "feature": "clang",
+                    "milestone": "M41"
+                },
+                {
+                    "feature": "git",
+                    "milestone": "M41"
+                },
+                {
+                    "feature": "Building itself",
+                    "milestone": "M41"
+                },
+                {
+                    "feature": "An SDK",
+                    "milestone": "M41"
+                },
+                {
+                    "feature": "An IDE",
+                    "milestone": "M42"
+                }
+            ]
+        },
+        {
+            "name": "Hardware and power",
+            "rows": [
+                {
+                    "feature": "virtio devices",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland"
+                        },
+                        {
+                            "suite": "test-sound"
+                        },
+                        {
+                            "suite": "test-network"
+                        }
+                    ]
+                },
+                {
+                    "feature": "NVMe, AHCI, USB, e1000e, Intel HD Audio, PS/2, in QEMU",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-hardware"
+                        }
+                    ]
+                },
+                {
+                    "feature": "x86_64, in QEMU",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-hardware",
+                            "output": "hardware-test: PASS"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Raspberry Pi 4, in QEMU",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-raspberry-pi",
+                            "output": "raspberry-pi-test: PASS"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Two displays",
+                    "milestone": "M22"
+                },
+                {
+                    "feature": "Scaled display modes",
+                    "milestone": "M22"
+                },
+                {
+                    "feature": "Screen recording",
+                    "milestone": "M22"
+                },
+                {
+                    "feature": "A microphone",
+                    "milestone": "M34"
+                },
+                {
+                    "feature": "Sleep and wake",
+                    "milestone": "M45"
+                },
+                {
+                    "feature": "Hot-plugged devices, in general",
+                    "milestone": "M45"
+                },
+                {
+                    "feature": "USB audio",
+                    "milestone": "M45"
+                },
+                {
+                    "feature": "USB network",
+                    "milestone": "M45"
+                },
+                {
+                    "feature": "MSI on AArch64",
+                    "milestone": "M45"
+                },
+                {
+                    "feature": "A real PC",
+                    "milestone": "H1"
+                },
+                {
+                    "feature": "A laptop: trackpad, battery, lid, backlight",
+                    "milestone": "H2"
+                },
+                {
+                    "feature": "Wi-Fi",
+                    "milestone": "H3"
+                },
+                {
+                    "feature": "Bluetooth",
+                    "milestone": "H3"
+                },
+                {
+                    "feature": "A camera",
+                    "milestone": "H3"
+                },
+                {
+                    "feature": "A real Raspberry Pi",
+                    "milestone": "H4"
+                }
+            ]
+        }
+    ]
+}

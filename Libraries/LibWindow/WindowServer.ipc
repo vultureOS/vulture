@@ -82,6 +82,10 @@ endpoint WindowServer
     // For tests and tools: only root may. As if the pointer moved here (points).
     inject_pointer(i32 x, i32 y, u32 buttons) =|
     statistics() => (u64 frames, u64 compose_microseconds, u64 flush_microseconds, u64 pixels)
+    // From the pointer moving to the window it's dragging being on the screen, since this was last asked: how many were
+    // timed, the 99th percentile and the worst, in microseconds. It's as far as this can see: the display's own latency
+    // comes after. (Asked by the one measuring: the counts start again.)
+    input_latency() => (u64 count, u64 p99_microseconds, u64 worst_microseconds)
     // The screen as it is now, as a PNG.
     capture() => (i32 error, ByteBuffer png)
     // What is on the screen, in words. Only root may ask. Every application with a window hears of it, and answers

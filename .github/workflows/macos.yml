@@ -3,10 +3,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Builds vultureOS on macOS (Apple silicon) with Homebrew's LLVM 22 and runs
-# every test: the host unit tests, then vultureOS booted in QEMU (boot,
-# panic, kernel, userland and persistence tests). Hosted runners are virtual
-# machines without nested virtualization, so QEMU emulates (TCG).
+# Builds vultureOS on macOS (Apple silicon) with Homebrew's LLVM 22, for both
+# architectures. That's all it does: the tests are run locally, by ninja check.
 
 name: macOS
 
