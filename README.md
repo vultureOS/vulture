@@ -5,9 +5,10 @@ Everything inside it is built from scratch in this repository: bootloader,
 kernel, C library, graphics, fonts rasterizer, UI framework, window server,
 desktop and apps.
 
-**Status:** all fourteen milestones of the [Roadmap](Documentation/Roadmap.md) are done, in QEMU. It has
-never run on a real PC or a real Raspberry Pi, and QEMU's models of devices aren't the devices, so expect
-to find problems on real machines.
+**Status:** all fifteen milestones of the [first roadmap](Documentation/Roadmap-1.md), M0 to M14, are done, in
+QEMU. It has never run on a real PC or a real Raspberry Pi, and QEMU's models of devices aren't the devices, so
+expect to find problems on real machines. The [Roadmap](Documentation/Roadmap.md) sets out what comes next: from
+a Mac that looks right to a Mac you can live on.
 
 - **It starts** on AArch64 and x86_64 through VultureBoot, our own UEFI loader, and on a Raspberry Pi 4 or 5
   from `kernel8.img`. One disk can start all of them.
@@ -111,7 +112,8 @@ ninja -C build check      # unit tests + headless boot, crash and kernel tests
 
 ## Documentation
 
-- [Roadmap](Documentation/Roadmap.md): milestones, performance budgets, risks
+- [Roadmap](Documentation/Roadmap.md): what comes next, performance budgets, risks
+- [Roadmap 1](Documentation/Roadmap-1.md): M0 to M14, and what each of them found
 - [Architecture](Documentation/Architecture.md): design, build system, repository layout
 - [Boot Protocol](Documentation/BootProtocol.md): how VultureBoot starts the kernel
 - [Raspberry Pi](Documentation/RaspberryPi.md): making a disk for one, and what is and isn't known to work

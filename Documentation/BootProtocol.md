@@ -53,8 +53,8 @@ On a disk for more than one kind of machine, `\EFI\BOOT\BOOTX64.EFI` is there to
    it (`stdout-path`, otherwise the first `arm,pl011`). Records the ACPI RSDP
    if there is one, and 64 bytes from the firmware RNG if it has one.
 5. Picks the largest graphics mode with a linear 32-bit framebuffer, prints a
-   summary, and only then switches to that mode (see "Findings" in the
-   Roadmap).
+   summary, and only then switches to that mode (see "Findings" in
+   [Roadmap 1](Roadmap-1.md#findings-so-far)).
 6. Builds the kernel's page tables (below), then calls `ExitBootServices`.
    On a stale map key it refreshes the map and retries, as the specification
    requires.
