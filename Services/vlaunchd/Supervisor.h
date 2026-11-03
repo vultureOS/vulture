@@ -47,6 +47,8 @@ public:
 
 private:
     bool m_graphical_session { false };
+    Vector<String> m_disabled_labels;
+    int m_directories_loaded { 0 };
     struct Service {
         String name;
         IPC::Port receive; // Our share, for MachServices (empty when registered).

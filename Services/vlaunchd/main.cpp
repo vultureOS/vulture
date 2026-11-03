@@ -29,7 +29,10 @@
 // Not as process 1, it supervises the jobs in the directories it is given
 // and stops them all when sent SIGTERM or SIGINT:
 //
-//   vlaunchd [--log FILE] --directory DIR...
+//   vlaunchd [--log FILE] [--gui] --directory DIR...
+//
+// (A job in an earlier directory is used in place of one of the same name in a later one, or, if it says "Disabled",
+// keeps that one from running: how a test changes a few of the system's jobs and runs the rest as they are.)
 
 namespace {
 
@@ -77,10 +80,12 @@ int run_as_supervisor(int argc, char** argv)
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--log") == 0 && i + 1 < argc) {
             Launchd::open_log(argv[++i]);
+        } else if (strcmp(argv[i], "--gui") == 0) {
+            supervisor.set_graphical_session(true);
         } else if (strcmp(argv[i], "--directory") == 0 && i + 1 < argc) {
             supervisor.load_directory(argv[++i]);
         } else {
-            fprintf(stderr, "usage: vlaunchd [--log FILE] --directory DIR...\n");
+            fprintf(stderr, "usage: vlaunchd [--log FILE] [--gui] --directory DIR...\n");
             return 1;
         }
     }
@@ -129,7 +134,11 @@ int main(int argc, char** argv)
         // only reaps, until the machine is switched off from outside.
         pid_t supervisor = fork();
         if (supervisor == 0) {
-            execl("/sbin/vlaunchd", "vlaunchd", "--directory", network_gui_test ? "/usr/tests/network-gui" : network_test ? "/usr/tests/network" : sound_test ? "/usr/tests/sound" : (ui_desktop ? "/usr/tests/desktop" : (ui_gallery ? "/usr/tests/gallery" : "/usr/tests/ui")), nullptr);
+            // The desktop's walkthroughs are of the real system: everything it runs, with only what they must change.
+            if (ui_desktop)
+                execl("/sbin/vlaunchd", "vlaunchd", "--gui", "--directory", "/usr/tests/desktop", "--directory", "/System/Library/LaunchDaemons", "--directory", "/Library/LaunchDaemons", nullptr);
+            else
+                execl("/sbin/vlaunchd", "vlaunchd", "--directory", network_gui_test ? "/usr/tests/network-gui" : network_test ? "/usr/tests/network" : sound_test ? "/usr/tests/sound" : (ui_gallery ? "/usr/tests/gallery" : "/usr/tests/ui"), nullptr);
             _exit(127);
         }
         // Nobody to stop here: asked to shut down (see tool_reboot), it just happens.

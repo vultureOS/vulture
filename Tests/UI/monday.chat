@@ -1,0 +1,45 @@
+# The Monday test: an ordinary working day, with the real keyboard and pointer, and nothing here knowing where anything is.
+# Finishing it unaided is what this whole roadmap is for (see Documentation/Roadmap.md); each milestone adds to it. What it
+# can't do yet is listed at the end, as what's still to come.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 1
+# ---- Write something down, and keep it.
+click button "Text Editor"
+expect texteditor: ready
+pause 0.5
+type Things to do on Monday.
+pause 0.5
+key meta_l-s
+ax-expect button "Save"
+type monday.txt\r
+ax-gone button "Save"
+key meta_l-q
+pause 1
+# ---- Is it there? Ask the shell.
+click button "Terminal"
+expect terminal: ready
+ax-expect textarea "Terminal"
+pause 1
+type cat Documents/monday.txt ; echo ; echo monday-$((6*7))\r
+ax-expect textarea "Terminal" ~ Things to do on Monday.
+ax-expect textarea "Terminal" ~ monday-42
+key meta_l-q
+ax-gone textarea "Terminal"
+# ---- Find it again, by what it's called.
+key meta_l-spc
+expect search: shown
+pause 0.3
+type monday
+ax-expect row "monday.txt"
+key esc
+ax-gone row "monday.txt"
+timeout 60
+# ---- And leave.
+click menuitem "Logo"
+click menuitem "Log Out"
+expect loginwindow: ready
+# Still to come, each with its milestone: read the mail (M33), open a PDF (M30), add a meeting to the calendar (M31), browse
+# (M40), play music (M34).

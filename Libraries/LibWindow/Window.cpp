@@ -98,6 +98,12 @@ void Connection::quit_requested(IPC::Sender const&)
         on_quit_requested();
 }
 
+void Connection::accessibility_requested(IPC::Sender const&, u32 generation)
+{
+    if (on_accessibility_requested)
+        on_accessibility_requested(generation);
+}
+
 void Connection::shell_state(IPC::Sender const&, String json)
 {
     if (on_shell_state)

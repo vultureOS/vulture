@@ -178,6 +178,7 @@ public:
     [[nodiscard]] bool shows_focus_ring() const override { return false; }
     bool key_down(KeyEvent const&) override;
     [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::Table; }
+    void accessibility_parts(Vector<Accessibility::Node>&) override;
 
 private:
     struct Entry {

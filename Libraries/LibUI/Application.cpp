@@ -7,6 +7,7 @@
 #include <AudioEndpoint.h>
 #include <LibIPC/Bootstrap.h>
 #include <LibJSON/JSON.h>
+#include <LibUI/Accessibility.h>
 #include <LibUI/Appearance.h>
 #include <LibUI/Application.h>
 #include <LibUI/Motion.h>
@@ -62,6 +63,7 @@ public:
     Bitmap& back_buffer() override { return m_window->back_buffer(); }
     void present(IntRect damage) override { m_window->present(damage); }
     int scale() const override { return m_window->connection().scale(); }
+    u32 system_id() const override { return m_window->id(); }
     IntRect frame() const override { return m_window->frame(); }
     void set_frame(IntRect frame) override { m_window->set_frame(frame); }
     void set_title(StringView title) override { m_window->set_title(title); }
@@ -117,6 +119,11 @@ ErrorOr<NonnullOwnPtr<Application>> Application::create(StringView name, StringV
             raw->m_menu_items[item]->action();
     };
     application->m_connection->on_quit_requested = [raw] { raw->request_quit(); };
+    application->m_connection->on_accessibility_requested = [raw](u32 generation) {
+        auto answer = Accessibility::describe_windows(WindowRegistry::windows());
+        if (!answer.is_error())
+            (void)raw->m_connection->server().publish_accessibility(generation, answer.value().view());
+    };
     if (!name.is_empty())
         (void)application->m_connection->server().set_application(name, identifier);
     // For golden screenshots: nothing moves or blinks in this program or what it starts.

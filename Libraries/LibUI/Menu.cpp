@@ -124,6 +124,14 @@ public:
     }
 
     [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::Menu; }
+    void accessibility_parts(Vector<Accessibility::Node>& parts) override
+    {
+        for (size_t i = 0; i < m_menu.m_items.size(); ++i) {
+            auto const& item = m_menu.m_items[i];
+            if (!item.separator)
+                parts.append(Accessibility::part_of(*this, Accessibility::Role::MenuItem, item.title.view(), m_menu.item_rect(static_cast<int>(i)), item.checked ? "on"_sv : StringView {}, item.enabled));
+        }
+    }
 
 private:
     [[nodiscard]] FloatPoint screen_of(MouseEvent const& event) const
@@ -269,6 +277,9 @@ void Menu::open(Window& owner, IntPoint screen_point, int aligned)
         s_open_menu = this;
         m_key_forwarder = adopt_own(*new KeyForwarder(*this));
         owner.set_key_interceptor(m_key_forwarder.ptr());
+        // The keys come by way of its owner, if that's the active window. If some other program's is, as it is for the menu
+        // bar's, they come to the menu's own, the one with the pointer.
+        m_window->set_key_interceptor(m_key_forwarder.ptr());
         owner.forget_press();
     }
 }

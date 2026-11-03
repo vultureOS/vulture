@@ -589,6 +589,11 @@ public:
 
     [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::Table; }
     [[nodiscard]] String accessibility_label() const override { return MUST(String::from_view(last_component(m_path.view()))); }
+    void accessibility_parts(Vector<Accessibility::Node>& parts) override
+    {
+        for (size_t i = 0; i < m_items.size(); ++i)
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::Cell, m_items[i].name.view(), item_rect(i), m_items[i].selected ? "selected"_sv : StringView {}));
+    }
 
 private:
     [[nodiscard]] int columns() const

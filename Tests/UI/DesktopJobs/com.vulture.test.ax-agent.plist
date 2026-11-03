@@ -1,0 +1,10 @@
+{
+    "Label" : "com.vulture.test.ax-agent",
+    "ProgramArguments" : [ "/usr/bin/ax", "--serve" ],
+    "StandardInPath" : "/dev/console",
+    "StandardOutPath" : "/dev/console",
+    "StandardErrorPath" : "/dev/console",
+    "RunAtLoad" : true,
+    "KeepAlive" : true,
+    "ThrottleInterval" : 1
+}

@@ -35,6 +35,14 @@ public:
 
     Function<void()> on_finished;
 
+    void accessibility_parts(Vector<Accessibility::Node>& parts) override
+    {
+        size_t const per_page = rows() * columns();
+        size_t const first = static_cast<size_t>(m_page) * per_page;
+        for (size_t i = first; i < m_shown.size() && i < first + per_page; ++i)
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::Cell, m_all[m_shown[i]].name.view(), cell_rect(i - first), static_cast<int>(i) == m_selected ? "selected"_sv : StringView {}));
+    }
+
     void filter(StringView text)
     {
         m_shown.clear();

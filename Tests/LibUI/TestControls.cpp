@@ -1067,6 +1067,43 @@ TEST_CASE(a_layer_is_drawn_once_and_faded_without_redrawing)
     EXPECT_EQ(view.count, drawn + 1);
 }
 
+TEST_CASE(the_accessibility_tree_goes_inside_what_draws_its_own_parts)
+{
+    TestWindow test;
+    auto& stack = test.place<StackView>({ 0, 0, 400, 200 }, Axis::Vertical, 8);
+    auto& segments = stack.add<SegmentedControl>();
+    segments.add_segment("Icons"_sv);
+    segments.add_segment("List"_sv);
+    segments.set_selected(1);
+    test.window->update_layout_now();
+    auto tree = Accessibility::tree_of(*test.window);
+    auto const* icons = Accessibility::find(tree, Accessibility::Role::RadioButton, "Icons"_sv);
+    auto const* list = Accessibility::find(tree, Accessibility::Role::RadioButton, "List"_sv);
+    EXPECT(icons != nullptr);
+    EXPECT(list != nullptr);
+    EXPECT(icons->value.view() == "off"_sv);
+    EXPECT(list->value.view() == "on"_sv);
+    // Where it really is, so that pressing there presses it.
+    EXPECT(list->frame.width > 0);
+    EXPECT(list->frame.x > icons->frame.x);
+    EXPECT(icons->frame.x >= segments.rect_in_window().x);
+}
+
+TEST_CASE(the_accessibility_tree_as_json)
+{
+    TestWindow test;
+    auto& stack = test.place<StackView>({ 0, 0, 400, 200 }, Axis::Vertical, 8);
+    auto& button = stack.add<Button>("Save"_sv);
+    button.set_enabled(false);
+    test.window->update_layout_now();
+    auto const json = MUST(Accessibility::to_json(Accessibility::tree_of(*test.window)));
+    EXPECT(json.get_string("role"_sv).value() == "window"_sv);
+    auto const serialized = MUST(json.serialize());
+    EXPECT(serialized.view().contains("\"label\":\"Save\""_sv) || serialized.view().contains("\"label\": \"Save\""_sv));
+    auto const again = MUST(JSON::parse(serialized.view()));
+    EXPECT(again.get_array("children"_sv) != nullptr);
+}
+
 TEST_CASE(the_accessibility_tree_names_what_is_there)
 {
     TestWindow test;

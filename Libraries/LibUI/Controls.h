@@ -272,6 +272,7 @@ private:
     };
     [[nodiscard]] Gfx::FloatRect segment_rect(size_t) const;
     [[nodiscard]] int segment_at(Gfx::FloatPoint) const;
+    void accessibility_parts(Vector<Accessibility::Node>&) override;
 
     Vector<Segment> m_segments;
     Mode m_mode { Mode::SelectOne };

@@ -218,6 +218,8 @@ public:
     void set_accessibility_label(StringView);
     // Presses it, as far as a screen reader is concerned.
     virtual bool accessibility_press() { return false; }
+    // What it has inside that aren't views of their own: a table's rows, a menu's items.
+    virtual void accessibility_parts(Vector<Accessibility::Node>&) { }
 
     void set_tooltip(StringView);
     [[nodiscard]] StringView tooltip() const { return m_tooltip.view(); }

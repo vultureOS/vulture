@@ -84,6 +84,12 @@ endpoint WindowServer
     statistics() => (u64 frames, u64 compose_microseconds, u64 flush_microseconds, u64 pixels)
     // The screen as it is now, as a PNG.
     capture() => (i32 error, ByteBuffer png)
+    // What is on the screen, in words. Only root may ask. Every application with a window hears of it, and answers
+    // with publish_accessibility as it gets to it; one that's stuck never does. `accessibility` says what has come in so
+    // far: the screen and its windows, front to back, as JSON, with each answer that came.
+    request_accessibility() => (i32 error, u32 generation)
+    publish_accessibility(u32 generation, String json) =|
+    accessibility(u32 generation) => (i32 error, u32 asked, u32 answered, String json)
 }
 
 endpoint WindowClient
@@ -109,4 +115,6 @@ endpoint WindowClient
     // To the desktop: all applications and windows, as JSON, whenever any change.
     shell_state(String json) =|
     hotkey(u16 code, u32 modifiers) =|
+    // For publish_accessibility.
+    accessibility_requested(u32 generation) =|
 }

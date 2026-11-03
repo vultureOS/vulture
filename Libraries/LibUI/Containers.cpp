@@ -372,6 +372,18 @@ size_t Sidebar::add_row(StringView title, Symbol symbol)
     return row;
 }
 
+void Sidebar::accessibility_parts(Vector<Accessibility::Node>& parts)
+{
+    float const row_height = tokens().metric("sidebar.rowHeight"_sv);
+    for (size_t i = 0; i < m_entries.size(); ++i) {
+        auto const& entry = m_entries[i];
+        if (entry.section)
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::StaticText, entry.title.view(), { 0, y_of(i), width(), row_height }));
+        else
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::Row, entry.title.view(), { 0, y_of(i), width(), row_height }, entry.row == m_selected ? "selected"_sv : StringView {}));
+    }
+}
+
 StringView Sidebar::row_title(size_t row) const
 {
     for (auto const& entry : m_entries) {

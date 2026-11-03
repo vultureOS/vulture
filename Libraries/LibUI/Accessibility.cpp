@@ -5,6 +5,7 @@
  */
 
 #include <LibUI/Accessibility.h>
+#include <LibUI/Platform.h>
 #include <LibUI/View.h>
 #include <LibUI/Window.h>
 
@@ -67,6 +68,8 @@ StringView name_of(Role role)
         return "splitgroup"_sv;
     case Role::Sheet:
         return "sheet"_sv;
+    case Role::Cell:
+        return "cell"_sv;
     }
     VERIFY_NOT_REACHED();
 }
@@ -82,6 +85,7 @@ void collect(View& view, Vector<Node>& into)
     Vector<Node> children;
     for (auto const& child : view.children())
         collect(*child, children);
+    view.accessibility_parts(children);
     if (role == Role::Group && label.is_empty()) {
         for (auto& child : children)
             into.append(move(child));
@@ -124,6 +128,18 @@ void describe_into(Node const& node, StringBuilder& builder, size_t depth)
 
 }
 
+Node part_of(View const& view, Role role, StringView label, Gfx::FloatRect frame, StringView value, bool enabled)
+{
+    auto const origin = view.rect_in_window();
+    Node node;
+    node.role = role;
+    node.label = MUST(String::from_view(label));
+    node.value = MUST(String::from_view(value));
+    node.frame = { origin.x + frame.x, origin.y + frame.y, frame.width, frame.height };
+    node.enabled = enabled;
+    return node;
+}
+
 Node tree_of(View& view)
 {
     Vector<Node> found;
@@ -155,6 +171,39 @@ String describe(Node const& node)
     StringBuilder builder;
     describe_into(node, builder, 0);
     return MUST(builder.to_string());
+}
+
+ErrorOr<JSON::Value> to_json(Node const& node)
+{
+    auto object = JSON::Value::object();
+    TRY(object.set("role"_sv, TRY(JSON::Value::string(name_of(node.role)))));
+    TRY(object.set("label"_sv, TRY(JSON::Value::string(node.label.view()))));
+    TRY(object.set("value"_sv, TRY(JSON::Value::string(node.value.view()))));
+    TRY(object.set("x"_sv, JSON::Value(static_cast<double>(node.frame.x))));
+    TRY(object.set("y"_sv, JSON::Value(static_cast<double>(node.frame.y))));
+    TRY(object.set("width"_sv, JSON::Value(static_cast<double>(node.frame.width))));
+    TRY(object.set("height"_sv, JSON::Value(static_cast<double>(node.frame.height))));
+    TRY(object.set("enabled"_sv, JSON::Value(node.enabled)));
+    TRY(object.set("focused"_sv, JSON::Value(node.focused)));
+    auto children = JSON::Value::array();
+    for (auto const& child : node.children)
+        TRY(children.append(TRY(to_json(child))));
+    TRY(object.set("children"_sv, move(children)));
+    return object;
+}
+
+ErrorOr<String> describe_windows(Span<Window* const> windows)
+{
+    auto list = JSON::Value::array();
+    for (auto* window : windows) {
+        if (!window->is_shown())
+            continue;
+        auto one = JSON::Value::object();
+        TRY(one.set("window"_sv, JSON::Value(static_cast<i64>(window->backend().system_id()))));
+        TRY(one.set("tree"_sv, TRY(to_json(tree_of(*window)))));
+        TRY(list.append(move(one)));
+    }
+    return list.serialize();
 }
 
 Node const* find(Node const& node, Role role, StringView label)

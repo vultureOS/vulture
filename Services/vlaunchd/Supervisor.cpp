@@ -266,8 +266,12 @@ void Supervisor::load_file(char const* path)
         log("%s:%zu:%zu: %s", path, where.line, where.column, where.message);
         return;
     }
-    if (plist.value().get_boolean("Disabled"_sv).value_or(false))
+    if (plist.value().get_boolean("Disabled"_sv).value_or(false)) {
+        // Whichever directory it would have come from.
+        if (auto label = plist.value().get_string("Label"_sv); label.has_value())
+            m_disabled_labels.append(MUST(String::from_view(label.value())));
         return;
+    }
     char const* error = "";
     auto job = Job::from_plist(plist.value(), error);
     if (!job) {
@@ -276,9 +280,15 @@ void Supervisor::load_file(char const* path)
     }
     if (job->only_in_graphical_session && !m_graphical_session)
         return;
+    for (auto const& disabled : m_disabled_labels) {
+        if (disabled.view() == job->label.view())
+            return;
+    }
     for (auto const& existing : m_jobs) {
         if (existing->label == job->label) {
-            log("%s: a job named %s is loaded already", path, job->label.characters());
+            // From a directory before this one is how a job is replaced. In the same one, it's a mistake.
+            if (existing->loaded_from_directory == m_directories_loaded)
+                log("%s: a job named %s is loaded already", path, job->label.characters());
             return;
         }
     }
@@ -296,11 +306,13 @@ void Supervisor::load_file(char const* path)
         auto* service = new (Base::nothrow) Service { name, move(port.value().receive), move(port.value().send), job.ptr(), 0 };
         m_services.append(adopt_own(*service));
     }
+    job->loaded_from_directory = m_directories_loaded;
     m_jobs.append(move(job));
 }
 
 void Supervisor::load_directory(char const* directory)
 {
+    ++m_directories_loaded;
     DIR* listing = opendir(directory);
     if (!listing)
         return;

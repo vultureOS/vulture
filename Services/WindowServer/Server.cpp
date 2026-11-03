@@ -7,6 +7,7 @@
 #include <os/log.h>
 #include "Server.h"
 #include "Cursors.h"
+#include <LibJSON/JSON.h>
 #include <Kernel/API/POSIX/input.h>
 #include <LibBase/Math.h>
 #include <LibGfx/Painter.h>
@@ -629,6 +630,87 @@ WindowServerEndpoint::CaptureAnswer Server::capture(IPC::Sender const& sender)
     return answer;
 }
 
+WindowServerEndpoint::RequestAccessibilityAnswer Server::request_accessibility(IPC::Sender const& sender)
+{
+    WindowServerEndpoint::RequestAccessibilityAnswer answer {};
+    if (sender.uid != 0) {
+        answer.error = EPERM;
+        return answer;
+    }
+    answer.generation = ++m_accessibility_generation;
+    for (auto& client : m_clients) {
+        IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::AccessibilityRequested));
+        encoder.encode(answer.generation);
+        send_to(*client, encoder);
+    }
+    return answer;
+}
+
+void Server::publish_accessibility(IPC::Sender const& sender, u32 generation, String json)
+{
+    for (auto& client : m_clients) {
+        if (client->pid == sender.pid) {
+            client->accessibility_generation = generation;
+            client->accessibility = move(json);
+            return;
+        }
+    }
+}
+
+WindowServerEndpoint::AccessibilityAnswer Server::accessibility(IPC::Sender const& sender, u32 generation)
+{
+    WindowServerEndpoint::AccessibilityAnswer answer {};
+    if (sender.uid != 0) {
+        answer.error = EPERM;
+        return answer;
+    }
+    // Only for clients with a window showing: nothing else could have anything to say.
+    auto windows = JSON::Value::array();
+    auto answers = JSON::Value::array();
+    for (auto const& client : m_clients) {
+        bool shows_something = false;
+        for (auto const* window : m_windows)
+            shows_something = shows_something || (window->client == client.ptr() && window->visible);
+        if (!shows_something)
+            continue;
+        ++answer.asked;
+        if (client->accessibility_generation != generation)
+            continue;
+        ++answer.answered;
+        // As it came: this server doesn't need to know what's in it.
+        MUST(answers.append(MUST(JSON::Value::string(client->accessibility.view()))));
+    }
+    // m_windows is back to front.
+    for (size_t i = m_windows.size(); i > 0; --i) {
+        auto const* window = m_windows[i - 1];
+        if (!window->visible)
+            continue;
+        auto one = JSON::Value::object();
+        MUST(one.set("id"_sv, JSON::Value(static_cast<i64>(window->id))));
+        MUST(one.set("pid"_sv, JSON::Value(static_cast<i64>(window->client ? window->client->pid : 0))));
+        MUST(one.set("application"_sv, MUST(JSON::Value::string(window->client ? window->client->application_name.view() : StringView {}))));
+        MUST(one.set("title"_sv, MUST(JSON::Value::string(window->title.view()))));
+        MUST(one.set("x"_sv, JSON::Value(window->frame.x)));
+        MUST(one.set("y"_sv, JSON::Value(window->frame.y)));
+        MUST(one.set("width"_sv, JSON::Value(window->frame.width)));
+        MUST(one.set("height"_sv, JSON::Value(window->frame.height)));
+        MUST(one.set("active"_sv, JSON::Value(window->active)));
+        MUST(windows.append(move(one)));
+    }
+    auto state = JSON::Value::object();
+    MUST(state.set("width"_sv, JSON::Value(m_screen.points().width)));
+    MUST(state.set("height"_sv, JSON::Value(m_screen.points().height)));
+    MUST(state.set("windows"_sv, move(windows)));
+    MUST(state.set("answers"_sv, move(answers)));
+    auto json = state.serialize();
+    if (json.is_error()) {
+        answer.error = ENOMEM;
+        return answer;
+    }
+    answer.json = json.release_value();
+    return answer;
+}
+
 // --- The window manager ---
 
 void Server::activate(ServerWindow* window)
@@ -1226,7 +1308,11 @@ void Server::key_changed(u16 code, int value)
         m_modifiers ^= Window::ModifierCapsLock;
     if (value == 1 && handle_hotkey(code))
         return;
-    if (!m_active || !m_active->client)
+    // Keys go to the active window, unless some other program has a menu open: Escape and the arrows are that menu's.
+    auto* target = m_active;
+    if (m_grab && (m_grab->flags & Window::WindowPopup) && m_grab->client && (!m_active || m_grab->client != m_active->client))
+        target = m_grab;
+    if (!target || !target->client)
         return;
     char text[2] = {};
     if (value && code < array_size(us_layout)) {
@@ -1237,12 +1323,12 @@ void Server::key_changed(u16 code, int value)
         text[0] = upper ? pair.shifted : pair.plain;
     }
     IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Key));
-    encoder.encode(m_active->id);
+    encoder.encode(target->id);
     encoder.encode(value != 0);
     encoder.encode(code);
     encoder.encode(m_modifiers);
     encoder.encode(StringView(text));
-    send_to(*m_active->client, encoder);
+    send_to(*target->client, encoder);
 }
 
 }

@@ -493,6 +493,7 @@ public:
     }
 
     [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::TextArea; }
+    [[nodiscard]] String accessibility_label() const override { return MUST(String::from_view("Terminal"_sv)); }
     [[nodiscard]] String accessibility_value() const override
     {
         StringBuilder builder;

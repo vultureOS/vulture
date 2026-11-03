@@ -173,6 +173,25 @@ public:
         return { m_table.m_header->total_width(), static_cast<float>(rows) * row_height };
     }
 
+    // Those that can be seen: a long list's others are nowhere to be pressed.
+    void accessibility_parts(Vector<Accessibility::Node>& parts) override
+    {
+        auto* model = m_table.m_model;
+        if (!model)
+            return;
+        float const row_height = tokens().metric("table.rowHeight"_sv);
+        auto const visible = m_table.m_scroll->rect_in_window();
+        auto const origin = rect_in_window();
+        for (size_t row = 0; row < model->row_count(); ++row) {
+            float const y = static_cast<float>(row) * row_height;
+            if (origin.y + y + row_height <= visible.y || origin.y + y >= visible.y + visible.height)
+                continue;
+            auto const text = model->text_at(row, 0);
+            bool const selected = m_table.m_selection.contains_slow(row);
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::Row, text.view(), { 0, y, width(), row_height }, selected ? "selected"_sv : StringView {}));
+        }
+    }
+
     void draw(Graphics& graphics) override
     {
         auto const& t = tokens();
@@ -556,6 +575,14 @@ bool OutlineView::key_down(KeyEvent const& event)
 CollectionView::CollectionView(CollectionModel& model)
     : m_model(model)
 {
+}
+
+void CollectionView::accessibility_parts(Vector<Accessibility::Node>& parts)
+{
+    for (size_t i = 0; i < m_model.item_count(); ++i) {
+        auto const title = m_model.title_of(i);
+        parts.append(Accessibility::part_of(*this, Accessibility::Role::Cell, title.view(), item_rect(i), static_cast<int>(i) == m_selected ? "selected"_sv : StringView {}));
+    }
 }
 
 int CollectionView::columns() const

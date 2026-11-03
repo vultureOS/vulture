@@ -29,6 +29,9 @@ struct Client {
     bool hidden { false };
     // Hears of everything (the Dock, the menu bar).
     bool is_shell { false };
+    // Its last answer to request_accessibility, and to which.
+    u32 accessibility_generation { 0 };
+    String accessibility;
 };
 
 // The service: clients and their windows, the window manager (stacking, focus,
@@ -85,6 +88,9 @@ private:
     void inject_pointer(IPC::Sender const&, i32 x, i32 y, u32 buttons) override;
     WindowServerEndpoint::StatisticsAnswer statistics(IPC::Sender const&) override;
     WindowServerEndpoint::CaptureAnswer capture(IPC::Sender const&) override;
+    WindowServerEndpoint::RequestAccessibilityAnswer request_accessibility(IPC::Sender const&) override;
+    void publish_accessibility(IPC::Sender const&, u32 generation, String json) override;
+    WindowServerEndpoint::AccessibilityAnswer accessibility(IPC::Sender const&, u32 generation) override;
 
     [[nodiscard]] Client* client_of(IPC::Sender const&);
     [[nodiscard]] ServerWindow* window_of(IPC::Sender const&, u32 id);
@@ -201,6 +207,7 @@ private:
     // The desktop.
     Client* m_active_application { nullptr };
     bool m_shell_state_pending { false };
+    u32 m_accessibility_generation { 0 };
     Gfx::IntPoint m_minimize_target { 0, 0 };
     int m_work_top { 0 };
     int m_work_left { 0 };

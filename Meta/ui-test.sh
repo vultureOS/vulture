@@ -91,6 +91,34 @@ for config in "gallery-2x 2560 1600 gallery uigallery" "gallery-1x 1280 800 gall
     done
     [ "$update" -eq 1 ] && echo "ui-test: $name: updated"
 done
+# Each milestone's walkthrough, and the Monday test (see Documentation/Roadmap.md): the real system, found by what things say.
+walkthroughs=("$source_dir"/Tests/UI/Milestones/*.chat "$source_dir/Tests/UI/monday.chat")
+for walkthrough in "${walkthroughs[@]}"; do
+    name="$(basename "$walkthrough" .chat)"
+    rm -f "$out_dir/$name"-*.png
+    if ! VULTURE_GPU_WIDTH=2560 VULTURE_GPU_HEIGHT=1600 VULTURE_SCREENSHOT_DEVICE=gpu0 VULTURE_SCREENSHOT_PREFIX="$out_dir/$name-" \
+        "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --fresh-disk --boot-args uidesktop \
+        --chat "$walkthrough" --timeout 300 > "$out_dir/$name.log" 2>&1; then
+        echo "ui-test: $name: it did not get through; see $out_dir/$name.log" >&2
+        status=1
+        continue
+    fi
+    echo "ui-test: $name: all of it done"
+    while IFS= read -r shot; do
+        case "$shot" in look-*) continue ;; esac
+        for _ in $(seq 1 50); do
+            [ -s "$out_dir/$name-$shot" ] && break
+            sleep 0.1
+        done
+        if [ "$update" -eq 1 ]; then
+            cp "$out_dir/$name-$shot" "$golden_dir/$name-$shot"
+        elif ! "$imgdiff" --output "$out_dir/$name-$shot-difference.png" "$golden_dir/$name-$shot" "$out_dir/$name-$shot"; then
+            echo "ui-test: $name-$shot: differs from the golden; see $out_dir/$name-$shot-difference.png" >&2
+            status=1
+        fi
+    done < <(grep '^screenshot ' "$walkthrough" | cut -d' ' -f2)
+done
+
 # The pointer. It's the display's own to draw, so it isn't in any screenshot above. Its shapes are compared on paper...
 sheet="$out_dir/cursors.png"
 "$build_dir/host/Tests/WindowServer/cursor-sheet" "$sheet"

@@ -913,6 +913,12 @@ bool SegmentedControl::key_down(KeyEvent const& event)
     return true;
 }
 
+void SegmentedControl::accessibility_parts(Vector<Accessibility::Node>& parts)
+{
+    for (size_t i = 0; i < m_segments.size(); ++i)
+        parts.append(Accessibility::part_of(*this, Accessibility::Role::RadioButton, m_segments[i].title.view(), segment_rect(i), m_segments[i].selected ? "on"_sv : "off"_sv, is_enabled()));
+}
+
 String SegmentedControl::accessibility_value() const
 {
     int selected = selected_index();

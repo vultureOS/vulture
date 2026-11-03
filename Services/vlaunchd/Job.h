@@ -52,6 +52,8 @@ struct Job {
     static OwnPtr<Job> from_plist(JSON::Value const&, char const*& error);
 
     String label;
+    // Which of the directories it came from, in the order they were loaded.
+    int loaded_from_directory { 0 };
     String program;
     Vector<String> arguments;
     bool run_at_load { false };

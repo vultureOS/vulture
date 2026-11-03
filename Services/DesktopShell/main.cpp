@@ -89,6 +89,13 @@ public:
 
     Function<void(size_t)> on_activate;
 
+    void accessibility_parts(Vector<Accessibility::Node>& parts) override
+    {
+        float const row = tokens().metric("searchPanel.rowHeight"_sv);
+        for (size_t i = 0; i < m_results.size(); ++i)
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::Row, m_results[i].name.view(), { 0, static_cast<float>(i) * row, width(), row }, static_cast<int>(i) == m_selected ? "selected"_sv : StringView {}));
+    }
+
     void draw(Graphics& graphics) override
     {
         auto const& t = tokens();
@@ -235,6 +242,11 @@ public:
         resize_for_results();
         m_window->show();
         m_window->make_first_responder(m_field);
+        // So that what was only just saved is there to be found.
+        if (auto port = IPC::look_up("com.vulture.indexd"_sv); !port.is_error()) {
+            SearchProxy search_service(port.release_value());
+            (void)search_service.update();
+        }
         printf("search: shown\n");
         fflush(stdout);
     }
@@ -913,6 +925,15 @@ public:
         if (menus_changed || m_items.is_empty())
             rebuild_menus();
         set_needs_display();
+    }
+
+    void accessibility_parts(Vector<Accessibility::Node>& parts) override
+    {
+        for (auto const& item : m_items)
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::MenuItem, item.is_logo ? "Logo"_sv : item.title.view(), { item.left, 0, item.width, height() }));
+        parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, "Search"_sv, m_search_rect));
+        parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, "Quick Settings"_sv, m_control_rect));
+        parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, "Notifications"_sv, m_clock_rect, m_clock.view()));
     }
 
     void tick_clock()

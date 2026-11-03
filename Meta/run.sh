@@ -67,14 +67,38 @@
 #                       screen), "button left down" presses a mouse button,
 #                       "pause SECONDS" waits (as a person would before ^Z);
 #                       blank lines and "#" comments are skipped. Succeeds
-#                       once every step is done (and any --expect found)
+#                       once every step is done (and any --expect found).
+#
+#                       By what things say rather than where they are (booted with
+#                       uidesktop, which runs "ax --serve"; a ROLE is optional):
+#                       'click ROLE "Label"' presses it with the real pointer,
+#                       'ax-expect ROLE "Label"' waits for it, optionally followed by
+#                       "enabled", "disabled", "focused", "= VALUE" or "~ PART OF VALUE", and
+#                       'ax-gone ROLE "Label"' waits until it's gone.
+#
+#                       Everything else a test might need to do to the machine:
+#                       "timeout SECONDS" limits how long each later step may wait
+#                       (0: only --timeout does), "forbid TEXT" fails the chat at once if
+#                       TEXT is ever seen ("KERNEL PANIC" always is, unless expected),
+#                       "reboot" presses the reset button, "plug ID DRIVER [PROPERTIES]"
+#                       and "unplug ID" add and remove a device, "qmp JSON" tells QEMU
+#                       anything else (a failure fails the chat), "qmp-result TEXT" says
+#                       TEXT must be in its answer, "touch begin|update|end SLOT X Y" is
+#                       a finger on a touch device, "display HEAD" says which head
+#                       later screenshots are of, "host COMMAND" runs a command on this
+#                       machine (a failure fails the chat), "host-start NAME COMMAND"
+#                       leaves one running, as a server for the guest to talk to, until
+#                       "host-stop NAME" or the end (see $VULTURE_RUN_DIR, a directory
+#                       for this run).
 #
 # Environment: QEMU (the emulator), VULTURE_ACCEL (hvf, kvm or tcg),
 # VULTURE_FIRMWARE_CODE and VULTURE_FIRMWARE_VARS (the UEFI firmware and its
 # variable store template; found under Homebrew's or Debian's names
 # otherwise), VULTURE_TCG_TIMEOUT_SCALE, VULTURE_AUDIO_WAV (record what the
 # sound device plays to this file, instead of playing it), VULTURE_NET_OPTIONS
-# (added to QEMU's -netdev user, as in hostfwd=tcp::8022-:22).
+# (added to QEMU's -netdev user, as in hostfwd=tcp::8022-:22), VULTURE_GPU_OUTPUTS
+# (how many displays the GPU has), VULTURE_STEP_TIMEOUT (a chat's "timeout" to start with), VULTURE_IMAGE_ON (what
+# --image is attached by: virtio, nvme, ahci or usb).
 
 set -euo pipefail
 
@@ -135,7 +159,7 @@ while [ $# -gt 0 ]; do
         --kill-delay) kill_delay="$2"; shift 2 ;;
         --) shift; extra_args=("$@"); break ;;
         --chat) chat_file="$2"; shift 2 ;;
-        -h|--help) sed -n '8,66p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '8,95p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "run.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -170,8 +194,10 @@ if [ -z "$accelerator" ]; then
 fi
 # Emulated, everything takes several times as long.
 chat_pause_scale=1
+chat_timeout_scale=1
 if [ "$accelerator" = "tcg" ]; then
     timeout_seconds=$((timeout_seconds * ${VULTURE_TCG_TIMEOUT_SCALE:-8}))
+    chat_timeout_scale="${VULTURE_TCG_TIMEOUT_SCALE:-8}"
     # (Including what a chat is pausing for: an animation that takes the time it takes.)
     chat_pause_scale="${VULTURE_TCG_PAUSE_SCALE:-4}"
 fi
@@ -307,9 +333,17 @@ if [ -n "$image" ]; then
         echo "run.sh: $image is missing; make it with: ninja -C $build_dir image" >&2
         exit 1
     fi
+    # What it's attached by: VULTURE_IMAGE_ON says, for a test of them all.
+    case "${VULTURE_IMAGE_ON:-}" in
+        ahci) image_device=(-device ich9-ahci,id=ahci0 -device ide-hd,drive=image,bus=ahci0.0,bootindex=0) ;;
+        nvme) image_device=(-device nvme,drive=image,serial=VULTURE0001,bootindex=0) ;;
+        usb) image_device=(-device qemu-xhci,id=usb-stick -device usb-storage,bus=usb-stick.0,drive=image,bootindex=0) ;;
+        virtio) image_device=(-device virtio-blk-pci,drive=image,bootindex=0) ;;
+        *) image_device=(-device "${disk_interface/drive=root/drive=image},bootindex=0") ;;
+    esac
     boot_disk_args=(
         -drive "if=none,id=image,format=raw,file=$image,cache=writeback"
-        -device "${disk_interface/drive=root/drive=image},bootindex=0"
+        "${image_device[@]}"
     )
 else
     boot_disk_args=(
@@ -321,9 +355,10 @@ fi
 
 # QEMU's window shows the first display: the text console, unless booting to the
 # window server.
-display_devices=(-device ramfb -device "virtio-gpu-pci,id=gpu0,xres=$gpu_width,yres=$gpu_height")
+gpu_device="virtio-gpu-pci,id=gpu0,xres=$gpu_width,yres=$gpu_height${VULTURE_GPU_OUTPUTS:+,max_outputs=$VULTURE_GPU_OUTPUTS}"
+display_devices=(-device ramfb -device "$gpu_device")
 if [ "$gui" -eq 1 ]; then
-    display_devices=(-device "virtio-gpu-pci,id=gpu0,xres=$gpu_width,yres=$gpu_height" -device ramfb)
+    display_devices=(-device "$gpu_device" -device ramfb)
 fi
 # A real machine's display is whatever the firmware set up. (A test can keep the one it knows the size
 # of, for what it needs from it.)
@@ -472,7 +507,9 @@ if [ -n "$chat_file" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
             "" | "#"*) ;;
-            "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "nudge "* | "button "* | "screenshot "*) chat_steps+=("$line") ;;
+            "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "nudge "* | "button "* | "screenshot "* | \
+                "click "* | "ax-expect "* | "ax-gone "* | "timeout "* | "forbid "* | "reboot" | "plug "* | "unplug "* | "qmp "* | "qmp-result "* | \
+                "touch "* | "display "* | "host "* | "host-start "* | "host-stop "*) chat_steps+=("$line") ;;
             *) echo "run.sh: $chat_file: not a step: $line" >&2; exit 2 ;;
         esac
     done < "$chat_file"
@@ -485,7 +522,16 @@ fi
 "$qemu" "${args[@]}" -display none -monitor none "${serial_args[@]}" -qmp "unix:$qmp_socket,server=on,wait=off" \
     ${extra_args[@]+"${extra_args[@]}"} &
 qemu_pid=$!
-trap 'kill "$qemu_pid" ${reader_pid:+"$reader_pid"} 2>/dev/null || true; rm -rf "$run_dir"' EXIT
+# Whatever a chat left running on this machine.
+stop_fixtures() {
+    local pid_file
+    for pid_file in "$run_dir"/fixture.*.pid; do
+        [ -f "$pid_file" ] || continue
+        kill "$(cat "$pid_file")" 2>/dev/null || true
+        rm -f "$pid_file"
+    done
+}
+trap 'stop_fixtures; kill "$qemu_pid" ${reader_pid:+"$reader_pid"} 2>/dev/null || true; rm -rf "$run_dir"' EXIT
 if [ -n "$chat_file" ]; then
     # Read and write, so opening never waits for QEMU.
     exec 7<> "$run_dir/serial.in"
@@ -602,7 +648,9 @@ save_screen() {
         /*) ;;
         *) file="$PWD/$file" ;;
     esac
-    if [ -n "${VULTURE_SCREENSHOT_DEVICE:-}" ]; then
+    if [ -n "$chat_head" ]; then
+        printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s","format":"png","device":"%s","head":%s}}\n' "$file" "${VULTURE_SCREENSHOT_DEVICE:-gpu0}" "$chat_head"
+    elif [ -n "${VULTURE_SCREENSHOT_DEVICE:-}" ]; then
         printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s","format":"png","device":"%s"}}\n' "$file" "$VULTURE_SCREENSHOT_DEVICE"
     else
         printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s","format":"png"}}\n' "$file"
@@ -610,10 +658,197 @@ save_screen() {
         nc -U -w 1 "$qmp_socket" > /dev/null || echo "run.sh: screenshot failed" >&2
 }
 
+# Tells QEMU something, and fails the chat if it refuses. Its answer is kept for qmp-result.
+qmp_command() {
+    local answer
+    answer="$(printf '{"execute":"qmp_capabilities"}\n%s\n' "$1" | nc -U -w 1 "$qmp_socket" 2>&1)" || true
+    printf '%s\n' "$answer" > "$run_dir/qmp.last"
+    case "$answer" in
+        *'"error"'*)
+            chat_failure="QEMU refused: $1: $(printf '%s' "$answer" | grep -a '"error"' | head -n 1)"
+            return 1
+            ;;
+        *'"return"'*) return 0 ;;
+        *)
+            chat_failure="no answer from QEMU to: $1"
+            return 1
+            ;;
+    esac
+}
+
+# "plug ID DRIVER [KEY=VALUE,...]" as QEMU's device_add.
+plug_device() {
+    local id="$1" driver="$2" properties="${3:-}" arguments pair
+    arguments="\"id\":\"$id\",\"driver\":\"$driver\""
+    while [ -n "$properties" ]; do
+        pair="${properties%%,*}"
+        if [ "$pair" = "$properties" ]; then properties=""; else properties="${properties#*,}"; fi
+        arguments="$arguments,\"${pair%%=*}\":\"${pair#*=}\""
+    done
+    qmp_command "{\"execute\":\"device_add\",\"arguments\":{$arguments}}"
+}
+
+# A finger: "begin", "update" or "end", which slot it's in, and where (0 to 32767 across the screen). QEMU wants an axis on
+# every event, though only those of type "data" mean anything by it.
+touch_event() {
+    local kind="$1" slot="$2" x="$3" y="$4" id=$((1000 + $2)) events=""
+    case "$kind" in
+        begin | update | end) ;;
+        *)
+            chat_failure="a finger can begin, update or end, not $kind"
+            return 1
+            ;;
+    esac
+    one_event() {
+        printf '{"type":"mtt","data":{"type":"%s","slot":%s,"tracking-id":%s,"axis":"%s","value":%s}}' "$1" "$slot" "$id" "$2" "$3"
+    }
+    if [ "$kind" = end ]; then
+        events="$(one_event end x "$x")"
+    else
+        events="$(one_event "$kind" x "$x"),$(one_event data x "$x"),$(one_event data y "$y")"
+    fi
+    qmp_command "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[$events]}}"
+}
+
+# A command on this machine, from the top of the source tree, with the run's own directory to work in.
+run_on_host() {
+    (cd "$root_dir" && VULTURE_RUN_DIR="$run_dir" VULTURE_BUILD_DIR="$build_dir" bash -c "$1") >> "$run_dir/host.log" 2>&1 || {
+        chat_failure="on this machine, this failed: $1: $(tail -n 3 "$run_dir/host.log" | tr '\n' ' ')"
+        return 1
+    }
+}
+
+start_on_host() {
+    local name="$1" command="$2"
+    (cd "$root_dir" && VULTURE_RUN_DIR="$run_dir" VULTURE_BUILD_DIR="$build_dir" exec bash -c "$command") >> "$run_dir/host.log" 2>&1 &
+    printf '%s\n' "$!" > "$run_dir/fixture.$name.pid"
+}
+
+stop_on_host() {
+    local pid_file="$run_dir/fixture.$1.pid"
+    if [ ! -f "$pid_file" ]; then
+        chat_failure="nothing called $1 is running on this machine"
+        return 1
+    fi
+    kill "$(cat "$pid_file")" 2>/dev/null || true
+    rm -f "$pid_file"
+}
+
+# ---- Asking the guest what's on its screen: see Utilities/bin/ax.cpp.
+ax_next_id=0
+ax_pending=""
+ax_asked_at=0
+ax_reply=""
+
+# What an ax step asks about: 'ROLE "Label" rest' or '"Label" rest'.
+parse_ax_target() {
+    local text="$1"
+    ax_role='*'
+    case "$text" in
+        \"*) ;;
+        *\ \"*)
+            ax_role="${text%% *}"
+            text="${text#* }"
+            ;;
+        *)
+            chat_failure="not 'ROLE \"Label\"': $1"
+            return 1
+            ;;
+    esac
+    text="${text#\"}"
+    ax_label="${text%%\"*}"
+    ax_rest="${text#*\"}"
+    ax_rest="${ax_rest# }"
+}
+
+# Asks, the first time; then true once the answer is back, in ax_reply. Asks again if nothing came, as the program serving
+# this may have been starting up, or restarting.
+ax_ask() {
+    local answer offset
+    if [ -z "$ax_pending" ] || [ $((SECONDS - ax_asked_at)) -ge 3 ]; then
+        ax_next_id=$((ax_next_id + 1))
+        ax_pending="$ax_next_id"
+        ax_asked_at="$SECONDS"
+        ax_log_offset="$(LC_ALL=C wc -c < "$log" | tr -d ' ')"
+        printf '@ax %s %s\n' "$ax_pending" "$1" >&7
+        return 1
+    fi
+    answer="$(tail -c +$((ax_log_offset + 1)) "$log" | LC_ALL=C grep -ao "@ax $ax_pending \(found\|none\|error\)[^"$'\r'"]*" | head -n 1)" || true
+    [ -n "$answer" ] || return 1
+    ax_pending=""
+    ax_reply="${answer#@ax * }"
+    return 0
+}
+
+# True if what was found is as this step wants: "enabled", "disabled", "focused" or "= VALUE".
+ax_condition_holds() {
+    local enabled="$1" focused="$2" value="$3"
+    case "$ax_rest" in
+        "") return 0 ;;
+        enabled) [ "$enabled" = 1 ] ;;
+        disabled) [ "$enabled" = 0 ] ;;
+        focused) [ "$focused" = 1 ] ;;
+        "= "*) [ "$value" = "${ax_rest#= }" ] ;;
+        "~ "*) case "$value" in *"${ax_rest#\~ }"*) return 0 ;; *) return 1 ;; esac ;;
+        *)
+            chat_failure="not a condition: $ax_rest"
+            return 1
+            ;;
+    esac
+}
+
+# One go at an ax step. True when it's finished, one way or the other.
+ax_step() {
+    local kind="$1" x y width height screen_width screen_height enabled focused value
+    parse_ax_target "$2" || return 0
+    ax_ask "find $ax_role $ax_label" || return 1
+    case "$ax_reply" in
+        error*)
+            chat_failure="ax says: $ax_reply"
+            return 0
+            ;;
+        none*)
+            [ "$kind" = gone ] && return 0
+            ax_pending=""
+            return 1
+            ;;
+    esac
+    read -r _ x y width height screen_width screen_height enabled focused value <<< "$ax_reply"
+    case "$kind" in
+        gone) return 1 ;;
+        expect) ax_condition_holds "$enabled" "$focused" "$value" ;;
+        click)
+            if [ "$enabled" != 1 ]; then
+                return 1
+            fi
+            # Its middle, as a fraction of the screen.
+            move_pointer $(((x + width / 2) * 32768 / screen_width)) $(((y + height / 2) * 32768 / screen_height))
+            sleep 0.2
+            press_button left down
+            sleep 0.1
+            press_button left up
+            return 0
+            ;;
+    esac
+}
+
 # The chat: which step is next, and where in the log the last expected
 # text ended (byte offsets, so no locale may count characters instead).
 chat_index=0
 chat_offset=0
+chat_failure=""
+chat_head=""
+chat_step_limit="${VULTURE_STEP_TIMEOUT:-0}"
+chat_waiting_index=-1
+chat_waiting_since=0
+chat_forbidden=()
+# Nothing a walkthrough does should panic the kernel. If one means to, it expects that in so many words.
+for step in ${chat_steps[@]+"${chat_steps[@]}"}; do
+    case "$step" in "expect "*"KERNEL PANIC"*) chat_expects_panic=1 ;; esac
+done
+if [ -n "$chat_file" ] && [ -z "${chat_expects_panic:-}" ]; then
+    chat_forbidden+=("KERNEL PANIC")
+fi
 chat_done() {
     [ "$chat_index" -ge ${#chat_steps[@]} ]
 }
@@ -662,8 +897,90 @@ advance_chat() {
                 chat_offset=$((chat_offset + ${match%%:*} + $(printf '%s' "$text" | LC_ALL=C wc -c)))
                 chat_index=$((chat_index + 1))
                 ;;
+            "click "*)
+                ax_step click "${step#click }" || return 0
+                [ -n "$chat_failure" ] && return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "ax-expect "*)
+                ax_step expect "${step#ax-expect }" || return 0
+                [ -n "$chat_failure" ] && return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "ax-gone "*)
+                ax_step gone "${step#ax-gone }" || return 0
+                [ -n "$chat_failure" ] && return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "timeout "*)
+                chat_step_limit="${step#timeout }"
+                chat_index=$((chat_index + 1))
+                ;;
+            "forbid "*)
+                chat_forbidden+=("${step#forbid }")
+                chat_index=$((chat_index + 1))
+                ;;
+            "reboot")
+                qmp_command '{"execute":"system_reset"}' || return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "plug "*)
+                # shellcheck disable=SC2086
+                plug_device ${step#plug } || return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "unplug "*)
+                qmp_command "{\"execute\":\"device_del\",\"arguments\":{\"id\":\"${step#unplug }\"}}" || return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "qmp "*)
+                qmp_command "${step#qmp }" || return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "qmp-result "*)
+                text="${step#qmp-result }"
+                if ! grep -qF -- "$text" "$run_dir/qmp.last" 2>/dev/null; then
+                    chat_failure="QEMU's last answer doesn't have \"$text\" in it: $(tail -n 1 "$run_dir/qmp.last" 2>/dev/null)"
+                    return 0
+                fi
+                chat_index=$((chat_index + 1))
+                ;;
+            "touch "*)
+                # shellcheck disable=SC2086
+                touch_event ${step#touch } || return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "display "*)
+                chat_head="${step#display }"
+                chat_index=$((chat_index + 1))
+                ;;
+            "host "*)
+                run_on_host "${step#host }" || return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "host-start "*)
+                text="${step#host-start }"
+                start_on_host "${text%% *}" "${text#* }"
+                chat_index=$((chat_index + 1))
+                ;;
+            "host-stop "*)
+                stop_on_host "${step#host-stop }" || return 0
+                chat_index=$((chat_index + 1))
+                ;;
         esac
     done
+}
+
+# True if something this chat says must never be seen has been.
+saw_forbidden() {
+    local text
+    for text in ${chat_forbidden[@]+"${chat_forbidden[@]}"}; do
+        if grep -aqF -- "$text" "$log"; then
+            chat_failure="saw what must not be seen: $text"
+            return 0
+        fi
+    done
+    return 1
 }
 
 # True once every expected text is in the log.
@@ -684,6 +1001,19 @@ while true; do
     fi
     if [ ${#chat_steps[@]} -gt 0 ]; then
         advance_chat
+        # How long this step has been at it.
+        if [ -z "$chat_failure" ] && ! chat_done; then
+            if [ "$chat_waiting_index" -ne "$chat_index" ]; then
+                chat_waiting_index="$chat_index"
+                chat_waiting_since="$SECONDS"
+            elif [ "$chat_step_limit" -gt 0 ] && [ $((SECONDS - chat_waiting_since)) -ge $((chat_step_limit * chat_timeout_scale)) ]; then
+                chat_failure="waited more than $((chat_step_limit * chat_timeout_scale))s"
+            fi
+        fi
+        saw_forbidden || true
+        if [ -n "$chat_failure" ]; then
+            break
+        fi
     fi
     if [ "$wait_for_exit" -eq 0 ] && { [ ${#expectations[@]} -gt 0 ] || [ ${#chat_steps[@]} -gt 0 ]; } && all_found && chat_done; then
         break
@@ -694,6 +1024,19 @@ while true; do
     fi
     sleep 0.2
 done
+
+# Stuck looking for something on the screen: what is on it?
+if [ ${#chat_steps[@]} -gt 0 ] && ! chat_done && kill -0 "$qemu_pid" 2>/dev/null; then
+    case "${chat_steps[$chat_index]}" in
+        "click "* | "ax-expect "* | "ax-gone "*)
+            printf '@ax dump dump\n' >&7
+            for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+                LC_ALL=C grep -aq '@ax dump end' "$log" && break
+                sleep 0.25
+            done
+            ;;
+    esac
+fi
 
 if [ -n "$screenshot" ] && kill -0 "$qemu_pid" 2>/dev/null; then
     save_screen "$screenshot"
@@ -710,9 +1053,11 @@ if [ -n "$reader_pid" ]; then
     # The copy ends with QEMU's end of the pipe.
     wait "$reader_pid" 2>/dev/null || true
 fi
-# What the guest said last, before it powered off, counts too.
-if [ ${#chat_steps[@]} -gt 0 ]; then
-    advance_chat
+# What the guest said last, before it powered off, counts too. (Only what's written: QEMU is gone.)
+if [ ${#chat_steps[@]} -gt 0 ] && [ -z "$chat_failure" ] && ! chat_done; then
+    case "${chat_steps[$chat_index]}" in
+        "expect "*) advance_chat ;;
+    esac
 fi
 
 # Show the console without the firmware's terminal control sequences.
@@ -728,10 +1073,17 @@ if [ "$wait_for_exit" -eq 1 ]; then
     fi
 fi
 if [ ${#chat_steps[@]} -gt 0 ]; then
-    if chat_done; then
+    if [ -f "$run_dir/host.log" ] && [ -s "$run_dir/host.log" ]; then
+        echo "run.sh: what ran on this machine said:"
+        cat "$run_dir/host.log"
+    fi
+    if chat_done && [ -z "$chat_failure" ]; then
         echo "run.sh: chat: all ${#chat_steps[@]} steps done"
+    elif chat_done; then
+        echo "run.sh: chat: $chat_failure" >&2
+        status=1
     else
-        echo "run.sh: chat: stuck at step $((chat_index + 1)) of ${#chat_steps[@]}: ${chat_steps[$chat_index]}" >&2
+        echo "run.sh: chat: stuck at step $((chat_index + 1)) of ${#chat_steps[@]}: ${chat_steps[$chat_index]}${chat_failure:+: $chat_failure}" >&2
         status=1
     fi
 fi

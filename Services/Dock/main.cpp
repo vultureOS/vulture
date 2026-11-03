@@ -86,6 +86,15 @@ public:
         rebuild({});
     }
 
+    void accessibility_parts(Vector<Accessibility::Node>& parts) override
+    {
+        compute_layout();
+        for (auto const& tile : m_tiles) {
+            if (tile.kind != Tile::Kind::Separator)
+                parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, tile.title.view(), { tile.center - tile.size / 2, m_shelf.y + (m_shelf.height - tile.size) / 2, tile.size, tile.size }));
+        }
+    }
+
     void set_state(Desktop::ShellState const& state)
     {
         m_state_applications.clear();

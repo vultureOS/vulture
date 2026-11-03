@@ -1,0 +1,49 @@
+# M15: finding things by what they say, with the real pointer, and checking what they say back. Nothing here knows where
+# anything is on the screen, so it won't go stale when things move.
+timeout 40
+expect loginwindow: ready
+ax-expect textfield "Password" focused
+ax-expect button "Shut Down" enabled
+type vulture\r
+expect files: ready
+pause 1
+# From the Dock, the appearance's two segments, and back.
+click button "Settings"
+expect settings: Appearance
+ax-expect radio "Light" = on
+click radio "Dark"
+ax-expect radio "Dark" = on
+ax-expect radio "Light" = off
+pause 0.5
+screenshot settings-dark.png
+click radio "Light"
+ax-expect radio "Light" = on
+# A sidebar's rows.
+click row "Wallpaper"
+expect settings: Wallpaper
+ax-expect row "Wallpaper" = selected
+click row "Appearance"
+expect settings: Appearance
+# The menu bar's system menu is another program's: its keys have to reach it, and Escape has to close it.
+click menuitem "Logo"
+ax-expect menuitem "About This Computer"
+key esc
+ax-gone menuitem "About This Computer"
+key meta_l-q
+ax-gone radio "Light"
+# And through it to something that happens.
+click menuitem "Logo"
+click menuitem "About This Computer"
+expect settings: About
+ax-gone menuitem "Log Out"
+pause 0.5
+screenshot about.png
+key meta_l-q
+ax-gone row "Privacy & Security"
+# Files, by what's in its window: the view's segments.
+click radio "List"
+ax-expect radio "List" = on
+click radio "Icons"
+ax-expect radio "Icons" = on
+pause 0.5
+screenshot files.png

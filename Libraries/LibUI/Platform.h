@@ -38,6 +38,8 @@ public:
     [[nodiscard]] virtual Gfx::Bitmap& back_buffer() = 0;
     virtual void present(Gfx::IntRect damage) = 0;
     [[nodiscard]] virtual int scale() const = 0;
+    // What the system knows this window by, if anything does.
+    [[nodiscard]] virtual u32 system_id() const { return 0; }
     // On the screen, in points.
     [[nodiscard]] virtual Gfx::IntRect frame() const = 0;
     virtual void set_frame(Gfx::IntRect) = 0;

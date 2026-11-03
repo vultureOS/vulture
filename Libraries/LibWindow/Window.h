@@ -39,6 +39,7 @@ public:
     Function<void()> on_quit_requested;
     Function<void(StringView)> on_shell_state;
     Function<void(u16, u32)> on_hotkey;
+    Function<void(u32)> on_accessibility_requested;
 
 private:
     friend class Window;
@@ -54,6 +55,7 @@ private:
     void quit_requested(IPC::Sender const&) override;
     void shell_state(IPC::Sender const&, String json) override;
     void hotkey(IPC::Sender const&, u16 code, u32 modifiers) override;
+    void accessibility_requested(IPC::Sender const&, u32 generation) override;
     void key(IPC::Sender const&, u32 window, bool pressed, u16 code, u32 modifiers, String text) override;
     void resized(IPC::Sender const&, u32 window, i32 width, i32 height) override;
     void close_requested(IPC::Sender const&, u32 window) override;
