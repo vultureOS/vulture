@@ -9,6 +9,7 @@ understands FAT would find it: by the partition table and the directories, not b
 
     Meta/read-fat-file.py IMAGE PATH                 prints it
     Meta/read-fat-file.py IMAGE PATH --set TEXT      replaces its contents, padded with spaces; it can't grow
+    Meta/read-fat-file.py IMAGE PATH --fill TEXT     fills it with TEXT, over and over
 """
 
 import argparse
@@ -116,13 +117,17 @@ def main():
     parser.add_argument("image")
     parser.add_argument("path")
     parser.add_argument("--set", dest="text")
+    parser.add_argument("--fill")
     arguments = parser.parse_args()
-    with open(arguments.image, "r+b" if arguments.text is not None else "rb") as image:
+    changing = arguments.text is not None or arguments.fill is not None
+    with open(arguments.image, "r+b" if changing else "rb") as image:
         volume = Volume(image, find_partition(image))
         first, size = volume.find(arguments.path)
-        if arguments.text is None:
+        if not changing:
             sys.stdout.buffer.write(volume.read_chain(first)[:size])
             return 0
+        if arguments.fill is not None:
+            arguments.text = (arguments.fill * (size // len(arguments.fill) + 1))[:size]
         new = arguments.text.encode()
         if len(new) > size:
             raise SystemExit(f"read-fat-file: {arguments.path} holds {size} bytes, not {len(new)}")

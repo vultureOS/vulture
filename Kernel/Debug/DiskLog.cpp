@@ -88,8 +88,25 @@ void flush_boot_log()
         (void)s_boot.device->flush();
 }
 
+// Spaces, all the way through: what the last boot said must not show through after what this one has said so far, and it may
+// well have said more.
+void clear_boot_log()
+{
+    constexpr size_t block = BlockDevice::block_size;
+    __builtin_memset(s_chunk, ' ', chunk_size);
+    for (u64 at = 0; at < s_boot.bytes;) {
+        size_t const blocks = min<u64>(chunk_size, s_boot.bytes - at) / block;
+        if (blocks == 0 || s_boot.device->write_blocks(s_boot.first_block + at / block, blocks, { s_chunk, blocks * block }).is_error()) {
+            s_boot_finished = true;
+            return;
+        }
+        at += blocks * block;
+    }
+}
+
 void keep_boot_log_up_to_date(void*)
 {
+    clear_boot_log();
     while (!s_boot_finished) {
         flush_boot_log();
         (void)Thread::sleep_for_microseconds(flush_interval_microseconds);

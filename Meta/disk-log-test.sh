@@ -102,8 +102,10 @@ for device in $devices; do
         failed "$device: Logs/boot.txt doesn't have the boot in it; see $boot_text"
     fi
 
-    # ---- A clean boot after it: a new boot log, and the panic left where it is.
+    # ---- A clean boot after it: a new boot log, and the panic left where it is. However much the last boot said, none of it
+    # may show through: so that this doesn't depend on which of them happened to say more, the whole file says something first.
     set_arguments "$image" "console"
+    python3 -I "$read_fat" "$image" Logs/boot.txt --fill "left over from before. "
     if ! VULTURE_IMAGE_ON="$device" "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --image "$image" \
         --chat "$source_dir/Tests/Hardware/disk-log.chat" --timeout 120 > "$out/$device-clean.log" 2>&1; then
         failed "$device: the clean boot didn't get through; see $out/$device-clean.log"
@@ -116,7 +118,7 @@ for device in $devices; do
         failed "$device: a clean boot lost Logs/panic.txt"
     fi
     read_log "$image" Logs/boot.txt "$boot_text"
-    if grep -q "vultureOS userland is up" "$boot_text" && ! grep -q "$panic_message" "$boot_text"; then
+    if grep -q "vultureOS userland is up" "$boot_text" && ! grep -q "left over from before" "$boot_text"; then
         ok "$device: Logs/boot.txt is the new boot's, with nothing of the last"
     else
         failed "$device: Logs/boot.txt isn't the new boot's; see $boot_text"
