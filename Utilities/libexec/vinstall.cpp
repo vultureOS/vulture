@@ -71,7 +71,7 @@ ErrorOr<void> read_system_partition(StringView directory, StringView relative, V
         return Error::from_errno(errno);
     while (auto* entry = readdir(listing)) {
         StringView const name(entry->d_name, strlen(entry->d_name));
-        if (name == "."_sv || name == ".."_sv || name == "boot-args"_sv || name == other_loader || name.ends_with(other_architecture))
+        if (name == "."_sv || name == ".."_sv || name == "boot-args"_sv || name == "Logs"_sv || name == other_loader || name.ends_with(other_architecture))
             continue;
         StringBuilder inner;
         if (!relative.is_empty()) {
@@ -117,6 +117,8 @@ int main(int argc, char** argv)
     Vector<Tools::FATFile> files;
     if (auto result = read_system_partition(esp, ""_sv, files); result.is_error())
         return fail_with("Couldn't read the EFI System Partition"_sv, result.error());
+    // (New ones: the logs of what this started from aren't the new disk's.)
+    Tools::add_log_files(files);
     say_progress(5);
 
     // The system's files: its own archive, on a disk with more than one.

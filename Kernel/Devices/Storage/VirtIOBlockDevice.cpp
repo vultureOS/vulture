@@ -5,6 +5,9 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/Time/Time.h>
+#include <Kernel/Arch/MMIO.h>
+#include <Kernel/Debug/Panic.h>
 #include <Kernel/Arch/InterruptController.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Devices/Storage/StorageControllers.h>
@@ -104,6 +107,15 @@ private:
     ErrorOr<void> request(u32 type, u64 sector, size_t blocks)
     {
         MutexLocker locker(m_lock);
+        // In a panic, there may be a request under way: it shares our memory, so it has to end first.
+        if (is_panicking()) {
+            u64 const deadline = Time::now() + Time::ticks_from_milliseconds(2'000);
+            while (!m_done.load() && Time::now() < deadline) {
+                if (m_queue->take_completion().has_value())
+                    m_done.store(true);
+                Arch::pause();
+            }
+        }
         auto* header = reinterpret_cast<RequestHeader*>(physical_to_virtual(m_control));
         auto* status = physical_to_virtual(m_control) + sizeof(RequestHeader);
         *header = { type, 0, sector };
@@ -118,7 +130,20 @@ private:
         m_done.store(false);
         TRY(m_queue->submit({ buffers, count }));
         m_transport->notify(*m_queue);
-        m_completed.wait_until([&] { return m_done.load(); });
+        if (is_panicking()) {
+            // Nothing will interrupt us: its status says when it has been done.
+            u64 const deadline = Time::now() + Time::ticks_from_milliseconds(10'000);
+            while (*const_cast<u8 volatile*>(status) == 0xff) {
+                if (Time::now() > deadline)
+                    return Error::from_errno(ETIMEDOUT);
+                Arch::pause();
+            }
+            Arch::memory_barrier();
+            while (m_queue->take_completion().has_value()) { }
+            m_done.store(true);
+        } else {
+            m_completed.wait_until([&] { return m_done.load(); });
+        }
         if (*status != 0)
             return Error::from_errno(EIO);
         return {};
@@ -143,7 +168,8 @@ private:
     PhysicalAddress m_control;
     PhysicalAddress m_bounce;
     Mutex m_lock;
-    Atomic<bool> m_done { false };
+    // Whether the last request has ended: so yes, before the first.
+    Atomic<bool> m_done { true };
     WaitQueue m_completed;
 };
 

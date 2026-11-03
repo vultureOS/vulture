@@ -19,6 +19,9 @@ static void verify_may_sleep()
 
 void Mutex::lock()
 {
+    // Whoever has it isn't coming back.
+    if (is_panicking())
+        return;
     verify_may_sleep();
     auto& self = Thread::current();
     auto state = m_lock.lock();
@@ -46,6 +49,8 @@ bool Mutex::try_lock()
 
 void Mutex::unlock()
 {
+    if (is_panicking())
+        return;
     auto state = m_lock.lock();
     if (m_owner != &Thread::current()) [[unlikely]]
         panic("Mutex: unlocked by a thread that does not hold it"_sv);

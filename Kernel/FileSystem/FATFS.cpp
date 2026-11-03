@@ -135,6 +135,10 @@ public:
         return m_device->read_blocks((m_root_start + index) * m_sector_blocks, m_sector_blocks, { destination, m_bytes_per_sector });
     }
 
+    [[nodiscard]] BlockDevice* device() const { return m_device.ptr(); }
+    // Where a cluster's first block is, on the device.
+    [[nodiscard]] u64 block_of_cluster(u32 cluster) const { return (m_data_start + static_cast<u64>(cluster - 2) * m_sectors_per_cluster) * m_sector_blocks; }
+
     [[nodiscard]] u32 root_sector_count() const { return m_root_sectors; }
     [[nodiscard]] u32 root_cluster() const { return m_root_cluster; }
     [[nodiscard]] u32 bytes_per_sector() const { return m_bytes_per_sector; }
@@ -231,6 +235,22 @@ public:
         , m_modification_time(modification_time)
         , m_is_root(is_root)
     {
+    }
+
+    [[nodiscard]] ErrorOr<ContiguousExtent> contiguous_extent() const override
+    {
+        if (m_is_root || (m_attributes & attribute_directory) || m_first_cluster < 2 || m_size == 0)
+            return Error::from_errno(EINVAL);
+        // Each cluster must be followed by the next one along, as far as the file goes.
+        u32 const clusters = static_cast<u32>((m_size + fat().cluster_size() - 1) / fat().cluster_size());
+        u32 cluster = m_first_cluster;
+        for (u32 i = 1; i < clusters; ++i) {
+            auto next = TRY(fat().next_cluster(cluster));
+            if (!next.has_value() || next.value() != cluster + 1)
+                return Error::from_errno(EFBIG);
+            cluster = next.value();
+        }
+        return ContiguousExtent { fat().device(), fat().block_of_cluster(m_first_cluster), m_size };
     }
 
     [[nodiscard]] InodeMetadata metadata() const override

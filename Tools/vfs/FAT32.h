@@ -22,4 +22,8 @@ struct FATFile {
 // The EFI System Partition of a disk image.
 ErrorOr<void> write_fat32(FILE*, u64 first_sector, u64 sector_count, StringView label, Vector<FATFile> const&);
 
+// The files the kernel keeps its logs in (see Kernel/Debug/DiskLog.h): made here, as it can't, all in one piece, and full
+// of spaces for it to write over. write_fat32 gives each file clusters in one run.
+void add_log_files(Vector<FATFile>&);
+
 }

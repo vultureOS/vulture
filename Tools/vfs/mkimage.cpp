@@ -85,6 +85,8 @@ int main(int argc, char** argv)
         files.append(Tools::FATFile { MUST(String::from_view(StringView(argv[i]))), data.release_value() });
     }
 
+    Tools::add_log_files(files);
+
     FILE* image = fopen(output, "w+b");
     if (!image)
         return fail("cannot create {}", StringView(output));

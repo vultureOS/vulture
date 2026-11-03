@@ -15,6 +15,7 @@
 namespace Kernel {
 
 class FileDescription;
+class BlockDevice;
 class FileSystem;
 class TTY;
 
@@ -78,6 +79,14 @@ public:
     [[nodiscard]] InodeIndex index() const { return m_index; }
 
     [[nodiscard]] virtual InodeMetadata metadata() const = 0;
+    // Where it is on its device, if it's all in one piece, and it's on the sort of filesystem that can say: for the likes of
+    // the kernel's log, which may have to write to it when nothing else in the kernel can be trusted.
+    struct ContiguousExtent {
+        BlockDevice* device { nullptr };
+        u64 first_block { 0 };
+        u64 bytes { 0 };
+    };
+    [[nodiscard]] virtual ErrorOr<ContiguousExtent> contiguous_extent() const;
     [[nodiscard]] bool is_directory() const { return metadata().type == InodeType::Directory; }
 
     virtual ErrorOr<size_t> read(u64 offset, size_t count, IOBuffer const&);

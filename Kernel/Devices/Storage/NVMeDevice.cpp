@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/Debug/Panic.h>
 #include <Kernel/Arch/InterruptController.h>
 #include <Kernel/Arch/MMIO.h>
 #include <Kernel/Debug/KernelLog.h>
@@ -293,9 +294,15 @@ ErrorOr<Completion> NVMeDevice::run_admin(Command command)
 
 ErrorOr<void> NVMeDevice::run_io(Command command)
 {
+    // In a panic, there may be one under way: its completion shouldn't be taken for this one's.
+    if (is_panicking()) {
+        u64 const wait_until = Time::now() + Time::ticks_from_microseconds(2'000'000);
+        while (!m_done.load() && Time::now() < wait_until)
+            handle_interrupt();
+    }
     m_done.store(false);
     (void)m_io->submit(command);
-    if (m_interrupts) {
+    if (m_interrupts && !is_panicking()) {
         m_completed.wait_until([&] { return m_done.load(); });
     } else {
         u64 deadline = Time::now() + Time::ticks_from_microseconds(30'000'000);

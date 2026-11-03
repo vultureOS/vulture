@@ -7,6 +7,7 @@
 #include <Kernel/Arch/CPU.h>
 #include <Kernel/Arch/Power.h>
 #include <Kernel/Console/TextConsole.h>
+#include <Kernel/Debug/DiskLog.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Debug/Panic.h>
 #include <Kernel/Debug/Symbols.h>
@@ -93,10 +94,16 @@ static void show_panic_console()
     kernel_log().attach_console(&console);
 }
 
+// The first processor to panic reports; the token is its hardware id + 1.
+static Atomic<u64> s_panicking_processor { 0 };
+
+bool is_panicking()
+{
+    return s_panicking_processor.load(MemoryOrder::Relaxed) != 0;
+}
+
 void panic(StringView reason, TrapFrame const* frame)
 {
-    // The first processor to panic reports; the token is its hardware id + 1.
-    static Atomic<u64> s_panicking_processor { 0 };
     [[maybe_unused]] auto interrupt_state = Arch::disable_interrupts();
     u64 self = Arch::processor_hardware_id() + 1;
     u64 expected = 0;
@@ -142,6 +149,8 @@ void panic(StringView reason, TrapFrame const* frame)
     }
 
     dmesgln("");
+    // The report's on the screen and the serial port. A machine with neither to hand gets to keep it too.
+    DiskLog::write_panic();
     if (s_power_off_on_panic.load()) {
         dmesgln("Powering off.");
         Arch::power_off();

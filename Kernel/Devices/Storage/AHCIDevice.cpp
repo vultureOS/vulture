@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/Debug/Panic.h>
 #include <Kernel/Arch/InterruptController.h>
 #include <Kernel/Arch/MMIO.h>
 #include <Kernel/Debug/KernelLog.h>
@@ -176,6 +177,12 @@ public:
     // The first command to run, before this is registered. Polled: there may be no interrupts yet.
     ErrorOr<void> run(u8 ata_command, u64 lba, size_t blocks, bool write)
     {
+        // In a panic, there may be a command under way: it shares our memory, so it has to end first.
+        if (is_panicking()) {
+            u64 const wait_until = Time::now() + Time::ticks_from_milliseconds(2'000);
+            while ((mmio_read32(m_port + port_issue) & 1) && Time::now() < wait_until)
+                Arch::pause();
+        }
         auto* header = physical_to_virtual<CommandHeader>(m_memory);
         auto* table = physical_to_virtual<CommandTable>(m_memory.offset(page_size));
         __builtin_memset(table, 0, sizeof(CommandTable));
@@ -211,7 +218,7 @@ public:
         // may well take a while.
         u64 const deadline = Time::now() + Time::ticks_from_milliseconds(30'000);
         while (mmio_read32(m_port + port_issue) & 1) {
-            if (m_use_interrupts) {
+            if (m_use_interrupts && !is_panicking()) {
                 u32 const seen = m_changed.load();
                 if (!(mmio_read32(m_port + port_issue) & 1))
                     break;

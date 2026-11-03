@@ -40,6 +40,7 @@
 #include <Kernel/FileSystem/IOBuffer.h>
 #include <Kernel/FileSystem/BootArchive.h>
 #include <Kernel/FileSystem/DevFS.h>
+#include <Kernel/Debug/DiskLog.h>
 #include <Kernel/FileSystem/FATFS.h>
 #include <Kernel/FileSystem/TmpFS.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
@@ -315,6 +316,7 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     make_directory("/tmp"_sv);
     must("devfs"_sv, VirtualFileSystem::mount(move(devices), "/dev"_sv));
     mount_volumes();
+    DiskLog::start();
     Seal::initialize(!arguments.has_flag("noseal"_sv));
     CodeSigning::initialize(!arguments.has_flag("nocodesign"_sv));
     auto temporary = must("tmpfs"_sv, TmpFS::create());

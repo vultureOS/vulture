@@ -422,6 +422,27 @@ ErrorOr<void> Writer::write(StringView label, Vector<FATFile> const& files)
 
 }
 
+static void add_log_file(Vector<FATFile>& files, StringView path, StringView first_line)
+{
+    constexpr size_t size = 256 * 1024;
+    for (auto const& file : files) {
+        if (file.path.view() == path)
+            return;
+    }
+    Vector<u8> data;
+    MUST(data.try_resize(size));
+    __builtin_memset(data.data(), ' ', size);
+    __builtin_memcpy(data.data(), first_line.characters_without_null_termination(), first_line.length());
+    data[size - 1] = '\n';
+    files.append(FATFile { MUST(String::from_view(path)), move(data) });
+}
+
+void add_log_files(Vector<FATFile>& files)
+{
+    add_log_file(files, "Logs/boot.txt"_sv, "This disk hasn't started anything far enough to write here yet.\n"_sv);
+    add_log_file(files, "Logs/panic.txt"_sv, "There hasn't been a kernel panic on this disk.\n"_sv);
+}
+
 ErrorOr<void> write_fat32(FILE* file, u64 first_sector, u64 sector_count, StringView label, Vector<FATFile> const& files)
 {
     auto writer = TRY(try_make<Writer>(file, first_sector, sector_count));

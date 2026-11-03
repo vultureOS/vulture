@@ -97,6 +97,11 @@ ErrorOr<size_t> Inode::write(u64, size_t, IOBuffer const&)
     return Error::from_errno(is_directory() ? EISDIR : EINVAL);
 }
 
+ErrorOr<Inode::ContiguousExtent> Inode::contiguous_extent() const
+{
+    return Error::from_errno(ENOTSUP);
+}
+
 ErrorOr<void> Inode::truncate(u64)
 {
     if (file_system().is_read_only())

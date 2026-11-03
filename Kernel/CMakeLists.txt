@@ -51,6 +51,7 @@ add_executable(Kernel
     Console/Font.cpp
     Console/Framebuffer.cpp
     Console/TextConsole.cpp
+    Debug/DiskLog.cpp
     Debug/KernelLog.cpp
     Debug/Panic.cpp
     Debug/Symbols.cpp

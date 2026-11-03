@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/Debug/Panic.h>
 #include <Kernel/Arch/InterruptController.h>
 #include <Kernel/Arch/MMIO.h>
 #include <Kernel/Bus/PCI/PCI.h>
@@ -256,6 +257,8 @@ private:
 class Controller {
 public:
     static ErrorOr<Controller*> create(PCI::Device const&);
+    // Whatever the controller has to say, now. Its own thread does this, unless it can't.
+    void drain_events();
 
     ErrorOr<u64> run_command(u64 parameter, u32 status, u32 control, u8* slot_out = nullptr);
     void ring_doorbell(u8 slot, u32 target) { mmio_write32(m_doorbells + static_cast<FlatPtr>(slot) * 4, target); }
@@ -399,7 +402,15 @@ ErrorOr<void> XHCIDevice::initialize(u16 first_max_packet)
 
 ErrorOr<size_t> XHCIDevice::wait_for_transfer(XHCIEndpoint& endpoint, u32 finished_before, size_t length)
 {
-    bool const finished = wait_with_deadline(endpoint.done, [&] { return endpoint.finished.load() != finished_before; }, command_timeout_milliseconds);
+    // In a panic, the thread that reads events has stopped with everything else.
+    if (is_panicking()) {
+        u64 const deadline = Time::now() + Time::ticks_from_milliseconds(5'000);
+        while (endpoint.finished.load() == finished_before && Time::now() < deadline) {
+            m_controller.drain_events();
+            Arch::pause();
+        }
+    }
+    bool const finished = is_panicking() ? endpoint.finished.load() != finished_before : wait_with_deadline(endpoint.done, [&] { return endpoint.finished.load() != finished_before; }, command_timeout_milliseconds);
     if (!finished)
         return Error::from_errno(ETIMEDOUT);
     u32 const code = endpoint.code.load();
@@ -901,30 +912,35 @@ void Controller::process_event(TRB const& event)
     }
 }
 
-void Controller::event_loop()
+void Controller::drain_events()
 {
     auto const* ring = reinterpret_cast<TRB const volatile*>(physical_to_virtual(m_event_ring));
+    bool any = false;
+    for (;;) {
+        auto const& entry = ring[m_event_index];
+        if (static_cast<bool>(entry.control & control_cycle) != m_event_cycle)
+            break;
+        Arch::memory_barrier();
+        TRB const event { entry.parameter, entry.status, entry.control };
+        ++m_event_index;
+        if (m_event_index == ring_entries) {
+            m_event_index = 0;
+            m_event_cycle = !m_event_cycle;
+        }
+        process_event(event);
+        any = true;
+    }
+    if (any)
+        write_dequeue(m_event_ring.get() + m_event_index * sizeof(TRB));
+}
+
+void Controller::event_loop()
+{
     for (;;) {
         // Now and then regardless, for a controller whose interrupts don't reach here for some reason.
         (void)wait_with_deadline(m_wait, [this] { return m_pending.load(); }, 100);
         m_pending.store(false);
-        bool any = false;
-        for (;;) {
-            auto const& entry = ring[m_event_index];
-            if (static_cast<bool>(entry.control & control_cycle) != m_event_cycle)
-                break;
-            Arch::memory_barrier();
-            TRB const event { entry.parameter, entry.status, entry.control };
-            ++m_event_index;
-            if (m_event_index == ring_entries) {
-                m_event_index = 0;
-                m_event_cycle = !m_event_cycle;
-            }
-            process_event(event);
-            any = true;
-        }
-        if (any)
-            write_dequeue(m_event_ring.get() + m_event_index * sizeof(TRB));
+        drain_events();
     }
 }
 

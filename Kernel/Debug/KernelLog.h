@@ -32,6 +32,13 @@ public:
     // Starts a line with the time since boot: "[    0.001234] ".
     void begin_line();
 
+    // Everything said since boot, as far as it's kept (the last history_size bytes): how much there's been, and a copy of
+    // what's still there from `position`, as much as `into` holds. Returns how much that was: 0 at the end, or if that part
+    // is gone.
+    static constexpr size_t history_size = 256 * 1024;
+    [[nodiscard]] u64 history_total();
+    [[nodiscard]] size_t read_history(u64 position, Bytes into);
+
     [[nodiscard]] Arch::InterruptState lock();
     void unlock(Arch::InterruptState);
     void enter_panic_mode() { m_panic_mode.store(true); }
@@ -42,6 +49,7 @@ private:
     u64 m_start_counter { 0 };
     SpinLock m_lock;
     Atomic<bool> m_panic_mode { false };
+    u64 m_history_total { 0 };
 };
 
 KernelLog& kernel_log();

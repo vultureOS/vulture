@@ -25,8 +25,38 @@ void KernelLog::attach_console(TextConsole* console)
     m_console = console;
 }
 
+// Text only: an ordinary array, so that it's there from the very first line.
+static char s_history[KernelLog::history_size];
+
+u64 KernelLog::history_total()
+{
+    auto state = lock();
+    u64 const total = m_history_total;
+    unlock(state);
+    return total;
+}
+
+size_t KernelLog::read_history(u64 position, Bytes into)
+{
+    auto state = lock();
+    u64 const oldest = m_history_total > history_size ? m_history_total - history_size : 0;
+    size_t copied = 0;
+    if (position >= oldest) {
+        while (copied < into.size() && position + copied < m_history_total) {
+            into[copied] = static_cast<u8>(s_history[(position + copied) % history_size]);
+            ++copied;
+        }
+    }
+    unlock(state);
+    return copied;
+}
+
 void KernelLog::write(StringView text)
 {
+    for (char character : text) {
+        s_history[m_history_total % history_size] = character;
+        ++m_history_total;
+    }
     if (m_serial) {
         for (char character : text) {
             if (character == '\n')
