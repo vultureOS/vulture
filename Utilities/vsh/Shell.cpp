@@ -983,9 +983,18 @@ int Shell::wait_for_job(Job& job)
         if (pid < 0) {
             if (errno == EINTR)
                 continue;
-            // Nothing left to wait for.
-            for (size_t i = 0; i < job.processes.size(); ++i)
+            // None of them left in the group, which is no reason to stop waiting for one that never got into it.
+            for (size_t i = 0; i < job.processes.size(); ++i) {
+                if (job.finished[i])
+                    continue;
+                int own_status = 0;
+                pid_t const own = waitpid(job.processes[i], &own_status, 0);
+                if (own < 0 && errno == EINTR)
+                    break;
                 job.finished[i] = true;
+                if (own > 0 && i == job.processes.size() - 1)
+                    job.status = own_status;
+            }
             continue;
         }
         for (size_t i = 0; i < job.processes.size(); ++i) {

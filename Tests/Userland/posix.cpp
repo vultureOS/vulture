@@ -202,6 +202,27 @@ void processes()
     REQUIRE(kill(child, 0) == -1 && errno == ESRCH, "kill(pid, 0) for a process that is gone: ESRCH");
     REQUIRE(kill(getpid(), 0) == 0, "kill(pid, 0) for a process that exists: 0");
 
+    // As a shell puts a pipeline together: its first command may be finished by the time the next is to join its group.
+    {
+        pid_t const first = fork();
+        if (first == 0) {
+            setpgid(0, 0);
+            _exit(0);
+        }
+        setpgid(first, first);
+        usleep(100000);
+        pid_t const second = fork();
+        if (second == 0) {
+            for (;;)
+                pause();
+        }
+        REQUIRE(setpgid(second, first) == 0, "setpgid(): a group whose first member has finished but hasn't been waited for can still be joined");
+        REQUIRE(waitpid(-first, &status, 0) == first, "waitpid(-group) reaps the one that has finished");
+        REQUIRE(waitpid(-first, &status, WNOHANG) == 0, "waitpid(-group, WNOHANG): 0, as there's still one in it");
+        kill(second, SIGKILL);
+        REQUIRE(waitpid(-first, &status, 0) == second, "waitpid(-group) reaps the one that joined");
+    }
+
     char* const argv[] = { const_cast<char*>("x"), nullptr };
     status = in_child([&] { _exit(execv("/nonexistent/program", argv) == -1 && errno == ENOENT ? 0 : 1); });
     REQUIRE(WIFEXITED(status) && WEXITSTATUS(status) == 0, "execv() of a missing file: ENOENT");

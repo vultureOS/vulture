@@ -946,8 +946,10 @@ ErrorOr<void> Process::send_signal_to_group(ProcessID pgid, int signal, vulture_
 bool Process::group_exists_in_session(ProcessID pgid, ProcessID sid)
 {
     SpinLockGuard guard(s_tree_lock);
+    // One that has finished is still a member until it's been waited for: a shell putting a pipeline
+    // together can't be told that the group has gone because its first command was quick.
     for (auto& process : s_processes) {
-        if (process.pgid() == pgid && process.sid() == sid && !process.is_zombie())
+        if (process.pgid() == pgid && process.sid() == sid)
             return true;
     }
     return false;
