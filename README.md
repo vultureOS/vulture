@@ -126,7 +126,7 @@ These come from a running system, on QEMU with hardware virtualization on Apple 
 
 <div align="center">
 
-| | Measured | Goal |
+| What | Measured | Goal |
 |:---|---:|---:|
 | Boot, from firmware handoff to login window | **0.22 s** | 2 s |
 | App launch, cold | **24 ms** | 300 ms |
@@ -145,7 +145,7 @@ Everything from the first instruction after the firmware to the last pixel on sc
 
 <div align="center">
 
-| | What it is | Lines |
+| Part | What it is | Lines |
 |:---|:---|---:|
 | **VultureBoot** | UEFI loader for AArch64 and x86_64, plus a Raspberry Pi start-up stub | 3,000 |
 | **Kernel** | Every processor, QoS scheduling, memory compression, sandboxes, TCP/IP, drivers from NVMe to USB | 47,000 |
@@ -178,12 +178,12 @@ We keep a [scoreboard](Documentation/Parity.md). It lists what macOS does, featu
   </tr>
   <tr>
     <td valign="top">
-      Log in, and use windows, the Dock and Overview<br>
+      Log in, use windows, the Dock and Overview<br>
       Manage files, and search them<br>
       Read and type Arabic, Hindi, Chinese and more<br>
       Use the terminal, and install signed packages<br>
       Reach the network, over TLS 1.3<br>
-      Boot AArch64 and x86_64 from one disk, in QEMU
+      Boot ARM and x86 from a single disk
     </td>
     <td valign="top">
       Browse the web<br>
@@ -298,16 +298,40 @@ This is the most useful thing you could offer. vultureOS has never run on real h
 
 <div align="center">
 
-| | |
-|:---|:---|
-| [Roadmap](Documentation/Roadmap.md) | What comes next, every milestone, and what each one found |
-| [Parity](Documentation/Parity.md) | How close to macOS this is, feature by feature |
-| [Architecture](Documentation/Architecture.md) | Design, build system and how the repository is laid out |
-| [vultureFS](Documentation/VultureFS.md) | The filesystem, on disk and in the kernel |
-| [Design System](Documentation/DesignSystem.md) | How the look is measured and locked |
-| [POSIX](Documentation/POSIX.md) | What's checked, and how it compares with a Mac |
-| [System Calls](Documentation/Syscalls.md) · [Boot Protocol](Documentation/BootProtocol.md) | The details |
-| [Raspberry Pi](Documentation/RaspberryPi.md) · [Coding Style](Documentation/CodingStyle.md) · [Naming](Documentation/Naming.md) | The rest |
+<table>
+  <tr>
+    <td><a href="Documentation/Roadmap.md">Roadmap</a></td>
+    <td>What comes next, every milestone, and what each one found</td>
+  </tr>
+  <tr>
+    <td><a href="Documentation/Parity.md">Parity</a></td>
+    <td>How close to macOS this is, feature by feature</td>
+  </tr>
+  <tr>
+    <td><a href="Documentation/Architecture.md">Architecture</a></td>
+    <td>Design, build system and how the repository is laid out</td>
+  </tr>
+  <tr>
+    <td><a href="Documentation/VultureFS.md">vultureFS</a></td>
+    <td>The filesystem, on disk and in the kernel</td>
+  </tr>
+  <tr>
+    <td><a href="Documentation/DesignSystem.md">Design System</a></td>
+    <td>How the look is measured and locked</td>
+  </tr>
+  <tr>
+    <td><a href="Documentation/POSIX.md">POSIX</a></td>
+    <td>What's checked, and how it compares with a Mac</td>
+  </tr>
+  <tr>
+    <td><a href="Documentation/Syscalls.md">System Calls</a> &nbsp;·&nbsp; <a href="Documentation/BootProtocol.md">Boot Protocol</a></td>
+    <td>The details</td>
+  </tr>
+  <tr>
+    <td><a href="Documentation/RaspberryPi.md">Raspberry Pi</a> &nbsp;·&nbsp; <a href="Documentation/CodingStyle.md">Coding Style</a> &nbsp;·&nbsp; <a href="Documentation/Naming.md">Naming</a></td>
+    <td>The rest</td>
+  </tr>
+</table>
 
 </div>
 
