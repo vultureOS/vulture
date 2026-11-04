@@ -58,12 +58,14 @@ void PL011::enable_receive_interrupt(u32 interrupt, Receiver receiver, void* con
 
 void PL011::handle_interrupt()
 {
+    // Cleared first: what arrives after this raises it again, whereas clearing it after looking would lose whatever came in between,
+    // until something else came along behind it.
+    m_registers[interrupt_clear_register] = receive_interrupts;
     while (!(m_registers[flag_register] & receive_fifo_empty)) {
         u8 byte = static_cast<u8>(m_registers[data_register]);
         if (m_receiver)
             m_receiver(m_receiver_context, byte);
     }
-    m_registers[interrupt_clear_register] = receive_interrupts;
 }
 
 BootSerial& boot_serial()
