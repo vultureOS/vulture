@@ -70,23 +70,7 @@ int execv(char const* path, char* const argv[])
 
 int execvp(char const* file, char* const argv[])
 {
-    if (strchr(file, '/'))
-        return execv(file, argv);
-    static char const* const directories[] = { "/bin/", "/usr/bin/", "/sbin/" };
-    char path[256];
-    for (char const* directory : directories) {
-        size_t directory_length = strlen(directory);
-        size_t file_length = strlen(file);
-        if (directory_length + file_length + 1 > sizeof(path))
-            continue;
-        memcpy(path, directory, directory_length);
-        memcpy(path + directory_length, file, file_length + 1);
-        execv(path, argv);
-        if (errno != ENOENT)
-            return -1;
-    }
-    errno = ENOENT;
-    return -1;
+    return execvpe(file, argv, environ);
 }
 
 pid_t getpid()
