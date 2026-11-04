@@ -134,6 +134,7 @@ header dependency tracking.
  Apps         Files · Terminal · Text Editor · Viewer · Settings · Monitor · Software …
  Desktop      LoginWindow · DesktopShell (menu bar, Search, notifications) · Dock · Overview · Quick Settings
  Frameworks   pranaUI (AppKit-like) · LibAnimation · LibGfx (Quartz-2D-like) · LibText (CoreText-like) · LibImage
+              LibUnicode (the Unicode Character Database, as code) · LibLocale (CLDR)
  Core libs    LibCore (run loop, JSON plists) · LibIPC (+ipcc IDL) · LibCrypto/TLS/HTTP · LibVT · LibAudio
  Runtime      LibC (math included) · LibCxxRT · LibSystem (syscalls; libSystem.B.dylib) · dyld · LibBase (shared with kernel)
  Services     vlaunchd (PID 1) · logd · notifyd · configd · PranaWindowServer · AudioServer · indexd · clipboardd
@@ -163,7 +164,7 @@ Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page
 Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem (libSystem.B.dylib) · LibDyld (dyld)
                LibCore (event loop, accounts) · LibCrypto · LibIPC · LibJSON · LibServices · LibDeviceTree · LibELF · LibVultureFS · LibTest
                LibGfx (drawing) · LibText (fonts) · LibImage · LibCompress · LibWindow (windows, for programs)
-               LibUI (pranaUI) … later
+               LibUI (pranaUI) · LibUnicode · LibLocale … later
 Services/      vlaunchd (process 1, M6); logd · notifyd · configd · clipboardd (M7); WindowServer (M8); Dock …  (M10+)
 Applications/  Files · Terminal · Text Editor · Viewer · Settings · Installer · WidgetGallery …   (M9+)
 Utilities/     vsh and the command-line tools (bin/), login and accounts                               (M6)
@@ -235,8 +236,10 @@ macOS-style at the top, real Unix underneath:
   slices (4 ms) are armed only while other threads wait, so a lone thread
   runs untimed and the kernel stays tickless. Switches happen when a thread
   blocks, yields or exits, and on return from an interrupt that asked for
-  one (a slice ended, or a more urgent thread woke). Later: boosts for input
-  and the window server, coalescing for background work.
+  one (a slice ended, or a more urgent thread woke). A thread that's holding what a more urgent one
+  wants runs at that one's class until it lets go (a mutex in the kernel, or a futex that says who
+  has it), and so does whoever's going to answer a message from one. Later: coalescing for
+  background work.
 - **Processes (M4).** A process has an address space, open files, signal
   state and its threads (see below). Its address space is a list of
   regions over anonymous VMObjects, mapped lazily by the page fault handler:
@@ -398,7 +401,9 @@ macOS-style at the top, real Unix underneath:
   only runs if the seal lists it, or root has vouched for its hash, as the installer does for
   a package whose signature it has checked. Executable memory comes only from such files.
   Limits: the seal goes by whole files, so a block that is read again after leaving the cache
-  isn't checked again; and nothing checks the loader or the kernel (no UEFI secure boot).
+  isn't checked again, which matters more now that the file cache gives memory back under
+  pressure (M16): M19's hash tree closes it. And nothing checks the loader or the kernel (no UEFI
+  secure boot).
 - **Sandboxes (M13).** A profile in `/System/Library/Sandbox/Profiles` says what a process may
   read, write, run and connect to, and which services it may look up; everything else is
   `EPERM`, and a line in the log. It is checked on canonical paths, so symbolic links and `..`
@@ -449,6 +454,15 @@ macOS-style at the top, real Unix underneath:
   (continuing through exceptions via a frame record in each trap frame),
   `VERIFY`, QEMU's GDB stub (`Meta/run.sh --gdb`), and the `ktest` boot mode.
   A panic stops the other processors and bypasses the log lock.
+
+## Text
+
+- **LibUnicode (M17).** Tables generated from the Unicode Character Database (`Meta/generate-unicode.py`; they're checked in, so building needs no download), and normalization, case mapping and folding, segmentation (UAX #29), line breaking (UAX #14) and bidi (UAX #9) over them. Unicode's own conformance files are run in `test-host`, every line.
+- **LibLocale (M17).** Numbers, dates and sorting, from CLDR (`Meta/generate-locale.py`). What a Mac says that CLDR doesn't is in that script, as measured, so that `Tests/Parity/locale-oracle.mm` finds nothing different on this system: `ninja test-oracle` runs it on both.
+- **The C library's locales (M17).** A locale is a directory in `/usr/share/locale`, as on a Mac, with `LC_TIME`, `LC_NUMERIC` and `LC_MONETARY` made from the same CLDR data. Text is always UTF-8 and `strcoll` goes by bytes, as a Mac's does for UTF-8. The character classes (`iswalpha` and so on) follow the rules a Mac's C library goes by, found by asking it about every code point, over this system's newer Unicode.
+- **Shaping (M18).** `Text::shape` takes one run in one script and one direction through what a font's GSUB and GPOS say (`OpenTypeLayout`), with what Arabic, Indic scripts, Thai and Hangul need besides. `Tests/Parity/shaping-oracle.mm` asks Core Text about the same text in the same font: which glyphs, and where. `Itemizer` finds the runs, by bidi level, script and font; `FontCascade` is what's asked for a font that has a character, opening each the first time it's wanted, mapped so that every program shares its pages. `ParagraphLayout` is what has more than one style, and lines.
+- **Plain text stays plain.** Most of what a system says is one font, left to right, with nothing to shape. `Font::shape` keeps that on the short path it always was, and it's only what needs more that goes through all of the above.
+- **Input (M18).** A keyboard layout is a file made from measuring a real Mac (`Meta/generate-keyboards.py`), which the window server goes by, dead keys included. Input methods are in the program, under `InputContext`: what's still being decided is marked text in the `TextStorage`, not part of it until it's committed.
 
 ## What became of the Rust kernel
 

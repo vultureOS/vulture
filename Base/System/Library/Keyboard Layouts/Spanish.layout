@@ -1,0 +1,108 @@
+name Spanish – Legacy
+key 2 0031 00a1 2018 2019 0031
+key 3 0032 0021 201c 201d 0032
+key 4 0033 0023 00ab 00bb 0033
+key 5 0034 0024 00a2 00ce 0034
+key 6 0035 0025 221e 00cc 0035
+key 7 0036 002f 005c 00cf 0036
+key 8 0037 0026 007c 00cd 0037
+key 9 0038 002a 00b0 f8ff 0038
+key 10 0039 0028 00a3 00d4 0039
+key 11 0030 0029 2260 00d2 0030
+key 12 002d 005f 2013 2014 002d
+key 13 003d 002b 00b1 00d3 003d
+key 16 0071 0051 0153 0152 0051
+key 17 0077 0057 2211 00ca 0057
+key 18 0065 0045 00e6 00c6 0045
+key 19 0072 0052 00ae 00c1 0052
+key 20 0074 0054 2020 00c8 0054
+key 21 0079 0059 00a5 00cb 0059
+key 22 0075 0055 20ac 00db 0055
+key 23 0069 0049 dead:005e 0131 0049
+key 24 006f 004f 00f8 00d8 004f
+key 25 0070 0050 03c0 220f 0050
+key 26 dead:00b4 00ba 00aa 00d9 00b4
+key 27 dead:0060 dead:00a8 007c 00da 0060
+key 30 0061 0041 00e5 00c5 0041
+key 31 0073 0053 00df fb01 0053
+key 32 0064 0044 2202 fb02 0044
+key 33 0066 0046 0192 2021 0046
+key 34 0067 0047 0040 201a 0047
+key 35 0068 0048 2122 00b7 0048
+key 36 006a 004a 2206 02dc 004a
+key 37 006b 004b 00a7 02d8 004b
+key 38 006c 004c 00ac 02c6 004c
+key 39 00f1 00d1 dead:007e 02d9 00d1
+key 40 003b 003a 00b6 00af 003b
+key 41 003c 003e 005b 007b 003c
+key 43 0027 0022 005d 007d 0027
+key 44 007a 005a 03a9 201e 005a
+key 45 0078 0058 2248 2030 0058
+key 46 0063 0043 00a9 00c2 0043
+key 47 0076 0056 221a 25ca 0056
+key 48 0062 0042 222b 003c 0042
+key 49 006e 004e 003e 003e 004e
+key 50 006d 004d 00b5 2264 004d
+key 51 002c 00bf 0178 2265 002c
+key 52 002e 003f 2026 00f7 002e
+key 53 00e7 00c7 2022 00b8 00c7
+key 57 0020 0020 00a0 00a0 0020
+key 86 005b 005d 007b 007d 005b
+compose plain 26 18 0 00e9
+compose plain 26 18 1 00c9
+compose plain 26 22 0 00fa
+compose plain 26 22 1 00da
+compose plain 26 23 0 00ed
+compose plain 26 23 1 00cd
+compose plain 26 24 0 00f3
+compose plain 26 24 1 00d3
+compose plain 26 26 0 00b4
+compose plain 26 27 0 00b4
+compose plain 26 27 1 00b4
+compose plain 26 30 0 00e1
+compose plain 26 30 1 00c1
+compose plain 26 57 0 00b4
+compose plain 26 57 1 00b4
+compose plain 27 18 0 00e8
+compose plain 27 18 1 00c8
+compose plain 27 22 0 00f9
+compose plain 27 22 1 00d9
+compose plain 27 23 0 00ec
+compose plain 27 23 1 00cc
+compose plain 27 24 0 00f2
+compose plain 27 24 1 00d2
+compose plain 27 30 0 00e0
+compose plain 27 30 1 00c0
+compose shift 27 18 0 00eb
+compose shift 27 18 1 00cb
+compose shift 27 21 0 00ff
+compose shift 27 21 1 0178
+compose shift 27 22 0 00fc
+compose shift 27 22 1 00dc
+compose shift 27 23 0 00ef
+compose shift 27 23 1 00cf
+compose shift 27 24 0 00f6
+compose shift 27 24 1 00d6
+compose shift 27 26 0 00a8
+compose shift 27 27 0 00a8
+compose shift 27 27 1 00a8
+compose shift 27 30 0 00e4
+compose shift 27 30 1 00c4
+compose shift 27 57 0 00a8
+compose shift 27 57 1 00a8
+compose option 23 18 0 00ea
+compose option 23 18 1 00ca
+compose option 23 22 0 00fb
+compose option 23 22 1 00db
+compose option 23 23 0 00ee
+compose option 23 23 1 00ce
+compose option 23 24 0 00f4
+compose option 23 24 1 00d4
+compose option 23 30 0 00e2
+compose option 23 30 1 00c2
+compose option 39 24 0 00f5
+compose option 39 24 1 00d5
+compose option 39 30 0 00e3
+compose option 39 30 1 00c3
+compose option 39 49 0 00f1
+compose option 39 49 1 00d1

@@ -1,0 +1,104 @@
+name Italian – QZERTY
+key 2 0026 0031 00ab 00bb 0031
+key 3 0022 0032 201c 201d 0032
+key 4 0027 0033 2018 2019 0033
+key 5 0028 0034 007b 005b 0034
+key 6 00e7 0035 00c7 00cc 0035
+key 7 00e8 0036 00b6 2022 0036
+key 8 0029 0037 007d 005d 0037
+key 9 00a3 0038 221e f8ff 0038
+key 10 00e0 0039 dead:0060 00d4 0039
+key 11 00e9 0030 dead:00b4 00d2 0030
+key 12 002d 005f 2013 2014 002d
+key 13 003d 002b 2260 00b1 003d
+key 16 0071 0051 2044 00c1 0051
+key 17 007a 005a 03a9 00cb 005a
+key 18 0065 0045 2122 00c8 0045
+key 19 0072 0052 00ae 00cd 0052
+key 20 0074 0054 2020 00cf 0054
+key 21 0079 0059 00a5 00ce 0059
+key 22 0075 0055 dead:00a8 00db 0055
+key 23 0069 0049 20ac 00d9 0049
+key 24 006f 004f 00f8 00d8 004f
+key 25 0070 0050 03c0 220f 0050
+key 26 00ec dead:005e 0153 0152 00ec
+key 27 0024 002a 00a2 00da 0024
+key 30 0061 0041 00e5 00c5 0041
+key 31 0073 0053 00df fb01 0053
+key 32 0064 0044 2202 fb02 0044
+key 33 0066 0046 0192 2021 0046
+key 34 0067 0047 0178 201a 0047
+key 35 0068 0048 2206 00b7 0048
+key 36 006a 004a 00aa 02c6 004a
+key 37 006b 004b 00ba 02dc 004b
+key 38 006c 004c 00ac 0131 004c
+key 39 006d 004d 00b5 00af 004d
+key 40 00f9 0025 00e6 00c6 00f9
+key 41 003c 003e 2264 2265 003c
+key 43 00a7 00b0 0040 0023 00a7
+key 44 0077 0057 2211 201e 0057
+key 45 0078 0058 2248 2030 0058
+key 46 0063 0043 00a9 00c2 0043
+key 47 0076 0056 221a 25ca 0056
+key 48 0062 0042 222b 00ca 0042
+key 49 006e 004e dead:007e 02d9 004e
+key 50 002c 003f 00bf 02da 002c
+key 51 003b 002e 2026 00f7 003b
+key 52 003a 002f 007c 005c 003a
+key 53 00f2 0021 00a1 02d8 00f2
+key 57 0020 0020 00a0 00a0 0020
+key 86 0040 0023 0040 0023 0040
+compose shift 26 18 0 00ea
+compose shift 26 18 1 00ca
+compose shift 26 22 0 00fb
+compose shift 26 22 1 201e
+compose shift 26 23 0 00ee
+compose shift 26 23 1 00ce
+compose shift 26 24 0 00f4
+compose shift 26 24 1 00d4
+compose shift 26 30 0 00e2
+compose shift 26 30 1 00c2
+compose option 10 18 0 00e8
+compose option 10 18 1 00c8
+compose option 10 22 0 00f9
+compose option 10 22 1 2030
+compose option 10 23 0 00ec
+compose option 10 23 1 00cc
+compose option 10 24 0 00f2
+compose option 10 24 1 00b7
+compose option 10 30 0 00e0
+compose option 10 30 1 00c0
+compose option 11 18 0 00e9
+compose option 11 18 1 00c9
+compose option 11 22 0 00fa
+compose option 11 22 1 201a
+compose option 11 23 0 00ed
+compose option 11 23 1 00cd
+compose option 11 24 0 00f3
+compose option 11 24 1 00d3
+compose option 11 26 1 00b4
+compose option 11 30 0 00e1
+compose option 11 30 1 00c1
+compose option 11 57 0 00b4
+compose option 11 57 1 00b4
+compose option 22 18 0 00eb
+compose option 22 18 1 00cb
+compose option 22 21 0 00ff
+compose option 22 21 1 0178
+compose option 22 22 0 00fc
+compose option 22 22 1 00dc
+compose option 22 23 0 00ef
+compose option 22 23 1 00cf
+compose option 22 24 0 00f6
+compose option 22 24 1 00d6
+compose option 22 26 1 00a8
+compose option 22 30 0 00e4
+compose option 22 30 1 00c4
+compose option 22 57 0 00a8
+compose option 22 57 1 00a8
+compose option 49 24 0 00f5
+compose option 49 24 1 00d5
+compose option 49 30 0 00e3
+compose option 49 30 1 00c3
+compose option 49 49 0 00f1
+compose option 49 49 1 00d1

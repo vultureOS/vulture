@@ -48,12 +48,32 @@ ErrorOr<NonnullRefPtr<Typeface>> Typeface::parse(Vector<u8> data)
     if (!typeface)
         return Error::from_string_literal("out of memory");
     auto reference = adopt_ref(*typeface);
-    typeface->m_data = move(data);
+    typeface->m_owned_data = move(data);
+    typeface->m_data = typeface->m_owned_data.span();
+    TRY(typeface->read_everything());
+    return reference;
+}
+
+ErrorOr<NonnullRefPtr<Typeface>> Typeface::parse_mapped(ReadonlyBytes data)
+{
+    auto* typeface = new (Base::nothrow) Typeface;
+    if (!typeface)
+        return Error::from_string_literal("out of memory");
+    auto reference = adopt_ref(*typeface);
+    typeface->m_data = data;
+    TRY(typeface->read_everything());
+    return reference;
+}
+
+ErrorOr<void> Typeface::read_everything()
+{
+    auto* typeface = this;
     typeface->m_id = s_next_id.fetch_add(1);
     TRY(typeface->read_directory());
     TRY(typeface->read_metrics());
     typeface->read_names();
     typeface->read_character_map();
+    typeface->read_variations();
     if (typeface->m_cff.exists())
         typeface->read_cff();
     typeface->read_layout_features(typeface->m_gpos, typeface->m_gpos_features, typeface->m_gpos_feature_lookups);
@@ -67,7 +87,7 @@ ErrorOr<NonnullRefPtr<Typeface>> Typeface::parse(Vector<u8> data)
         }
     }
     quick_sort(typeface->m_kerning_lookups.span());
-    return reference;
+    return {};
 }
 
 ErrorOr<void> Typeface::read_directory()
@@ -75,11 +95,18 @@ ErrorOr<void> Typeface::read_directory()
     if (m_data.size() < 12)
         return Error::from_string_literal("font: too short");
     u32 version = u32_at(0);
+    // A collection: the first of what's in it. (Which language's forms are wanted is for `locl`.)
+    if (version == tag("ttcf")) {
+        if (u32_at(8) == 0)
+            return Error::from_string_literal("font: an empty collection");
+        m_directory_offset = u32_at(12);
+        version = u32_at(m_directory_offset);
+    }
     if (version != 0x00010000 && version != tag("OTTO") && version != tag("true"))
         return Error::from_string_literal("font: not an OpenType file");
-    u16 count = u16_at(4);
+    u16 count = u16_at(m_directory_offset + 4);
     for (u16 i = 0; i < count; ++i) {
-        size_t record = 12 + static_cast<size_t>(i) * 16;
+        size_t record = m_directory_offset + 12 + static_cast<size_t>(i) * 16;
         u32 name = u32_at(record);
         size_t offset = u32_at(record + 8);
         size_t size = u32_at(record + 12);
@@ -126,13 +153,35 @@ ErrorOr<void> Typeface::read_directory()
         case tag("CFF "):
             m_cff = table;
             break;
+        case tag("fvar"):
+            m_fvar = table;
+            break;
+        case tag("avar"):
+            m_avar = table;
+            break;
+        case tag("gvar"):
+            m_gvar = table;
+            break;
+        case tag("COLR"):
+            m_colr = table;
+            break;
+        case tag("CPAL"):
+            m_cpal = table;
+            break;
+        case tag("CBDT"):
+            m_cbdt = table;
+            break;
+        case tag("CBLC"):
+            m_cblc = table;
+            break;
         default:
             break;
         }
     }
     if (!m_head.exists() || !m_hhea.exists() || !m_hmtx.exists() || !m_maxp.exists() || !m_cmap.exists())
         return Error::from_string_literal("font: a required table is missing");
-    if (!m_cff.exists() && (!m_glyf.exists() || !m_loca.exists()))
+    // (A font of pictures has nothing else.)
+    if (!m_cff.exists() && (!m_glyf.exists() || !m_loca.exists()) && !(m_cbdt.exists() && m_cblc.exists()))
         return Error::from_string_literal("font: no outlines");
     return {};
 }
@@ -210,6 +259,8 @@ void Typeface::read_character_map()
         u16 encoding = u16_at(record + 2);
         size_t subtable = m_cmap.offset + u32_at(record + 4);
         u16 format = u16_at(subtable);
+        if (format == 14 && platform == 0 && encoding == 5)
+            m_cmap_variations = subtable;
         int score = -1;
         // The whole of Unicode if we can have it.
         if (format == 12 && ((platform == 3 && encoding == 10) || platform == 0))
@@ -285,10 +336,571 @@ GlyphIndex Typeface::glyph_for_code_point(u32 code_point) const
     return 0;
 }
 
+GlyphIndex Typeface::glyph_for_variation(u32 code_point, u32 selector) const
+{
+    if (m_cmap_variations == 0)
+        return 0;
+    auto const u24_at = [this](size_t at) { return (static_cast<u32>(byte_at(at)) << 16) | (static_cast<u32>(byte_at(at + 1)) << 8) | byte_at(at + 2); };
+    u32 const records = u32_at(m_cmap_variations + 6);
+    if (records > m_data.size() / 11)
+        return 0;
+    for (u32 i = 0; i < records; ++i) {
+        size_t const record = m_cmap_variations + 10 + static_cast<size_t>(i) * 11;
+        if (u24_at(record) != selector)
+            continue;
+        // Those that aren't the character's usual glyph are listed; those that are, are listed differently.
+        size_t const non_default = u32_at(record + 7);
+        if (non_default != 0) {
+            size_t const table = m_cmap_variations + non_default;
+            u32 const mappings = u32_at(table);
+            if (mappings > m_data.size() / 5)
+                return 0;
+            u32 low = 0, high = mappings;
+            while (low < high) {
+                u32 const middle = low + (high - low) / 2;
+                size_t const mapping = table + 4 + static_cast<size_t>(middle) * 5;
+                u32 const unicode = u24_at(mapping);
+                if (unicode == code_point) {
+                    u16 const glyph = u16_at(mapping + 3);
+                    return glyph < m_glyph_count ? glyph : 0;
+                }
+                if (unicode < code_point)
+                    low = middle + 1;
+                else
+                    high = middle;
+            }
+        }
+        size_t const default_ranges = u32_at(record + 3);
+        if (default_ranges != 0) {
+            size_t const table = m_cmap_variations + default_ranges;
+            u32 const ranges = u32_at(table);
+            if (ranges > m_data.size() / 4)
+                return 0;
+            for (u32 r = 0; r < ranges; ++r) {
+                size_t const range = table + 4 + static_cast<size_t>(r) * 4;
+                u32 const first = u24_at(range);
+                if (code_point >= first && code_point <= first + byte_at(range + 3))
+                    return glyph_for_code_point(code_point);
+            }
+        }
+        return 0;
+    }
+    return 0;
+}
+
+size_t Typeface::offset_of_table(u32 wanted) const
+{
+    u16 const count = u16_at(m_directory_offset + 4);
+    for (u16 i = 0; i < count; ++i) {
+        size_t const record = m_directory_offset + 12 + static_cast<size_t>(i) * 16;
+        if (u32_at(record) != wanted)
+            continue;
+        size_t const offset = u32_at(record + 8);
+        size_t const size = u32_at(record + 12);
+        return offset <= m_data.size() && size <= m_data.size() - offset ? offset : 0;
+    }
+    return 0;
+}
+
+size_t Typeface::size_of_table(u32 wanted) const
+{
+    u16 const count = u16_at(m_directory_offset + 4);
+    for (u16 i = 0; i < count; ++i) {
+        size_t const record = m_directory_offset + 12 + static_cast<size_t>(i) * 16;
+        if (u32_at(record) == wanted)
+            return u32_at(record + 12);
+    }
+    return 0;
+}
+
 u16 Typeface::advance_of(GlyphIndex glyph) const
 {
     u16 index = glyph < m_metric_count ? glyph : static_cast<u16>(m_metric_count - 1);
-    return u16_at(m_hmtx.offset + static_cast<size_t>(index) * 4);
+    u16 const advance = u16_at(m_hmtx.offset + static_cast<size_t>(index) * 4);
+    if (!m_is_varied)
+        return advance;
+    if (auto const* known = m_varied_advances.get(glyph))
+        return *known;
+    // The third and fourth of the extra points are its width: how far apart they've moved is how much it's changed by.
+    Vector<u16> ends;
+    Vector<float> xs;
+    Vector<float> ys;
+    u32 const points = point_count_of(glyph, ends, xs, ys);
+    Vector<float> dx;
+    Vector<float> dy;
+    u16 result = advance;
+    if (points >= 4 && variation_deltas(glyph, points, ends.span(), xs.span(), ys.span(), dx, dy)) {
+        float const changed = static_cast<float>(advance) + dx[points - 3] - dx[points - 4];
+        result = static_cast<u16>(max(0.0f, changed + 0.5f));
+    }
+    (void)m_varied_advances.try_set(glyph, result);
+    return result;
+}
+
+// ---- Variations (fvar, avar, gvar).
+
+void Typeface::read_variations()
+{
+    if (!m_fvar.exists() || u16_at(m_fvar.offset) != 1)
+        return;
+    size_t const axes = m_fvar.offset + u16_at(m_fvar.offset + 4);
+    u16 const count = u16_at(m_fvar.offset + 8);
+    u16 const size = u16_at(m_fvar.offset + 10);
+    if (size < 20 || count > 64)
+        return;
+    auto const fixed = [this](size_t at) { return static_cast<float>(static_cast<i32>(u32_at(at))) / 65536.0f; };
+    for (u16 i = 0; i < count; ++i) {
+        size_t const axis = axes + static_cast<size_t>(i) * size;
+        m_variation_axes.append({ u32_at(axis), fixed(axis + 4), fixed(axis + 8), fixed(axis + 12) });
+        m_normalized_coordinates.append(0);
+    }
+}
+
+ErrorOr<NonnullRefPtr<Typeface>> Typeface::with_variations(Span<VariationSetting const> settings) const
+{
+    auto varied = TRY(parse_mapped(m_data));
+    for (size_t a = 0; a < varied->m_variation_axes.size(); ++a) {
+        auto const& axis = varied->m_variation_axes[a];
+        float value = axis.default_value;
+        for (auto const& setting : settings) {
+            if (setting.tag == axis.tag)
+                value = setting.value;
+        }
+        value = max(axis.minimum, min(axis.maximum, value));
+        // To between -1 and 1, with the default at 0.
+        float normalized = 0;
+        if (value < axis.default_value && axis.default_value > axis.minimum)
+            normalized = (value - axis.default_value) / (axis.default_value - axis.minimum);
+        else if (value > axis.default_value && axis.maximum > axis.default_value)
+            normalized = (value - axis.default_value) / (axis.maximum - axis.default_value);
+        // And the font's own idea of how that goes.
+        if (varied->m_avar.exists()) {
+            size_t at = varied->m_avar.offset + 8;
+            for (size_t skip = 0; skip < a; ++skip)
+                at += 2 + static_cast<size_t>(varied->u16_at(at)) * 4;
+            u16 const pairs = varied->u16_at(at);
+            auto const from_at = [&](u16 i) { return static_cast<float>(varied->i16_at(at + 2 + static_cast<size_t>(i) * 4)) / 16384.0f; };
+            auto const to_at = [&](u16 i) { return static_cast<float>(varied->i16_at(at + 4 + static_cast<size_t>(i) * 4)) / 16384.0f; };
+            for (u16 i = 0; i + 1 < pairs; ++i) {
+                float const from = from_at(i);
+                float const next = from_at(static_cast<u16>(i + 1));
+                if (normalized >= from && normalized <= next && next > from) {
+                    normalized = to_at(i) + (normalized - from) / (next - from) * (to_at(static_cast<u16>(i + 1)) - to_at(i));
+                    break;
+                }
+            }
+        }
+        varied->m_normalized_coordinates[a] = normalized;
+        if (normalized != 0)
+            varied->m_is_varied = varied->m_gvar.exists();
+    }
+    return varied;
+}
+
+float Typeface::variation_scalar(size_t peak, size_t intermediate) const
+{
+    float scalar = 1;
+    size_t const axes = m_normalized_coordinates.size();
+    for (size_t a = 0; a < axes; ++a) {
+        float const peak_value = static_cast<float>(i16_at(peak + a * 2)) / 16384.0f;
+        if (peak_value == 0)
+            continue;
+        float const value = m_normalized_coordinates[a];
+        if (value == 0)
+            return 0;
+        if (intermediate != 0) {
+            float const low = static_cast<float>(i16_at(intermediate + a * 2)) / 16384.0f;
+            float const high = static_cast<float>(i16_at(intermediate + axes * 2 + a * 2)) / 16384.0f;
+            if (value < low || value > high)
+                return 0;
+            if (value == peak_value)
+                continue;
+            scalar *= value < peak_value ? (value - low) / (peak_value - low) : (high - value) / (high - peak_value);
+        } else {
+            if ((value < 0) != (peak_value < 0))
+                return 0;
+            if (value < 0 ? value < peak_value : value > peak_value)
+                continue;
+            scalar *= value / peak_value;
+        }
+    }
+    return scalar;
+}
+
+u32 Typeface::point_count_of(GlyphIndex glyph, Vector<u16>& contour_ends, Vector<float>& xs, Vector<float>& ys) const
+{
+    size_t start, end;
+    if (m_long_loca) {
+        start = u32_at(m_loca.offset + static_cast<size_t>(glyph) * 4);
+        end = u32_at(m_loca.offset + (static_cast<size_t>(glyph) + 1) * 4);
+    } else {
+        start = static_cast<size_t>(u16_at(m_loca.offset + static_cast<size_t>(glyph) * 2)) * 2;
+        end = static_cast<size_t>(u16_at(m_loca.offset + (static_cast<size_t>(glyph) + 1) * 2)) * 2;
+    }
+    u32 count = 0;
+    if (end > start && end <= m_glyf.size && end - start >= 10) {
+        size_t const offset = m_glyf.offset + start;
+        size_t const limit = m_glyf.offset + end;
+        i16 const contours = i16_at(offset);
+        if (contours >= 0) {
+            if (contours > 0)
+                count = static_cast<u32>(u16_at(offset + 10 + (static_cast<size_t>(contours) - 1) * 2)) + 1;
+            for (i16 c = 0; c < contours; ++c)
+                contour_ends.append(u16_at(offset + 10 + static_cast<size_t>(c) * 2));
+        } else {
+            size_t at = offset + 10;
+            for (int part = 0; part < 64 && at + 4 <= limit; ++part) {
+                u16 const flags = u16_at(at);
+                ++count;
+                at += 4 + ((flags & 1) ? 4 : 2);
+                if (flags & 0x0008)
+                    at += 2;
+                else if (flags & 0x0040)
+                    at += 4;
+                else if (flags & 0x0080)
+                    at += 8;
+                if (!(flags & 0x0020))
+                    break;
+            }
+        }
+    }
+    // Only for what's looked at to fill in points that aren't said: and those are only asked for when there are contours, by what actually has them.
+    for (u32 i = 0; i < count + 4; ++i) {
+        xs.append(0);
+        ys.append(0);
+    }
+    return count + 4;
+}
+
+bool Typeface::variation_deltas(GlyphIndex glyph, u32 point_count, Span<u16 const> contour_ends, Span<float const> xs, Span<float const> ys, Vector<float>& dx, Vector<float>& dy) const
+{
+    if (!m_is_varied || point_count > 65535)
+        return false;
+    size_t const axes = m_normalized_coordinates.size();
+    if (u16_at(m_gvar.offset + 4) != axes)
+        return false;
+    u16 const shared_tuple_count = u16_at(m_gvar.offset + 6);
+    size_t const shared_tuples = m_gvar.offset + u32_at(m_gvar.offset + 8);
+    bool const long_offsets = u16_at(m_gvar.offset + 14) & 1;
+    size_t const data_start = m_gvar.offset + u32_at(m_gvar.offset + 16);
+    size_t const offsets = m_gvar.offset + 20;
+    if (glyph >= u16_at(m_gvar.offset + 12))
+        return false;
+    size_t const first = long_offsets ? u32_at(offsets + static_cast<size_t>(glyph) * 4) : static_cast<size_t>(u16_at(offsets + static_cast<size_t>(glyph) * 2)) * 2;
+    size_t const next = long_offsets ? u32_at(offsets + (static_cast<size_t>(glyph) + 1) * 4) : static_cast<size_t>(u16_at(offsets + (static_cast<size_t>(glyph) + 1) * 2)) * 2;
+    if (next <= first)
+        return false;
+    size_t const data = data_start + first;
+    size_t const data_end = min(data_start + next, m_data.size());
+
+    u16 const tuple_info = u16_at(data);
+    u16 const tuple_count = tuple_info & 0x0fff;
+    size_t serialized = data + u16_at(data + 2);
+    size_t header = data + 4;
+
+    // Points are said as how far each is from the last.
+    auto const read_points = [&](size_t& at, Vector<u16>& points) -> bool {
+        u32 count = byte_at(at++);
+        if (count & 0x80)
+            count = ((count & 0x7f) << 8) | byte_at(at++);
+        // None said means all of them.
+        if (count == 0) {
+            points.clear();
+            return true;
+        }
+        u32 value = 0;
+        while (points.size() < count) {
+            if (at >= data_end)
+                return false;
+            u8 const control = byte_at(at++);
+            u32 const run = (control & 0x7f) + 1u;
+            for (u32 i = 0; i < run && points.size() < count; ++i) {
+                if (control & 0x80) {
+                    value += u16_at(at);
+                    at += 2;
+                } else {
+                    value += byte_at(at++);
+                }
+                points.append(static_cast<u16>(value));
+            }
+        }
+        return true;
+    };
+    auto const read_deltas = [&](size_t& at, u32 count, Vector<float>& out) -> bool {
+        while (out.size() < count) {
+            if (at >= data_end)
+                return false;
+            u8 const control = byte_at(at++);
+            u32 const run = (control & 0x3f) + 1u;
+            for (u32 i = 0; i < run && out.size() < count; ++i) {
+                if (control & 0x80) {
+                    out.append(0);
+                } else if (control & 0x40) {
+                    out.append(static_cast<float>(i16_at(at)));
+                    at += 2;
+                } else {
+                    out.append(static_cast<float>(static_cast<i8>(byte_at(at++))));
+                }
+            }
+        }
+        return true;
+    };
+
+    Vector<u16> shared_points;
+    bool has_shared_points = false;
+    if (tuple_info & 0x8000) {
+        if (!read_points(serialized, shared_points))
+            return false;
+        has_shared_points = true;
+    }
+
+    MUST(dx.try_resize(point_count));
+    MUST(dy.try_resize(point_count));
+    for (u32 i = 0; i < point_count; ++i) {
+        dx[i] = 0;
+        dy[i] = 0;
+    }
+    bool anything = false;
+    for (u16 t = 0; t < tuple_count; ++t) {
+        u16 const data_size = u16_at(header);
+        u16 const index = u16_at(header + 2);
+        header += 4;
+        size_t peak;
+        if (index & 0x8000) {
+            peak = header;
+            header += axes * 2;
+        } else {
+            if ((index & 0x0fff) >= shared_tuple_count)
+                return anything;
+            peak = shared_tuples + static_cast<size_t>(index & 0x0fff) * axes * 2;
+        }
+        size_t intermediate = 0;
+        if (index & 0x4000) {
+            intermediate = header;
+            header += axes * 4;
+        }
+        size_t const next_serialized = serialized + data_size;
+        float const scalar = variation_scalar(peak, intermediate);
+        if (scalar != 0) {
+            size_t at = serialized;
+            Vector<u16> own_points;
+            if (index & 0x2000) {
+                if (!read_points(at, own_points))
+                    return anything;
+            }
+            auto const& points = (index & 0x2000) ? own_points : shared_points;
+            bool const all_points = points.is_empty() && ((index & 0x2000) || has_shared_points || true);
+            u32 const said = all_points ? point_count : static_cast<u32>(points.size());
+            Vector<float> x_deltas;
+            Vector<float> y_deltas;
+            if (!read_deltas(at, said, x_deltas) || !read_deltas(at, said, y_deltas))
+                return anything;
+            if (all_points) {
+                for (u32 i = 0; i < point_count; ++i) {
+                    dx[i] += x_deltas[i] * scalar;
+                    dy[i] += y_deltas[i] * scalar;
+                }
+            } else {
+                // Those it says, and those between them by following along (IUP): each contour by itself, in what's left over by the end.
+                Vector<float> tuple_dx;
+                Vector<float> tuple_dy;
+                Vector<bool> touched;
+                MUST(tuple_dx.try_resize(point_count));
+                MUST(tuple_dy.try_resize(point_count));
+                MUST(touched.try_resize(point_count));
+                for (u32 i = 0; i < point_count; ++i) {
+                    tuple_dx[i] = 0;
+                    tuple_dy[i] = 0;
+                    touched[i] = false;
+                }
+                for (u32 i = 0; i < said; ++i) {
+                    if (points[i] < point_count) {
+                        tuple_dx[points[i]] = x_deltas[i];
+                        tuple_dy[points[i]] = y_deltas[i];
+                        touched[points[i]] = true;
+                    }
+                }
+                u32 contour_start = 0;
+                for (u16 end_of_contour : contour_ends) {
+                    if (end_of_contour >= point_count || end_of_contour < contour_start)
+                        break;
+                    u32 const size = end_of_contour - contour_start + 1u;
+                    // The first that's touched: if there isn't one, nothing moves.
+                    u32 first_touched = size;
+                    for (u32 i = 0; i < size; ++i) {
+                        if (touched[contour_start + i]) {
+                            first_touched = i;
+                            break;
+                        }
+                    }
+                    if (first_touched < size) {
+                        u32 previous = first_touched;
+                        for (u32 step = 1; step <= size; ++step) {
+                            u32 const here = (first_touched + step) % size;
+                            if (!touched[contour_start + here])
+                                continue;
+                            // Everything from just after `previous` to just before `here`.
+                            auto const interpolate = [&](Span<float const> position, Vector<float>& delta) {
+                                float const p1 = position[contour_start + previous];
+                                float const p2 = position[contour_start + here];
+                                float const d1 = delta[contour_start + previous];
+                                float const d2 = delta[contour_start + here];
+                                for (u32 k = (previous + 1) % size; k != here; k = (k + 1) % size) {
+                                    float const p = position[contour_start + k];
+                                    float value;
+                                    if (p1 == p2) {
+                                        value = d1 == d2 ? d1 : 0;
+                                    } else if (p <= min(p1, p2)) {
+                                        value = p1 < p2 ? d1 : d2;
+                                    } else if (p >= max(p1, p2)) {
+                                        value = p1 > p2 ? d1 : d2;
+                                    } else {
+                                        value = d1 + (p - p1) * (d2 - d1) / (p2 - p1);
+                                    }
+                                    delta[contour_start + k] = value;
+                                }
+                            };
+                            interpolate(xs, tuple_dx);
+                            interpolate(ys, tuple_dy);
+                            previous = here;
+                        }
+                    }
+                    contour_start = end_of_contour + 1u;
+                }
+                for (u32 i = 0; i < point_count; ++i) {
+                    dx[i] += tuple_dx[i] * scalar;
+                    dy[i] += tuple_dy[i] * scalar;
+                }
+            }
+            anything = true;
+        }
+        serialized = next_serialized;
+    }
+    return anything;
+}
+
+// ---- Glyphs that are pictures: COLR and CBDT.
+
+Vector<Typeface::ColorLayer> Typeface::color_layers(GlyphIndex glyph) const
+{
+    Vector<ColorLayer> layers;
+    if (!m_colr.exists() || !m_cpal.exists())
+        return layers;
+    u16 const base_count = u16_at(m_colr.offset + 2);
+    size_t const bases = m_colr.offset + u32_at(m_colr.offset + 4);
+    size_t const all_layers = m_colr.offset + u32_at(m_colr.offset + 8);
+    u32 low = 0, high = base_count;
+    while (low < high) {
+        u32 const middle = (low + high) / 2;
+        size_t const record = bases + static_cast<size_t>(middle) * 6;
+        u16 const value = u16_at(record);
+        if (value == glyph) {
+            u16 const first = u16_at(record + 2);
+            u16 const count = u16_at(record + 4);
+            size_t const palette_start = m_cpal.offset + u32_at(m_cpal.offset + 8) + static_cast<size_t>(u16_at(m_cpal.offset + 12)) * 4;
+            u16 const palette_size = u16_at(m_cpal.offset + 2);
+            for (u16 l = 0; l < count && l < 256; ++l) {
+                size_t const layer = all_layers + (static_cast<size_t>(first) + l) * 4;
+                ColorLayer one;
+                one.glyph = u16_at(layer);
+                u16 const palette_index = u16_at(layer + 2);
+                if (palette_index == 0xffff || palette_index >= palette_size) {
+                    one.is_text_color = true;
+                } else {
+                    // BGRA, as it's kept.
+                    size_t const color = palette_start + static_cast<size_t>(palette_index) * 4;
+                    one.argb = (static_cast<u32>(byte_at(color + 3)) << 24) | (static_cast<u32>(byte_at(color + 2)) << 16) | (static_cast<u32>(byte_at(color + 1)) << 8) | byte_at(color);
+                }
+                layers.append(one);
+            }
+            return layers;
+        }
+        if (value < glyph)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    return layers;
+}
+
+Optional<Typeface::ColorBitmap> Typeface::color_bitmap(GlyphIndex glyph, u16 wanted) const
+{
+    if (!m_cbdt.exists() || !m_cblc.exists())
+        return {};
+    u32 const strikes = u32_at(m_cblc.offset + 4);
+    if (strikes > 256)
+        return {};
+    // The smallest that's at least as big, or the biggest there is.
+    size_t best = 0;
+    u8 best_size = 0;
+    for (u32 s = 0; s < strikes; ++s) {
+        size_t const strike = m_cblc.offset + 8 + static_cast<size_t>(s) * 48;
+        u16 const start = u16_at(strike + 40);
+        u16 const end = u16_at(strike + 42);
+        if (glyph < start || glyph > end)
+            continue;
+        u8 const size = byte_at(strike + 44);
+        bool const better = best == 0 || (best_size < wanted ? size > best_size : (size >= wanted && size < best_size));
+        if (better) {
+            best = strike;
+            best_size = size;
+        }
+    }
+    if (best == 0)
+        return {};
+    size_t const sub_tables = m_cblc.offset + u32_at(best);
+    u32 const sub_table_count = u32_at(best + 8);
+    if (sub_table_count > 65536)
+        return {};
+    for (u32 t = 0; t < sub_table_count; ++t) {
+        size_t const record = sub_tables + static_cast<size_t>(t) * 8;
+        u16 const first = u16_at(record);
+        u16 const last = u16_at(record + 2);
+        if (glyph < first || glyph > last)
+            continue;
+        size_t const sub = sub_tables + u32_at(record + 4);
+        u16 const index_format = u16_at(sub);
+        u16 const image_format = u16_at(sub + 2);
+        size_t const image_base = u32_at(sub + 4);
+        size_t offset = 0;
+        size_t next = 0;
+        if (index_format == 1) {
+            offset = u32_at(sub + 8 + static_cast<size_t>(glyph - first) * 4);
+            next = u32_at(sub + 8 + (static_cast<size_t>(glyph - first) + 1) * 4);
+        } else if (index_format == 3) {
+            offset = u16_at(sub + 8 + static_cast<size_t>(glyph - first) * 2);
+            next = u16_at(sub + 8 + (static_cast<size_t>(glyph - first) + 1) * 2);
+        } else {
+            return {};
+        }
+        if (next <= offset)
+            return {};
+        size_t const data = m_cbdt.offset + image_base + offset;
+        ColorBitmap bitmap;
+        bitmap.pixels_per_em = best_size;
+        if (image_format == 17) {
+            // Small metrics, then its length, then the PNG.
+            bitmap.left = static_cast<i8>(byte_at(data + 2));
+            bitmap.top = static_cast<i8>(byte_at(data + 3));
+            bitmap.advance = byte_at(data + 4);
+            u32 const length = u32_at(data + 5);
+            if (data + 9 + length > m_data.size())
+                return {};
+            bitmap.png = { m_data.data() + data + 9, length };
+        } else if (image_format == 18) {
+            bitmap.left = static_cast<i8>(byte_at(data + 2));
+            bitmap.top = static_cast<i8>(byte_at(data + 3));
+            bitmap.advance = byte_at(data + 4);
+            u32 const length = u32_at(data + 8);
+            if (data + 12 + length > m_data.size())
+                return {};
+            bitmap.png = { m_data.data() + data + 12, length };
+        } else {
+            return {};
+        }
+        return bitmap;
+    }
+    return {};
 }
 
 // --- Outlines ---
@@ -300,7 +912,7 @@ Gfx::Path Typeface::outline_of(GlyphIndex glyph) const
         return path;
     if (m_cff.exists())
         append_cff_outline(glyph, path);
-    else
+    else if (m_glyf.exists())
         append_truetype_outline(glyph, path, {}, 0);
     return path;
 }
@@ -323,8 +935,19 @@ void Typeface::append_truetype_outline(GlyphIndex glyph, Gfx::Path& path, Gfx::A
     size_t limit = m_glyf.offset + end;
     i16 contours = i16_at(offset);
     if (contours >= 0) {
-        append_simple_outline(offset + 10, limit, contours, path, transform);
+        append_simple_outline(glyph, offset + 10, limit, contours, path, transform);
         return;
+    }
+    // Where its parts go can change with the design, as anything can: each part is a "point" here, with what's left over being the glyph's metrics.
+    Vector<float> part_dx;
+    Vector<float> part_dy;
+    if (m_is_varied) {
+        Vector<u16> no_contours;
+        Vector<float> xs;
+        Vector<float> ys;
+        u32 const parts = point_count_of(glyph, no_contours, xs, ys);
+        if (parts > 0)
+            (void)variation_deltas(glyph, parts, no_contours.span(), xs.span(), ys.span(), part_dx, part_dy);
     }
     // Composite: other glyphs, each moved and perhaps scaled.
     constexpr u16 arguments_are_words = 0x0001;
@@ -353,6 +976,10 @@ void Typeface::append_truetype_outline(GlyphIndex glyph, Gfx::Path& path, Gfx::A
         // (Point matching, without offsets, is rare enough to place at the origin.)
         if (!(flags & arguments_are_offsets))
             dx = dy = 0;
+        if (static_cast<size_t>(component) < part_dx.size()) {
+            dx += part_dx[static_cast<size_t>(component)];
+            dy += part_dy[static_cast<size_t>(component)];
+        }
         float a = 1, b = 0, c = 0, d = 1;
         auto fixed = [&](size_t where) { return static_cast<float>(i16_at(where)) / 16384.0f; };
         if (flags & has_scale) {
@@ -375,7 +1002,7 @@ void Typeface::append_truetype_outline(GlyphIndex glyph, Gfx::Path& path, Gfx::A
     }
 }
 
-void Typeface::append_simple_outline(size_t offset, size_t limit, i16 contours, Gfx::Path& path, Gfx::AffineTransform const& transform) const
+void Typeface::append_simple_outline(GlyphIndex glyph, size_t offset, size_t limit, i16 contours, Gfx::Path& path, Gfx::AffineTransform const& transform) const
 {
     if (contours == 0 || offset + static_cast<size_t>(contours) * 2 + 2 > limit)
         return;
@@ -438,6 +1065,35 @@ void Typeface::append_simple_outline(size_t offset, size_t limit, i16 contours, 
     }
     if (at > limit)
         return;
+
+    if (m_is_varied) {
+        Vector<u16> ends;
+        Vector<float> xs;
+        Vector<float> ys;
+        for (i16 contour = 0; contour < contours; ++contour)
+            ends.append(u16_at(offset + static_cast<size_t>(contour) * 2));
+        for (auto const& point : points) {
+            xs.append(point.x);
+            ys.append(point.y);
+        }
+        // (The four at the end, for the metrics, aren't in the outline.)
+        xs.append(0);
+        xs.append(0);
+        xs.append(0);
+        xs.append(0);
+        ys.append(0);
+        ys.append(0);
+        ys.append(0);
+        ys.append(0);
+        Vector<float> dx;
+        Vector<float> dy;
+        if (variation_deltas(glyph, point_count + 4, ends.span(), xs.span(), ys.span(), dx, dy)) {
+            for (u32 i = 0; i < point_count; ++i) {
+                points[i].x += dx[i];
+                points[i].y += dy[i];
+            }
+        }
+    }
 
     u32 first = 0;
     for (i16 contour = 0; contour < contours; ++contour) {
@@ -546,6 +1202,9 @@ void Typeface::read_cff()
     // A DICT: operands, then an operator.
     size_t charstrings_offset = 0;
     size_t private_size = 0, private_offset = 0;
+    // A CID-keyed font, as those for Chinese and Japanese are: several dictionaries, each with its own subroutines, and a list of which glyph goes by which.
+    size_t font_dictionaries_offset = 0;
+    size_t dictionary_select_offset = 0;
     auto walk_dict = [&](size_t from, size_t to, auto on_operator) {
         double operands[48];
         int count = 0;
@@ -592,10 +1251,43 @@ void Typeface::read_cff()
             private_size = static_cast<size_t>(operands[0]);
             private_offset = static_cast<size_t>(operands[1]);
         }
+        if (op == 1236 && count >= 1)
+            font_dictionaries_offset = static_cast<size_t>(operands[0]);
+        if (op == 1237 && count >= 1)
+            dictionary_select_offset = static_cast<size_t>(operands[0]);
     });
     if (charstrings_offset == 0)
         return;
     m_cff_charstrings = read_cff_index(base + charstrings_offset);
+    if (font_dictionaries_offset != 0 && dictionary_select_offset != 0) {
+        auto const dictionaries = read_cff_index(base + font_dictionaries_offset);
+        // (No more than this has ever been needed: an index is only a byte, and most have a few dozen.)
+        for (u32 d = 0; d < dictionaries.count && d < 256; ++d) {
+            CFFIndex local;
+            size_t dictionary_start = 0, dictionary_end = 0;
+            if (cff_object(dictionaries, d, dictionary_start, dictionary_end)) {
+                size_t size = 0, offset = 0;
+                walk_dict(dictionary_start, dictionary_end, [&](u16 op, double const* operands, int count) {
+                    if (op == 18 && count >= 2) {
+                        size = static_cast<size_t>(operands[0]);
+                        offset = static_cast<size_t>(operands[1]);
+                    }
+                });
+                if (size && offset && base + offset + size <= m_data.size()) {
+                    size_t subroutines = 0;
+                    walk_dict(base + offset, base + offset + size, [&](u16 op, double const* operands, int count) {
+                        if (op == 19 && count >= 1)
+                            subroutines = static_cast<size_t>(operands[0]);
+                    });
+                    if (subroutines)
+                        local = read_cff_index(base + offset + subroutines);
+                }
+            }
+            m_cff_font_dictionary_locals.append(local);
+        }
+        m_cff_dictionary_select = base + dictionary_select_offset;
+        return;
+    }
     if (private_size && private_offset && base + private_offset + private_size <= m_data.size()) {
         size_t subroutines = 0;
         walk_dict(base + private_offset, base + private_offset + private_size, [&](u16 op, double const* operands, int count) {
@@ -861,9 +1553,34 @@ void Typeface::append_cff_outline(GlyphIndex glyph, Gfx::Path& path) const
         return;
     CharstringState state;
     state.path = &path;
-    run_charstring(start, end, state, m_cff_local_subroutines, 0);
+    run_charstring(start, end, state, cff_local_subroutines_for(glyph), 0);
     if (state.open)
         path.close();
+}
+
+Typeface::CFFIndex const& Typeface::cff_local_subroutines_for(GlyphIndex glyph) const
+{
+    if (m_cff_dictionary_select == 0)
+        return m_cff_local_subroutines;
+    size_t which = 0;
+    u8 const format = byte_at(m_cff_dictionary_select);
+    if (format == 0) {
+        which = byte_at(m_cff_dictionary_select + 1 + glyph);
+    } else if (format == 3) {
+        u16 const ranges = u16_at(m_cff_dictionary_select + 1);
+        // Each is where it starts, and which: the last that starts at or before this one.
+        u32 low = 0, high = ranges;
+        while (low < high) {
+            u32 const middle = (low + high) / 2;
+            if (u16_at(m_cff_dictionary_select + 3 + static_cast<size_t>(middle) * 3) <= glyph)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+        if (low > 0)
+            which = byte_at(m_cff_dictionary_select + 3 + static_cast<size_t>(low - 1) * 3 + 2);
+    }
+    return which < m_cff_font_dictionary_locals.size() ? m_cff_font_dictionary_locals[which] : m_cff_local_subroutines;
 }
 
 // --- Layout tables ---

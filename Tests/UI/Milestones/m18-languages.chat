@@ -1,0 +1,141 @@
+# M18: the world's writing in a title bar, fields, a table and a menu, compared with what it's meant to look like; and typing through the real keyboard, in input methods.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 1
+click button "Terminal"
+expect terminal: ready
+ax-expect textarea "Terminal"
+pause 1
+type /usr/tests/languages &\r
+pointer 16000 500
+pause 1.5
+ax-expect textfield "Arabic"
+ax-expect textfield "Chinese"
+screenshot languages.png
+click popup "Languages"
+pause 0.5
+screenshot languages-menu.png
+key esc
+pause 0.5
+click textfield "Type here"
+# Pinyin, by the real keyboard path: letters to characters, with a choice.
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "Keyboard"
+expect settings: Keyboard
+click popup "Input method"
+click menuitem "Pinyin - Simplified"
+pause 0.5
+key meta_l-q
+pause 1
+click textfield "Type here"
+pause 0.5
+type nihao
+ax-expect row "你好"
+screenshot languages-pinyin.png
+key spc
+ax-expect textfield "Type here" = 你好
+# Kana.
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "Keyboard"
+expect settings: Keyboard
+click popup "Input method"
+click menuitem "Japanese - Romaji"
+pause 0.5
+key meta_l-q
+pause 1
+click textfield "Type here"
+pause 0.5
+type yama\r
+ax-expect textfield "Type here" ~ やま
+# Hangul.
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "Keyboard"
+expect settings: Keyboard
+click popup "Input method"
+click menuitem "2-Set Korean"
+pause 0.5
+key meta_l-q
+pause 1
+click textfield "Type here"
+pause 0.5
+type gksrmf\r
+ax-expect textfield "Type here" ~ 한글
+# And none again.
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "Keyboard"
+expect settings: Keyboard
+click popup "Input method"
+click menuitem "None"
+pause 0.5
+key meta_l-q
+pause 1
+# A German keyboard, with a dead key: real key presses, by what the layout says they are.
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "Keyboard"
+expect settings: Keyboard
+click popup "Keyboard layout"
+click menuitem "German"
+pause 0.5
+key meta_l-q
+pause 1
+click textfield "Type here"
+pause 0.5
+key y
+ax-expect textfield "Type here" ~ z
+key equal
+key e
+ax-expect textfield "Type here" ~ é
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "Keyboard"
+expect settings: Keyboard
+click popup "Keyboard layout"
+click menuitem "U.S."
+pause 0.5
+key meta_l-q
+pause 1
+# Emoji & Symbols, from the keyboard, into the field.
+click textfield "Type here"
+pause 0.5
+key ctrl-meta_l-spc
+ax-expect button "grinning face"
+screenshot languages-emoji.png
+click button "grinning face"
+ax-expect textfield "Type here" ~ 😀
+key esc
+ax-gone button "grinning face"
+pause 0.5
+# Held down, a letter with other forms shows them, and a number chooses one. One without just repeats.
+click textfield "Type here"
+pause 0.5
+hold u 1000
+ax-expect row "ü"
+screenshot languages-accents.png
+key 2
+ax-gone row "ü"
+ax-expect textfield "Type here" ~ ü
+hold x 1000
+ax-expect textfield "Type here" ~ xxx
+# Running text: a misspelling corrected, a replacement, a capital, a period for two spaces, and red dots under what's wrong.
+key meta_l-q
+pause 1
+click button "Text Editor"
+expect texteditor: ready
+pause 1
+type teh cat omw hello two  taht wrod iss zzqxv here
+ax-expect textarea "Document" ~ The cat On my way! Hello two. That word iss zzqxv here
+pause 0.5
+screenshot text-editor-spelling.png

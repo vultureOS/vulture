@@ -9,6 +9,7 @@
 #include <LibGfx/Rasterizer.h>
 #include <LibTest/TestCase.h>
 #include <LibText/Font.h>
+#include <LibText/Paragraph.h>
 
 extern "C" {
 struct FILE;
@@ -349,4 +350,132 @@ TEST_CASE(damaged_fonts_do_no_harm)
             damaged[next() % 300] = static_cast<u8>(next());
         exercise(move(damaged));
     }
+}
+
+// ---- Paragraphs.
+
+namespace {
+
+struct ParagraphFixture {
+    NonnullRefPtr<Typeface> regular;
+    NonnullRefPtr<Typeface> bold;
+};
+
+ParagraphFixture paragraph_fixture()
+{
+    return { MUST(Typeface::parse(read_file(StringView(VULTURE_FONT_DIRECTORY), "Inter-Regular.ttf"_sv))), MUST(Typeface::parse(read_file(StringView(VULTURE_FONT_DIRECTORY), "Inter-Bold.ttf"_sv))) };
+}
+
+ParagraphLayout laid_out(ParagraphFixture const& fixture, StringView text, float width)
+{
+    ParagraphStyle const styles[] = { { fixture.regular.ptr(), 13 }, { fixture.bold.ptr(), 26 } };
+    StyleRange const ranges[] = { { 0, text.length(), 0 } };
+    return MUST(ParagraphLayout::create(text, { ranges, 1 }, { styles, 2 }, width));
+}
+
+}
+
+TEST_CASE(paragraph_on_one_line_when_it_fits)
+{
+    auto const fixture = paragraph_fixture();
+    auto const layout = laid_out(fixture, "Hello, world"_sv, 0);
+    EXPECT_EQ(layout.lines().size(), 1u);
+    EXPECT_EQ(layout.lines()[0].start, 0u);
+    EXPECT_EQ(layout.lines()[0].end, 12u);
+    EXPECT(layout.height() > 13);
+}
+
+TEST_CASE(paragraph_breaks_between_words)
+{
+    auto const fixture = paragraph_fixture();
+    auto const text = "the quick brown fox jumps over the lazy dog"_sv;
+    auto const one_line = laid_out(fixture, text, 0);
+    float const whole = one_line.widest_line();
+    auto const layout = laid_out(fixture, text, whole / 2.5f);
+    EXPECT(layout.lines().size() >= 3);
+    size_t expected_start = 0;
+    for (auto const& line : layout.lines()) {
+        EXPECT_EQ(line.start, expected_start);
+        EXPECT(line.width <= whole / 2.5f);
+        // Only ever after a space, or at the very end.
+        if (line.end != text.length())
+            EXPECT_EQ(text[line.end - 1], ' ');
+        expected_start = line.end;
+    }
+    EXPECT_EQ(expected_start, text.length());
+    // Lines one below the other.
+    for (size_t i = 1; i < layout.lines().size(); ++i)
+        EXPECT(layout.lines()[i].baseline > layout.lines()[i - 1].baseline);
+}
+
+TEST_CASE(paragraph_breaks_where_it_has_to)
+{
+    auto const fixture = paragraph_fixture();
+    auto const layout = laid_out(fixture, "one\ntwo"_sv, 0);
+    EXPECT_EQ(layout.lines().size(), 2u);
+    EXPECT_EQ(layout.lines()[0].end, 4u);
+    EXPECT_EQ(layout.lines()[1].start, 4u);
+    // After a break at the very end, there's a line with nothing on it for the caret to go to.
+    EXPECT_EQ(laid_out(fixture, "one\n"_sv, 0).lines().size(), 2u);
+    // And a word that's too long for any line breaks wherever it has to.
+    auto const narrow = laid_out(fixture, "abcdefghijklmnopqrstuvwxyz"_sv, 40);
+    EXPECT(narrow.lines().size() >= 3);
+    EXPECT_EQ(narrow.lines()[narrow.lines().size() - 1].end, 26u);
+}
+
+TEST_CASE(paragraph_with_two_styles)
+{
+    auto const fixture = paragraph_fixture();
+    ParagraphStyle const styles[] = { { fixture.regular.ptr(), 13 }, { fixture.bold.ptr(), 26 } };
+    auto const text = "small BIG"_sv;
+    StyleRange const ranges[] = { { 0, 6, 0 }, { 6, 9, 1 } };
+    auto const layout = MUST(ParagraphLayout::create(text, { ranges, 2 }, { styles, 2 }, 0));
+    EXPECT_EQ(layout.lines().size(), 1u);
+    auto const& line = layout.lines()[0];
+    EXPECT_EQ(line.runs.size(), 2u);
+    EXPECT_EQ(line.runs[0].style, 0u);
+    EXPECT_EQ(line.runs[1].style, 1u);
+    EXPECT_EQ(line.runs[1].x, line.runs[0].width);
+    // As tall as what's tallest on it.
+    EXPECT(line.ascent > 20);
+}
+
+TEST_CASE(paragraph_carets_and_hits)
+{
+    auto const fixture = paragraph_fixture();
+    auto const text = "Hello"_sv;
+    auto const layout = laid_out(fixture, text, 0);
+    float previous = -1;
+    for (size_t i = 0; i <= text.length(); ++i) {
+        float const x = layout.caret_x(i);
+        EXPECT(x > previous);
+        previous = x;
+        // Clicking where a caret goes finds that place again.
+        EXPECT_EQ(layout.offset_at(x + 0.01f, 5), i);
+    }
+    EXPECT_EQ(layout.offset_at(-5, 5), 0u);
+    EXPECT_EQ(layout.offset_at(1000, 5), text.length());
+    // And below the last line is on the last line.
+    EXPECT_EQ(layout.offset_at(-5, 500), 0u);
+}
+
+TEST_CASE(paragraph_right_to_left)
+{
+    auto const fixture = paragraph_fixture();
+    // Hebrew letters, then some Latin: Inter has no Hebrew, but which way it goes doesn't depend on that. (Nothing else is found here, so the first font's own .notdef is used.)
+    auto const text = "\xd7\x90\xd7\x91\xd7\x92 abc"_sv;
+    auto const layout = laid_out(fixture, text, 200);
+    EXPECT(layout.is_right_to_left());
+    auto const& line = layout.lines()[0];
+    // Set to the right of what's there.
+    EXPECT_EQ(line.x, 200 - line.width);
+    // The Latin's drawn first, on the left, although it comes last.
+    EXPECT_EQ(line.runs.size(), 2u);
+    EXPECT(!line.runs[0].is_right_to_left);
+    EXPECT(line.runs[1].is_right_to_left);
+    // The start of the text is its right-hand end.
+    EXPECT(layout.caret_x(0) > layout.caret_x(2));
+    // And the selection of something that changes direction is in two parts.
+    auto const spans = layout.selection_spans(4, 8);
+    EXPECT_EQ(spans.size(), 2u);
 }

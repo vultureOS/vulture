@@ -27,6 +27,7 @@ endpoint WindowServer
     set_cursor(u32 window, i32 shape) =|
     // "Light" or "Dark", for everyone.
     set_appearance(String name) => (i32 error)
+    set_keyboard_layout(String identifier) => (i32 error)
 
     // The window's pixels: shared memory holding two buffers of this size, one
     // after the other, premultiplied BGRA. One is shown; the client draws in

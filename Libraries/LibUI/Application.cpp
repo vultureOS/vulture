@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <LibUI/InputMethod.h>
 #include <AudioEndpoint.h>
 #include <LibIPC/Bootstrap.h>
 #include <LibJSON/JSON.h>
@@ -128,6 +129,7 @@ ErrorOr<NonnullOwnPtr<Application>> Application::create(StringView name, StringV
     application->m_connection = TRY(::Window::Connection::connect(application->m_loop));
     s_application = application.ptr();
     Platform::set(application.ptr());
+    install_input_context();
     TRY(Appearance::use(application->m_connection->appearance()));
     application->m_connection->on_appearance_change = [](StringView appearance) {
         (void)Appearance::use(appearance);
@@ -340,6 +342,9 @@ NonnullOwnPtr<Menu> Application::standard_menus(Function<void()> on_about, bool 
     edit.add_with_shortcut("Copy"_sv, KeyC, shown("C"_sv).view(), [this] { (void)send_command("copy"_sv); });
     edit.add_with_shortcut("Paste"_sv, KeyV, shown("V"_sv).view(), [this] { (void)send_command("paste"_sv); });
     edit.add_with_shortcut("Select All"_sv, KeyA, shown("A"_sv).view(), [this] { (void)send_command("selectAll"_sv); });
+
+    edit.add_separator();
+    edit.add("Emoji & Symbols"_sv, [this] { (void)send_command("emojiAndSymbols"_sv); });
 
     auto& window_menu = menus->add_submenu("Window"_sv);
     window_menu.add_with_shortcut("Minimize"_sv, KeyM, shown("M"_sv).view(), [this] {

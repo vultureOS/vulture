@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <LibGfx/Color.h>
+#include <LibGfx/Geometry.h>
 #include <LibBase/Function.h>
 #include <LibBase/String.h>
 #include <LibBase/Vector.h>
@@ -16,6 +18,41 @@
 // the start of a character.
 
 namespace UI {
+
+class TextStorage;
+struct KeyEvent;
+
+// How part of a text looks, in a text view that's rich.
+struct TextAttributes {
+    bool bold { false };
+    bool italic { false };
+    bool underline { false };
+    bool strikethrough { false };
+    // In points: 0 for the view's own.
+    float size { 0 };
+    bool has_color { false };
+    Gfx::Color color {};
+
+    bool operator==(TextAttributes const&) const = default;
+};
+
+struct AttributeRun {
+    size_t start { 0 };
+    size_t end { 0 };
+    TextAttributes attributes;
+};
+
+// Who gets to look at each key before a text control does: an input method, if there's a system to have one on. (The toolkit's built for tests with no system at all.)
+struct TextInputHooks {
+    bool (*key)(KeyEvent const&, TextStorage&, Gfx::IntPoint caret_on_screen) { nullptr };
+    void (*focus_lost)(TextStorage&) { nullptr };
+    void (*show_emoji)(TextStorage&) { nullptr };
+    // After something's been typed, in a view of running text: for corrections and capitals.
+    void (*typed)(TextStorage&, StringView) { nullptr };
+    // Whether a word's spelled right, if there's a dictionary to ask.
+    bool (*is_spelled_right)(StringView) { nullptr };
+};
+extern TextInputHooks g_text_input_hooks;
 
 class TextStorage {
 public:
@@ -56,6 +93,24 @@ public:
     void delete_backward(size_t to);
     void delete_forward(size_t to);
 
+    // ---- Rich text. Runs cover the whole text, with what's alike joined up. What's typed takes after what's before it, or what's been asked for since the caret was last moved.
+    [[nodiscard]] bool is_rich() const { return m_rich; }
+    void set_rich(bool);
+    [[nodiscard]] Span<AttributeRun const> attribute_runs() const { return m_runs.span(); }
+    [[nodiscard]] TextAttributes attributes_at(size_t offset) const;
+    // For the selection, if there is one, with an undo; if not, for whatever's typed next. `change` is given what's there now.
+    void change_attributes(Function<void(TextAttributes&)> change);
+    // Of the whole selection, or of what would be typed: for a menu to show a check mark.
+    [[nodiscard]] TextAttributes typing_attributes() const;
+
+    // ---- What an input method is still working on: shown in the text, underlined, but not part of it until it's been decided. Nothing can undo it, as it hasn't happened yet.
+    [[nodiscard]] bool has_marked_text() const { return m_marked_length != 0; }
+    [[nodiscard]] size_t marked_start() const { return m_marked_start; }
+    [[nodiscard]] size_t marked_end() const { return m_marked_start + m_marked_length; }
+    void set_marked_text(StringView);
+    // Instead of what was marked, or at the caret if nothing was, and with an undo like typing.
+    void commit_marked_text(StringView);
+
     [[nodiscard]] bool can_undo() const { return !m_undo.is_empty(); }
     [[nodiscard]] bool can_redo() const { return !m_redo.is_empty(); }
     void undo();
@@ -73,12 +128,21 @@ private:
         size_t caret_before;
         size_t anchor_before;
         EditKind kind;
+        Vector<AttributeRun> runs_before {};
+        Vector<AttributeRun> runs_after {};
     };
 
     void apply(size_t position, size_t removed_length, StringView inserted);
+    void join_runs();
+    void split_run_at(size_t);
     void changed();
 
     Vector<char> m_text;
+    bool m_rich { false };
+    Vector<AttributeRun> m_runs;
+    Optional<TextAttributes> m_pending_attributes;
+    size_t m_marked_start { 0 };
+    size_t m_marked_length { 0 };
     size_t m_caret { 0 };
     size_t m_anchor { 0 };
     Vector<Edit> m_undo;

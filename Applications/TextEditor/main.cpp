@@ -83,6 +83,8 @@ public:
         m_scroll = &scroll;
         scroll.set_scrolls_horizontally(!s_wraps);
         auto& text = scroll.make_document<TextView>();
+        text.set_corrects_text(true);
+        text.set_accessibility_label("Document"_sv);
         m_text = &text;
         m_font = tokens().named_font("body"_sv);
         text.set_font(m_font);

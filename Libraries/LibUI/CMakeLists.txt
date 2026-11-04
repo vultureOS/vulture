@@ -19,6 +19,7 @@ set(LibUI_SOURCES
     Panels.cpp
     Platform.cpp
     ScrollView.cpp
+    SpellChecker.cpp
     TableView.cpp
     TextField.cpp
     TextStorage.cpp
@@ -27,7 +28,7 @@ set(LibUI_SOURCES
     Window.cpp)
 
 if(VULTURE_PART STREQUAL "userland")
-    list(APPEND LibUI_SOURCES Application.cpp)
+    list(APPEND LibUI_SOURCES Application.cpp InputContext.cpp InputMethods.cpp)
 endif()
 
 add_library(LibUI STATIC ${LibUI_SOURCES})

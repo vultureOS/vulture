@@ -148,6 +148,15 @@
                 {
                     "feature": "Windows come back when an application or the session does",
                     "milestone": "M26"
+                },
+                {
+                    "feature": "The pointer's tip is where it clicks, in QEMU's window on a Mac",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui"
+                        }
+                    ]
                 }
             ]
         },
@@ -886,7 +895,17 @@
                 },
                 {
                     "feature": "Emoji",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages-emoji.png"
+                        }
+                    ]
                 }
             ]
         },
@@ -917,103 +936,378 @@
                 },
                 {
                     "feature": "Unicode normalization",
-                    "milestone": "M17"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibUnicode"
+                        }
+                    ]
                 },
                 {
                     "feature": "Case folding",
-                    "milestone": "M17"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibUnicode"
+                        }
+                    ]
                 },
                 {
                     "feature": "Word and sentence boundaries",
-                    "milestone": "M17"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibUnicode"
+                        }
+                    ]
                 },
                 {
                     "feature": "Line breaking by Unicode's rules",
-                    "milestone": "M17"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibUnicode"
+                        }
+                    ]
                 },
                 {
                     "feature": "Bidirectional text",
-                    "milestone": "M17"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibUnicode"
+                        }
+                    ]
                 },
                 {
                     "feature": "Dates and numbers for other locales",
-                    "milestone": "M17"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host",
+                            "output": "LibLocale"
+                        },
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: locale: 756 on both: 756 the same, 0 different"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Sorting the way a language does",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host",
+                            "output": "LibLocale"
+                        },
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: locale: 756 on both: 756 the same, 0 different"
+                        }
+                    ]
                 },
                 {
                     "feature": "A real iconv",
-                    "milestone": "M17"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: character sets: ok: UTF-8 to SHIFT_JIS"
+                        },
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: character sets: ok: EUC-KR to UTF-8"
+                        }
+                    ]
                 },
                 {
                     "feature": "Language & Region",
-                    "milestone": "M17"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "monday.chat",
+                                "Language & Region"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Arabic and Hebrew",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: shaping: 135 on both: 135 the same, 0 different"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Indic scripts",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: shaping: 135 on both: 135 the same, 0 different"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Thai",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: shaping: 135 on both: 135 the same, 0 different"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Hangul",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: shaping: 135 on both: 135 the same, 0 different"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Chinese and Japanese",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: shaping: 135 on both: 135 the same, 0 different"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Font fallback",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Variable fonts",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: variations: 189 glyphs at 7 settings: 189 within a unit"
+                        }
+                    ]
                 },
                 {
                     "feature": "Colour glyphs",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages-emoji.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Rich text in text views",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host",
+                            "output": "LibUI"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Other keyboard layouts",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m18-languages.chat",
+                                "click menuitem \"German\""
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Dead keys",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m18-languages.chat",
+                                "key equal"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Press and hold for accents",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m18-languages.chat",
+                                "hold u 1000"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages-accents.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Input methods",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m18-languages.chat",
+                                "click menuitem \"Pinyin - Simplified\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m18-languages.chat",
+                                "click menuitem \"Japanese - Romaji\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m18-languages.chat",
+                                "click menuitem \"2-Set Korean\""
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Emoji & Symbols picker",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m18-languages.chat",
+                                "key ctrl-meta_l-spc"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages-emoji.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Spell check",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-text-editor-spelling.png"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibUI"
+                        }
+                    ]
                 },
                 {
                     "feature": "Autocorrect",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m18-languages.chat",
+                                "ax-expect textarea \"Document\" ~ The cat"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Text replacements",
-                    "milestone": "M18"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m18-languages.chat",
+                                "On my way!"
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Paragraph layout with several styles",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host",
+                            "output": "LibText"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m18-languages-languages.png"
+                        }
+                    ]
                 }
             ]
         },
@@ -1142,12 +1436,15 @@
                 },
                 {
                     "feature": "Keyboard",
-                    "claim": "partial",
+                    "claim": "present",
                     "missing": "one toggle and a list (M18)",
-                    "milestone": "M18",
                     "proof": [
                         {
-                            "suite": "test-ui"
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m18-languages.chat",
+                                "click row \"Keyboard\""
+                            ]
                         }
                     ]
                 },
@@ -1684,10 +1981,6 @@
                     ]
                 },
                 {
-                    "feature": "Unix-domain sockets",
-                    "milestone": "M16"
-                },
-                {
                     "feature": "IPv6",
                     "milestone": "M32"
                 },
@@ -2111,155 +2404,383 @@
                 },
                 {
                     "feature": "dlopen",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "plugins: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "kqueue",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: kqueue: ok: EVFILT_READ on a pipe"
+                        }
+                    ]
                 },
                 {
                     "feature": "select",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: select: ok: select() of something to read"
+                        }
+                    ]
                 },
                 {
                     "feature": "socketpair",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: socket pairs: ok: socketpair(SOCK_STREAM)"
+                        }
+                    ]
                 },
                 {
                     "feature": "shm_open",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: shared memory: ok: shm_open(O_CREAT)"
+                        }
+                    ]
                 },
                 {
                     "feature": "Shared anonymous mmap",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: shared memory: ok: a child's writes show in its parent"
+                        }
+                    ]
                 },
                 {
                     "feature": "madvise",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: shared memory: ok: madvise(MADV_FREE)"
+                        }
+                    ]
                 },
                 {
                     "feature": "setitimer",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: interval timers: ok: SIGALRM, again and again"
+                        }
+                    ]
                 },
                 {
                     "feature": "The *at calls",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: at calls: ok: openat() makes a file in that directory"
+                        }
+                    ]
                 },
                 {
                     "feature": "readv and writev",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: vectored io: ok: writev()"
+                        }
+                    ]
                 },
                 {
                     "feature": "Thousands of open files",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "many-files: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "mount and unmount",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "[ OK ] /usr/tests/volumes"
+                        }
+                    ]
                 },
                 {
                     "feature": "ptrace",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "debugging: stepping goes one instruction at a time"
+                        }
+                    ]
                 },
                 {
                     "feature": "Core dumps",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "debugging: the core says what ended it"
+                        }
+                    ]
                 },
                 {
                     "feature": "The file cache gives memory back",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-compressor",
+                            "output": "pages cached with"
+                        }
+                    ]
                 },
                 {
                     "feature": "QoS boosts and priority inheritance",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "priority: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "wchar.h",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: wide characters: ok: wcslen()"
+                        }
+                    ]
                 },
                 {
                     "feature": "fenv.h",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: floating point: ok: fesetround(FE_UPWARD)"
+                        }
+                    ]
                 },
                 {
                     "feature": "pthread cancellation",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: cancellation: ok: pthread_cancel()"
+                        }
+                    ]
                 },
                 {
                     "feature": "Process-shared locks",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: shared locks: ok: a mutex between processes keeps them out of each other's way"
+                        }
+                    ]
                 },
                 {
                     "feature": "awk",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "tar",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "gzip",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "diff and patch",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "cmp",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "dd",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "file",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "vi",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-login",
+                            "output": "hello from vi"
+                        }
+                    ]
                 },
                 {
                     "feature": "make",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "top",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "killall",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "man",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-login",
+                            "output": "launchctl - talk to the launch daemon"
+                        }
+                    ]
                 },
                 {
                     "feature": "defaults",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "launchctl",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-login",
+                            "output": "Could not find service \"test.sleeper\""
+                        }
+                    ]
                 },
                 {
                     "feature": "plutil",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "ditto",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "sw_vers",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "system_profiler",
-                    "milestone": "M16"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
                 },
                 {
                     "feature": "open and scutil",
@@ -2269,6 +2790,86 @@
                     "proof": [
                         {
                             "suite": "test-userland"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Unix-domain sockets",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: unix sockets: ok: connect()"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Passing open files through a socket",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: passing files: ok: a descriptor arrives in another process, and it's the same open file"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Named pipes",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: fifos: ok: open() that waits for the other end"
+                        }
+                    ]
+                },
+                {
+                    "feature": "System calls restart after a signal",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: restarting: ok: read(), with SA_RESTART: it carries on until there's something"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Numbers printed and read exactly",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: numbers as text: ok: strtod() barely past half way"
+                        }
+                    ]
+                },
+                {
+                    "feature": "iconv",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "posix: character sets: ok: UTF-16 surrogates"
+                        }
+                    ]
+                },
+                {
+                    "feature": "zip and unzip",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
+                        }
+                    ]
+                },
+                {
+                    "feature": "od, mkfifo and networksetup",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle-test: PASS"
                         }
                     ]
                 }

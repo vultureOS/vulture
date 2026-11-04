@@ -80,11 +80,7 @@ pause 1
 type \r
 expect settings: Appearance
 pause 1
-pointer 6656 13845
-pause 0.3
-button left down
-pause 0.2
-button left up
+click row "Privacy & Security"
 expect settings: Privacy & Security
 pause 0.8
 screenshot settings-privacy.png
@@ -150,11 +146,7 @@ pause 1
 type \r
 expect settings: Appearance
 pause 1
-pointer 6656 9257
-pause 0.3
-button left down
-pause 0.2
-button left up
+click row "Network"
 expect settings: Network
 pause 0.8
 screenshot settings-network.png

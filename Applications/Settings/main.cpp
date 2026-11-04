@@ -10,6 +10,7 @@
 #include <PrivacyEndpoint.h>
 #include <Desktop.h>
 #include <LibCore/Account.h>
+#include <LibLocale/Locale.h>
 #include <LibUI/Application.h>
 #include <LibUI/Containers.h>
 #include <LibUI/Layout.h>
@@ -426,9 +427,154 @@ void build_sound(Page& page)
     page.finish();
 }
 
+// Language & Region. Only for how things are written, for now: the system's own words stay in English until M44.
+struct RegionPreview {
+    Label* short_date { nullptr };
+    Label* number { nullptr };
+    Label* full_date { nullptr };
+    Label* short_date_and_time { nullptr };
+    Label* preview_number { nullptr };
+    Label* preview_money { nullptr };
+    PopUpButton* first_day { nullptr };
+};
+
+RegionPreview s_region_preview;
+
+// Always this moment, so that it's the formats that change: a Thursday.
+constexpr i64 region_sample_time = 1768470060; // 2026-01-15 09:41:00 UTC
+
+void show_region_preview(Locale::LocaleData const& locale)
+{
+    auto const& preview = s_region_preview;
+    preview.short_date->set_text(MUST(Locale::format_date(locale, region_sample_time, Locale::Style::Short, Locale::Style::None)).view());
+    preview.number->set_text(MUST(Locale::format_number(locale, 1234567.89)).view());
+    preview.full_date->set_text(MUST(Locale::format_date(locale, region_sample_time, Locale::Style::Full, Locale::Style::Short)).view());
+    preview.short_date_and_time->set_text(MUST(Locale::format_date(locale, region_sample_time, Locale::Style::Short, Locale::Style::Short)).view());
+    preview.preview_number->set_text(MUST(Locale::format_number(locale, 1234.56)).view());
+    preview.preview_money->set_text(MUST(Locale::format_currency(locale, 4567.89)).view());
+}
+
+// What a place is called, in English for now, as the rest of the system is.
+StringView region_name_of(Locale::LocaleData const& locale)
+{
+    auto const& english = Locale::default_locale();
+    for (size_t i = 0; i < Locale::region_name_count; ++i) {
+        if (StringView(Locale::region_codes[i]) == StringView(locale.region))
+            return StringView(english.region_names[i]);
+    }
+    return StringView(locale.region);
+}
+
+void build_language_region(Page& page)
+{
+    Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
+    auto const chosen = preferences.string("region"_sv).value_or("en_US"_sv);
+    auto const* found = Locale::find_locale(chosen);
+    auto const& locale = found ? *found : Locale::default_locale();
+
+    auto& group = page.add_group();
+    auto& region_row = group.rows().add<Row>("Region"_sv);
+    auto& regions = region_row.add<PopUpButton>();
+    regions.set_accessibility_label("Region"_sv);
+    for (size_t i = 0; i < Locale::locale_count; ++i) {
+        regions.add_item(region_name_of(Locale::locales[i]));
+        if (&Locale::locales[i] == &locale)
+            regions.set_selected_index(static_cast<int>(i));
+    }
+    (void)group.rows().add<Row>("Calendar"_sv, "Gregorian"_sv);
+    auto& first_day_row = group.rows().add<Row>("First day of week"_sv);
+    auto& first_day = first_day_row.add<PopUpButton>();
+    for (auto const* day : Locale::default_locale().days_format_wide)
+        first_day.add_item(StringView(day));
+    first_day.set_selected_index(static_cast<int>(preferences.number("firstDayOfWeek"_sv).value_or(locale.first_day_of_week)));
+    first_day.on_change = [](int index) {
+        Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+        saved.set("firstDayOfWeek"_sv, JSON::Value(static_cast<double>(index)));
+        saved.save();
+    };
+    s_region_preview.first_day = &first_day;
+    auto& date_row = group.rows().add<Row>("Date format"_sv);
+    auto& short_date = date_row.add<Label>(""_sv);
+    short_date.set_style(LabelStyle::Secondary);
+    s_region_preview.short_date = &short_date;
+    auto& number_row = group.rows().add<Row>("Number format"_sv);
+    auto& number = number_row.add<Label>(""_sv);
+    number.set_style(LabelStyle::Secondary);
+    s_region_preview.number = &number;
+    (void)group.rows().add<Row>("List sort order"_sv, "Universal"_sv);
+
+    auto& example = page.add_group("Preview"_sv);
+    auto add_line = [&](Label*& into) {
+        auto& line = example.rows().add<Label>(""_sv);
+        into = &line;
+    };
+    add_line(s_region_preview.full_date);
+    add_line(s_region_preview.short_date_and_time);
+    add_line(s_region_preview.preview_number);
+    add_line(s_region_preview.preview_money);
+
+    regions.on_change = [](int index) {
+        auto const& picked = Locale::locales[index];
+        Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+        saved.set("region"_sv, MUST(JSON::Value::string(StringView(picked.identifier))));
+        // What it says for the week goes with the place, as on a Mac, until it's been changed again.
+        saved.set("firstDayOfWeek"_sv, JSON::Value(static_cast<double>(picked.first_day_of_week)));
+        saved.save();
+        s_region_preview.first_day->set_selected_index(picked.first_day_of_week);
+        show_region_preview(picked);
+    };
+    show_region_preview(locale);
+    page.finish();
+}
+
 void build_keyboard(Page& page)
 {
-    auto& group = page.add_group();
+    Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
+
+    auto& sources = page.add_group("Input Sources"_sv);
+    auto& layout_row = sources.rows().add<Row>("Keyboard layout"_sv);
+    auto& layouts = layout_row.add<PopUpButton>();
+    layouts.set_accessibility_label("Keyboard layout"_sv);
+    struct Named {
+        StringView file;
+        StringView title;
+    };
+    static constexpr Named all_layouts[] = {
+        { "US"_sv, "U.S."_sv }, { "British"_sv, "British"_sv }, { "German"_sv, "German"_sv }, { "French"_sv, "French"_sv }, { "Spanish"_sv, "Spanish"_sv }, { "Italian"_sv, "Italian"_sv },
+        { "Dutch"_sv, "Dutch"_sv }, { "Swedish-Pro"_sv, "Swedish"_sv }, { "Polish"_sv, "Polish"_sv }, { "Turkish"_sv, "Turkish"_sv }, { "Brazilian"_sv, "Brazilian"_sv }, { "Russian"_sv, "Russian"_sv },
+        { "Greek"_sv, "Greek"_sv }, { "Arabic"_sv, "Arabic"_sv }, { "Hebrew"_sv, "Hebrew"_sv }, { "Devanagari"_sv, "Hindi"_sv },
+    };
+    auto const chosen_layout = preferences.string("keyboardLayout"_sv).value_or("US"_sv);
+    for (size_t i = 0; i < array_size(all_layouts); ++i) {
+        layouts.add_item(all_layouts[i].title);
+        if (all_layouts[i].file == chosen_layout)
+            layouts.set_selected_index(static_cast<int>(i));
+    }
+    layouts.on_change = [](int index) {
+        auto const file = all_layouts[index].file;
+        (void)Application::the().connection().server().set_keyboard_layout(file);
+        Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+        saved.set("keyboardLayout"_sv, MUST(JSON::Value::string(file)));
+        saved.save();
+    };
+
+    auto& method_row = sources.rows().add<Row>("Input method"_sv);
+    auto& methods = method_row.add<PopUpButton>();
+    methods.set_accessibility_label("Input method"_sv);
+    static constexpr Named all_methods[] = { { ""_sv, "None"_sv }, { "Pinyin"_sv, "Pinyin - Simplified"_sv }, { "Kana"_sv, "Japanese - Romaji"_sv }, { "Hangul"_sv, "2-Set Korean"_sv } };
+    auto const chosen_method = preferences.string("inputMethod"_sv).value_or(""_sv);
+    for (size_t i = 0; i < array_size(all_methods); ++i) {
+        methods.add_item(all_methods[i].title);
+        if (all_methods[i].file == chosen_method)
+            methods.set_selected_index(static_cast<int>(i));
+    }
+    methods.on_change = [](int index) {
+        Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+        saved.set("inputMethod"_sv, MUST(JSON::Value::string(all_methods[index].file)));
+        saved.save();
+    };
+
+    auto& group = page.add_group("Keyboard"_sv);
     auto& row = group.rows().add<Row>("Keyboard navigation"_sv);
     auto& toggle = row.add<Switch>(Control::full_keyboard_access());
     toggle.on_action = [&toggle] { Control::set_full_keyboard_access(toggle.is_on()); };
@@ -436,6 +582,31 @@ void build_keyboard(Page& page)
     (void)group.rows().add<Row>("Search"_sv, "\xE2\x8C\x98Space"_sv);
     (void)group.rows().add<Row>("Overview"_sv, "\xE2\x8C\x83\xE2\x86\x91"_sv);
     (void)group.rows().add<Row>("Switch applications"_sv, "\xE2\x8C\x98Tab"_sv);
+    (void)group.rows().add<Row>("Emoji & Symbols"_sv, "\xE2\x8C\x83\xE2\x8C\x98Space"_sv);
+
+    auto& text_input = page.add_group("Text Input"_sv);
+    struct Option {
+        StringView title;
+        StringView key;
+        bool on_by_default;
+    };
+    static constexpr Option options[] = {
+        { "Correct spelling automatically"_sv, "correctSpelling"_sv, true },
+        { "Capitalize words automatically"_sv, "capitalizeWords"_sv, true },
+        { "Add period with double-space"_sv, "periodWithDoubleSpace"_sv, true },
+        { "Use text replacements"_sv, "useTextReplacements"_sv, true },
+    };
+    for (auto const& option : options) {
+        auto& option_row = text_input.rows().add<Row>(option.title);
+        auto& option_switch = option_row.add<Switch>(preferences.boolean(option.key).value_or(option.on_by_default));
+        option_switch.set_accessibility_label(option.title);
+        auto const key = option.key;
+        option_switch.on_action = [&option_switch, key] {
+            Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+            saved.set(key, JSON::Value(option_switch.is_on()));
+            saved.save();
+        };
+    }
     page.finish();
 }
 
@@ -519,6 +690,7 @@ public:
         add_pane("Network"_sv, Symbol::Globe, build_network);
         add_pane("Sound"_sv, Symbol::Speaker, build_sound);
         add_pane("Keyboard"_sv, Symbol::Plus, build_keyboard);
+        add_pane("Language & Region"_sv, Symbol::Globe, build_language_region);
         add_pane("Notifications"_sv, Symbol::Question, build_notifications);
         add_pane("Privacy & Security"_sv, Symbol::Lock, build_privacy);
         add_pane("Users"_sv, Symbol::Checkmark, build_users);

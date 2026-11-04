@@ -170,6 +170,12 @@ void TextField::draw(Graphics& graphics)
             graphics.fill({ left + x0 - m_scroll, top, x1 - x0, line }, t.color(key ? "selectedText"_sv : "selectedTextInactive"_sv));
         }
         graphics.draw_text(shown, font, { left - m_scroll, baseline_y }, t.color(is_enabled() ? text_color_token() : "tertiaryLabel"_sv));
+        if (m_storage.has_marked_text()) {
+            // What's still being decided: underlined.
+            float const x0 = x_of_offset(m_storage.marked_start());
+            float const x1 = x_of_offset(m_storage.marked_end());
+            graphics.fill({ left + min(x0, x1) - m_scroll, baseline_y + 2, x1 > x0 ? x1 - x0 : x0 - x1, 1 }, t.color("label"_sv));
+        }
     }
     if (focused && m_caret_shown && !m_storage.has_selection()) {
         float caret_x = graphics.snap(left + x_of_offset(m_storage.caret()) - m_scroll);
@@ -185,7 +191,7 @@ float TextField::x_of_offset(size_t offset) const
 {
     auto font = tokens().control_font(control_size());
     if (!m_secure)
-        return Appearance::text_width(font, m_storage.text().substring_view(0, offset));
+        return Appearance::x_of_offset(font, m_storage.text(), offset);
     // As many dots as characters before it.
     size_t characters = 0;
     auto text = m_storage.text();
@@ -198,7 +204,9 @@ float TextField::x_of_offset(size_t offset) const
 
 size_t TextField::offset_at_x(float x) const
 {
-    // The boundary nearest it; every prefix is shaped, so kerning counts.
+    if (!m_secure)
+        return Appearance::offset_at_x(tokens().control_font(control_size()), m_storage.text(), x);
+    // The boundary nearest it.
     size_t best = 0;
     float best_distance = x < 0 ? -x : x;
     size_t at = 0;
@@ -265,6 +273,8 @@ void TextField::did_become_first_responder()
 
 void TextField::did_resign_first_responder()
 {
+    if (g_text_input_hooks.focus_lost)
+        g_text_input_hooks.focus_lost(m_storage);
     stop_blink();
     m_caret_shown = false;
     m_storage.end_undo_group();
@@ -340,6 +350,15 @@ bool TextField::key_down(KeyEvent const& event)
 {
     if (!m_editable || !is_enabled())
         return false;
+    if (g_text_input_hooks.key && !m_secure && window()) {
+        auto const on_window = to_window({ text_left() + x_of_offset(m_storage.caret()) - m_scroll, height() });
+        auto const origin = window()->frame().origin();
+        if (g_text_input_hooks.key(event, m_storage, { origin.x + static_cast<int>(on_window.x), origin.y + static_cast<int>(on_window.y) + 2 })) {
+            scroll_caret_into_view();
+            restart_blink();
+            return true;
+        }
+    }
     bool shift = event.has_shift();
     auto& storage = m_storage;
     auto after_move = [&] {
@@ -430,6 +449,8 @@ bool TextField::key_down(KeyEvent const& event)
 
 bool TextField::can_perform_command(StringView command) const
 {
+    if (command == "emojiAndSymbols"_sv)
+        return m_editable && !m_secure && g_text_input_hooks.show_emoji;
     if (command == "selectAll"_sv)
         return m_storage.length() > 0;
     if (command == "copy"_sv || command == "cut"_sv)
@@ -445,6 +466,11 @@ bool TextField::can_perform_command(StringView command) const
 
 bool TextField::perform_command(StringView command)
 {
+    if (command == "emojiAndSymbols"_sv) {
+        if (m_editable && !m_secure && g_text_input_hooks.show_emoji)
+            g_text_input_hooks.show_emoji(m_storage);
+        return true;
+    }
     if (command == "selectAll"_sv) {
         select_all();
         return true;

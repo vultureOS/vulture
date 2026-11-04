@@ -17,7 +17,26 @@ posix: time          15 of  15
 posix: memory        15 of  15
 posix: environment   16 of  16
 posix: library       30 of  30
-posix: 208 of 208 requirements met: PASS
+posix: at calls      44 of  44
+posix: descriptors   29 of  29
+posix: vectored io   18 of  18
+posix: unix sockets  65 of  65
+posix: socket pairs  24 of  24
+posix: passing files  18 of  18
+posix: kqueue        54 of  54
+posix: select        13 of  13
+posix: fifos         22 of  22
+posix: shared memory  26 of  26
+posix: interval timers  23 of  23
+posix: restarting    22 of  22
+posix: cancellation  28 of  28
+posix: shared locks  25 of  25
+posix: numbers as text  99 of  99
+posix: dynamic loading  17 of  17
+posix: wide characters  47 of  47
+posix: floating point  21 of  21
+posix: character sets  12 of  12
+posix: 871 of 871 requirements met: PASS
 ```
 
 The rest of `test-userland` checks the same interfaces from other sides:
@@ -38,9 +57,18 @@ credentials and permissions (`permissions`), threads (`threads`), BSD sockets
 | Pipes | `pipe`, `pipe2`, `poll`, end of file, `EAGAIN`, `EPIPE`, `ESPIPE` |
 | Terminals | `posix_openpt`, `grantpt`, `unlockpt`, `ptsname`, `isatty`, `ttyname`, `tcgetattr`, `tcsetattr`, `tcflush`, `tcdrain`, `tcsendbreak`, `cfgetispeed`/`cfgetospeed`, canonical and non-canonical input, `tcgetpgrp`/`tcsetpgrp` and job control |
 | Time | `time`, `clock_gettime`, `clock_getres` (`CLOCK_REALTIME`, `CLOCK_MONOTONIC`), `nanosleep`, `gmtime`, `localtime`, `mktime`, `timegm`, `strftime`, `strptime`, `difftime` |
-| Memory | `mmap` (anonymous; private and shared file mappings), `munmap`, `mprotect`, `msync`, `madvise`, `posix_madvise`, `sysconf(_SC_PAGESIZE)` |
+| Memory | `mmap` (anonymous and file mappings, private and shared), `munmap`, `mprotect`, `msync`, `madvise`, `posix_madvise`, `shm_open`, `shm_unlink`, `sysconf(_SC_PAGESIZE)` |
 | Environment | `getenv`, `setenv`, `unsetenv`, `environ`, `getuid` and friends, `getpwnam`, `getpwuid`, `getgrnam`, `getgrgid`, `uname`, `gethostname`, `sysconf` |
 | C library | `printf` family, `scanf` family, `strto*`, `atoi`, `qsort`, `bsearch`, the string functions, `strtok_r`, `strerror`, `strsignal`, `stdio` streams, `tmpfile`, `atexit`, `getopt`, `regcomp`/`regexec`, `fnmatch`, `glob` |
+| Relative paths | `openat`, `fstatat`, `mkdirat`, `unlinkat`, `renameat`, `readlinkat`, `symlinkat`, `linkat`, `faccessat`, `fchmodat`, `fchownat`, `utimensat`, `fchdir`, `fcntl(F_GETPATH)` |
+| Descriptors | `getrlimit`, `setrlimit` and `RLIMIT_NOFILE` as they're enforced, `sysconf(_SC_OPEN_MAX)`, `getdtablesize`, `F_DUPFD`, `F_DUPFD_CLOEXEC`; `readv`, `writev` |
+| Sockets between processes | `AF_UNIX` streams and datagrams, `bind`, `listen`, `accept`, `connect`, `socketpair`, `sendmsg`, `recvmsg`, `SCM_RIGHTS`, `LOCAL_PEERCRED`, `getpeereid`, `SO_NOSIGPIPE`; `mkfifo` and what opening one waits for |
+| Waiting | `kqueue`, `kevent` (`EVFILT_READ`, `WRITE`, `VNODE`, `PROC`, `SIGNAL`, `TIMER`, `USER`), `select`, `pselect`, and system calls restarting after a signal, or not, as `SA_RESTART` says |
+| Timers | `setitimer`, `getitimer` (`ITIMER_REAL`, `ITIMER_VIRTUAL`, `ITIMER_PROF`) |
+| Threads | Cancellation (`pthread_cancel`, `pthread_setcancelstate`, `pthread_setcanceltype`, `pthread_testcancel`, and the cancellation points); `PTHREAD_PROCESS_SHARED` mutexes and conditions; `sem_open`, `sem_close`, `sem_unlink` |
+| Numbers | `printf` of `%f %e %g %a` and `strtod` exactly: what's printed is the true value correctly rounded, and what's read is the nearest number there is |
+| Text | `wchar.h` and `wctype.h`, `iconv`, `fenv.h` |
+| Programs | `dlopen`, `dlsym`, `dlclose`, `dlerror`, `dladdr`, including thread-local data, unloading, and failing cleanly |
 
 ## Threads
 
@@ -56,29 +84,20 @@ credentials and permissions (`permissions`), threads (`threads`), BSD sockets
 
 ## Not yet
 
-These POSIX interfaces are not there yet, and arrive with the milestones
-that need them (most of them with M16: see [Roadmap](Roadmap.md)):
+These POSIX interfaces are not there yet, and nothing here needs them so far:
 
-- Thread cancellation (`pthread_cancel`, `pthread_setcancelstate`,
-  `pthread_testcancel`), and synchronization across processes
-  (`PTHREAD_PROCESS_SHARED`, named semaphores): futexes are private to a process.
-- Unix domain sockets (M16). Sockets over a network and `getaddrinfo` have been here since M12.
-- The `*at` family (`openat`, `fstatat`, `unlinkat`, ...) and `fchdir`.
-- Interval timers (`setitimer`, `getitimer`, `timer_create`), `waitid`,
-  `sigqueue` and real-time signals.
-- Message queues, semaphores and shared memory objects (`mq_*`, `sem_*`,
-  `shm_open`), asynchronous I/O (`aio_*`).
-- `dlopen` and `dlsym` (dyld loads only what programs are linked with).
-- Locales beyond "C"/"POSIX", wide characters and `iconv`.
+- `timer_create`, `waitid`, `sigqueue` and real-time signals.
+- Message queues (`mq_*`) and asynchronous I/O (`aio_*`).
+- `pthread_setschedparam` and the rest of POSIX's scheduling. What a thread's work is for is said a Mac's way, with `pthread_set_qos_class_self_np`.
 
-Resource limits are reported and may be lowered, but are not enforced
-beyond the kernel's own (64 open files per process, an 8 MiB stack).
+Of the resource limits, `RLIMIT_NOFILE` and `RLIMIT_CORE` do what they say. The others are kept, and reported, but nothing enforces them yet.
+
+## Locales
+
+`setlocale` knows the locales in `/usr/share/locale`, and `strftime`, `localeconv` and `nl_langinfo` go by them. Text is UTF-8 whichever it is, and `strcoll` goes by bytes, as a Mac's does for UTF-8; for anything better, there's LibLocale. `iconv` has Unicode's own forms, ASCII, the ISO-8859 sets, the Windows and Mac code pages, KOI8, Shift_JIS, EUC-JP, EUC-KR, GBK, GB18030 and Big5, from the Encoding Standard's tables.
 
 ## Compared with a real Mac
 
-The same 208 checks also run on the Mac this is built on, compiled for it from the same source, and every difference has to be
-explained: `ninja test-oracle` fails otherwise, and also if an explanation no longer applies. See
-`Tests/Parity/posix-differences.json`. On macOS 26.4 a Mac meets 201 of them. Of the 7 it doesn't, 3 are the checks assuming
-this system (they run as root, look up its account and expect its name), 2 are where macOS itself differs from POSIX (`SIGBUS`
-rather than `SIGSEGV`, `ENODEV` rather than `ENOTTY`), 1 is a choice (4 KiB pages everywhere, where Apple silicon has 16 KiB),
-and 1 is something to change here: `/tmp` should be a symbolic link to `/private/tmp`, as it comes with M19's volumes.
+The same checks also run on the Mac this is built on, compiled for it from the same source, and every difference has to be explained: `ninja test-oracle` fails otherwise, and also if an explanation no longer applies. See `Tests/Parity/posix-differences.json`. On macOS 26.4, of the 865 checks that run on both, this system meets all of them and a Mac meets 856. Of the 9 it doesn't, 2 are checks assuming this system (they run as root, and look up its account), 4 are where macOS itself differs from POSIX (`SIGBUS` rather than `SIGSEGV`, `ENODEV` rather than `ENOTTY`, `fcntl` with no such command, and a thread that goes on running through `PTHREAD_CANCEL_ASYNCHRONOUS`), 2 are choices (the system's name, and 4 KiB pages everywhere, where Apple silicon has 16 KiB), and 1 is something to change here: `/tmp` should be a symbolic link to `/private/tmp`, as it comes with M19's volumes.
+
+What commands say gets the same treatment: `Tests/Userland/commands.cpp` runs 90 of them, on the same files, on both, and of those 83 say exactly the same. The other 7 are in `Tests/Parity/command-differences.json`, each with why.

@@ -1,0 +1,128 @@
+name French
+key 2 0026 0031 f8ff dead:00b4 0026
+key 3 00e9 0032 00eb 201e 00c9
+key 4 0022 0033 201c 201d 0022
+key 5 0027 0034 2018 2019 0027
+key 6 0028 0035 007b 005b 0028
+key 7 00a7 0036 00b6 00e5 00a7
+key 8 00e8 0037 00ab 00bb 00c8
+key 9 0021 0038 00a1 00db 0021
+key 10 00e7 0039 00c7 00c1 00c7
+key 11 00e0 0030 00f8 00d8 00c0
+key 12 0029 00b0 007d 005d 0029
+key 13 002d 005f 2014 2013 002d
+key 16 0061 0041 00e6 00c6 0041
+key 17 007a 005a 00c2 00c5 005a
+key 18 0065 0045 00ea 00ca 0045
+key 19 0072 0052 00ae 201a 0052
+key 20 0074 0054 2020 2122 0054
+key 21 0079 0059 00da 0178 0059
+key 22 0075 0055 00ba 00aa 0055
+key 23 0069 0049 00ee 00ef 0049
+key 24 006f 004f 0153 0152 004f
+key 25 0070 0050 03c0 220f 0050
+key 26 dead:005e dead:00a8 00f4 00d4 dead:005e
+key 27 0024 002a 20ac 00a5 0024
+key 30 0071 0051 2021 03a9 0051
+key 31 0073 0053 00d2 2211 0053
+key 32 0064 0044 2202 2206 0044
+key 33 0066 0046 0192 00b7 0046
+key 34 0067 0047 fb01 fb02 0047
+key 35 0068 0048 00cc 00ce 0048
+key 36 006a 004a 00cf 00cd 004a
+key 37 006b 004b 00c8 00cb 004b
+key 38 006c 004c 00ac 007c 004c
+key 39 006d 004d 00b5 00d3 004d
+key 40 00f9 0025 00d9 2030 00d9
+key 41 003c 003e 2264 2265 003c
+key 43 dead:0060 00a3 0040 0023 dead:0060
+key 44 0077 0057 2039 203a 0057
+key 45 0078 0058 2248 2044 0058
+key 46 0063 0043 00a9 00a2 0043
+key 47 0076 0056 25ca 221a 0056
+key 48 0062 0042 00df 222b 0042
+key 49 006e 004e dead:007e 0131 004e
+key 50 002c 003f 221e 00bf 002c
+key 51 003b 002e 2026 2022 003b
+key 52 003a 002f 00f7 005c 003a
+key 53 003d 002b 2260 00b1 003d
+key 57 0020 0020 00a0 00a0 0020
+key 86 0040 0023 2022 0178 0040
+compose plain 26 16 0 00e2
+compose plain 26 16 1 00c2
+compose plain 26 18 0 00ea
+compose plain 26 18 1 00ca
+compose plain 26 22 0 00fb
+compose plain 26 22 1 00db
+compose plain 26 23 0 00ee
+compose plain 26 23 1 00ce
+compose plain 26 24 0 00f4
+compose plain 26 24 1 00d4
+compose plain 43 16 0 00e0
+compose plain 43 16 1 00c0
+compose plain 43 18 0 00e8
+compose plain 43 18 1 00c8
+compose plain 43 22 0 00f9
+compose plain 43 22 1 00d9
+compose plain 43 23 0 00ec
+compose plain 43 23 1 00cc
+compose plain 43 24 0 00f2
+compose plain 43 24 1 00d2
+compose shift 26 16 0 00e4
+compose shift 26 16 1 00c4
+compose shift 26 18 0 00eb
+compose shift 26 18 1 00cb
+compose shift 26 21 0 00ff
+compose shift 26 21 1 0178
+compose shift 26 22 0 00fc
+compose shift 26 22 1 00dc
+compose shift 26 23 0 00ef
+compose shift 26 23 1 00cf
+compose shift 26 24 0 00f6
+compose shift 26 24 1 00d6
+compose shift 26 26 0 00a8
+compose shift 26 26 1 00a8
+compose shift 26 43 0 00a8
+compose shift 26 57 0 00a8
+compose shift 26 57 1 00a8
+compose option 49 16 0 00e3
+compose option 49 16 1 00c3
+compose option 49 24 0 00f5
+compose option 49 24 1 00d5
+compose option 49 49 0 00f1
+compose option 49 49 1 00d1
+compose shift-option 2 16 0 00e1
+compose shift-option 2 16 1 00c1
+compose shift-option 2 18 0 00e9
+compose shift-option 2 18 1 00c9
+compose shift-option 2 22 0 00fa
+compose shift-option 2 22 1 00da
+compose shift-option 2 23 0 00ed
+compose shift-option 2 23 1 00cd
+compose shift-option 2 24 0 00f3
+compose shift-option 2 24 1 00d3
+compose shift-option 2 26 0 00b4
+compose shift-option 2 26 1 00b4
+compose shift-option 2 43 0 00b4
+compose shift-option 2 57 0 00b4
+compose shift-option 2 57 1 00b4
+compose caps 26 16 0 00e2
+compose caps 26 16 1 00c2
+compose caps 26 18 0 00ea
+compose caps 26 18 1 00ca
+compose caps 26 22 0 00fb
+compose caps 26 22 1 00db
+compose caps 26 23 0 00ee
+compose caps 26 23 1 00ce
+compose caps 26 24 0 00f4
+compose caps 26 24 1 00d4
+compose caps 43 16 0 00e0
+compose caps 43 16 1 00c0
+compose caps 43 18 0 00e8
+compose caps 43 18 1 00c8
+compose caps 43 22 0 00f9
+compose caps 43 22 1 00d9
+compose caps 43 23 0 00ec
+compose caps 43 23 1 00cc
+compose caps 43 24 0 00f2
+compose caps 43 24 1 00d2

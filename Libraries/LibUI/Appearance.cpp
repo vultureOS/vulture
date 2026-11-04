@@ -358,8 +358,19 @@ Text::Font& Appearance::font(FontSpec spec, float scale)
         s_atlas = new Text::GlyphAtlas;
     auto& face = face_for(spec);
     auto* font = new Text::Font(*face, spec.size, scale, *s_atlas);
+    font->set_oblique(spec.oblique);
     s_fonts.append(CachedFont { spec, scale, font });
     return *font;
+}
+
+float Appearance::x_of_offset(FontSpec spec, StringView text, size_t offset)
+{
+    return font(spec, 2).x_of_offset(text, offset) / 2;
+}
+
+size_t Appearance::offset_at_x(FontSpec spec, StringView text, float x)
+{
+    return font(spec, 2).offset_at_x(text, x * 2);
 }
 
 float Appearance::text_width(FontSpec spec, StringView text)

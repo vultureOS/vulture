@@ -84,8 +84,162 @@ void TextView::set_text_inset(float inset)
     relayout_lines();
 }
 
+void TextView::set_rich(bool rich)
+{
+    m_storage.set_rich(rich);
+    relayout_lines();
+    set_needs_display();
+}
+
+FontSpec TextView::spec_for(TextAttributes const& attributes) const
+{
+    FontSpec spec = m_font;
+    if (attributes.bold)
+        spec.weight = FontWeight::Bold;
+    if (attributes.size > 0)
+        spec.size = attributes.size;
+    spec.oblique = attributes.italic;
+    return spec;
+}
+
+void TextView::relayout_rich()
+{
+    m_rich_paragraphs.clear();
+    m_lines.clear();
+    m_rich_height = 0;
+    m_rich_widest = 0;
+    auto const text = m_storage.text();
+    float const available = m_wraps ? width() - m_inset * 2 : 0;
+    m_laid_out_width = width();
+    size_t start = 0;
+    float top = 0;
+    while (true) {
+        size_t end = start;
+        while (end < text.length() && text[end] != '\n')
+            ++end;
+
+        // Its styles: one for each different look it has.
+        Vector<Text::StyleRange> ranges;
+        Vector<Text::ParagraphStyle> styles;
+        Vector<FontSpec> specs;
+        Vector<TextAttributes> attributes;
+        auto const style_for = [&](TextAttributes const& wanted) -> u32 {
+            for (size_t i = 0; i < attributes.size(); ++i) {
+                if (attributes[i] == wanted)
+                    return static_cast<u32>(i);
+            }
+            auto const spec = spec_for(wanted);
+            attributes.append(wanted);
+            specs.append(spec);
+            styles.append({ &Appearance::font(spec, 2).typeface(), spec.size });
+            return static_cast<u32>(attributes.size() - 1);
+        };
+        for (auto const& run : m_storage.attribute_runs()) {
+            size_t const from = max(run.start, start);
+            size_t const to = min(run.end, end);
+            if (from < to)
+                ranges.append({ from - start, to - start, style_for(run.attributes) });
+        }
+        if (styles.is_empty())
+            (void)style_for(m_storage.attributes_at(start));
+
+        auto layout = MUST(Text::ParagraphLayout::create(text.substring_view(start, end - start), ranges.span(), styles.span(), available));
+        for (auto const& line : layout.lines()) {
+            // (What's on a line, in the whole text's terms, with no room taken for the paragraph's end.)
+            m_lines.append(Line { start + line.start, start + line.end });
+        }
+        float const height = layout.height();
+        m_rich_widest = max(m_rich_widest, layout.widest_line());
+        m_rich_paragraphs.append(RichParagraph { start, end, top, move(layout), move(specs), move(attributes) });
+        top += height;
+        if (end >= text.length())
+            break;
+        start = end + 1;
+    }
+    m_rich_height = top;
+}
+
+float TextView::line_height_at(size_t index) const
+{
+    if (!is_rich())
+        return Appearance::line_height(m_font);
+    size_t seen = 0;
+    for (auto const& paragraph : m_rich_paragraphs) {
+        auto const lines = paragraph.layout.lines();
+        if (index < seen + lines.size())
+            return lines[index - seen].height();
+        seen += lines.size();
+    }
+    return Appearance::line_height(m_font);
+}
+
+void TextView::draw_rich(Graphics& graphics, float visible_top, float visible_bottom)
+{
+    auto const& t = tokens();
+    bool const focused = is_first_responder();
+    bool const key = window() && window()->is_key() && focused;
+    size_t const selection_start = m_storage.selection_start();
+    size_t const selection_end = m_storage.selection_end();
+    float const scale = graphics.scale();
+    for (auto const& paragraph : m_rich_paragraphs) {
+        float const paragraph_top = m_inset + paragraph.top;
+        if (paragraph_top > visible_bottom || paragraph_top + paragraph.layout.height() < visible_top)
+            continue;
+        // The selection goes behind.
+        if (m_storage.has_selection() && selection_start <= paragraph.end && selection_end >= paragraph.start) {
+            size_t const from = selection_start > paragraph.start ? selection_start - paragraph.start : 0;
+            size_t const to = min(selection_end, paragraph.end + 1) - paragraph.start;
+            for (auto const& span : paragraph.layout.selection_spans(from, to)) {
+                auto const& line = paragraph.layout.lines()[span.line];
+                graphics.fill({ m_inset + span.left, paragraph_top + line.top(), span.right - span.left, line.height() }, t.color(key ? "selectedText"_sv : "selectedTextInactive"_sv));
+            }
+        }
+        for (auto const& line : paragraph.layout.lines()) {
+            for (auto const& run : line.runs) {
+                auto const& spec = paragraph.specs[run.style];
+                auto const& attributes = paragraph.attributes[run.style];
+                auto const color = attributes.has_color ? attributes.color : t.color("label"_sv);
+                Text::ShapedRun device;
+                device.is_complex = true;
+                device.width = run.width * scale;
+                for (auto const& glyph : run.glyphs) {
+                    auto placed = glyph;
+                    placed.x *= scale;
+                    placed.y *= scale;
+                    placed.advance *= scale;
+                    if (placed.typeface == &Appearance::font(spec, scale).typeface())
+                        placed.typeface = nullptr;
+                    device.glyphs.append(placed);
+                }
+                FloatPoint const origin { m_inset + line.x + run.x, paragraph_top + line.baseline };
+                auto const mapped = graphics.painter().transform().map(origin);
+                Appearance::font(spec, scale).draw(graphics.painter(), mapped, device, color);
+                if (attributes.underline)
+                    graphics.fill({ origin.x, origin.y + 2, run.width, 1 }, color);
+                if (attributes.strikethrough)
+                    graphics.fill({ origin.x, origin.y - Appearance::cap_height(spec) / 3, run.width, 1 }, color);
+            }
+        }
+    }
+    if (m_storage.has_marked_text()) {
+        auto const from = caret_rect(m_storage.marked_start());
+        auto const to = caret_rect(m_storage.marked_end());
+        graphics.fill({ min(from.x, to.x), from.y + from.height - 2, from.x < to.x ? to.x - from.x : from.x - to.x, 1 }, t.color("label"_sv));
+    }
+    draw_spelling(graphics);
+    if (focused && m_editable && m_caret_shown && !m_storage.has_selection()) {
+        auto rect = caret_rect(m_storage.caret());
+        rect.x = graphics.snap(rect.x);
+        graphics.fill(rect, t.color("text"_sv));
+    }
+}
+
 void TextView::relayout_lines()
 {
+    if (is_rich()) {
+        relayout_rich();
+        return;
+    }
     m_lines.clear();
     auto text = m_storage.text();
     float available = width() - m_inset * 2;
@@ -138,6 +292,8 @@ void TextView::relayout_lines()
 
 FloatSize TextView::intrinsic_size() const
 {
+    if (is_rich())
+        return { m_wraps ? -1 : m_rich_widest + m_inset * 2 + 2, m_rich_height + m_inset * 2 };
     float line = Appearance::line_height(m_font);
     float inset = m_inset;
     float height_needed = static_cast<float>(m_lines.size()) * line + inset * 2;
@@ -174,30 +330,32 @@ size_t TextView::line_of(size_t offset) const
 
 float TextView::x_in_line(Line const& line, size_t offset) const
 {
-    return Appearance::text_width(m_font, m_storage.text().substring_view(line.start, min(offset, line.end) - line.start));
+    if (is_rich())
+        return caret_rect(min(offset, line.end)).x - m_inset;
+    auto const text = m_storage.text().substring_view(line.start, line.end - line.start);
+    return Appearance::x_of_offset(m_font, text, min(offset, line.end) - line.start);
 }
 
 size_t TextView::offset_in_line(Line const& line, float x) const
 {
-    size_t best = line.start;
-    float best_distance = x < 0 ? -x : x;
-    size_t at = line.start;
-    while (at < line.end) {
-        at = m_storage.next_character(at);
-        float here = x_in_line(line, at);
-        float distance = here > x ? here - x : x - here;
-        if (distance < best_distance) {
-            best = at;
-            best_distance = distance;
-        } else if (here > x) {
-            break;
-        }
-    }
-    return best;
+    if (is_rich())
+        return offset_at({ x + m_inset, caret_rect(line.start).y + 1 });
+    auto const text = m_storage.text().substring_view(line.start, line.end - line.start);
+    return line.start + Appearance::offset_at_x(m_font, text, x);
 }
 
 FloatRect TextView::caret_rect(size_t offset) const
 {
+    if (is_rich()) {
+        for (auto const& paragraph : m_rich_paragraphs) {
+            if (offset > paragraph.end)
+                continue;
+            size_t const within = offset - paragraph.start;
+            auto const& line = paragraph.layout.lines()[paragraph.layout.line_of(within)];
+            return { m_inset + paragraph.layout.caret_x(within), m_inset + paragraph.top + line.top(), tokens().metric("field.caretWidth"_sv), line.height() };
+        }
+        return { m_inset, m_inset, tokens().metric("field.caretWidth"_sv), Appearance::line_height(m_font) };
+    }
     float line_height = Appearance::line_height(m_font);
     size_t index = line_of(offset);
     float x = m_inset + x_in_line(m_lines[index], offset);
@@ -207,6 +365,14 @@ FloatRect TextView::caret_rect(size_t offset) const
 
 size_t TextView::offset_at(FloatPoint point) const
 {
+    if (is_rich()) {
+        for (size_t i = 0; i < m_rich_paragraphs.size(); ++i) {
+            auto const& paragraph = m_rich_paragraphs[i];
+            if (i + 1 == m_rich_paragraphs.size() || point.y - m_inset < paragraph.top + paragraph.layout.height())
+                return paragraph.start + paragraph.layout.offset_at(point.x - m_inset, point.y - m_inset - paragraph.top);
+        }
+        return 0;
+    }
     float line_height = Appearance::line_height(m_font);
     int index = static_cast<int>((point.y - m_inset) / line_height);
     index = clamp(index, 0, static_cast<int>(m_lines.size()) - 1);
@@ -222,6 +388,10 @@ void TextView::draw(Graphics& graphics)
     float visible_top = (clip.y - origin.y) / scale;
     float visible_bottom = (clip.bottom() - origin.y) / scale;
     graphics.fill({ 0, max(visible_top, 0.0f), width(), visible_bottom - max(visible_top, 0.0f) }, t.color("textBackground"_sv));
+    if (is_rich()) {
+        draw_rich(graphics, visible_top, visible_bottom);
+        return;
+    }
 
     float line_height = Appearance::line_height(m_font);
     float ascent = Appearance::ascent(m_font);
@@ -245,11 +415,47 @@ void TextView::draw(Graphics& graphics)
             graphics.fill({ m_inset + x0, y, x1 - x0, line_height }, t.color(key ? "selectedText"_sv : "selectedTextInactive"_sv));
         }
         graphics.draw_text(text.substring_view(line.start, line.end - line.start), m_font, { m_inset, y + ascent }, t.color("label"_sv));
+        if (m_storage.has_marked_text() && m_storage.marked_end() > line.start && m_storage.marked_start() <= line.end) {
+            float const x0 = x_in_line(line, max(m_storage.marked_start(), line.start));
+            float const x1 = x_in_line(line, m_storage.marked_end());
+            graphics.fill({ m_inset + min(x0, x1), y + ascent + 2, x1 > x0 ? x1 - x0 : x0 - x1, 1 }, t.color("label"_sv));
+        }
     }
+    draw_spelling(graphics);
     if (focused && m_editable && m_caret_shown && !m_storage.has_selection()) {
         auto rect = caret_rect(m_storage.caret());
         rect.x = graphics.snap(rect.x);
         graphics.fill(rect, t.color("text"_sv));
+    }
+}
+
+void TextView::draw_spelling(Graphics& graphics)
+{
+    if (!m_corrects_text || !g_text_input_hooks.is_spelled_right || !is_first_responder())
+        return;
+    auto const text = m_storage.text();
+    auto const is_letter = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '\''; };
+    size_t const caret = m_storage.caret();
+    for (size_t at = 0; at < text.length();) {
+        if (!is_letter(text[at])) {
+            ++at;
+            continue;
+        }
+        size_t end = at;
+        while (end < text.length() && is_letter(text[end]))
+            ++end;
+        // Only once it's finished with.
+        if (!(caret >= at && caret <= end) && !g_text_input_hooks.is_spelled_right(text.substring_view(at, end - at))) {
+            auto const from = caret_rect(at);
+            auto const to = caret_rect(end);
+            if (from.y == to.y) {
+                // A row of red dots, as on a Mac.
+                float const y = from.y + from.height - 2;
+                for (float x = from.x; x + 1.5f < to.x; x += 3)
+                    graphics.fill_rounded({ x, y, 1.5f, 1.5f }, 0.75f, Gfx::Color::from_rgb(0xff3b30));
+            }
+        }
+        at = end;
     }
 }
 
@@ -282,6 +488,8 @@ void TextView::did_become_first_responder()
 
 void TextView::did_resign_first_responder()
 {
+    if (g_text_input_hooks.focus_lost)
+        g_text_input_hooks.focus_lost(m_storage);
     stop_blink();
     m_caret_shown = false;
     m_storage.end_undo_group();
@@ -304,6 +512,16 @@ void TextView::moved(bool)
 bool TextView::key_down(KeyEvent const& event)
 {
     auto& storage = m_storage;
+    if (g_text_input_hooks.key && window()) {
+        auto const caret = caret_rect(storage.caret());
+        auto const on_window = to_window({ caret.x, caret.y + caret.height });
+        auto const origin = window()->frame().origin();
+        if (g_text_input_hooks.key(event, storage, { origin.x + static_cast<int>(on_window.x), origin.y + static_cast<int>(on_window.y) + 2 })) {
+            m_goal_x = -1;
+            moved(false);
+            return true;
+        }
+    }
     bool shift = event.has_shift();
     auto keep_goal = [&](auto const& move_it) {
         move_it();
@@ -416,6 +634,8 @@ bool TextView::key_down(KeyEvent const& event)
         if (first >= 0x20 && first != 0x7F) {
             m_goal_x = -1;
             storage.replace_selection(event.text, TextStorage::EditKind::Typing);
+            if (g_text_input_hooks.typed && m_corrects_text)
+                g_text_input_hooks.typed(storage, event.text);
             moved(false);
             return true;
         }
@@ -425,6 +645,8 @@ bool TextView::key_down(KeyEvent const& event)
 
 bool TextView::can_perform_command(StringView command) const
 {
+    if (command == "emojiAndSymbols"_sv)
+        return m_editable && g_text_input_hooks.show_emoji;
     if (command == "selectAll"_sv)
         return m_storage.length() > 0;
     if (command == "copy"_sv)
@@ -442,6 +664,11 @@ bool TextView::can_perform_command(StringView command) const
 
 bool TextView::perform_command(StringView command)
 {
+    if (command == "emojiAndSymbols"_sv) {
+        if (m_editable && g_text_input_hooks.show_emoji)
+            g_text_input_hooks.show_emoji(m_storage);
+        return true;
+    }
     if (command == "selectAll"_sv) {
         m_storage.select_all();
         set_needs_display();

@@ -55,6 +55,7 @@ struct FontSpec {
     float size { 13 };
     FontWeight weight { FontWeight::Regular };
     bool mono { false };
+    bool oblique { false };
 
     bool operator==(FontSpec const&) const = default;
 };
@@ -91,6 +92,9 @@ public:
     [[nodiscard]] static Text::Font& font(FontSpec, float scale);
     // In points, as a 2x display would lay it out: the same at every scale.
     [[nodiscard]] static float text_width(FontSpec, StringView text);
+    // Where a caret goes for this place in the text, and the place nearest this.
+    [[nodiscard]] static float x_of_offset(FontSpec, StringView text, size_t offset);
+    [[nodiscard]] static size_t offset_at_x(FontSpec, StringView text, float x);
     [[nodiscard]] static float ascent(FontSpec);
     [[nodiscard]] static float descent(FontSpec);
     [[nodiscard]] static float line_height(FontSpec);

@@ -1,0 +1,102 @@
+name Turkish F – Legacy
+key 2 0031 0021 00a1 00b7 0031
+key 3 0032 002a 2122 20ac 0032
+key 4 0033 0022 201c 201d 0033
+key 5 0034 0027 2018 2019 0034
+key 6 0035 0028 005b 007b 0035
+key 7 0036 002f 007c 005c 0036
+key 8 0037 0029 005d 007d 0037
+key 9 0038 005f 2022 00b0 0038
+key 10 0039 0025 00ab 00bb 0039
+key 11 0030 003a 00ba 00f7 0030
+key 12 0078 0058 2248 00d9 0058
+key 13 0071 0051 0153 0152 0051
+key 16 0066 0046 0192 00cf 0046
+key 17 0067 0047 00b6 0060 0047
+key 18 011f 011e 0023 00b4 011e
+key 19 0131 0049 005e 00c8 0049
+key 20 006f 004f 00f8 00d8 004f
+key 21 0064 0044 2202 00ce 0044
+key 22 0072 0052 00ae 00c2 0052
+key 23 006e 004e dead:007e 02c6 004e
+key 24 0068 0048 dead:005e 00d3 0048
+key 25 0070 0050 03c0 220f 0050
+key 26 003b 0024 2026 00a2 003b
+key 27 003e 003c 2265 2264 003e
+key 30 0075 0055 f8ff 00cb 0055
+key 31 0069 0130 dead:0060 221e 0130
+key 32 0065 0045 dead:00b4 2030 0045
+key 33 0061 0041 00e5 00c5 0041
+key 34 00fc 00dc 0040 00aa 00dc
+key 35 0074 0054 20ba 00ca 0054
+key 36 006b 004b dead:00a8 00a9 004b
+key 37 006d 004d 00b5 02dc 004d
+key 38 006c 004c 00ac 00a3 004c
+key 39 0079 0059 00a5 00c1 0059
+key 40 015f 015e 00e6 00c6 015e
+key 41 0077 0057 2211 201e 0057
+key 43 003d 002b 2260 00b1 003d
+key 44 006a 004a 2206 00d4 004a
+key 45 00f6 00d6 00a8 0178 00d6
+key 46 0076 0056 221a 25ca 0056
+key 47 0063 0043 00e7 02da 0043
+key 48 00e7 00c7 00af 02d9 00c7
+key 49 007a 005a 03a9 00db 005a
+key 50 0073 0053 00a7 007e 0053
+key 51 0062 0042 222b 00df 0042
+key 52 002e 003f 0026 00bf 002e
+key 53 002c 002d 2013 2014 002c
+key 57 0020 0020 00a0 00a0 0020
+key 86 00a7 00b1 - - 00a7
+compose option 23 20 0 00f5
+compose option 23 20 1 00d5
+compose option 23 23 0 00f1
+compose option 23 23 1 00d1
+compose option 23 33 0 00e3
+compose option 23 33 1 00c3
+compose option 24 19 1 00ce
+compose option 24 20 0 00f4
+compose option 24 20 1 00d4
+compose option 24 30 0 00fb
+compose option 24 30 1 00db
+compose option 24 31 0 00ee
+compose option 24 32 0 00ea
+compose option 24 32 1 00ca
+compose option 24 33 0 00e2
+compose option 24 33 1 00c2
+compose option 31 19 1 00cc
+compose option 31 20 0 00f2
+compose option 31 20 1 00d2
+compose option 31 30 0 00f9
+compose option 31 30 1 00d9
+compose option 31 31 0 00ec
+compose option 31 32 0 00e8
+compose option 31 32 1 00c8
+compose option 31 33 0 00e0
+compose option 31 33 1 00c0
+compose option 32 19 1 00cd
+compose option 32 20 0 00f3
+compose option 32 20 1 00d3
+compose option 32 30 0 00fa
+compose option 32 30 1 00da
+compose option 32 31 0 00ed
+compose option 32 32 0 00e9
+compose option 32 32 1 00c9
+compose option 32 33 0 00e1
+compose option 32 33 1 00c1
+compose option 32 57 0 00b4
+compose option 32 57 1 00b4
+compose option 36 19 1 00cf
+compose option 36 20 0 00f6
+compose option 36 20 1 00d6
+compose option 36 30 0 00fc
+compose option 36 30 1 00dc
+compose option 36 31 0 00ef
+compose option 36 32 0 00eb
+compose option 36 32 1 00cb
+compose option 36 33 0 00e4
+compose option 36 33 1 00c4
+compose option 36 39 0 00ff
+compose option 36 39 1 0178
+compose option 36 57 0 00a8
+compose option 36 57 1 00a8

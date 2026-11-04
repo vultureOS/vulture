@@ -733,7 +733,8 @@ void Window::handle_key(bool pressed, u16 code, u32 modifiers, StringView text)
     hide_tooltip();
     KeyEvent event;
     event.code = code;
-    event.modifiers = modifiers;
+    event.modifiers = modifiers & ~static_cast<u32>(WS::ModifierRepeat);
+    event.repeat = modifiers & WS::ModifierRepeat;
     event.text = text;
     if (m_key_interceptor) {
         if (pressed ? m_key_interceptor->key_down(event) : m_key_interceptor->key_up(event))

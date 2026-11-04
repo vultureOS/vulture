@@ -516,7 +516,7 @@ if [ -n "$chat_file" ]; then
         case "$line" in
             "" | "#"*) ;;
             "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "nudge "* | "button "* | "screenshot "* | \
-                "click "* | "ax-expect "* | "ax-gone "* | "timeout "* | "forbid "* | "reboot" | "plug "* | "unplug "* | "qmp "* | "qmp-result "* | \
+                "click "* | "ax-expect "* | "ax-gone "* | "timeout "* | "forbid "* | "reboot" | "plug "* | "hold "* | "unplug "* | "qmp "* | "qmp-result "* | \
                 "touch "* | "display "* | "host "* | "host-start "* | "host-stop "*) chat_steps+=("$line") ;;
             *) echo "run.sh: $chat_file: not a step: $line" >&2; exit 2 ;;
         esac
@@ -560,6 +560,12 @@ press_keys() {
 {\"execute\":\"send-key\",\"arguments\":{\"keys\":[$keys],\"hold-time\":10}}"
     done
     printf '%s\n' "$commands" | nc -U -w 1 "$qmp_socket" > /dev/null || echo "run.sh: QMP failed" >&2
+}
+
+# A key held down, for this many milliseconds.
+hold_key() {
+    printf '{"execute":"qmp_capabilities"}\n{"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"%s"}],"hold-time":%s}}\n' "$1" "$2" |
+        nc -U -w 1 "$qmp_socket" > /dev/null || echo "run.sh: QMP failed" >&2
 }
 
 send_input_events() {
@@ -875,6 +881,10 @@ advance_chat() {
                 ;;
             "key "*)
                 press_keys "${step#key }"
+                chat_index=$((chat_index + 1))
+                ;;
+            "hold "*)
+                hold_key ${step#hold }
                 chat_index=$((chat_index + 1))
                 ;;
             "pointer "*)

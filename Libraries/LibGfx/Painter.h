@@ -30,6 +30,7 @@ public:
     void rotate(float radians);
     void concat(AffineTransform const&);
     [[nodiscard]] AffineTransform const& transform() const { return m_state.transform; }
+    void set_transform(AffineTransform const& transform) { m_state.transform = transform; }
 
     // Clips only shrink, until restore().
     void clip_rect(FloatRect const&);

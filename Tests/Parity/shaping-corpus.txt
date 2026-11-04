@@ -1,0 +1,136 @@
+# What's compared with Core Text: FONT SCRIPT RTL TEXT, one to a line. The fonts are Noto's, from Meta/fetch-fonts.sh.
+NotoSans-Regular.ttf Latin 0 Hello, world
+NotoSans-Regular.ttf Latin 0 office affluent
+NotoSans-Regular.ttf Latin 0 AVATAR To Ty
+NotoSans-Regular.ttf Latin 0 résumé naïve
+NotoSans-Regular.ttf Latin 0 é ä ñ
+NotoSans-Regular.ttf Latin 0 ﬁ
+NotoSans-Regular.ttf Latin 0 1/2 3/4
+NotoSans-Regular.ttf Latin 0 (a) [b]
+NotoSans-Regular.ttf Latin 0 ẫ ệ ǖ
+NotoSans-Regular.ttf Latin 0 Việt Nam
+NotoSans-Regular.ttf Latin 0 ÅÄÖ åäö ß
+NotoSans-Regular.ttf Cyrillic 0 Привет, мир
+NotoSans-Regular.ttf Cyrillic 0 Съешь ещё
+NotoSans-Regular.ttf Cyrillic 0 Україна
+NotoSans-Regular.ttf Greek 0 Καλημέρα κόσμε
+NotoSans-Regular.ttf Greek 0 ΑΥΤΟ
+NotoSansArabic-Regular.ttf Arabic 1 مرحبا بالعالم
+NotoSansArabic-Regular.ttf Arabic 1 السلام عليكم
+NotoSansArabic-Regular.ttf Arabic 1 كتاب
+NotoSansArabic-Regular.ttf Arabic 1 لا إله إلا الله
+NotoSansArabic-Regular.ttf Arabic 1 مُحَمَّد
+NotoSansArabic-Regular.ttf Arabic 1 ـهـ
+NotoSansArabic-Regular.ttf Arabic 1 الْعَرَبِيَّة
+NotoSansArabic-Regular.ttf Arabic 1 ه
+NotoSansArabic-Regular.ttf Arabic 1 فففف
+NotoSansArabic-Regular.ttf Arabic 1 اللغة العربية جميلة جدا
+NotoSansArabic-Regular.ttf Arabic 1 پاکستان
+NotoSansArabic-Regular.ttf Arabic 1 فارسی زبان
+NotoSansArabic-Regular.ttf Arabic 1 لله
+NotoSansArabic-Regular.ttf Arabic 1 لآ لأ لإ
+NotoSansArabic-Regular.ttf Arabic 1 ئؤءآأإ
+NotoSansArabic-Regular.ttf Arabic 1 بِسْمِ اللَّهِ
+NotoSansHebrew-Regular.ttf Hebrew 1 שלום עולם
+NotoSansHebrew-Regular.ttf Hebrew 1 בְּרֵאשִׁית
+NotoSansHebrew-Regular.ttf Hebrew 1 עִבְרִית
+NotoSansHebrew-Regular.ttf Hebrew 1 יְרוּשָׁלַיִם
+NotoSansDevanagari-Regular.ttf Devanagari 0 नमस्ते
+NotoSansDevanagari-Regular.ttf Devanagari 0 हिन्दी
+NotoSansDevanagari-Regular.ttf Devanagari 0 कि
+NotoSansDevanagari-Regular.ttf Devanagari 0 क्ष
+NotoSansDevanagari-Regular.ttf Devanagari 0 र्क
+NotoSansDevanagari-Regular.ttf Devanagari 0 र्कि
+NotoSansDevanagari-Regular.ttf Devanagari 0 क्र
+NotoSansDevanagari-Regular.ttf Devanagari 0 कृ
+NotoSansDevanagari-Regular.ttf Devanagari 0 द्ध
+NotoSansDevanagari-Regular.ttf Devanagari 0 त्र
+NotoSansDevanagari-Regular.ttf Devanagari 0 स्त्र
+NotoSansDevanagari-Regular.ttf Devanagari 0 श्री
+NotoSansDevanagari-Regular.ttf Devanagari 0 र्य
+NotoSansDevanagari-Regular.ttf Devanagari 0 प्र
+NotoSansDevanagari-Regular.ttf Devanagari 0 ग्रा
+NotoSansDevanagari-Regular.ttf Devanagari 0 क्त
+NotoSansDevanagari-Regular.ttf Devanagari 0 ज्ञ
+NotoSansDevanagari-Regular.ttf Devanagari 0 ट्ठ
+NotoSansDevanagari-Regular.ttf Devanagari 0 ड्ढ
+NotoSansDevanagari-Regular.ttf Devanagari 0 न्ह
+NotoSansDevanagari-Regular.ttf Devanagari 0 कु की के कै को कौ कं कः कँ
+NotoSansDevanagari-Regular.ttf Devanagari 0 क़ ऩ अ ॐ
+NotoSansDevanagari-Regular.ttf Devanagari 0 भारत गणराज्य
+NotoSansDevanagari-Regular.ttf Devanagari 0 संस्कृत
+NotoSansDevanagari-Regular.ttf Devanagari 0 विश्व
+NotoSansDevanagari-Regular.ttf Devanagari 0 प्रौद्योगिकी
+NotoSansDevanagari-Regular.ttf Devanagari 0 र्
+NotoSansDevanagari-Regular.ttf Devanagari 0 क्
+NotoSansDevanagari-Regular.ttf Devanagari 0 क्‍ष
+NotoSansDevanagari-Regular.ttf Devanagari 0 क्‌ष
+NotoSansDevanagari-Regular.ttf Devanagari 0 ि
+NotoSansDevanagari-Regular.ttf Devanagari 0 र्त्स्न्य
+NotoSansDevanagari-Regular.ttf Devanagari 0 हिंदी में लिखा गया वाक्य
+NotoSansBengali-Regular.ttf Bengali 0 বাংলা
+NotoSansBengali-Regular.ttf Bengali 0 কি কে কৈ কো কৌ
+NotoSansBengali-Regular.ttf Bengali 0 ক্ষ
+NotoSansBengali-Regular.ttf Bengali 0 র্ক
+NotoSansBengali-Regular.ttf Bengali 0 ক্র
+NotoSansBengali-Regular.ttf Bengali 0 ক্য
+NotoSansBengali-Regular.ttf Bengali 0 শ্রী
+NotoSansBengali-Regular.ttf Bengali 0 বিশ্ববিদ্যালয়
+NotoSansBengali-Regular.ttf Bengali 0 জ্ঞান
+NotoSansBengali-Regular.ttf Bengali 0 স্ত্র
+NotoSansBengali-Regular.ttf Bengali 0 আমি বাংলায় গান গাই
+NotoSansGurmukhi-Regular.ttf Gurmukhi 0 ਪੰਜਾਬੀ
+NotoSansGurmukhi-Regular.ttf Gurmukhi 0 ਕਿ ਕੀ ਕੁ ਕੂ ਕੇ ਕੈ ਕੋ ਕੌ
+NotoSansGurmukhi-Regular.ttf Gurmukhi 0 ਪ੍ਰ ਸ੍ਰ ਕ੍ਰ
+NotoSansGurmukhi-Regular.ttf Gurmukhi 0 ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ
+NotoSansGujarati-Regular.ttf Gujarati 0 ગુજરાતી
+NotoSansGujarati-Regular.ttf Gujarati 0 કિ કી કુ કૂ કે કૈ કો કૌ
+NotoSansGujarati-Regular.ttf Gujarati 0 ક્ષ જ્ઞ શ્ર ત્ર
+NotoSansGujarati-Regular.ttf Gujarati 0 ર્ક ર્કિ
+NotoSansGujarati-Regular.ttf Gujarati 0 નમસ્તે દુનિયા
+NotoSansOriya-Regular.ttf Oriya 0 ଓଡ଼ିଆ
+NotoSansOriya-Regular.ttf Oriya 0 କି କୀ କୁ କେ କୈ କୋ କୌ
+NotoSansOriya-Regular.ttf Oriya 0 କ୍ଷ ର୍କ କ୍ର
+NotoSansOriya-Regular.ttf Oriya 0 ଭାରତ ଦେଶ
+NotoSansTamil-Regular.ttf Tamil 0 தமிழ்
+NotoSansTamil-Regular.ttf Tamil 0 கி கீ கு கெ கே கை கொ கோ கௌ
+NotoSansTamil-Regular.ttf Tamil 0 க்ஷ
+NotoSansTamil-Regular.ttf Tamil 0 ஶ்ரீ
+NotoSansTamil-Regular.ttf Tamil 0 வணக்கம்
+NotoSansTamil-Regular.ttf Tamil 0 தமிழ் மொழி மிகவும் பழமையானது
+NotoSansTelugu-Regular.ttf Telugu 0 తెలుగు
+NotoSansTelugu-Regular.ttf Telugu 0 కి కీ కు కూ కె కే కై కొ కో కౌ
+NotoSansTelugu-Regular.ttf Telugu 0 క్ష క్ర క్య
+NotoSansTelugu-Regular.ttf Telugu 0 ర్క స్త్ర
+NotoSansTelugu-Regular.ttf Telugu 0 నమస్కారం ప్రపంచం
+NotoSansKannada-Regular.ttf Kannada 0 ಕನ್ನಡ
+NotoSansKannada-Regular.ttf Kannada 0 ಕಿ ಕೀ ಕು ಕೂ ಕೆ ಕೇ ಕೈ ಕೊ ಕೋ ಕೌ
+NotoSansKannada-Regular.ttf Kannada 0 ಕ್ಷ ಕ್ರ ಕ್ಯ
+NotoSansKannada-Regular.ttf Kannada 0 ರ್ಕ ಸ್ತ್ರ
+NotoSansKannada-Regular.ttf Kannada 0 ನಮಸ್ಕಾರ ಪ್ರಪಂಚ
+NotoSansMalayalam-Regular.ttf Malayalam 0 മലയാളം
+NotoSansMalayalam-Regular.ttf Malayalam 0 കി കീ കു കൂ കെ കേ കൈ കൊ കോ കൗ
+NotoSansMalayalam-Regular.ttf Malayalam 0 ക്ഷ ക്ര ക്യ
+NotoSansMalayalam-Regular.ttf Malayalam 0 ർക്ക ന്റെ
+NotoSansMalayalam-Regular.ttf Malayalam 0 നമസ്കാരം ലോകം
+NotoSansThai-Regular.ttf Thai 0 สวัสดี
+NotoSansThai-Regular.ttf Thai 0 ภาษาไทย
+NotoSansThai-Regular.ttf Thai 0 น้ำ
+NotoSansThai-Regular.ttf Thai 0 ที่
+NotoSansThai-Regular.ttf Thai 0 กำ
+NotoSansThai-Regular.ttf Thai 0 ปู่
+NotoSansThai-Regular.ttf Thai 0 ฎู
+NotoSansThai-Regular.ttf Thai 0 กิ่ง
+NotoSansThai-Regular.ttf Thai 0 ญี่ปุ่น
+NotoSansThai-Regular.ttf Thai 0 เด็ก
+NotoSansThai-Regular.ttf Thai 0 ประเทศไทยเป็นประเทศที่สวยงาม
+NotoSansLao-Regular.ttf Lao 0 ພາສາລາວ
+NotoSansLao-Regular.ttf Lao 0 ນ້ຳ ກຳ ຄຳ
+NotoSansCJK-Regular.ttc Han 0 中文字体
+NotoSansCJK-Regular.ttc Han 0 你好，世界。
+NotoSansCJK-Regular.ttc Han 0 「引用」《书名》
+NotoSansCJK-Regular.ttc Han 0 汉字漢字
+NotoSansCJK-Regular.ttc Hiragana 0 こんにちは世界
+NotoSansCJK-Regular.ttc Katakana 0 カタカナ
+NotoSansCJK-Regular.ttc Hangul 0 안녕하세요 세계
+NotoSansCJK-Regular.ttc Hangul 0 한글

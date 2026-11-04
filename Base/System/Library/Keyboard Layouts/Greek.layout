@@ -1,0 +1,111 @@
+name Greek
+key 2 0031 0021 00b9 03ad 0031
+key 3 0032 0040 00b2 03af 0032
+key 4 0033 0023 00b3 03ae 0033
+key 5 0034 0024 00a3 03cc 0034
+key 6 0035 0025 00a7 038f 0035
+key 7 0036 005e 00b6 005e 0036
+key 8 0037 0026 03d7 03cf 0037
+key 9 0038 002a 2022 03a1 0038
+key 10 0039 0028 201c 039a 0039
+key 11 0030 0029 00b0 03cd 0030
+key 12 002d 005f 00b1 005f 002d
+key 13 003d 002b 00bd 002b 003d
+key 16 003b 003a 00b7 2015 003b
+key 17 03c2 dead:0385 2015 0392 03a3
+key 18 03b5 0395 20ac 0388 0395
+key 19 03c1 03a1 00ae 0394 03a1
+key 20 03c4 03a4 2122 - 03a4
+key 21 03c5 03a5 00a5 - 03a5
+key 22 03b8 0398 00ad 039e 0398
+key 23 03b9 0399 2020 039d 0399
+key 24 03bf 039f 0153 03a4 039f
+key 25 03c0 03a0 2248 - 03a0
+key 26 005b 007b 00ab 007b 005b
+key 27 005d 007d 00bb 007d 005d
+key 30 03b1 0391 2026 03ac 0391
+key 31 03c3 03a3 00df 03c1 03a3
+key 32 03b4 0394 00f7 - 0394
+key 33 03c6 03a6 2260 03a0 03a6
+key 34 03b3 0393 00a9 03aa 0393
+key 35 03b7 0397 00bd 2260 0397
+key 36 03be 039e 2264 2265 039e
+key 37 03ba 039a 03d7 03cf 039a
+key 38 03bb 039b 00ac 00b7 039b
+key 39 dead:0384 dead:00a8 dead:0385 003a dead:0384
+key 40 0027 0022 0027 0022 0027
+key 41 0060 007e 0060 039c 0060
+key 43 005c 007c 00a6 0396 005c
+key 44 03b6 0396 00a7 - 0396
+key 45 03c7 03a7 - - 03a7
+key 46 03c8 03a8 00e7 03a7 03a8
+key 47 03c9 03a9 00b1 0386 03a9
+key 48 03b2 0392 - - 0392
+key 49 03bd 039d 2018 038c 039d
+key 50 03bc 039c 2019 038e 039c
+key 51 002c 003c 00ab - 002c
+key 52 002e 003e 00bb 03ce 002e
+key 53 002f 003f 002f 003f 002f
+key 57 0020 0020 00a0 00a0 0020
+key 86 00a7 00b1 - - 00a7
+compose plain 39 17 1 0384
+compose plain 39 18 0 03ad
+compose plain 39 18 1 0388
+compose plain 39 21 0 03cd
+compose plain 39 21 1 038e
+compose plain 39 23 0 03af
+compose plain 39 23 1 038a
+compose plain 39 24 0 03cc
+compose plain 39 24 1 038c
+compose plain 39 30 0 03ac
+compose plain 39 30 1 0386
+compose plain 39 35 0 03ae
+compose plain 39 35 1 0389
+compose plain 39 39 0 0384
+compose plain 39 39 1 0384
+compose plain 39 47 0 03ce
+compose plain 39 47 1 038f
+compose plain 39 57 0 0384
+compose plain 39 57 1 0384
+compose shift 17 17 1 0385
+compose shift 17 21 0 03b0
+compose shift 17 23 0 0390
+compose shift 17 39 0 0385
+compose shift 17 39 1 0385
+compose shift 17 57 0 0385
+compose shift 17 57 1 0385
+compose shift 39 17 1 00a8
+compose shift 39 21 0 03cb
+compose shift 39 21 1 03ab
+compose shift 39 23 0 03ca
+compose shift 39 23 1 03aa
+compose shift 39 39 0 00a8
+compose shift 39 39 1 00a8
+compose shift 39 57 0 00a8
+compose shift 39 57 1 00a8
+compose option 39 17 1 0385
+compose option 39 21 0 03b0
+compose option 39 23 0 0390
+compose option 39 39 0 0385
+compose option 39 39 1 0385
+compose option 39 57 0 0385
+compose option 39 57 1 0385
+compose caps 39 17 1 0384
+compose caps 39 18 0 03ad
+compose caps 39 18 1 0388
+compose caps 39 21 0 03cd
+compose caps 39 21 1 038e
+compose caps 39 23 0 03af
+compose caps 39 23 1 038a
+compose caps 39 24 0 03cc
+compose caps 39 24 1 038c
+compose caps 39 30 0 03ac
+compose caps 39 30 1 0386
+compose caps 39 35 0 03ae
+compose caps 39 35 1 0389
+compose caps 39 39 0 0384
+compose caps 39 39 1 0384
+compose caps 39 47 0 03ce
+compose caps 39 47 1 038f
+compose caps 39 57 0 0384
+compose caps 39 57 1 0384

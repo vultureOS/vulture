@@ -90,6 +90,8 @@ enum Modifiers : u32 {
     ModifierOption = 1 << 2,
     ModifierCommand = 1 << 3,
     ModifierCapsLock = 1 << 4,
+    // Not a modifier that's held: this press is the key repeating by itself.
+    ModifierRepeat = 1 << 5,
 };
 
 // The materials a region can have (their looks are in the theme).

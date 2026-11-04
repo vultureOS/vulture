@@ -94,10 +94,10 @@ Sizes are rough estimates of new lines, scaled from the reference figures above.
 
 | Phase | # | Milestone | Status | When it's done, you can... | Est. size |
 |---|---|---|---|---|---|
-| **1 Foundations** | M15 | [Rulers](#m15-rulers) | Next | See exactly how close to a Mac we are, as a generated scoreboard | 6k |
-| | M16 | [System completeness](#m16-system-completeness) | | Run real programs: plugins, kqueue, Unix sockets, 10,000 open files | 20k |
-| | M17 | [Unicode and locale](#m17-unicode-and-locale) | | Have text, dates and numbers handled correctly for any language | 15k |
-| | M18 | [Shaping and input](#m18-shaping-and-input) | | Read and type any language, with emoji, in any control | 30k |
+| **1 Foundations** | M15 | [Rulers](#m15-rulers) | Done, but for the VM (waiting on a decision) | See exactly how close to a Mac we are, as a generated scoreboard | 6k |
+| | M16 | [System completeness](#m16-system-completeness) | Done | Run real programs: plugins, kqueue, Unix sockets, 10,000 open files | 20k |
+| | M17 | [Unicode and locale](#m17-unicode-and-locale) | Done | Have text, dates and numbers handled correctly for any language | 15k |
+| | M18 | [Shaping and input](#m18-shaping-and-input) | Done | Read and type any language, with emoji, in any control | 30k |
 | | M19 | [vultureFS 2](#m19-vulturefs-2) | | Use a 1 TiB disk, duplicate files instantly, roll back a snapshot | 20k |
 | | M20 | [External media](#m20-external-media) | | Plug in a USB stick; erase and repair disks; open disk images | 8k |
 | | M21 | [Layers](#m21-layers) | | See animations stay smooth even when an app hangs, with the spinning cursor | 18k |
@@ -590,3 +590,29 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on. M15 me
 ## Findings
 
 Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap-1.md#findings-so-far).
+
+### M15 and M16
+
+- **A serial console that stopped.** `run.sh`'s chats stuck now and then at the last character of a line with no newline. The PL011 driver drained its FIFO and then cleared the interrupt, so what arrived in between was lost until the next character. It clears first now, and twenty runs in a row get through.
+- **A tickless kernel has no sample to average.** A timer every five seconds for the load average broke what `timer.fires_in_deadline_order_and_never_early` asserts: that nothing's queued when nothing's due. The average's worked out when it's asked for instead, from how long the idle threads have run.
+- **The sanitizers earn their keep.** UBSan found that a core dump wrote a structure at four-byte alignment, as ELF notes are. Nothing went wrong on this processor; the same code on another could have faulted.
+- **Testing inside a copy of the system.** With a `dd` of its own at last, a test that changes to a copy of the system and runs `dd` ran that one, for the wrong processor, if `PATH` had a relative entry in it. The seal tests then found nothing to catch, and said so as if the kernel had let a tampered file by.
+- **Tests that click by position go stale.** One new row in Settings moved everything under it, and each walkthrough that clicked one of those by coordinates went wrong, as M15 said it would. They go by name now.
+- **What a Mac does that's wrong.** Nine of POSIX's checks and seven of the commands are different on purpose. Each is written down in `Tests/Parity`, with why.
+
+### M18
+
+- **A window that doesn't look at the hot spot.** "The cursor's not accurate", from someone using it: they had to aim off to the side to hit the traffic lights or a window's edge. Everything here was right, by every test, as all of them run with no window. QEMU's window on a Mac places the cursor's picture by its corner and never reads its hot spot, so the arrow's tip was 6 points from where it clicked, and the resize arrows 16. `run.sh` says so now, with the boot word `cursortopleft`, and the driver tells it the corner instead.
+- **A group doesn't end with its leader.** Now and then a shell printed its prompt before a pipeline's output. A group whose first member had finished, but hadn't been waited for, counted as gone, so a fast `echo` left the next command out of its group and the shell stopped waiting for it. It took a slow enough machine and a busy enough one to see, and `test-keyboard` found it. It's four more checks that a real Mac agrees with.
+- **A dictionary knows less than it seems to.** Words are compared with its entries without regard to case, so "iss" passes because "ISS" is in there. Proper names and acronyms deserve better, and that's still to do.
+- **Core Text agrees, for the most part by being asked.** 135 lines in ten scripts come out the same, glyph for glyph and position for position. The last two differences were a contextual feature that Core Text leaves off outside the scripts that need it, and a consonant with a pre-base form taken for the base.
+- **A font for Chinese has more than one set of subroutines.** With only the first, a CID-keyed font's outlines were recognisably characters, some of the time. `世界` looked right and `你好` didn't.
+- **A font of pictures has no outlines**, and the parser refused it for that. And bitmaps go through a painter's transform where masks don't, so emoji were twice the size and somewhere else.
+- **Joiners are skipped, except when they're what's being looked for.** A family of emoji is a ligature with joiners in it.
+- **The fonts and the dictionary aren't in the repository.** `Meta/fetch-fonts.sh` fetches Noto and a word list, pinned and checked, and an image built without them still works, with boxes where those languages would be. Whether they go in is a decision for later.
+
+### M17
+
+- **A truncated download looks like a bug in the algorithm.** `BidiCharacterTest` passed four times in ten, and everything said the rules were wrong. `DerivedBidiClass.txt` had been cut short when the disk filled up: a size that's an exact multiple of 4096 was the clue. Everything else downloaded has been checked for the same since.
+- **A Mac has three sets of locale data.** Foundation's matches CLDR but for a short list, which is in `Meta/generate-locale.py`. Its C library's, in `/usr/share/locale`, is from old BSD tables, and disagrees with its own Foundation about things as basic as "Sept". This system has one set, and 78 differences from those old tables are listed in `Tests/Parity/locale-file-differences.json`.
+- **This Mac isn't Sequoia.** What's measured here is macOS 26.4. Locale data does change between releases, so some of what's in that list may be different on Sequoia: without the VM, that can't be known.

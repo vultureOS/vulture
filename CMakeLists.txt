@@ -114,13 +114,18 @@ elseif(VULTURE_PART STREQUAL "userland")
     # hierarchy's directories even while nothing is in them (their modes
     # are in Meta/CMake/MakeBootArchive.cmake).
     install(DIRECTORY Base/ DESTINATION .)
+    # The fonts for other languages and emoji, if they've been fetched (Meta/fetch-fonts.sh): they aren't in the repository.
+    if(EXISTS ${CMAKE_BINARY_DIR}/../fonts)
+        install(DIRECTORY ${CMAKE_BINARY_DIR}/../fonts/ DESTINATION System/Library/Fonts FILES_MATCHING PATTERN "*.ttf" PATTERN "*.ttc" PATTERN "*-VF.ttf" EXCLUDE)
+        install(DIRECTORY ${CMAKE_BINARY_DIR}/../fonts/ DESTINATION usr/share/hunspell FILES_MATCHING PATTERN "en_US*")
+    endif()
     # Which kind of machine this system is for: a disk may hold more than one.
     file(WRITE ${CMAKE_BINARY_DIR}/Architecture "${CMAKE_SYSTEM_PROCESSOR}\n")
     install(FILES ${CMAKE_BINARY_DIR}/Architecture DESTINATION System/Library/CoreServices)
     foreach(directory
             Applications Library Library/Preferences Library/LaunchDaemons Library/LaunchAgents
             System/Library/CoreServices System/Library/Frameworks System/Library/LaunchDaemons System/Library/LaunchAgents
-            Users Users/Shared Volumes dev tmp
+            Users Users/Shared Volumes cores dev tmp
             usr/local usr/local/bin usr/share
             var var/root var/log var/run var/tmp var/db var/db/sudo)
         install(DIRECTORY DESTINATION ${directory})

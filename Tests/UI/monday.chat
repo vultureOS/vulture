@@ -37,6 +37,66 @@ ax-expect row "monday.txt"
 key esc
 ax-gone row "monday.txt"
 timeout 60
+# ---- Dates and numbers, as they're written in Germany.
+key meta_l-spc
+expect search: shown
+pause 0.3
+type settings
+pause 1
+type \r
+expect settings: Appearance
+pause 1
+click row "Language & Region"
+expect settings: Language & Region
+ax-expect text "1,234.56"
+click popup "Region"
+click menuitem "Germany"
+ax-expect text "1.234,56"
+ax-expect text "4.567,89 €"
+key meta_l-q
+ax-gone text "1.234,56"
+pause 1
+click button "Terminal"
+expect terminal: ready
+ax-expect textarea "Terminal"
+pause 1
+type date +%A ; echo region-$LANG\r
+ax-expect textarea "Terminal" ~ region-de_DE.UTF-8
+key meta_l-q
+ax-gone textarea "Terminal"
+# ---- And back.
+key meta_l-spc
+expect search: shown
+pause 0.3
+type settings
+pause 1
+type \r
+expect settings: Appearance
+pause 1
+click row "Language & Region"
+expect settings: Language & Region
+click popup "Region"
+click menuitem "United States"
+ax-expect text "1,234.56"
+key meta_l-q
+ax-gone text "1,234.56"
+pause 1
+# ---- A note in a hurry, put right along the way, with a word held down for its accent.
+click button "Text Editor"
+expect texteditor: ready
+ax-expect textarea "Document"
+pause 0.5
+type teh caf
+hold e 1000
+ax-expect row "é"
+key 2
+type  omw 
+ax-expect textarea "Document" ~ The café On my way!
+key meta_l-q
+ax-expect button "Don’t Save"
+click button "Don’t Save"
+ax-gone textarea "Document"
+
 # ---- And leave.
 click menuitem "Logo"
 click menuitem "Log Out"

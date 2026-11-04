@@ -1,0 +1,40 @@
+{
+    "about": "Every command in Tests/Userland/commands.cpp whose output is different on a real Mac, and why. Meta/oracle-test.sh fails on a difference that isn't here.",
+    "differences": [
+        {
+            "command": "awk a syntax error",
+            "kind": "chosen",
+            "why": "Each says what's wrong in its own words. It's stopped with the same status either way, and nothing reads these."
+        },
+        {
+            "command": "sw_vers",
+            "kind": "chosen",
+            "why": "This system is called vultureOS, and has its own version numbers."
+        },
+        {
+            "command": "sw_vers -productName",
+            "kind": "chosen",
+            "why": "This system is called vultureOS."
+        },
+        {
+            "command": "killall of nothing",
+            "kind": "test",
+            "why": "Tests run as root here, and root hears about processes in general: it's what a Mac says to root too."
+        },
+        {
+            "command": "tar reading nothing",
+            "kind": "mac",
+            "why": "macOS 26 says 'tar: absent.tar: m: No such file or directory', which looks like a mistake. This says what libarchive has always said."
+        },
+        {
+            "command": "launchctl list",
+            "kind": "test",
+            "why": "The test programs run with vlaunchd in its test mode, with no name service to ask. Meta/harness-test.sh's full boot checks launchctl itself."
+        },
+        {
+            "command": "launchctl of nothing",
+            "kind": "test",
+            "why": "As for launchctl list."
+        }
+    ]
+}

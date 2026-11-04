@@ -11,6 +11,7 @@
 #include <LibIPC/Bootstrap.h>
 #include <LibIPC/Listener.h>
 #include <LibJSON/JSON.h>
+#include <LibLocale/Locale.h>
 #include <LibUI/Panels.h>
 #include <LibUI/Application.h>
 #include <LibUI/Controls.h>
@@ -24,6 +25,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -48,15 +50,27 @@ String clock_text()
 {
     if (s_still)
         return MUST(String::from_view("Thu Jan 15  9:41 AM"_sv));
-    time_t now = time(nullptr);
+    time_t const now = time(nullptr);
     struct tm parts;
     localtime_r(&now, &parts);
-    static char const* const days[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
-    static char const* const months[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-    int hour = parts.tm_hour % 12;
-    StringBuilder builder;
-    builder.appendff("{} {} {}  {}:{:02} {}", days[parts.tm_wday], months[parts.tm_mon], parts.tm_mday, hour == 0 ? 12 : hour, parts.tm_min, parts.tm_hour < 12 ? "AM" : "PM");
-    return MUST(builder.to_string());
+    // Written as where it's been set to write it. (It's asked every second, and that file doesn't change often: only look when it has.)
+    static String s_preferences_path = [] {
+        StringBuilder path;
+        path.append(Desktop::home_directory().view());
+        path.append("/Library/Preferences/com.vulture.desktop.json"_sv);
+        return MUST(path.to_string());
+    }();
+    static time_t s_preferences_changed = -1;
+    static Locale::LocaleData const* s_locale = &Locale::default_locale();
+    struct stat information {};
+    time_t const changed = stat(s_preferences_path.characters(), &information) == 0 ? information.st_mtime : 0;
+    if (changed != s_preferences_changed) {
+        s_preferences_changed = changed;
+        Desktop::Preferences preferences("com.vulture.desktop"_sv);
+        auto const* found = Locale::find_locale(preferences.string("region"_sv).value_or("en_US"_sv));
+        s_locale = found ? found : &Locale::default_locale();
+    }
+    return MUST(Locale::format_date_pattern(*s_locale, StringView(s_locale->clock_format), now, static_cast<i32>(parts.tm_gmtoff)));
 }
 
 // ---- SearchPanel
@@ -1160,6 +1174,8 @@ int main(int argc, char** argv)
         (void)server.set_appearance(saved.value());
     if (auto saved = preferences.string("wallpaper"_sv); saved.has_value())
         (void)server.set_wallpaper(saved.value());
+    if (auto saved = preferences.string("keyboardLayout"_sv); saved.has_value())
+        (void)server.set_keyboard_layout(saved.value());
 
     SearchPanel search_panel;
     NotificationServicePanel center;

@@ -15,6 +15,7 @@
 #include <LibUI/Panels.h>
 #include <LibUI/ScrollView.h>
 #include <LibUI/TableView.h>
+#include <LibUI/SpellChecker.h>
 #include <LibUI/TextField.h>
 #include <LibUI/TextView.h>
 
@@ -1193,4 +1194,153 @@ TEST_CASE(a_tooltip_comes_after_a_while_over_the_view)
     (void)test;
     test.move_to(400, 300);
     TestPlatform::the().advance(0.1);
+}
+
+TEST_CASE(a_character_is_what_a_person_would_call_one)
+{
+    TextStorage storage;
+    // e, then a combining acute accent; a family of emoji, joined up; and Hindi's ksha with its vowel.
+    auto const text = "e\xcc\x81" "x\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x91\xa7y"_sv;
+    storage.set_text(text);
+    EXPECT_EQ(storage.next_character(0), 3u);
+    EXPECT_EQ(storage.previous_character(3), 0u);
+    EXPECT_EQ(storage.next_character(3), 4u);
+    // The whole family at once, there and back.
+    size_t const after_family = text.length() - 1;
+    EXPECT_EQ(storage.next_character(4), after_family);
+    EXPECT_EQ(storage.previous_character(after_family), 4u);
+    EXPECT_EQ(storage.next_character(after_family), text.length());
+    // Plain text is plain.
+    storage.set_text("abc"_sv);
+    EXPECT_EQ(storage.next_character(1), 2u);
+    EXPECT_EQ(storage.previous_character(2), 1u);
+}
+
+TEST_CASE(marked_text_is_in_the_text_until_its_decided)
+{
+    TextStorage storage;
+    storage.set_text("ab"_sv);
+    storage.set_marked_text("ni"_sv);
+    EXPECT(storage.text() == "abni"_sv);
+    EXPECT(storage.has_marked_text());
+    EXPECT_EQ(storage.marked_start(), 2u);
+    EXPECT_EQ(storage.marked_end(), 4u);
+    storage.set_marked_text("nihao"_sv);
+    EXPECT(storage.text() == "abnihao"_sv);
+    storage.commit_marked_text("\xe4\xbd\xa0\xe5\xa5\xbd"_sv);
+    EXPECT(storage.text() == "ab\xe4\xbd\xa0\xe5\xa5\xbd"_sv);
+    EXPECT(!storage.has_marked_text());
+    // That's one thing to undo, and nothing of what was marked comes back.
+    storage.undo();
+    EXPECT(storage.text() == "ab"_sv);
+}
+
+TEST_CASE(rich_text_keeps_its_attributes_through_editing)
+{
+    TextStorage storage;
+    storage.set_rich(true);
+    storage.set_text("hello world"_sv);
+    EXPECT_EQ(storage.attribute_runs().size(), 1u);
+
+    // Bold on the second word.
+    storage.select(6, 11);
+    storage.change_attributes([](TextAttributes& attributes) { attributes.bold = true; });
+    EXPECT_EQ(storage.attribute_runs().size(), 2u);
+    EXPECT_EQ(storage.attribute_runs()[1].start, 6u);
+    EXPECT(storage.attribute_runs()[1].attributes.bold);
+    EXPECT(!storage.attribute_runs()[0].attributes.bold);
+
+    // What's typed takes after what's before it.
+    storage.select(11, 11);
+    storage.replace_selection("!"_sv);
+    EXPECT_EQ(storage.attribute_runs().size(), 2u);
+    EXPECT_EQ(storage.attribute_runs()[1].end, 12u);
+    storage.select(0, 0);
+    storage.replace_selection(">"_sv);
+    EXPECT_EQ(storage.attribute_runs()[0].end, 7u);
+    EXPECT_EQ(storage.attribute_runs()[1].start, 7u);
+
+    // What's deleted goes, and what's left joins up.
+    storage.select(6, 13);
+    storage.replace_selection({});
+    EXPECT_EQ(storage.attribute_runs().size(), 1u);
+    EXPECT(storage.text() == ">hello"_sv);
+
+    // Undoing brings the look back too.
+    storage.undo();
+    EXPECT(storage.text() == ">hello world!"_sv);
+    EXPECT_EQ(storage.attribute_runs().size(), 2u);
+    EXPECT(storage.attribute_runs()[1].attributes.bold);
+
+    // With nothing selected, it's for what's typed next, and it's forgotten if the caret moves.
+    storage.select(1, 1);
+    storage.change_attributes([](TextAttributes& attributes) { attributes.italic = true; });
+    EXPECT(storage.typing_attributes().italic);
+    storage.replace_selection("x"_sv);
+    EXPECT(storage.attributes_at(2).italic);
+    storage.move_caret(4, false);
+    EXPECT(!storage.typing_attributes().italic);
+
+    // And the runs always cover all of it, in order.
+    size_t expected = 0;
+    for (auto const& run : storage.attribute_runs()) {
+        EXPECT_EQ(run.start, expected);
+        expected = run.end;
+    }
+    EXPECT_EQ(expected, storage.length());
+
+    // Changing a look undoes by itself.
+    storage.select(0, 1);
+    storage.change_attributes([](TextAttributes& attributes) { attributes.underline = true; });
+    EXPECT(storage.attributes_at(1).underline);
+    storage.undo();
+    EXPECT(!storage.attributes_at(1).underline);
+    storage.redo();
+    EXPECT(storage.attributes_at(1).underline);
+}
+
+TEST_CASE(a_text_view_lays_out_rich_text)
+{
+    TestWindow test;
+    auto& view = test.place<TextView>({ 0, 0, 300, 200 });
+    view.set_rich(true);
+    view.set_text("one\ntwo"_sv);
+    view.storage().select(0, 3);
+    view.storage().change_attributes([](TextAttributes& attributes) { attributes.size = 30; });
+    // A taller line for what's bigger, and the next below it.
+    auto const first = view.caret_rect(0);
+    auto const second = view.caret_rect(4);
+    EXPECT(first.height > 30);
+    EXPECT(second.y >= first.y + first.height);
+    EXPECT(second.height < 30);
+    EXPECT_EQ(view.offset_at({ second.x + 0.01f, second.y + 2 }), 4u);
+}
+
+TEST_CASE(a_spell_checker_knows_words_and_their_forms)
+{
+    SpellChecker checker;
+    EXPECT(checker.is_correct("anything"_sv)); // With no dictionary, there's nothing to say.
+    auto const dictionary = "5\nwalk/SDG\nhappy/U\nthe\nI\nlocate/DG\n"_sv;
+    auto const affixes = "SET UTF-8\nSFX S Y 1\nSFX S 0 s .\nSFX D Y 2\nSFX D 0 d e\nSFX D 0 ed [^e]\nSFX G Y 2\nSFX G e ing e\nSFX G 0 ing [^e]\nPFX U Y 1\nPFX U 0 un .\n"_sv;
+    checker.load(dictionary, affixes);
+    EXPECT(checker.is_loaded());
+    EXPECT(checker.is_correct("walk"_sv));
+    EXPECT(checker.is_correct("Walk"_sv));
+    EXPECT(checker.is_correct("walks"_sv));
+    EXPECT(checker.is_correct("walked"_sv));
+    EXPECT(checker.is_correct("walking"_sv));
+    EXPECT(checker.is_correct("located"_sv));
+    EXPECT(checker.is_correct("locating"_sv));
+    EXPECT(checker.is_correct("unhappy"_sv));
+    EXPECT(checker.is_correct("walk's"_sv));
+    EXPECT(checker.is_correct("1234"_sv));
+    EXPECT(!checker.is_correct("teh"_sv));
+    EXPECT(!checker.is_correct("happys"_sv));
+    EXPECT(!checker.is_correct("locatd"_sv));
+    auto const suggestions = checker.suggestions("teh"_sv);
+    EXPECT_EQ(suggestions.size(), 1u);
+    EXPECT(suggestions[0].view() == "the"_sv);
+    EXPECT(checker.suggestions("walkk"_sv)[0].view() == "walk"_sv);
+    EXPECT(checker.suggestions("wlak"_sv)[0].view() == "walk"_sv);
+    EXPECT(checker.suggestions("zzzzzzzz"_sv).is_empty());
 }

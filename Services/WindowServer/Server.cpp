@@ -56,22 +56,6 @@ u64 now_microseconds()
 
 constexpr u64 frame_interval = 16667;
 
-// Key code to text, on a US keyboard.
-struct KeyPair {
-    char plain;
-    char shifted;
-};
-
-constexpr KeyPair us_layout[] = {
-    { 0, 0 }, { 0, 0 }, { '1', '!' }, { '2', '@' }, { '3', '#' }, { '4', '$' }, { '5', '%' }, { '6', '^' },
-    { '7', '&' }, { '8', '*' }, { '9', '(' }, { '0', ')' }, { '-', '_' }, { '=', '+' }, { 8, 8 }, { '\t', '\t' },
-    { 'q', 'Q' }, { 'w', 'W' }, { 'e', 'E' }, { 'r', 'R' }, { 't', 'T' }, { 'y', 'Y' }, { 'u', 'U' }, { 'i', 'I' },
-    { 'o', 'O' }, { 'p', 'P' }, { '[', '{' }, { ']', '}' }, { '\r', '\r' }, { 0, 0 }, { 'a', 'A' }, { 's', 'S' },
-    { 'd', 'D' }, { 'f', 'F' }, { 'g', 'G' }, { 'h', 'H' }, { 'j', 'J' }, { 'k', 'K' }, { 'l', 'L' }, { ';', ':' },
-    { '\'', '"' }, { '`', '~' }, { 0, 0 }, { '\\', '|' }, { 'z', 'Z' }, { 'x', 'X' }, { 'c', 'C' }, { 'v', 'V' },
-    { 'b', 'B' }, { 'n', 'N' }, { 'm', 'M' }, { ',', '<' }, { '.', '>' }, { '/', '?' }, { 0, 0 }, { '*', '*' },
-    { 0, 0 }, { ' ', ' ' },
-};
 
 }
 
@@ -449,6 +433,15 @@ void Server::set_cursor(IPC::Sender const& sender, u32 id, i32 shape)
         return;
     window->cursor = static_cast<Window::CursorShape>(shape);
     update_cursor();
+}
+
+i32 Server::set_keyboard_layout(IPC::Sender const&, String identifier)
+{
+    auto layout = KeyboardLayout::load(identifier.view());
+    if (layout.is_error())
+        return ENOENT;
+    m_keyboard_layout = layout.release_value();
+    return 0;
 }
 
 i32 Server::set_appearance(IPC::Sender const&, String name)
@@ -1335,28 +1328,63 @@ void Server::key_changed(u16 code, int value)
         m_modifiers = value ? (m_modifiers | modifier) : (m_modifiers & ~modifier);
     if (code == VULTURE_KEY_CAPSLOCK && value == 1)
         m_modifiers ^= Window::ModifierCapsLock;
+    // Keys repeat because this says so, as on a Mac, however long the machine that's showing this holds them down for, and whatever it says about it.
+    if (value == 2 || (value == 1 && code == m_repeating_key))
+        return;
     if (value == 1 && handle_hotkey(code))
         return;
+    if (value == 1 && !modifier && !(m_modifiers & Window::ModifierCommand)) {
+        start_key_repeat(code);
+    } else if (value == 0 && code == m_repeating_key) {
+        stop_key_repeat();
+    }
+    deliver_key(code, value);
+}
+
+void Server::start_key_repeat(u16 code)
+{
+    stop_key_repeat();
+    m_repeating_key = code;
+    // A Mac's defaults: a wait, and then a steady stream until it's let go.
+    constexpr u64 delay_until_repeat = 375;
+    constexpr u64 between_repeats = 90;
+    m_key_repeat_timer = m_loop.add_timer(delay_until_repeat, false, [this] {
+        deliver_key(m_repeating_key, 2);
+        m_key_repeat_timer = m_loop.add_timer(between_repeats, true, [this] { deliver_key(m_repeating_key, 2); });
+    });
+}
+
+void Server::stop_key_repeat()
+{
+    if (m_key_repeat_timer >= 0)
+        m_loop.cancel_timer(m_key_repeat_timer);
+    m_key_repeat_timer = -1;
+    m_repeating_key = 0;
+}
+
+void Server::deliver_key(u16 code, int value)
+{
     // Keys go to the active window, unless some other program has a menu open: Escape and the arrows are that menu's.
     auto* target = m_active;
     if (m_grab && (m_grab->flags & Window::WindowPopup) && m_grab->client && (!m_active || m_grab->client != m_active->client))
         target = m_grab;
     if (!target || !target->client)
         return;
-    char text[2] = {};
-    if (value && code < array_size(us_layout)) {
-        auto const& pair = us_layout[code];
-        bool is_letter = pair.plain >= 'a' && pair.plain <= 'z';
-        bool shifted = m_modifiers & Window::ModifierShift;
-        bool upper = shifted != (is_letter && (m_modifiers & Window::ModifierCapsLock));
-        text[0] = upper ? pair.shifted : pair.plain;
+    // What it types, by the layout that's chosen. Only when it's pressed, as a key that's let go of types nothing.
+    String text;
+    if (value) {
+        bool const shift = m_modifiers & Window::ModifierShift;
+        bool const option = m_modifiers & Window::ModifierOption;
+        bool const caps = m_modifiers & Window::ModifierCapsLock;
+        bool const shortcut = m_modifiers & (Window::ModifierCommand | Window::ModifierControl);
+        text = m_keyboard_layout.type(code, shift, option, caps, shortcut);
     }
     IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Key));
     encoder.encode(target->id);
     encoder.encode(value != 0);
     encoder.encode(code);
-    encoder.encode(m_modifiers);
-    encoder.encode(StringView(text));
+    encoder.encode(value == 2 ? (m_modifiers | Window::ModifierRepeat) : m_modifiers);
+    encoder.encode(text.view());
     send_to(*target->client, encoder);
 }
 

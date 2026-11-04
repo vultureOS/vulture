@@ -1,0 +1,148 @@
+name Swedish
+key 2 0031 0021 00a9 00a1 0031
+key 3 0032 0022 0040 201d 0032
+key 4 0033 0023 00a3 00a5 0033
+key 5 0034 20ac 0024 00a2 0034
+key 6 0035 0025 221e 2030 0035
+key 7 0036 0026 00a7 00b6 0036
+key 8 0037 002f 007c 005c 0037
+key 9 0038 0028 005b 007b 0038
+key 10 0039 0029 005d 007d 0039
+key 11 0030 003d 2248 2260 0030
+key 12 002b 003f 00b1 00bf 002b
+key 13 dead:00b4 dead:0060 00b4 0060 dead:00b4
+key 16 0071 0051 2022 00b0 0051
+key 17 0077 0057 03a9 02dd 0057
+key 18 0065 0045 00e9 00c9 0045
+key 19 0072 0052 00ae 221a 0052
+key 20 0074 0054 2020 2021 0054
+key 21 0079 0059 00b5 02dc 0059
+key 22 0075 0055 00fc 00dc 0055
+key 23 0069 0049 0131 02c6 0049
+key 24 006f 004f 0153 0152 004f
+key 25 0070 0050 03c0 220f 0050
+key 26 00e5 00c5 02d9 02da 00c5
+key 27 dead:00a8 dead:005e dead:007e 005e dead:00a8
+key 30 0061 0041 f8ff 25ca 0041
+key 31 0073 0053 00df 2211 0053
+key 32 0064 0044 2202 2206 0044
+key 33 0066 0046 0192 222b 0046
+key 34 0067 0047 00b8 00af 0047
+key 35 0068 0048 02db 02d8 0048
+key 36 006a 004a 221a 00ac 004a
+key 37 006b 004b 00aa 00ba 004b
+key 38 006c 004c fb01 fb02 004c
+key 39 00f6 00d6 00f8 00d8 00d6
+key 40 00e4 00c4 00e6 00c6 00c4
+key 41 003c 003e 2264 2265 003c
+key 43 0027 002a 2122 2019 0027
+key 44 007a 005a 00f7 2044 005a
+key 45 0078 0058 2248 02c7 0058
+key 46 0063 0043 00e7 00c7 0043
+key 47 0076 0056 2039 00ab 0056
+key 48 0062 0042 203a 00bb 0042
+key 49 006e 004e 2018 201c 004e
+key 50 006d 004d 2019 201d 004d
+key 51 002c 003b 201a 201e 002c
+key 52 002e 003a 2026 00b7 002e
+key 53 002d 005f 2013 2014 002d
+key 57 0020 0020 00a0 00a0 0020
+key 86 00a7 00b0 00b6 2022 00a7
+compose plain 13 13 0 00b4
+compose plain 13 13 1 00b4
+compose plain 13 18 0 00e9
+compose plain 13 18 1 00c9
+compose plain 13 21 0 00fd
+compose plain 13 21 1 00dd
+compose plain 13 22 0 00fa
+compose plain 13 22 1 00da
+compose plain 13 23 0 00ed
+compose plain 13 23 1 00cd
+compose plain 13 24 0 00f3
+compose plain 13 24 1 00d3
+compose plain 13 27 0 00b4
+compose plain 13 27 1 00b4
+compose plain 13 30 0 00e1
+compose plain 13 30 1 00c1
+compose plain 13 57 0 00b4
+compose plain 13 57 1 00b4
+compose plain 27 13 0 00a8
+compose plain 27 13 1 00a8
+compose plain 27 18 0 00eb
+compose plain 27 18 1 00cb
+compose plain 27 21 0 00ff
+compose plain 27 21 1 0178
+compose plain 27 22 0 00fc
+compose plain 27 22 1 00dc
+compose plain 27 23 0 00ef
+compose plain 27 23 1 00cf
+compose plain 27 24 0 00f6
+compose plain 27 24 1 00d6
+compose plain 27 27 0 00a8
+compose plain 27 27 1 00a8
+compose plain 27 30 0 00e4
+compose plain 27 30 1 00c4
+compose plain 27 57 0 00a8
+compose plain 27 57 1 00a8
+compose shift 13 18 0 00e8
+compose shift 13 18 1 00c8
+compose shift 13 22 0 00f9
+compose shift 13 22 1 00d9
+compose shift 13 23 0 00ec
+compose shift 13 23 1 00cc
+compose shift 13 24 0 00f2
+compose shift 13 24 1 00d2
+compose shift 13 30 0 00e0
+compose shift 13 30 1 00c0
+compose shift 27 18 0 00ea
+compose shift 27 18 1 00ca
+compose shift 27 22 0 00fb
+compose shift 27 22 1 00db
+compose shift 27 23 0 00ee
+compose shift 27 23 1 00ce
+compose shift 27 24 0 00f4
+compose shift 27 24 1 00d4
+compose shift 27 30 0 00e2
+compose shift 27 30 1 00c2
+compose option 27 24 0 00f5
+compose option 27 24 1 00d5
+compose option 27 30 0 00e3
+compose option 27 30 1 00c3
+compose option 27 49 0 00f1
+compose option 27 49 1 00d1
+compose caps 13 13 0 00b4
+compose caps 13 13 1 00b4
+compose caps 13 18 0 00e9
+compose caps 13 18 1 00c9
+compose caps 13 21 0 00fd
+compose caps 13 21 1 00dd
+compose caps 13 22 0 00fa
+compose caps 13 22 1 00da
+compose caps 13 23 0 00ed
+compose caps 13 23 1 00cd
+compose caps 13 24 0 00f3
+compose caps 13 24 1 00d3
+compose caps 13 27 0 00b4
+compose caps 13 27 1 00b4
+compose caps 13 30 0 00e1
+compose caps 13 30 1 00c1
+compose caps 13 57 0 00b4
+compose caps 13 57 1 00b4
+compose caps 27 13 0 00a8
+compose caps 27 13 1 00a8
+compose caps 27 18 0 00eb
+compose caps 27 18 1 00cb
+compose caps 27 21 0 00ff
+compose caps 27 21 1 0178
+compose caps 27 22 0 00fc
+compose caps 27 22 1 00dc
+compose caps 27 23 0 00ef
+compose caps 27 23 1 00cf
+compose caps 27 24 0 00f6
+compose caps 27 24 1 00d6
+compose caps 27 27 0 00a8
+compose caps 27 27 1 00a8
+compose caps 27 30 0 00e4
+compose caps 27 30 1 00c4
+compose caps 27 57 0 00a8
+compose caps 27 57 1 00a8

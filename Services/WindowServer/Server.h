@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "KeyboardLayout.h"
 #include "Compositor.h"
 #include "Screen.h"
 #include "ServerWindow.h"
@@ -63,6 +64,7 @@ private:
     void grab_pointer(IPC::Sender const&, u32 window, bool grab) override;
     void set_cursor(IPC::Sender const&, u32 window, i32 shape) override;
     i32 set_appearance(IPC::Sender const&, String name) override;
+    i32 set_keyboard_layout(IPC::Sender const&, String identifier) override;
     void begin_drag(IPC::Sender const&, u32 window, u32 image, String type, Vector<u8> data) override;
     void accept_drop(IPC::Sender const&, u32 window, bool accepted) override;
     i32 set_surface(IPC::Sender const&, u32 window, IPC::Port memory, i32 width, i32 height) override;
@@ -170,6 +172,12 @@ private:
     Gfx::IntPoint m_pointer;
     u32 m_buttons { 0 };
     u32 m_modifiers { 0 };
+    KeyboardLayout m_keyboard_layout { KeyboardLayout::builtin() };
+    u16 m_repeating_key { 0 };
+    int m_key_repeat_timer { -1 };
+    void start_key_repeat(u16 code);
+    void stop_key_repeat();
+    void deliver_key(u16 code, int value);
     int m_pending_absolute_x { -1 };
     int m_pending_relative_x { 0 };
     int m_pending_relative_y { 0 };

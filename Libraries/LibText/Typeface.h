@@ -32,6 +32,8 @@ class Typeface final : public RefCounted<Typeface> {
 public:
     // Keeps the bytes.
     [[nodiscard]] static ErrorOr<NonnullRefPtr<Typeface>> parse(Vector<u8> data);
+    // These stay where they are, for as long as this font's in use: a file that's been mapped, so that every program that's using a large font is sharing one copy of it.
+    [[nodiscard]] static ErrorOr<NonnullRefPtr<Typeface>> parse_mapped(ReadonlyBytes data);
 
     [[nodiscard]] u16 units_per_em() const { return m_units_per_em; }
     [[nodiscard]] i16 ascent() const { return m_ascent; }
@@ -56,6 +58,53 @@ public:
     // Applies the GSUB features listed, in the font's order of lookups.
     void substitute(Vector<GlyphIndex>& glyphs, Span<u32 const> features) const;
 
+    // ---- Variable fonts: one file with a range of designs in it, by weight and so on.
+    struct VariationAxis {
+        u32 tag { 0 };
+        float minimum { 0 };
+        float default_value { 0 };
+        float maximum { 0 };
+    };
+    struct VariationSetting {
+        u32 tag { 0 };
+        float value { 0 };
+    };
+    [[nodiscard]] Vector<VariationAxis> const& variation_axes() const { return m_variation_axes; }
+    // The same font at these settings: what isn't said stays as it is by default. It's using this one's bytes, so this has to stay.
+    [[nodiscard]] ErrorOr<NonnullRefPtr<Typeface>> with_variations(Span<VariationSetting const>) const;
+
+    // ---- Glyphs that are pictures.
+    struct ColorLayer {
+        GlyphIndex glyph { 0 };
+        // From the palette: 0xFFFF for whatever colour the text is.
+        u32 argb { 0 };
+        bool is_text_color { false };
+    };
+    // A glyph drawn as coloured shapes, one over the other (COLR): empty if it isn't one.
+    [[nodiscard]] Vector<ColorLayer> color_layers(GlyphIndex) const;
+    struct ColorBitmap {
+        // A PNG, in the font's own bytes.
+        ReadonlyBytes png;
+        // What size it's for: pixels to the em.
+        u8 pixels_per_em { 0 };
+        // From the pen to its left edge, and from the baseline up to its top, in its own pixels.
+        i16 left { 0 };
+        i16 top { 0 };
+        u16 advance { 0 };
+    };
+    // A glyph that's a picture (CBDT), in the size nearest above what's wanted: nothing if it isn't one.
+    [[nodiscard]] Optional<ColorBitmap> color_bitmap(GlyphIndex, u16 pixels_per_em) const;
+    [[nodiscard]] bool has_color_glyphs() const { return m_colr.exists() || (m_cbdt.exists() && m_cblc.exists()); }
+
+    // For what reads the font's tables by itself (OpenTypeLayout): where a table is, or 0, and what's there. What's past the end reads as zero.
+    [[nodiscard]] size_t offset_of_table(u32 tag) const;
+    [[nodiscard]] size_t size_of_table(u32 tag) const;
+    [[nodiscard]] u16 layout_u16(size_t at) const { return u16_at(at); }
+    [[nodiscard]] u32 layout_u32(size_t at) const { return u32_at(at); }
+    [[nodiscard]] u8 layout_u8(size_t at) const { return byte_at(at); }
+    // The glyph for a character with a variation selector after it, if the font has one for that: 0 if it doesn't.
+    [[nodiscard]] GlyphIndex glyph_for_variation(u32 code_point, u32 selector) const;
+
 private:
     Typeface() = default;
 
@@ -78,7 +127,12 @@ private:
     void read_layout_features(Table const& table, Vector<u32>& tags, Vector<Vector<u16>>& lookups) const;
 
     void append_truetype_outline(GlyphIndex, Gfx::Path&, Gfx::AffineTransform const&, int depth) const;
-    void append_simple_outline(size_t offset, size_t end, i16 contours, Gfx::Path&, Gfx::AffineTransform const&) const;
+    void append_simple_outline(GlyphIndex, size_t offset, size_t end, i16 contours, Gfx::Path&, Gfx::AffineTransform const&) const;
+    void read_variations();
+    // What this glyph's points move by, at the current settings. There's one for each point, and four more for its metrics. False if nothing moves.
+    [[nodiscard]] bool variation_deltas(GlyphIndex, u32 point_count, Span<u16 const> contour_ends, Span<float const> xs, Span<float const> ys, Vector<float>& dx, Vector<float>& dy) const;
+    [[nodiscard]] float variation_scalar(size_t peak, size_t intermediate) const;
+    [[nodiscard]] u32 point_count_of(GlyphIndex, Vector<u16>& contour_ends, Vector<float>& xs, Vector<float>& ys) const;
     void append_cff_outline(GlyphIndex, Gfx::Path&) const;
 
     [[nodiscard]] int coverage_index(size_t coverage_offset, GlyphIndex) const;
@@ -91,9 +145,19 @@ private:
     bool apply_single_at(u16 lookup_index, Vector<GlyphIndex>&, size_t position) const;
     bool apply_single_at_inner(u16 lookup_index, Vector<GlyphIndex>&, size_t position) const;
 
-    Vector<u8> m_data;
+    ErrorOr<void> read_everything();
+
+    Vector<u8> m_owned_data;
+    ReadonlyBytes m_data;
     u32 m_id { 0 };
+    size_t m_directory_offset { 0 };
     Table m_head, m_hhea, m_hmtx, m_maxp, m_cmap, m_loca, m_glyf, m_kern, m_gpos, m_gsub, m_os2, m_name, m_cff;
+    Table m_fvar, m_avar, m_gvar, m_colr, m_cpal, m_cbdt, m_cblc;
+    Vector<VariationAxis> m_variation_axes;
+    // From -1 to 1, one for each axis: all zero is the default design.
+    Vector<float> m_normalized_coordinates;
+    bool m_is_varied { false };
+    mutable HashMap<u32, u16> m_varied_advances;
     u16 m_units_per_em { 1000 };
     i16 m_ascent { 0 };
     i16 m_descent { 0 };
@@ -110,6 +174,7 @@ private:
     // cmap: the subtable used, and its format.
     size_t m_cmap_subtable { 0 };
     u16 m_cmap_format { 0 };
+    size_t m_cmap_variations { 0 };
 
     // CFF.
     struct CFFIndex {
@@ -125,6 +190,9 @@ private:
     CFFIndex m_cff_charstrings;
     CFFIndex m_cff_global_subroutines;
     CFFIndex m_cff_local_subroutines;
+    Vector<CFFIndex> m_cff_font_dictionary_locals;
+    size_t m_cff_dictionary_select { 0 };
+    [[nodiscard]] CFFIndex const& cff_local_subroutines_for(GlyphIndex) const;
 
     Vector<u32> m_gpos_features;
     Vector<Vector<u16>> m_gpos_feature_lookups;

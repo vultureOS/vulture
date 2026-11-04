@@ -7,5 +7,11 @@
 # Fonts: parsing, shaping, glyph images. Built for the host too, for tests.
 add_library(LibText STATIC
     Font.cpp
+    Itemizer.cpp
+    OpenTypeLayout.cpp
+    Paragraph.cpp
+    Shaper.cpp
+    ShaperArabic.cpp
+    ShaperIndic.cpp
     Typeface.cpp)
-target_link_libraries(LibText PUBLIC LibGfx)
+target_link_libraries(LibText PUBLIC LibGfx LibImage LibUnicode)

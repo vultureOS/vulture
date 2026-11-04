@@ -23,12 +23,22 @@ struct PositionedGlyph {
     GlyphIndex glyph { 0 };
     // From the start of the run, in device pixels.
     float x { 0 };
+    // Below the baseline, in device pixels. Nearly always none: marks on letters, and Arabic that runs downhill.
+    float y { 0 };
+    // Which font it's in, if not the one that shaped it.
+    Typeface const* typeface { nullptr };
+    // Where in the text it came from, in bytes. Only known for text that's gone through the whole shaper.
+    u32 cluster { 0 };
+    float advance { 0 };
+    bool is_right_to_left { false };
 };
 
 struct ShapedRun {
     Vector<PositionedGlyph> glyphs;
     // Its total advance, in device pixels.
     float width { 0 };
+    // Whether it went through bidi, script runs and fallback. Most of what a system says doesn't need to.
+    bool is_complex { false };
 };
 
 // Where glyph images live: pages of coverage values, packed in shelves.
@@ -63,6 +73,8 @@ public:
     Font(NonnullRefPtr<Typeface>, float points, float scale, GlyphAtlas&);
 
     [[nodiscard]] Typeface const& typeface() const { return *m_typeface; }
+    // Slanted, for a font with no italics of its own: which is what a Mac does too.
+    void set_oblique(bool oblique) { m_oblique = oblique; }
     [[nodiscard]] float points() const { return m_points; }
     [[nodiscard]] float scale() const { return m_scale; }
     // Of the typeface, in device pixels.
@@ -75,6 +87,11 @@ public:
     // UTF-8 (bad sequences show as .notdef) to glyphs and positions.
     [[nodiscard]] ShapedRun shape(StringView text) const;
     [[nodiscard]] float width_of(StringView text) const { return shape(text).width; }
+
+    // Where a caret goes for this place in the text (in bytes), from the start of the line, in device pixels: on either side of what's there, according to which way it's going.
+    [[nodiscard]] float x_of_offset(StringView text, size_t offset) const;
+    // The place in the text nearest this.
+    [[nodiscard]] size_t offset_at_x(StringView text, float x) const;
 
     // Draws with the baseline starting at `origin`, in device pixels (the
     // painter's transform is not applied, as glyphs are made for one size).
@@ -93,14 +110,18 @@ private:
         int top { 0 };
     };
 
-    [[nodiscard]] Image const* image_for(GlyphIndex, u32 subpixel);
+    [[nodiscard]] Image const* image_for(Typeface const&, GlyphIndex, u32 subpixel);
+    [[nodiscard]] ShapedRun shape_complex(StringView text) const;
+    [[nodiscard]] Gfx::Bitmap const* color_bitmap_for(Typeface const&, GlyphIndex);
 
     NonnullRefPtr<Typeface> m_typeface;
     float m_points;
     float m_scale;
     float m_pixels_per_unit;
+    bool m_oblique { false };
     GlyphAtlas& m_atlas;
-    HashMap<u32, Image> m_images;
+    HashMap<u64, Image> m_images;
+    HashMap<u64, RefPtr<Gfx::Bitmap>> m_color_bitmaps;
 };
 
 }

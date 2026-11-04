@@ -36,6 +36,16 @@
             "kind": "to do",
             "milestone": "M19",
             "why": "On a Mac /tmp is a symbolic link to /private/tmp, so getcwd() reports /private/tmp/... . Here /tmp is a directory in its own right. It should come with the System and Data volumes' layout."
+        },
+        {
+            "check": "descriptors: fcntl() of no such command: EINVAL",
+            "kind": "mac",
+            "why": "POSIX says EINVAL. macOS hands a command it doesn't know to the device as an ioctl, so it says ENODEV for /dev/null and ENOTTY for a file."
+        },
+        {
+            "check": "cancellation: PTHREAD_CANCEL_ASYNCHRONOUS: it goes anyway",
+            "kind": "mac",
+            "why": "POSIX has it that this can happen at any moment, and here it does. In this test, macOS let a thread that never reaches a cancellation point run to the end."
         }
     ]
 }

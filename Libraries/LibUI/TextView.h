@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibText/Paragraph.h>
 #include <LibUI/TextStorage.h>
 #include <LibUI/View.h>
 
@@ -26,6 +27,11 @@ public:
     void set_editable(bool);
     [[nodiscard]] bool is_editable() const { return m_editable; }
     void set_text_inset(float);
+    // With styles on parts of it: bold, italic, underlined, sizes and colours (TextStorage's attributes). Off by default, as most text in a system's all one style.
+    void set_rich(bool);
+    // Whether what's typed is corrected and capitalized as Settings says: it's running text, not code, or a transcript.
+    void set_corrects_text(bool corrects) { m_corrects_text = corrects; }
+    [[nodiscard]] bool is_rich() const { return m_storage.is_rich(); }
 
     Function<void()> on_change;
 
@@ -61,6 +67,11 @@ private:
     };
 
     void relayout_lines();
+    void relayout_rich();
+    void draw_rich(Graphics&, float visible_top, float visible_bottom);
+    void draw_spelling(Graphics&);
+    [[nodiscard]] FontSpec spec_for(TextAttributes const&) const;
+    [[nodiscard]] float line_height_at(size_t index) const;
     [[nodiscard]] size_t line_of(size_t offset) const;
     void scroll_caret_into_view();
     void restart_blink();
@@ -69,6 +80,20 @@ private:
     [[nodiscard]] float x_in_line(Line const&, size_t offset) const;
     [[nodiscard]] size_t offset_in_line(Line const&, float x) const;
 
+    // One for each paragraph, in rich text: with the styles it's laid out with, as those say what to draw it in.
+    struct RichParagraph {
+        size_t start { 0 };
+        size_t end { 0 };
+        float top { 0 };
+        Text::ParagraphLayout layout;
+        Vector<FontSpec> specs;
+        Vector<TextAttributes> attributes;
+    };
+    Vector<RichParagraph> m_rich_paragraphs;
+    float m_rich_height { 0 };
+    float m_rich_widest { 0 };
+
+    bool m_corrects_text { false };
     TextStorage m_storage;
     FontSpec m_font;
     Vector<Line> m_lines;
