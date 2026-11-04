@@ -372,15 +372,79 @@ size_t Sidebar::add_row(StringView title, Symbol symbol)
     return row;
 }
 
+size_t Sidebar::insert_row_after(size_t row, StringView title, Symbol symbol)
+{
+    for (auto& entry : m_entries) {
+        if (entry.row > static_cast<int>(row))
+            ++entry.row;
+    }
+    if (m_selected > static_cast<int>(row))
+        ++m_selected;
+    for (size_t i = 0; i < m_entries.size(); ++i) {
+        if (m_entries[i].row == static_cast<int>(row)) {
+            m_entries.insert(i + 1, Entry { MUST(String::from_view(title)), symbol, false, static_cast<int>(row + 1) });
+            break;
+        }
+    }
+    ++m_rows;
+    set_needs_display();
+    return row + 1;
+}
+
+void Sidebar::remove_row(size_t row)
+{
+    for (size_t i = 0; i < m_entries.size(); ++i) {
+        if (m_entries[i].row == static_cast<int>(row)) {
+            m_entries.remove(i);
+            break;
+        }
+    }
+    for (auto& entry : m_entries) {
+        if (entry.row > static_cast<int>(row))
+            --entry.row;
+    }
+    if (m_selected == static_cast<int>(row))
+        m_selected = -1;
+    else if (m_selected > static_cast<int>(row))
+        --m_selected;
+    --m_rows;
+    set_needs_display();
+}
+
+void Sidebar::clear()
+{
+    m_entries.clear();
+    m_rows = 0;
+    m_selected = -1;
+    set_needs_display();
+}
+
+void Sidebar::set_row_accessory(size_t row, Symbol symbol, StringView label, Function<void()> action)
+{
+    for (auto& entry : m_entries) {
+        if (entry.row == static_cast<int>(row)) {
+            entry.has_accessory = true;
+            entry.accessory = symbol;
+            entry.accessory_label = MUST(String::from_view(label));
+            entry.accessory_action = move(action);
+        }
+    }
+    set_needs_display();
+}
+
 void Sidebar::accessibility_parts(Vector<Accessibility::Node>& parts)
 {
     float const row_height = tokens().metric("sidebar.rowHeight"_sv);
+    float const accessory = tokens().metric("sidebar.iconSize"_sv);
+    float const inset = tokens().metric("sidebar.rowInset"_sv);
     for (size_t i = 0; i < m_entries.size(); ++i) {
         auto const& entry = m_entries[i];
         if (entry.section)
             parts.append(Accessibility::part_of(*this, Accessibility::Role::StaticText, entry.title.view(), { 0, y_of(i), width(), row_height }));
         else
             parts.append(Accessibility::part_of(*this, Accessibility::Role::Row, entry.title.view(), { 0, y_of(i), width(), row_height }, entry.row == m_selected ? "selected"_sv : StringView {}));
+        if (entry.has_accessory)
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, entry.accessory_label.view(), { width() - inset - accessory - 6, y_of(i) + (row_height - accessory) / 2, accessory, accessory }));
     }
 }
 
@@ -438,7 +502,10 @@ void Sidebar::draw(Graphics& graphics)
         if (entry.row == m_selected)
             graphics.fill_rounded({ inset, y, width() - inset * 2, row_height }, radius, t.color(window() && window()->is_key() ? "sidebar.selectionActive"_sv : "sidebar.selection"_sv));
         graphics.draw_symbol(entry.symbol, { inset + left - 8, y + (row_height - icon) / 2, icon, icon }, t.color("sidebar.icon"_sv));
-        graphics.draw_text_truncated(entry.title.view(), body, { inset + left - 8 + icon + gap, y + (row_height + Appearance::cap_height(body)) / 2 }, width() - inset * 2 - left - icon - gap, t.color("sidebar.text"_sv));
+        float const room_for_accessory = entry.has_accessory ? icon + 6 : 0;
+        graphics.draw_text_truncated(entry.title.view(), body, { inset + left - 8 + icon + gap, y + (row_height + Appearance::cap_height(body)) / 2 }, width() - inset * 2 - left - icon - gap - room_for_accessory, t.color("sidebar.text"_sv));
+        if (entry.has_accessory)
+            graphics.draw_symbol(entry.accessory, { width() - inset - icon - 6, y + (row_height - icon) / 2, icon, icon }, t.color("sidebar.icon"_sv));
     }
 }
 
@@ -461,6 +528,11 @@ bool Sidebar::mouse_down(MouseEvent const& event)
         auto const& entry = m_entries[i];
         float y = y_of(i);
         if (!entry.section && event.position.y >= y && event.position.y < y + row_height) {
+            float const accessory = tokens().metric("sidebar.iconSize"_sv);
+            if (entry.has_accessory && event.position.x >= width() - tokens().metric("sidebar.rowInset"_sv) - accessory - 8) {
+                entry.accessory_action();
+                return true;
+            }
             select_row(static_cast<size_t>(entry.row));
             return true;
         }

@@ -12,6 +12,7 @@
 #include <Kernel/Net/NetworkStack.h>
 #include <Kernel/Net/Socket.h>
 #include <Kernel/Net/TCP.h>
+#include <Kernel/API/POSIX/disk.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/poll.h>
 #include <Kernel/API/POSIX/sysctl.h>
@@ -20,7 +21,10 @@
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/FileSystem/Poll.h>
 #include <Kernel/IPC/Port.h>
+#include <Kernel/Devices/Storage/BlockDevice.h>
+#include <Kernel/FileSystem/ForeignFS.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
+#include <Kernel/FileSystem/VultureFS.h>
 #include <Kernel/Memory/MemoryManager.h>
 #include <Kernel/Memory/PhysicalMemory.h>
 #include <Kernel/Memory/UserAccess.h>
@@ -410,6 +414,43 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
             Net::NetworkStack::the().set_drop_rate(rate);
         }
         set_number(0u);
+    } else if (name == "kern.disks"_sv) {
+        auto const copy = [](char* destination, size_t size, StringView text) {
+            size_t const length = min(text.length(), size - 1);
+            __builtin_memcpy(destination, text.characters_without_null_termination(), length);
+        };
+        for (auto const& device : BlockDevice::all()) {
+            vulture_disk_info info {};
+            copy(info.name, sizeof(info.name), device->name());
+            auto* partition = device->as_partition();
+            copy(info.whole, sizeof(info.whole), partition ? partition->disk().name() : device->name());
+            copy(info.bus, sizeof(info.bus), device->bus_name());
+            info.sectors = device->block_count();
+            info.sector_size = BlockDevice::block_size;
+            info.read_only = device->is_read_only();
+            info.removable = device->is_removable();
+            if (partition) {
+                __builtin_memcpy(info.partition_type, partition->type(), 16);
+                __builtin_memcpy(info.partition_unique, partition->unique(), 16);
+                auto const device_name = device->name();
+                auto const s_at = device_name.find_last('s');
+                info.partition_number = s_at.has_value() ? device_name.substring_view(s_at.value() + 1).to_number<int>().value_or(0) : 0;
+            }
+            if (partition && is_system_partition(*device)) {
+                copy(info.content, sizeof(info.content), "vulture-system"_sv);
+                copy(info.label, sizeof(info.label), "Vulture HD"_sv);
+            } else if (partition && is_data_partition(*device)) {
+                copy(info.content, sizeof(info.content), "vulture-data"_sv);
+                copy(info.label, sizeof(info.label), "Vulture HD - Data"_sv);
+            } else if (auto const kind = recognise_file_system(*device); kind != ForeignFS::Kind::None) {
+                copy(info.content, sizeof(info.content), ForeignFS::name_of(kind));
+                if (auto const label = label_of_file_system(*device); !label.is_error())
+                    copy(info.label, sizeof(info.label), label.value().view());
+            }
+            size_t const offset = table.size();
+            TRY(table.try_resize(offset + sizeof(info)));
+            __builtin_memcpy(table.begin() + offset, &info, sizeof(info));
+        }
     } else if (name == "vfs.mounts"_sv) {
         TRY(VirtualFileSystem::for_each_mount_point([](void* context, FileSystem& file_system, StringView path) -> ErrorOr<void> {
             auto& rows = *static_cast<Vector<u8>*>(context);
@@ -426,6 +467,7 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
             info.blocks = statistics.blocks;
             info.free_blocks = statistics.free_blocks;
             info.read_only = file_system.is_read_only();
+            info.device_gone = file_system.device_has_gone();
             size_t offset = rows.size();
             TRY(rows.try_resize(offset + sizeof(info)));
             __builtin_memcpy(rows.begin() + offset, &info, sizeof(info));
@@ -434,7 +476,7 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
     } else {
         return Error::from_errno(ENOENT);
     }
-    result = name == "kern.proc.all"_sv || name == "vfs.mounts"_sv || name == "net.interfaces"_sv || name == "net.connections"_sv ? ReadonlyBytes { table.begin(), table.size() } : ReadonlyBytes { value, value_length };
+    result = name == "kern.proc.all"_sv || name == "kern.disks"_sv || name == "vfs.mounts"_sv || name == "net.interfaces"_sv || name == "net.connections"_sv ? ReadonlyBytes { table.begin(), table.size() } : ReadonlyBytes { value, value_length };
     if (old_length_address) {
         auto room = TRY(copy_from_user<u64>(old_length_address));
         if (old_buffer) {

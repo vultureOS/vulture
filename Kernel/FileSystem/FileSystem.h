@@ -28,6 +28,7 @@ public:
     [[nodiscard]] virtual Statistics statistics() { return {}; }
     // The device it is on ("disk1s1"), or its type for those on none.
     [[nodiscard]] virtual StringView device_name() const { return name(); }
+    [[nodiscard]] virtual bool device_has_gone() const { return false; }
     // Writes everything to stable storage.
     virtual ErrorOr<void> sync() { return {}; }
     // Memory's short: gives back up to this many pages of what it's only keeping to save reading it again. How many it did.

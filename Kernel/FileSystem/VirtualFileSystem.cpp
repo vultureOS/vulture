@@ -104,6 +104,7 @@ struct Mount {
 Mutex s_mounts_lock;
 RefPtr<FileSystem> s_root;
 Vector<Mount> s_mounts;
+Vector<NonnullRefPtr<FileSystem>> s_forced_out;
 
 struct Step {
     NonnullRefPtr<Inode> inode;
@@ -422,7 +423,7 @@ ErrorOr<void> VirtualFileSystem::make_node(StringView path, StringView cwd, Inod
     return {};
 }
 
-ErrorOr<void> VirtualFileSystem::unmount(StringView path, StringView cwd, InUse in_use)
+ErrorOr<void> VirtualFileSystem::unmount(StringView path, StringView cwd, InUse in_use, bool force)
 {
     auto target = TRY(resolve(path, cwd));
     RefPtr<FileSystem> file_system;
@@ -442,7 +443,11 @@ ErrorOr<void> VirtualFileSystem::unmount(StringView path, StringView cwd, InUse 
         return Error::from_errno(EINVAL);
     if (in_use(*file_system, target.path.view()))
         return Error::from_errno(EBUSY);
-    TRY(file_system->sync());
+    if (auto synced = file_system->sync(); synced.is_error() && !force)
+        return synced;
+    // Whatever's still open on it finds out from what it reads and writes, and that takes something to ask.
+    if (force)
+        TRY(s_forced_out.try_append(*file_system));
     MutexLocker locker(s_mounts_lock);
     for (size_t i = s_mounts.size(); i > 0; --i) {
         auto const& mount = s_mounts[i - 1];

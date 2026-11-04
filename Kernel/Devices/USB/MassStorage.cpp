@@ -35,6 +35,7 @@ constexpr u8 scsi_read_capacity = 0x25;
 constexpr u8 scsi_read = 0x28;
 constexpr u8 scsi_write = 0x2a;
 constexpr u8 scsi_synchronize = 0x35;
+constexpr u8 scsi_start_stop = 0x1b;
 
 struct [[gnu::packed]] CommandWrapper {
     u32 signature;
@@ -72,8 +73,27 @@ public:
     {
     }
 
+    [[nodiscard]] StringView bus_name() const override { return "USB"_sv; }
+    [[nodiscard]] bool is_removable() const override { return true; }
+
+    ErrorOr<void> eject() override
+    {
+        {
+            MutexLocker locker(m_lock);
+            u8 const synchronize[10] = { scsi_synchronize };
+            (void)run_command(synchronize, sizeof(synchronize), 0, false);
+            // Load/eject: and not to start again.
+            u8 const stop[6] = { scsi_start_stop, 0, 0, 0, 0x02, 0 };
+            (void)run_command(stop, sizeof(stop), 0, false);
+        }
+        BlockDevice::remove_disk(*this);
+        return {};
+    }
+
     ErrorOr<void> read_blocks(u64 first, size_t count, Bytes destination) override
     {
+        if (m_device.has_gone())
+            return Error::from_errno(ENXIO);
         MutexLocker locker(m_lock);
         finish_what_a_panic_interrupted();
         size_t done = 0;
@@ -88,6 +108,8 @@ public:
 
     ErrorOr<void> write_blocks(u64 first, size_t count, ReadonlyBytes source) override
     {
+        if (m_device.has_gone())
+            return Error::from_errno(ENXIO);
         MutexLocker locker(m_lock);
         finish_what_a_panic_interrupted();
         size_t done = 0;
@@ -102,6 +124,8 @@ public:
 
     ErrorOr<void> flush() override
     {
+        if (m_device.has_gone())
+            return Error::from_errno(ENXIO);
         MutexLocker locker(m_lock);
         finish_what_a_panic_interrupted();
         u8 const command[10] = { scsi_synchronize };
@@ -249,6 +273,11 @@ ErrorOr<bool> attach_mass_storage(Device& device, InterfaceDescription const& in
     auto reference = adopt_ref(*disk);
     if (!TRY(disk->read_size()))
         return true;
+    // (There's nothing left of it to tell it to, and a disk has no more than that to do.)
+    // (A reference of its own, for as long as the device lasts: it may have been ejected long before it's taken out.)
+    auto* kept = new (Base::nothrow) RefPtr<Disk>(reference);
+    if (kept)
+        device.set_removal_callback([](void* context) { BlockDevice::remove_disk(**static_cast<RefPtr<Disk>*>(context)); }, kept);
     add_disk(reference, "USB"_sv);
     return true;
 }

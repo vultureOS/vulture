@@ -78,6 +78,7 @@ add_executable(Kernel
     Devices/Storage/AHCIDevice.cpp
     Devices/Storage/BlockDevice.cpp
     Devices/Storage/NVMeDevice.cpp
+    Devices/Storage/DiskEvents.cpp
     Devices/Storage/Storage.cpp
     Devices/Storage/VirtIOBlockDevice.cpp
     Devices/USB/HID.cpp
@@ -86,7 +87,7 @@ add_executable(Kernel
     Devices/VirtIO/VirtIO.cpp
     FileSystem/DataVolume.cpp
     FileSystem/DevFS.cpp
-    FileSystem/FATFS.cpp
+    FileSystem/ForeignFS.cpp
     FileSystem/FileDescription.cpp
     FileSystem/FSEvents.cpp
     FileSystem/IOBuffer.cpp
@@ -178,7 +179,7 @@ target_link_options(Kernel PRIVATE
     -Wl,-z,max-page-size=4096
     -Wl,--build-id=none)
 
-target_link_libraries(Kernel PRIVATE LibACPI LibCompress LibCrypto LibDeviceTree LibELF LibVultureFS LibUnicode LibBase LibBaseFreestanding)
+target_link_libraries(Kernel PRIVATE LibACPI LibCompress LibCrypto LibDeviceTree LibELF LibForeignFS LibVultureFS LibUnicode LibBase LibBaseFreestanding)
 
 # The key the system's seal is checked with: see Tools/vseal, and Security/Seal.h.
 set(VULTURE_SIGNING_DIR ${VULTURE_HOST_TOOLS}/../../signing CACHE PATH "Where the key that signs the system is")

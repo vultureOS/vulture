@@ -1,0 +1,7 @@
+{
+    "Label" : "com.vulture.diskarbitrationd",
+    "ProgramArguments" : [ "/usr/libexec/diskarbitrationd" ],
+    "KeepAlive" : true,
+    "RunAtLoad" : true,
+    "ThrottleInterval" : 1
+}

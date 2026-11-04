@@ -48,6 +48,11 @@ enum class Symbol : u8 {
     Speaker,
     Globe,
     Lock,
+    Eject,
+    FirstAid,
+    Erase,
+    Mount,
+    Partition,
 };
 
 // A control's face: a shape with shadows outside it, a fill, shading inside it.

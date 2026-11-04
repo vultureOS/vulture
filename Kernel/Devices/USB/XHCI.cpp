@@ -105,6 +105,8 @@ constexpr u32 control_direction_in = 1 << 16;
 constexpr u32 code_success = 1;
 constexpr u32 code_stall = 6;
 constexpr u32 code_short_packet = 13;
+// Of our own: nothing a controller says. It's been taken out.
+constexpr u32 code_device_gone = 0xffff;
 
 struct TRB {
     u64 parameter;
@@ -217,6 +219,8 @@ public:
     }
 
     void rescan_hub();
+    // It's come out: whatever's waiting on it finds out now, and not at some timeout.
+    void stop_waiting();
 
     ErrorOr<void> initialize(u16 first_max_packet);
     ErrorOr<void> bring_up();
@@ -402,6 +406,20 @@ ErrorOr<void> XHCIDevice::initialize(u16 first_max_packet)
     return {};
 }
 
+void XHCIDevice::stop_waiting()
+{
+    auto const stop = [](XHCIEndpoint& endpoint) {
+        endpoint.code.store(code_device_gone);
+        endpoint.finished.fetch_add(1);
+        endpoint.done.wake_all();
+    };
+    stop(m_default);
+    for (auto* endpoint : m_endpoints) {
+        if (endpoint)
+            stop(*endpoint);
+    }
+}
+
 ErrorOr<size_t> XHCIDevice::wait_for_transfer(XHCIEndpoint& endpoint, u32 finished_before, size_t length)
 {
     // In a panic, the thread that reads events has stopped with everything else.
@@ -418,6 +436,8 @@ ErrorOr<size_t> XHCIDevice::wait_for_transfer(XHCIEndpoint& endpoint, u32 finish
     u32 const code = endpoint.code.load();
     if (code == code_stall)
         return Error::from_errno(EPIPE);
+    if (code == code_device_gone)
+        return Error::from_errno(ENXIO);
     if (code != code_success && code != code_short_packet)
         return Error::from_errno(EIO);
     u32 const residue = endpoint.residue.load();
@@ -1085,8 +1105,10 @@ void Controller::port_loop()
                     dmesgln("USB: port {}: {}", port, attached.error());
             } else if (!connected && device) {
                 dmesgln("USB: port {}: removed", port);
-                // What's waiting on it finds out from its next transfer failing. (Its memory stays, as
-                // its drivers may still be using it, and nothing that's plugged in often enough matters.)
+                // (Its memory stays, as its drivers may still be using it, and nothing that's plugged in often
+                // enough matters.)
+                device->stop_waiting();
+                device->mark_gone();
                 for (u32 slot = 0; slot < 256; ++slot) {
                     if (m_slots[slot] == device) {
                         (void)run_command(0, 0, (trb_disable_slot << 10) | (slot << 24));

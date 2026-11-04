@@ -5,6 +5,7 @@
  */
 
 #include <Desktop.h>
+#include <LibDiskManagement/Disks.h>
 #include <FilesEndpoint.h>
 #include <LibIPC/Bootstrap.h>
 #include <LibIPC/Listener.h>
@@ -819,8 +820,11 @@ public:
         add_place("Downloads"_sv, joined(home.view(), "Downloads"_sv).view(), Symbol::Download);
         add_place("Applications"_sv, "/Applications"_sv, Symbol::Applications);
         m_sidebar->add_section("Locations"_sv);
+        m_system_row = m_places.size();
         add_place("Vulture HD"_sv, "/"_sv, Symbol::Drive);
         add_place("Trash"_sv, joined(home.view(), ".Trash"_sv).view(), Symbol::Trash);
+        refresh_volumes();
+        m_volumes_timer = Application::the().add_timer(500, true, [this] { refresh_volumes(); });
         m_sidebar->on_select = [this](size_t row) {
             if (m_syncing_sidebar)
                 return;
@@ -865,6 +869,56 @@ private:
     {
         m_sidebar->add_row(title, symbol);
         m_places.append(MUST(String::from_view(path)));
+    }
+
+    // What's under /Volumes, after the start-up disk: as they're plugged in and taken out.
+    void refresh_volumes()
+    {
+        Vector<String> now;
+        if (DIR* directory = opendir("/Volumes")) {
+            while (auto* entry = readdir(directory)) {
+                StringView const name { entry->d_name, strlen(entry->d_name) };
+                // (That one's for the machine, and nobody's business.)
+                if (name == "."_sv || name == ".."_sv || name == "EFI"_sv || name.starts_with('.'))
+                    continue;
+                now.append(MUST(String::from_view(name)));
+            }
+            closedir(directory);
+        }
+        for (size_t row = m_shown_volumes.size(); row > 0; --row) {
+            bool still_there = false;
+            for (auto const& name : now)
+                still_there = still_there || name.view() == m_shown_volumes[row - 1].view();
+            if (still_there)
+                continue;
+            size_t const sidebar_row = m_system_row + row;
+            auto const place = MUST(String::from_view(m_places[sidebar_row].view()));
+            bool const was_here = m_icons->path().starts_with(place.view());
+            m_sidebar->remove_row(sidebar_row);
+            m_places.remove(sidebar_row);
+            m_shown_volumes.remove(row - 1);
+            if (was_here)
+                navigate(Desktop::home_directory().view(), false);
+        }
+        for (auto const& name : now) {
+            bool shown = false;
+            for (auto const& known : m_shown_volumes)
+                shown = shown || known.view() == name.view();
+            if (shown)
+                continue;
+            size_t const after = m_system_row + m_shown_volumes.size();
+            auto const path = joined("/Volumes"_sv, name.view());
+            size_t const row = m_sidebar->insert_row_after(after, name.view(), Symbol::Drive);
+            m_places.insert(row, MUST(String::from_view(path.view())));
+            m_shown_volumes.append(MUST(String::from_view(name.view())));
+            StringBuilder label;
+            label.appendff("Eject {}", name.view());
+            m_sidebar->set_row_accessory(row, Symbol::Eject, label.view(), [path = MUST(String::from_view(path.view()))] {
+                StringBuilder line;
+                line.appendff("eject {}", path.view());
+                (void)DiskManagement::request(line.view());
+            });
+        }
     }
 
     void navigate(StringView given, bool remember)
@@ -948,6 +1002,9 @@ private:
     Label* m_status { nullptr };
     ListModel m_list_model;
     Vector<String> m_places;
+    size_t m_system_row { 0 };
+    Vector<String> m_shown_volumes;
+    int m_volumes_timer { -1 };
     Vector<String> m_back_stack;
     Vector<String> m_forward_stack;
     bool m_syncing_sidebar { false };

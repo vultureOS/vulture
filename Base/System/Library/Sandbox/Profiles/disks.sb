@@ -1,3 +1,5 @@
-# Says what is mounted, which it asks the kernel. (It looks at the volumes to say so.)
+# Says what is plugged in and what's on it, which it asks the kernel, and asks diskarbitrationd to change.
 include application
 read /Volumes
+read /private/var/run
+write /private/var/run/diskarbitrationd.socket

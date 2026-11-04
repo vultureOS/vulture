@@ -50,7 +50,8 @@ public:
     static ErrorOr<void> make_node(StringView path, StringView cwd, InodeType, u32 permissions);
     // Whichever of them is mounted here, gone. EBUSY if `in_use` says someone's still using it.
     using InUse = bool (*)(FileSystem&, StringView path);
-    static ErrorOr<void> unmount(StringView path, StringView cwd, InUse in_use);
+    // With `force`, whatever's left unwritten is lost if it can't be written.
+    static ErrorOr<void> unmount(StringView path, StringView cwd, InUse in_use, bool force = false);
     static ErrorOr<void> unlink(StringView path, StringView cwd);
     static ErrorOr<void> rmdir(StringView path, StringView cwd);
     static ErrorOr<void> rename(StringView old_path, StringView new_path, StringView cwd);

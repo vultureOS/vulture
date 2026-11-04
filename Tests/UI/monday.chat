@@ -29,6 +29,11 @@ ax-expect textarea "Terminal" ~ monday-42
 # (A copy to be getting on with, that takes no room; which says what it's for, to anyone who asks.)
 type cp -c Documents/monday.txt Documents/monday-draft.txt ; xattr -w org.example.for draft Documents/monday-draft.txt ; xattr -p org.example.for Documents/monday-draft.txt\r
 ax-expect textarea "Terminal" ~ draft
+# (And one to take home: on a stick, which comes out again when it's told to.)
+plug stick usb-storage bus=usb0.0,drive=stick
+expect at /Volumes/STICK
+type cp Documents/monday.txt /Volumes/STICK/ ; diskutil eject /Volumes/STICK ; ls /Volumes ; echo stick-is-out\r
+ax-expect textarea "Terminal" ~ stick-is-out
 key meta_l-q
 ax-gone textarea "Terminal"
 # ---- Find it again, by what it's called.

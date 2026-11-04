@@ -165,6 +165,13 @@ public:
     void set_top_padding(float);
     void add_section(StringView title);
     size_t add_row(StringView title, Symbol = Symbol::Folder);
+    // In the same section as that row, right after it. Rows after it move along one.
+    size_t insert_row_after(size_t row, StringView title, Symbol = Symbol::Folder);
+    void remove_row(size_t);
+    // Everything, sections too.
+    void clear();
+    // A small button at the end of a row, as a volume has to eject it.
+    void set_row_accessory(size_t row, Symbol, StringView label, Function<void()> action);
     void select_row(size_t);
     [[nodiscard]] int selected_row() const { return m_selected; }
     [[nodiscard]] StringView row_title(size_t row) const;
@@ -186,6 +193,10 @@ private:
         Symbol symbol;
         bool section;
         int row;
+        bool has_accessory { false };
+        Symbol accessory { Symbol::Eject };
+        String accessory_label {};
+        Function<void()> accessory_action {};
     };
 
     [[nodiscard]] float y_of(size_t entry) const;

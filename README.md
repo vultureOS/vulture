@@ -183,13 +183,14 @@ We keep a [scoreboard](Documentation/Parity.md). It lists what macOS does, featu
       Type Arabic, Hindi, Chinese and more<br>
       Use the terminal, and install signed packages<br>
       Reach the network, over TLS 1.3<br>
-      Boot ARM and x86 from a single disk
+      Boot ARM and x86 from a single disk<br>
+      Plug in a USB stick, and erase or repair it
     </td>
     <td valign="top">
       Browse the web<br>
       Read a PDF<br>
       Use mail, music or video<br>
-      Plug in a USB stick and see it appear (it's next)<br>
+      Use two displays, or swipe between Spaces<br>
       Run real Mac apps, which isn't the goal<br>
       Trust it on real hardware: it's only run in QEMU
     </td>

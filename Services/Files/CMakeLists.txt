@@ -11,4 +11,4 @@ vulture_add_application(Files
     ICON Files
     KIND "File Manager"
     DESTINATION System/Library/CoreServices
-    LIBRARIES LibDesktop)
+    LIBRARIES LibDesktop LibDiskManagement)

@@ -159,7 +159,7 @@ Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page
                Console (framebuffer, font, boot screen) · Debug (log, panic, symbols) · Devices/Serial
                Interrupts · Locking · Memory (buddy, physical memory, heap, memory manager)
                Tasks (Processor, Thread, Scheduler, Process) · Syscalls · Bus/PCI · Devices (VirtIO, Storage)
-               FileSystem (VFS, vultureFS, FAT, tmpfs, devfs, pipes, FSEvents)
+               FileSystem (VFS, vultureFS, FAT, exFAT, ISO 9660, tmpfs, devfs, pipes, FSEvents)
                Time (timer queues) · Tests (ktest) · Library (C++ runtime) · Init.cpp
 Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem (libSystem.B.dylib) · LibDyld (dyld)
                LibCore (event loop, accounts) · LibCrypto · LibIPC · LibJSON · LibServices · LibDeviceTree · LibELF · LibVultureFS · LibTest
@@ -181,6 +181,7 @@ macOS-style at the top, real Unix underneath:
 - `/Applications/*.app`, `/System/Library/{Kernels,CoreServices,Frameworks,LaunchDaemons,LaunchAgents,Fonts,Themes,Sounds,Desktop Pictures}`, `/Library`, `/Users/<name>/{Desktop,Documents,Downloads,Library}`, `/Volumes`
 - `/bin`, `/sbin`, `/usr/{bin,lib,share/man}`, `/private/{etc,var,tmp}` with symlinks at `/etc` and `/var`, and `/dev` (devfs)
 - App bundles: `Name.app/Contents/{Info.plist, MacOS/, Resources/}`
+- What's plugged in goes under `/Volumes`, by what it's called. `diskarbitrationd` hears from `/dev/diskevents` when a disk comes or goes, recognises what's on it, and mounts it; and it does what `diskutil`, `hdiutil`, `bless`, Disks and Settings ask, for those who may.
 - Two volumes, as on a Mac: the sealed system at `/`, and what changes at `/System/Volumes/Data`, showing through at each place `/usr/share/firmlinks` lists (`/Users`, `/private`, `/Applications`, `/Library`, `/usr/local` and so on). `/etc`, `/tmp` and `/var` are links to `private/...`. Applications the system came with are in `/System/Applications`; what's installed is in `/Applications`.
 
 ## Kernel design

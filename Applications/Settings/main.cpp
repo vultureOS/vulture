@@ -9,7 +9,9 @@
 #include <LibJSON/JSON.h>
 #include <PrivacyEndpoint.h>
 #include <Desktop.h>
+#include <Kernel/API/POSIX/sysctl.h>
 #include <LibCore/Account.h>
+#include <LibDiskManagement/Disks.h>
 #include <LibLocale/Locale.h>
 #include <LibUI/Application.h>
 #include <LibUI/Containers.h>
@@ -643,6 +645,64 @@ String read_uname_line()
     return MUST(builder.to_string());
 }
 
+// How full each volume is.
+void build_storage(Page& page)
+{
+    size_t length = 0;
+    Vector<vulture_mount_info> mounts;
+    if (sysctlbyname("vfs.mounts", nullptr, &length, nullptr, 0) == 0) {
+        length += 8 * sizeof(vulture_mount_info);
+        MUST(mounts.try_resize(length / sizeof(vulture_mount_info)));
+        if (sysctlbyname("vfs.mounts", mounts.data(), &length, nullptr, 0) != 0)
+            length = 0;
+        MUST(mounts.try_resize(length / sizeof(vulture_mount_info)));
+    }
+    auto const add_volume = [&](StringView name, vulture_mount_info const& mount) {
+        u64 const capacity = mount.blocks * mount.block_size;
+        u64 const available = mount.free_blocks * mount.block_size;
+        auto& group = page.add_group(name);
+        StringBuilder used;
+        used.appendff("{} used of {}", DiskManagement::size_text(capacity - available).view(), DiskManagement::size_text(capacity).view());
+        (void)group.rows().add<Row>("Used"_sv, used.view());
+        (void)group.rows().add<Row>("Available"_sv, DiskManagement::size_text(available).view());
+    };
+    for (auto const& mount : mounts) {
+        StringView const point { mount.point, strlen(mount.point) };
+        if (point == "/System/Volumes/Data"_sv)
+            add_volume("Vulture HD"_sv, mount);
+        else if (point.starts_with("/Volumes/"_sv) && point != "/Volumes/EFI"_sv)
+            add_volume(point.substring_view(9), mount);
+    }
+    page.finish();
+}
+
+// Which of the systems on the machine it starts from.
+void build_startup_disk(Page& page)
+{
+    auto& group = page.add_group("Start up from"_sv);
+    auto const disks = DiskManagement::list_disks();
+    size_t found = 0;
+    if (!disks.is_error()) {
+        for (auto const& disk : disks.value()) {
+            if (disk.content() != "vulture-system"_sv)
+                continue;
+            ++found;
+            StringBuilder title;
+            title.appendff("{} ({})", disk.label(), disk.name());
+            auto& row = group.rows().add<Row>(title.view());
+            auto& button = row.add<Button>("Choose"_sv);
+            StringBuilder line;
+            line.appendff("set-startup {}", disk.name());
+            button.on_action = [line = MUST(line.to_string())] {
+                (void)DiskManagement::request(line.view());
+            };
+        }
+    }
+    if (found == 0)
+        (void)group.rows().add<Row>("This system is running from memory: there's nothing on a disk to start from."_sv);
+    page.finish();
+}
+
 void build_about(Page& page)
 {
     auto& group = page.add_group();
@@ -694,6 +754,8 @@ public:
         add_pane("Notifications"_sv, Symbol::Question, build_notifications);
         add_pane("Privacy & Security"_sv, Symbol::Lock, build_privacy);
         add_pane("Users"_sv, Symbol::Checkmark, build_users);
+        add_pane("Storage"_sv, Symbol::Drive, build_storage);
+        add_pane("Startup Disk"_sv, Symbol::Drive, build_startup_disk);
         add_pane("About"_sv, Symbol::Folder, build_about);
         m_sidebar->on_select = [this](size_t row) { show_page(row); };
         size_t first = 0;

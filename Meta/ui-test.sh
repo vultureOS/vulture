@@ -96,14 +96,18 @@ walkthroughs=("$source_dir"/Tests/UI/Milestones/*.chat "$source_dir/Tests/UI/mon
 for walkthrough in "${walkthroughs[@]}"; do
     name="$(basename "$walkthrough" .chat)"
     rm -f "$out_dir/$name"-*.png
+    # A USB controller, and a stick that isn't in it yet, for those that plug one in.
+    stick="$out_dir/$name.stick"
+    "$build_dir/host/Tests/LibForeignFS/foreignfs-exercise" make "$stick" 64 exfat STICK > /dev/null
     if ! VULTURE_GPU_WIDTH=2560 VULTURE_GPU_HEIGHT=1600 VULTURE_SCREENSHOT_DEVICE=gpu0 VULTURE_SCREENSHOT_PREFIX="$out_dir/$name-" \
         "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --fresh-disk --boot-args uidesktop \
-        --chat "$walkthrough" --timeout 300 > "$out_dir/$name.log" 2>&1; then
+        --chat "$walkthrough" --timeout 300 -- -device qemu-xhci,id=usb0 -drive "if=none,id=stick,format=raw,file=$stick" > "$out_dir/$name.log" 2>&1; then
         echo "ui-test: $name: it did not get through; see $out_dir/$name.log" >&2
         status=1
         continue
     fi
     echo "ui-test: $name: all of it done"
+    : > "$stick"
     while IFS= read -r shot; do
         case "$shot" in look-*) continue ;; esac
         for _ in $(seq 1 50); do

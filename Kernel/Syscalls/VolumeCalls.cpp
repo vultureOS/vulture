@@ -5,8 +5,9 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Devices/Storage/BlockDevice.h>
-#include <Kernel/FileSystem/FATFS.h>
+#include <Kernel/FileSystem/ForeignFS.h>
 #include <Kernel/FileSystem/FSEvents.h>
 #include <Kernel/FileSystem/FileDescription.h>
 #include <Kernel/FileSystem/TmpFS.h>
@@ -17,6 +18,10 @@
 #include <Kernel/Security/Sandbox.h>
 #include <Kernel/Security/Seal.h>
 #include <Kernel/Tasks/Process.h>
+
+// As <sys/mount.h> has them.
+#define MNT_RDONLY 0x00000001
+#define MNT_FORCE 0x00080000
 
 namespace Kernel {
 
@@ -36,7 +41,8 @@ ErrorOr<FlatPtr> Process::sys_mount(TrapFrame&, SyscallArguments const& argument
         TRY(VirtualFileSystem::mount(TRY(TmpFS::create()), target.path.view()));
         return 0;
     }
-    if (type.view() == "msdos"_sv) {
+    bool const by_recognising = type.view() == "auto"_sv;
+    if (by_recognising || type.view() == "msdos"_sv || type.view() == "exfat"_sv || type.view() == "cd9660"_sv) {
         if (!arguments.values[3])
             return Error::from_errno(EINVAL);
         auto device_path = TRY(copy_path_from_user(arguments.values[3]));
@@ -44,11 +50,17 @@ ErrorOr<FlatPtr> Process::sys_mount(TrapFrame&, SyscallArguments const& argument
         if (device_node.inode->metadata().type != InodeType::BlockDevice)
             return Error::from_errno(ENOTBLK);
         auto const name = device_node.inode->block_device_name();
+        bool const read_only = arguments.values[2] & MNT_RDONLY;
         for (auto& device : BlockDevice::all()) {
-            if (device->name() == name) {
-                TRY(VirtualFileSystem::mount(TRY(create_fat_file_system(*device)), target.path.view()));
-                return 0;
-            }
+            if (device->name() != name)
+                continue;
+            // What's on it says what it is: anything else is someone's mistake.
+            auto const kind = recognise_file_system(*device);
+            if (kind == ForeignFS::Kind::None || (!by_recognising && ForeignFS::name_of(kind) != type.view()))
+                return Error::from_errno(EINVAL);
+            TRY(VirtualFileSystem::mount(TRY(mount_foreign_file_system(*device, read_only)), target.path.view()));
+            dmesgln("Volumes: {} ({}) at {}", device->name(), ForeignFS::name_of(kind), target.path.view());
+            return 0;
         }
         return Error::from_errno(ENXIO);
     }
@@ -60,13 +72,20 @@ ErrorOr<FlatPtr> Process::sys_unmount(TrapFrame&, SyscallArguments const& argume
     if (!m_credentials.is_superuser())
         return Error::from_errno(EPERM);
     auto directory = TRY(copy_path_from_user(arguments.values[0]));
-    TRY(VirtualFileSystem::unmount(directory.view(), current_directory().view(), [](FileSystem& file_system, StringView path) {
+    bool const force = arguments.values[1] & MNT_FORCE;
+    auto const in_use = [](FileSystem& file_system, StringView path) {
         for (auto& process : Process::all()) {
             if (process->is_using(file_system, path))
                 return true;
         }
         return false;
-    }));
+    };
+    auto const not_a_concern = [](FileSystem&, StringView) { return false; };
+    if (force) {
+        TRY(VirtualFileSystem::unmount(directory.view(), current_directory().view(), not_a_concern, true));
+        dmesgln("Volumes: {} was taken away, whatever was using it", directory.view());
+    } else
+        TRY(VirtualFileSystem::unmount(directory.view(), current_directory().view(), in_use));
     return 0;
 }
 

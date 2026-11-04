@@ -426,6 +426,83 @@ void Graphics::draw_symbol(Symbol symbol, FloatRect const& rect, Color color, fl
         m_painter.fill_path(drive, color, FillRule::EvenOdd);
         return;
     }
+    case Symbol::Eject: {
+        Path triangle;
+        triangle.move_to(at(8, 2.6f));
+        triangle.line_to(at(14, 9.2f));
+        triangle.line_to(at(2, 9.2f));
+        triangle.close();
+        auto const corner = at(2, 11);
+        triangle.add_rounded_rect({ corner.x, corner.y, 12 * unit, 2.2f * unit }, 0.6f * unit);
+        m_painter.fill_path(triangle, color);
+        return;
+    }
+    case Symbol::FirstAid: {
+        // A rounded square with a cross cut out of it.
+        Path shape;
+        auto const corner = at(1.6f, 1.6f);
+        shape.add_rounded_rect({ corner.x, corner.y, 12.8f * unit, 12.8f * unit }, 3 * unit);
+        shape.move_to(at(6.8f, 4));
+        shape.line_to(at(9.2f, 4));
+        shape.line_to(at(9.2f, 6.8f));
+        shape.line_to(at(12, 6.8f));
+        shape.line_to(at(12, 9.2f));
+        shape.line_to(at(9.2f, 9.2f));
+        shape.line_to(at(9.2f, 12));
+        shape.line_to(at(6.8f, 12));
+        shape.line_to(at(6.8f, 9.2f));
+        shape.line_to(at(4, 9.2f));
+        shape.line_to(at(4, 6.8f));
+        shape.line_to(at(6.8f, 6.8f));
+        shape.close();
+        m_painter.fill_path(shape, color, FillRule::EvenOdd);
+        return;
+    }
+    case Symbol::Erase: {
+        // An eraser, at an angle, and the line it's going over.
+        Path shape;
+        shape.move_to(at(1.7f, 8.6f));
+        shape.line_to(at(6.3f, 4));
+        shape.line_to(at(10.8f, 8.5f));
+        shape.line_to(at(6.2f, 13.1f));
+        shape.close();
+        shape.move_to(at(7.2f, 3.1f));
+        shape.line_to(at(9.3f, 1));
+        shape.line_to(at(13.8f, 5.5f));
+        shape.line_to(at(11.7f, 7.6f));
+        shape.close();
+        auto const line = at(1.6f, 14);
+        shape.add_rounded_rect({ line.x, line.y, 12.8f * unit, 1.2f * unit }, 0.6f * unit);
+        m_painter.fill_path(shape, color);
+        return;
+    }
+    case Symbol::Partition: {
+        // A pie, with a slice drawn out of it.
+        float const turn = 2 * static_cast<float>(Math::pi);
+        Path shape;
+        shape.move_to(at(7.3f, 8.7f));
+        shape.arc_to(at(7.3f, 8.7f), 5.9f * unit, 0, turn * 0.75f);
+        shape.close();
+        shape.move_to(at(8.7f, 7.3f));
+        shape.arc_to(at(8.7f, 7.3f), 5.9f * unit, turn * 0.75f, turn);
+        shape.close();
+        m_painter.fill_path(shape, color);
+        return;
+    }
+    case Symbol::Mount: {
+        // A drive with an arrow going into it.
+        Path shape;
+        auto const corner = at(1.4f, 8.4f);
+        shape.add_rounded_rect({ corner.x, corner.y, 13.2f * unit, 5.6f * unit }, 1.4f * unit);
+        auto const stem = at(7.1f, 1.6f);
+        shape.add_rounded_rect({ stem.x, stem.y, 1.8f * unit, 4 * unit }, 0.3f * unit);
+        shape.move_to(at(8, 7.6f));
+        shape.line_to(at(5, 4.8f));
+        shape.line_to(at(11, 4.8f));
+        shape.close();
+        m_painter.fill_path(shape, color);
+        return;
+    }
     case Symbol::Lock: {
         Path body;
         auto corner = at(3.2f, 7.2f);
@@ -496,18 +573,19 @@ void Graphics::draw_symbol(Symbol symbol, FloatRect const& rect, Color color, fl
     }
     case Symbol::Refresh: {
         // Most of a circle, and the head of the arrow on its end.
-        constexpr int steps = 18;
+        constexpr int steps = 24;
         for (int i = 0; i <= steps; ++i) {
-            float angle = -0.6f + 5.0f * static_cast<float>(i) / static_cast<float>(steps);
+            // From a little past the top, the long way round, and back up to it.
+            float angle = -0.75f + 5.46f * static_cast<float>(i) / static_cast<float>(steps);
             auto point = at(8 + 5.2f * static_cast<float>(Math::cosine(static_cast<double>(angle))), 8 + 5.2f * static_cast<float>(Math::sine(static_cast<double>(angle))));
             if (i == 0)
                 path.move_to(point);
             else
                 path.line_to(point);
         }
-        path.move_to(at(12.4f, 1.8f));
-        path.line_to(at(12.4f, 5));
-        path.line_to(at(9.2f, 5));
+        path.move_to(at(6.6f, 0.7f));
+        path.line_to(at(8.9f, 2.8f));
+        path.line_to(at(6.6f, 4.9f));
         break;
     }
     case Symbol::Folder: {

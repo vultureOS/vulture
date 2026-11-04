@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/API/POSIX/disk.h>
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/Devices/Storage/DiskEvents.h>
+#include <Kernel/Locking/Mutex.h>
+#include <Kernel/Memory/UserAccess.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Devices/Storage/BlockDevice.h>
 #include <Kernel/Memory/Heap.h>
@@ -13,6 +17,7 @@
 namespace Kernel {
 
 static Vector<NonnullRefPtr<BlockDevice>> s_devices;
+static Mutex s_devices_lock;
 static u32 s_next_minor = 0;
 
 BlockDevice::BlockDevice(String name, u64 block_count, bool read_only)
@@ -23,15 +28,92 @@ BlockDevice::BlockDevice(String name, u64 block_count, bool read_only)
 {
 }
 
-Vector<NonnullRefPtr<BlockDevice>>& BlockDevice::all()
+Vector<NonnullRefPtr<BlockDevice>> BlockDevice::all()
 {
-    return s_devices;
+    MutexLocker locker(s_devices_lock);
+    Vector<NonnullRefPtr<BlockDevice>> copy;
+    for (auto const& device : s_devices)
+        MUST(copy.try_append(device));
+    return copy;
 }
 
 ErrorOr<void> BlockDevice::register_device(NonnullRefPtr<BlockDevice> device)
 {
     TRY(DevFS::the().add_device(device->name(), device));
-    return s_devices.try_append(move(device));
+    auto const& added = *device;
+    {
+        MutexLocker locker(s_devices_lock);
+        TRY(s_devices.try_append(move(device)));
+    }
+    DiskEvents::disk_appeared(added.name());
+    return {};
+}
+
+void BlockDevice::remove_disk(BlockDevice& disk)
+{
+    // (Kept here for as long as this takes, as these are what's holding them.)
+    NonnullRefPtr<BlockDevice> keep(disk);
+    disk.m_gone = true;
+    Vector<NonnullRefPtr<BlockDevice>> going;
+    {
+        MutexLocker locker(s_devices_lock);
+        for (size_t i = s_devices.size(); i > 0; --i) {
+            auto device = s_devices[i - 1];
+            auto* partition = device->as_partition();
+            if (device.ptr() != &disk && (!partition || &partition->disk() != &disk))
+                continue;
+            MUST(going.try_append(device));
+            s_devices.remove(i - 1);
+        }
+    }
+    for (auto& device : going) {
+        device->m_gone = true;
+        DevFS::the().remove_device(device->name());
+        DiskEvents::disk_disappeared(device->name());
+    }
+}
+
+ErrorOr<FlatPtr> BlockDevice::ioctl(FileDescription&, unsigned request, FlatPtr argument)
+{
+    switch (request) {
+    case DKIOCGETBLOCKSIZE:
+        TRY(copy_to_user(argument, static_cast<u32>(block_size)));
+        return 0;
+    case DKIOCGETBLOCKCOUNT:
+        TRY(copy_to_user(argument, block_count()));
+        return 0;
+    case DKIOCSYNCHRONIZE:
+        TRY(flush());
+        return 0;
+    case DKIOCEJECT:
+        TRY(eject());
+        return 0;
+    case VULTURE_DKIOCRESCAN: {
+        if (as_partition())
+            return Error::from_errno(ENOTTY);
+        // What's there goes, and what it now says comes in its place.
+        Vector<NonnullRefPtr<BlockDevice>> going;
+        {
+            MutexLocker locker(s_devices_lock);
+            for (size_t i = s_devices.size(); i > 0; --i) {
+                auto device = s_devices[i - 1];
+                auto* partition = device->as_partition();
+                if (!partition || &partition->disk() != this)
+                    continue;
+                TRY(going.try_append(device));
+                s_devices.remove(i - 1);
+            }
+        }
+        for (auto& device : going) {
+            device->m_gone = true;
+            DevFS::the().remove_device(device->name());
+            DiskEvents::disk_disappeared(device->name());
+        }
+        TRY(flush());
+        return TRY(scan_partitions(*this));
+    }
+    }
+    return Error::from_errno(ENOTTY);
 }
 
 InodeMetadata BlockDevice::metadata() const
@@ -45,6 +127,8 @@ InodeMetadata BlockDevice::metadata() const
 // Byte-granular access for programs: whole blocks through a bounce buffer.
 ErrorOr<size_t> BlockDevice::read(u64 offset, size_t count, IOBuffer const& buffer)
 {
+    if (m_gone)
+        return Error::from_errno(ENXIO);
     u64 size = m_block_count * block_size;
     if (offset >= size)
         return 0;
@@ -74,6 +158,8 @@ ErrorOr<size_t> BlockDevice::read(u64 offset, size_t count, IOBuffer const& buff
 
 ErrorOr<size_t> BlockDevice::write(u64 offset, size_t count, IOBuffer const& buffer)
 {
+    if (m_gone)
+        return Error::from_errno(ENXIO);
     if (m_read_only)
         return Error::from_errno(EROFS);
     u64 size = m_block_count * block_size;
@@ -120,13 +206,15 @@ PartitionDevice::PartitionDevice(NonnullRefPtr<BlockDevice> disk, String name, u
     __builtin_memcpy(m_type, type, sizeof(m_type));
 }
 
-ErrorOr<NonnullRefPtr<PartitionDevice>> PartitionDevice::create(BlockDevice& disk, String name, u64 first, u64 count, u8 const (&type)[16])
+ErrorOr<NonnullRefPtr<PartitionDevice>> PartitionDevice::create(BlockDevice& disk, String name, u64 first, u64 count, u8 const (&type)[16], u8 const* unique)
 {
     if (first + count > disk.block_count() || count == 0)
         return Error::from_errno(EINVAL);
     auto* partition = new (Base::nothrow) PartitionDevice(disk, move(name), first, count, type);
     if (!partition)
         return Error::from_errno(ENOMEM);
+    if (unique)
+        __builtin_memcpy(partition->m_unique, unique, sizeof(partition->m_unique));
     return adopt_ref(*partition);
 }
 
@@ -231,10 +319,10 @@ ErrorOr<size_t> scan_partitions(BlockDevice& disk)
         return result.release_error();
     }
     size_t found = 0;
-    auto add = [&](u64 first, u64 count, u8 const(&type)[16]) -> ErrorOr<void> {
+    auto add = [&](u64 first, u64 count, u8 const(&type)[16], u8 const* unique = nullptr) -> ErrorOr<void> {
         StringBuilder name;
         name.appendff("{}s{}", disk.name(), found + 1);
-        auto partition = TRY(PartitionDevice::create(disk, TRY(name.to_string()), first, count, type));
+        auto partition = TRY(PartitionDevice::create(disk, TRY(name.to_string()), first, count, type, unique));
         TRY(BlockDevice::register_device(partition));
         ++found;
         return {};
@@ -281,7 +369,7 @@ ErrorOr<size_t> scan_partitions(BlockDevice& disk)
         for (u8 byte : entry.type)
             used = used || byte;
         if (used && entry.last_lba >= entry.first_lba)
-            result = add(entry.first_lba, entry.last_lba - entry.first_lba + 1, entry.type);
+            result = add(entry.first_lba, entry.last_lba - entry.first_lba + 1, entry.type, entry.unique);
     }
     kfree(table);
     TRY(result);

@@ -305,6 +305,13 @@ add_custom_target(test-oracle
     USES_TERMINAL
     VERBATIM)
 
+# Disks of the kinds other machines use, a USB stick plugged in and pulled out, and what a real Mac makes of them.
+add_custom_target(test-media
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-media ${CMAKE_SOURCE_DIR}/Meta/media-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    DEPENDS host uefi target boot-archive
+    USES_TERMINAL
+    VERBATIM)
+
 # What a data volume does that takes the disk from outside to see.
 add_custom_target(test-volume
     COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-volume ${CMAKE_SOURCE_DIR}/Meta/volume-test.sh --build-dir ${CMAKE_BINARY_DIR}
@@ -334,7 +341,7 @@ add_custom_target(parity
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-volume test-disk-log test-oracle test-harness test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-sound test-network test-hardening test-compressor test-hardware test-raspberry-pi test-sanitized-kernel test-ui test-persistence)
+add_custom_target(check DEPENDS test-media test-volume test-disk-log test-oracle test-harness test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-sound test-network test-hardening test-compressor test-hardware test-raspberry-pi test-sanitized-kernel test-ui test-persistence)
 
 # M5's "done when": 100 power cuts at random moments while writing; each
 # must leave a disk that passes fsck and remounts with every committed

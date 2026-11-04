@@ -1,0 +1,83 @@
+# M20: a USB stick comes and goes while everything else goes on, and Disks can do what it's for.
+timeout 60
+# Nothing here is pulled out, so nothing should be forced off.
+forbid was taken away
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 1
+plug stick usb-storage bus=usb0.0,drive=stick
+expect at /Volumes/STICK
+# ---- There in the Files sidebar, with something on it.
+click button "Files"
+pause 1
+ax-expect row "STICK"
+click row "STICK"
+pause 1
+ax-expect cell "README.TXT"
+pointer 16000 3000
+pause 1
+screenshot files-with-a-stick.png
+# ---- Disks shows it, and can check it and erase it.
+key meta_l-spc
+expect search: shown
+pause 0.3
+type disks
+pause 1
+type \r
+expect disks: ready
+pause 1
+ax-expect row "STICK"
+click row "STICK"
+pause 0.5
+ax-expect text "ExFAT"
+click button "First Aid"
+ax-expect button "Run"
+click button "Run"
+expect disks: first aid finished: clean
+ax-expect button "OK"
+click button "OK"
+ax-gone button "OK"
+click button "Erase…"
+ax-expect button "Erase"
+pointer 16000 3000
+pause 1
+screenshot disks-erase.png
+click popup "Format"
+pause 0.5
+click menuitem "MS-DOS (FAT)"
+pause 0.3
+click button "Erase"
+expect disks: erased
+pause 2
+ax-expect text "MS-DOS (FAT)"
+# ---- Divided in two.
+click button "Partition…"
+ax-expect button "Partition"
+pointer 16000 3000
+pause 1
+screenshot disks-partition.png
+click button "Partition"
+expect disks: partitioned
+pause 2
+ax-expect row "UNTITLED 1"
+ax-expect row "UNTITLED 2"
+# ---- And gone, when it's ejected.
+click button "Eject"
+ax-gone row "UNTITLED 1"
+ax-gone row "UNTITLED 2"
+key meta_l-q
+pause 1
+# ---- How full things are, and what it starts from.
+click button "Settings"
+ax-expect row "Storage"
+click row "Storage"
+pause 0.5
+ax-expect text "Used"
+ax-expect text "Available"
+click row "Startup Disk"
+pause 0.5
+pointer 16000 3000
+pause 1
+screenshot settings-startup.png
+key meta_l-q

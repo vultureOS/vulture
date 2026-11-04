@@ -10,4 +10,4 @@ vulture_add_application(Settings
     IDENTIFIER com.vulture.Settings
     ICON Settings
     KIND "System Configuration"
-    LIBRARIES LibDesktop LibLocale)
+    LIBRARIES LibDesktop LibDiskManagement LibLocale)

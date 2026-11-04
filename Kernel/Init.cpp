@@ -38,11 +38,12 @@
 #include <Kernel/Devices/Storage/BlockDevice.h>
 #include <Kernel/Devices/Storage/StorageControllers.h>
 #include <Kernel/FileSystem/IOBuffer.h>
+#include <Kernel/Devices/Storage/DiskEvents.h>
 #include <Kernel/FileSystem/DataVolume.h>
 #include <Kernel/FileSystem/FSEvents.h>
 #include <Kernel/FileSystem/DevFS.h>
 #include <Kernel/Debug/DiskLog.h>
-#include <Kernel/FileSystem/FATFS.h>
+#include <Kernel/FileSystem/ForeignFS.h>
 #include <Kernel/FileSystem/TmpFS.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/FileSystem/VultureFS.h>
@@ -202,30 +203,23 @@ static void make_directory(StringView path)
         must("making a mount point"_sv, move(result));
 }
 
-// Mounts every FAT volume found on the disks under /Volumes, the way macOS
-// shows them: the EFI System Partition (the one holding an EFI directory)
-// as /Volumes/EFI, others by device name.
+// The EFI System Partition (the one holding an EFI directory) at /Volumes/EFI, for the system's own use, and not for changing:
+// it's where the kernel's own log is, written behind anything's back. Everything else diskarbitrationd sees to.
 static void mount_volumes()
 {
-    bool made_volumes = false;
     for (auto& device : BlockDevice::all()) {
-        auto file_system = create_fat_file_system(*device);
-        if (file_system.is_error())
+        if (recognise_file_system(*device) != ForeignFS::Kind::FAT)
             continue;
-        if (!made_volumes) {
-            make_directory("/Volumes"_sv);
-            made_volumes = true;
-        }
-        bool is_efi = !file_system.value()->root_inode()->lookup("EFI"_sv).is_error();
-        StringBuilder path;
-        path.append("/Volumes/"_sv);
-        path.append(is_efi ? "EFI"_sv : device->name());
-        make_directory(path.view());
-        if (auto result = VirtualFileSystem::mount(file_system.release_value(), path.view()); result.is_error()) {
-            dmesgln("Volumes: can't mount {} at {}: {}", device->name(), path.view(), result.error());
+        auto file_system = mount_foreign_file_system(*device, true);
+        if (file_system.is_error() || file_system.value()->root_inode()->lookup("EFI"_sv).is_error())
+            continue;
+        make_directory("/Volumes/EFI"_sv);
+        if (auto result = VirtualFileSystem::mount(file_system.release_value(), "/Volumes/EFI"_sv); result.is_error()) {
+            dmesgln("Volumes: can't mount {} at /Volumes/EFI: {}", device->name(), result.error());
             continue;
         }
-        dmesgln("Volumes: {} (FAT) at {}", device->name(), path.view());
+        dmesgln("Volumes: {} (FAT) at /Volumes/EFI", device->name());
+        break;
     }
 }
 
@@ -255,13 +249,38 @@ static bool is_system_for_this_machine(FileSystem& file_system)
 // be vouched for. What comes with that is `s_data_device`, the partition after it for its data.
 static RefPtr<BlockDevice> s_data_device;
 
+// What's been chosen in Settings, on an EFI System Partition: a partition's GUID, or nothing.
+static bool chosen_startup_disk(u8* unique)
+{
+    for (auto& device : BlockDevice::all()) {
+        if (recognise_file_system(*device) != ForeignFS::Kind::FAT)
+            continue;
+        auto file_system = mount_foreign_file_system(*device, true);
+        if (file_system.is_error())
+            continue;
+        auto file = file_system.value()->root_inode()->lookup("StartupDisk"_sv);
+        if (file.is_error())
+            continue;
+        auto const got = file.value()->read(0, 16, IOBuffer::kernel(unique));
+        if (!got.is_error() && got.value() == 16)
+            return true;
+    }
+    return false;
+}
+
 static bool mount_root_file_system(API::BootInfo const& boot_info, bool checking)
 {
     int refused_by = 0;
-    auto& devices = BlockDevice::all();
+    auto const devices = BlockDevice::all();
+    u8 chosen[16];
+    bool const has_chosen = chosen_startup_disk(chosen);
+    // The one that's been chosen, if it's there; and if it won't do, any.
+    for (int round = has_chosen ? 0 : 1; round < 2; ++round)
     for (size_t i = 0; i < devices.size(); ++i) {
         auto& device = *devices[i];
         if (!is_system_partition(device))
+            continue;
+        if (round == 0 && __builtin_memcmp(device.as_partition()->unique(), chosen, 16) != 0)
             continue;
         auto sealed = Seal::open_system_image(device, checking);
         if (sealed.is_error()) {
@@ -344,6 +363,7 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     // devfs comes first: disks add themselves to it as they are found.
     auto devices = must("devfs"_sv, DevFS::create());
     must("devices"_sv, create_basic_devices());
+    must("disk events"_sv, DiskEvents::create_devices());
     must("terminals"_sv, create_terminals());
     set_display_ignores_cursor_hot_spot(arguments.has_flag("cursortopleft"_sv));
     initialize_graphics();

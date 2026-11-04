@@ -99,7 +99,7 @@ Sizes are rough estimates of new lines, scaled from the reference figures above.
 | | M17 | [Unicode and locale](#m17-unicode-and-locale) | Done | Have text, dates and numbers handled correctly for any language | 15k |
 | | M18 | [Shaping and input](#m18-shaping-and-input) | Done | Read and type any language, with emoji, in any control | 30k |
 | | M19 | [vultureFS 2](#m19-vulturefs-2) | Done | Use a 1 TiB disk, duplicate files instantly, roll back a snapshot | 20k |
-| | M20 | [External media](#m20-external-media) | | Plug in a USB stick; erase and repair disks; open disk images | 8k |
+| | M20 | [External media](#m20-external-media) | Done | Plug in a USB stick; erase and repair disks; open disk images | 8k |
 | | M21 | [Layers](#m21-layers) | | See animations stay smooth even when an app hangs, with the spinning cursor | 18k |
 | | M22 | [Displays and gestures](#m22-displays-and-gestures) | | Use two displays, swipe between Spaces, record the screen | 8k |
 | **2 Mac feel** | M23 | [Windows and Spaces](#m23-windows-and-spaces) | | Tile, go full screen, use App Exposé and Stage | 10k |
@@ -599,6 +599,21 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **Testing inside a copy of the system.** With a `dd` of its own at last, a test that changes to a copy of the system and runs `dd` ran that one, for the wrong processor, if `PATH` had a relative entry in it. The seal tests then found nothing to catch, and said so as if the kernel had let a tampered file by.
 - **Tests that click by position go stale.** One new row in Settings moved everything under it, and each walkthrough that clicked one of those by coordinates went wrong, as M15 said it would. They go by name now.
 - **What a Mac does that's wrong.** Nine of POSIX's checks and seven of the commands are different on purpose. Each is written down in `Tests/Parity`, with why.
+
+### M20
+
+- **A real Mac's fsck is a better judge than ours.** Ours and the volume both thought all was well, and `fsck_msdos` found 67 clusters in use by nothing: files that had been removed and never let go of, which is the test's doing, and a fair thing for a checker to complain about. It's now what every volume written here has to get past, in both directions.
+- **A hash table moves things.** The first host run with the sanitizers on found a volume keeping references to nodes in a table that had since grown. They're on the heap now, where they stay.
+- **A reference that outlived what it was of.** Unmounting looked up the root, then let go of the file system, then of the root: whose last moments wanted the volume that had just gone. A `VERIFY` said so, on the first stick to come out.
+- **Ejected isn't taken out.** A stick that's been ejected is still in its port, and when it does come out there has to be something left to tell. The device keeps a reference to its disk for as long as it lasts.
+- **Nothing used to change the list of disks.** `BlockDevice::all()` handed out the list itself, which was fine when it was only ever added to, before anything ran. Now it's a copy, under a lock.
+- **A walkthrough passed with a sheet nobody could see.** Erase's sheet asked for a size from something that had no opinion on one, and came out with no height. It wasn't drawn, yet the accessibility tree listed its buttons and a click on them still landed, so every step passed. It only showed in the screenshot. What has no room is now gone from the tree and from hit testing too, as it already was from the screen, and a test says so.
+- **A stale message about a name.** After partitioning, the first new volume was forced off and mounted again. The daemon did the work and only then read that `disk2s1` had gone, which by then was true of the old one and not of the new one with its name. Anything writing to it just then would have lost data. A mount's record now says whether what it's on has gone, so a name alone can't take a volume away, and the walkthrough forbids that line.
+- **Look at symbols at the size they're seen.** First Aid's cross came out as a pair of dice, from two overlapping arms under an even-odd fill. Refresh looked like a "d". Both had passed by being there; a crop of the toolbar is what showed them.
+- **A frame rate that depends on the machine.** The drag test fell to 56 fps during a full `check`, and made 59.7 alone. Each frame only takes about 10 ms of work: it's the fixed beat that can't catch up, which is what M21 replaces.
+- **Limit:** disk images are plain ones, so a Mac's compressed `.dmg` isn't read yet, and a disc is ISO 9660 with Joliet or Rock Ridge, with no UDF.
+- **Limit:** only disks come and go. The general kind of hot-plugging is M45.
+- **Limit:** a volume forced out while in use stays in memory until the machine restarts, for whatever's still holding its files to be told.
 
 ### M19
 

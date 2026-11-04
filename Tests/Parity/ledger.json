@@ -1494,11 +1494,27 @@
                 },
                 {
                     "feature": "Storage",
-                    "milestone": "M20"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "output": "m20-media: all of it done"
+                        }
+                    ]
                 },
                 {
                     "feature": "Startup Disk",
-                    "milestone": "M20"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-media",
+                            "output": "a machine with two systems starts from whichever was chosen"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m20-media-settings-startup.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Displays",
@@ -1627,12 +1643,15 @@
                 },
                 {
                     "feature": "Disks",
-                    "claim": "partial",
-                    "missing": "erase, partition, repair, mount",
-                    "milestone": "M20",
+                    "claim": "present",
                     "proof": [
                         {
-                            "suite": "test-ui"
+                            "suite": "test-ui",
+                            "golden": "m20-media-disks-erase.png"
+                        },
+                        {
+                            "suite": "test-media",
+                            "output": "damage is found, and put right"
                         }
                     ]
                 },
@@ -2368,31 +2387,97 @@
                 },
                 {
                     "feature": "Plug in a USB stick",
-                    "milestone": "M20"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-media",
+                            "output": "a USB stick plugged in comes up under /Volumes"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m20-media-files-with-a-stick.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Eject",
-                    "milestone": "M20"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-media",
+                            "output": "reads, writes, and ejects"
+                        },
+                        {
+                            "suite": "test-media",
+                            "output": "pulled out with no warning"
+                        }
+                    ]
                 },
                 {
                     "feature": "FAT, writing",
-                    "milestone": "M20"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-media",
+                            "output": "fat12 made here passes this Mac's fsck"
+                        },
+                        {
+                            "suite": "test-media",
+                            "output": "fat16 made here passes this Mac's fsck"
+                        },
+                        {
+                            "suite": "test-media",
+                            "output": "fat32 made here passes this Mac's fsck"
+                        }
+                    ]
                 },
                 {
                     "feature": "exFAT",
-                    "milestone": "M20"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-media",
+                            "output": "exfat made here passes this Mac's fsck"
+                        },
+                        {
+                            "suite": "test-media",
+                            "output": "a exfat volume made by this Mac reads here"
+                        }
+                    ]
                 },
                 {
                     "feature": "ISO 9660",
-                    "milestone": "M20"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-media",
+                            "output": "an ISO 9660 disc made by this Mac reads here"
+                        }
+                    ]
                 },
                 {
                     "feature": "Disk images",
-                    "milestone": "M20"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-media",
+                            "output": "a disk image made, attached, written and read"
+                        }
+                    ]
                 },
                 {
                     "feature": "diskutil and hdiutil",
-                    "milestone": "M20"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-media",
+                            "output": "a stick erased and divided"
+                        },
+                        {
+                            "suite": "test-media",
+                            "output": "damage is found, and put right"
+                        }
+                    ]
                 },
                 {
                     "feature": "Disk encryption",

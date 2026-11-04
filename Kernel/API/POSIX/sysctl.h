@@ -36,5 +36,5 @@ struct vulture_mount_info {
     unsigned long long blocks;
     unsigned long long free_blocks;
     int read_only;
-    int reserved;
+    int device_gone; // What it was on has been taken away. Another may have the name by now.
 };

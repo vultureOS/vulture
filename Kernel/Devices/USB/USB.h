@@ -65,6 +65,16 @@ class Device {
 public:
     virtual ~Device() = default;
 
+    // It's come out of its port. Whatever's waiting on it stops waiting; whoever's using it finds out.
+    [[nodiscard]] bool has_gone() const { return m_gone; }
+    void mark_gone();
+    // What's to hear about that, once: a disk, say.
+    void set_removal_callback(void (*callback)(void*), void* context)
+    {
+        m_removal_callback = callback;
+        m_removal_context = context;
+    }
+
     // On the default endpoint. `data` is what it says is either going or coming; returns how much did.
     virtual ErrorOr<size_t> control(u8 request_type, u8 request, u16 value, u16 index, Bytes data) = 0;
 
@@ -82,7 +92,21 @@ public:
 
     // The next steps after an endpoint has stalled.
     virtual ErrorOr<void> clear_stall(Endpoint&) = 0;
+
+private:
+    bool m_gone { false };
+    void (*m_removal_callback)(void*) { nullptr };
+    void* m_removal_context { nullptr };
 };
+
+inline void Device::mark_gone()
+{
+    if (m_gone)
+        return;
+    m_gone = true;
+    if (m_removal_callback)
+        m_removal_callback(m_removal_context);
+}
 
 // The class drivers: false if this isn't an interface it knows how to drive.
 ErrorOr<bool> attach_hid(Device&, InterfaceDescription const&);
