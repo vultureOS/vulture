@@ -180,7 +180,7 @@ We keep a [scoreboard](Documentation/Parity.md). It lists what macOS does, featu
     <td valign="top">
       Log in, use windows, the Dock and Overview<br>
       Manage files, and search them<br>
-      Read and type Arabic, Hindi, Chinese and more<br>
+      Type Arabic, Hindi, Chinese and more<br>
       Use the terminal, and install signed packages<br>
       Reach the network, over TLS 1.3<br>
       Boot ARM and x86 from a single disk
