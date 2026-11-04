@@ -66,6 +66,8 @@ public:
     {
         for (size_t done = 0; done < count;) {
             size_t blocks = min(count - done, transfer_blocks);
+            // There's one bounce buffer: it's only ours from before the request until what's in it has been dealt with.
+            MutexLocker locker(m_lock);
             TRY(request(request_in, first + done, blocks));
             __builtin_memcpy(buffer.data() + done * block_size, physical_to_virtual(m_bounce), blocks * block_size);
             done += blocks;
@@ -79,6 +81,7 @@ public:
             return Error::from_errno(EROFS);
         for (size_t done = 0; done < count;) {
             size_t blocks = min(count - done, transfer_blocks);
+            MutexLocker locker(m_lock);
             __builtin_memcpy(physical_to_virtual(m_bounce), buffer.data() + done * block_size, blocks * block_size);
             TRY(request(request_out, first + done, blocks));
             done += blocks;
@@ -90,6 +93,7 @@ public:
     {
         if (!(m_features & feature_flush))
             return {};
+        MutexLocker locker(m_lock);
         return request(request_flush, 0, 0);
     }
 
@@ -104,9 +108,9 @@ private:
     {
     }
 
+    // With the lock held.
     ErrorOr<void> request(u32 type, u64 sector, size_t blocks)
     {
-        MutexLocker locker(m_lock);
         // In a panic, there may be a request under way: it shares our memory, so it has to end first.
         if (is_panicking()) {
             u64 const deadline = Time::now() + Time::ticks_from_milliseconds(2'000);

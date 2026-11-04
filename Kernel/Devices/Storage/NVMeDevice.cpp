@@ -165,6 +165,8 @@ public:
     {
         for (size_t done = 0; done < count;) {
             size_t blocks = min(count - done, transfer_bytes / block_size);
+            // There's one bounce buffer: it's only ours from before the request until what's in it has been dealt with.
+            MutexLocker locker(m_lock);
             TRY(transfer(io_read, first + done, blocks));
             __builtin_memcpy(buffer.data() + done * block_size, physical_to_virtual(m_bounce), blocks * block_size);
             done += blocks;
@@ -176,6 +178,7 @@ public:
     {
         for (size_t done = 0; done < count;) {
             size_t blocks = min(count - done, transfer_bytes / block_size);
+            MutexLocker locker(m_lock);
             __builtin_memcpy(physical_to_virtual(m_bounce), buffer.data() + done * block_size, blocks * block_size);
             TRY(transfer(io_write, first + done, blocks));
             done += blocks;
@@ -211,9 +214,9 @@ private:
     ErrorOr<void> create_io_queues(bool with_interrupts);
     void handle_interrupt();
 
+    // With the lock held.
     ErrorOr<void> transfer(u8 opcode, u64 lba, size_t blocks)
     {
-        MutexLocker locker(m_lock);
         size_t bytes = blocks * block_size;
         Command command {};
         command.dword0 = opcode;
