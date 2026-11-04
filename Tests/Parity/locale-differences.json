@@ -1,0 +1,4 @@
+{
+    "about": "What Foundation says on this Mac that LibLocale doesn't, for the same locale: each with why. There are none: where CLDR says something else, what the Mac says is in Meta/generate-locale.py.",
+    "differences": []
+}

@@ -1,0 +1,395 @@
+{
+    "about": "What the C library says for a locale on this Mac that this system's doesn't, with why. A Mac's C locale files (/usr/share/locale) come from old BSD tables, and don't agree with its own Foundation, which is what's being matched: that comparison, in locale-differences.json, has nothing in it. This system has one set of data, from CLDR.",
+    "differences": [
+        {
+            "command": "en_GB.UTF-8 am or pm",
+            "kind": "chosen",
+            "why": "As %r: only for a locale that CLDR says uses twelve hours, and with CLDR's word for it."
+        },
+        {
+            "command": "en_GB.UTF-8 %r",
+            "kind": "chosen",
+            "why": "The twelve-hour time's only there for a locale CLDR says uses twelve hours; a Mac's older tables have it for others too."
+        },
+        {
+            "command": "en_GB.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "fr_FR.UTF-8 %x",
+            "kind": "chosen",
+            "why": "How a date's written: from CLDR's short format here, and from an older table on a Mac, which Foundation there doesn't agree with either."
+        },
+        {
+            "command": "fr_FR.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "es_ES.UTF-8 weekday",
+            "kind": "chosen",
+            "why": "The names of days: from CLDR here, as everything else on this system is. A Mac's C locale files are older than its own Foundation's data, which is what's matched exactly."
+        },
+        {
+            "command": "es_ES.UTF-8 month",
+            "kind": "chosen",
+            "why": "The names of months: from CLDR here. A Mac's C locale files are older than its own Foundation's data, which is what's matched exactly."
+        },
+        {
+            "command": "es_ES.UTF-8 %c",
+            "kind": "chosen",
+            "why": "Made from the names of days and months, which come from CLDR here."
+        },
+        {
+            "command": "es_ES.UTF-8 am or pm",
+            "kind": "chosen",
+            "why": "As %r: only for a locale that CLDR says uses twelve hours, and with CLDR's word for it."
+        },
+        {
+            "command": "es_ES.UTF-8 %r",
+            "kind": "chosen",
+            "why": "The twelve-hour time's only there for a locale CLDR says uses twelve hours; a Mac's older tables have it for others too."
+        },
+        {
+            "command": "es_ES.UTF-8 date command",
+            "kind": "chosen",
+            "why": "Made from names and an order that come from CLDR here, with one form for all locales rather than a Mac's older one for each."
+        },
+        {
+            "command": "es_ES.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "it_IT.UTF-8 %x",
+            "kind": "chosen",
+            "why": "How a date's written: from CLDR's short format here, and from an older table on a Mac, which Foundation there doesn't agree with either."
+        },
+        {
+            "command": "it_IT.UTF-8 am or pm",
+            "kind": "chosen",
+            "why": "As %r: only for a locale that CLDR says uses twelve hours, and with CLDR's word for it."
+        },
+        {
+            "command": "it_IT.UTF-8 %r",
+            "kind": "chosen",
+            "why": "The twelve-hour time's only there for a locale CLDR says uses twelve hours; a Mac's older tables have it for others too."
+        },
+        {
+            "command": "it_IT.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "pt_BR.UTF-8 weekday",
+            "kind": "chosen",
+            "why": "The names of days: from CLDR here, as everything else on this system is. A Mac's C locale files are older than its own Foundation's data, which is what's matched exactly."
+        },
+        {
+            "command": "pt_BR.UTF-8 month",
+            "kind": "chosen",
+            "why": "The names of months: from CLDR here. A Mac's C locale files are older than its own Foundation's data, which is what's matched exactly."
+        },
+        {
+            "command": "pt_BR.UTF-8 %c",
+            "kind": "chosen",
+            "why": "Made from the names of days and months, which come from CLDR here."
+        },
+        {
+            "command": "pt_BR.UTF-8 date command",
+            "kind": "chosen",
+            "why": "Made from names and an order that come from CLDR here, with one form for all locales rather than a Mac's older one for each."
+        },
+        {
+            "command": "pt_BR.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "nl_NL.UTF-8 money",
+            "kind": "chosen",
+            "why": "The currency symbol is CLDR's, with what a Mac's Foundation says for it where that's different."
+        },
+        {
+            "command": "nl_NL.UTF-8 month",
+            "kind": "chosen",
+            "why": "The names of months: from CLDR here. A Mac's C locale files are older than its own Foundation's data, which is what's matched exactly."
+        },
+        {
+            "command": "nl_NL.UTF-8 %c",
+            "kind": "chosen",
+            "why": "Made from the names of days and months, which come from CLDR here."
+        },
+        {
+            "command": "nl_NL.UTF-8 am or pm",
+            "kind": "chosen",
+            "why": "As %r: only for a locale that CLDR says uses twelve hours, and with CLDR's word for it."
+        },
+        {
+            "command": "nl_NL.UTF-8 %r",
+            "kind": "chosen",
+            "why": "The twelve-hour time's only there for a locale CLDR says uses twelve hours; a Mac's older tables have it for others too."
+        },
+        {
+            "command": "nl_NL.UTF-8 date command",
+            "kind": "chosen",
+            "why": "Made from names and an order that come from CLDR here, with one form for all locales rather than a Mac's older one for each."
+        },
+        {
+            "command": "nl_NL.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "sv_SE.UTF-8 %c",
+            "kind": "chosen",
+            "why": "Made from the names of days and months, which come from CLDR here."
+        },
+        {
+            "command": "sv_SE.UTF-8 am or pm",
+            "kind": "chosen",
+            "why": "As %r: only for a locale that CLDR says uses twelve hours, and with CLDR's word for it."
+        },
+        {
+            "command": "sv_SE.UTF-8 %r",
+            "kind": "chosen",
+            "why": "The twelve-hour time's only there for a locale CLDR says uses twelve hours; a Mac's older tables have it for others too."
+        },
+        {
+            "command": "sv_SE.UTF-8 date command",
+            "kind": "chosen",
+            "why": "Made from names and an order that come from CLDR here, with one form for all locales rather than a Mac's older one for each."
+        },
+        {
+            "command": "sv_SE.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "pl_PL.UTF-8 %x",
+            "kind": "chosen",
+            "why": "How a date's written: from CLDR's short format here, and from an older table on a Mac, which Foundation there doesn't agree with either."
+        },
+        {
+            "command": "pl_PL.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "tr_TR.UTF-8 %x",
+            "kind": "chosen",
+            "why": "How a date's written: from CLDR's short format here, and from an older table on a Mac, which Foundation there doesn't agree with either."
+        },
+        {
+            "command": "tr_TR.UTF-8 am or pm",
+            "kind": "chosen",
+            "why": "As %r: only for a locale that CLDR says uses twelve hours, and with CLDR's word for it."
+        },
+        {
+            "command": "tr_TR.UTF-8 %r",
+            "kind": "chosen",
+            "why": "The twelve-hour time's only there for a locale CLDR says uses twelve hours; a Mac's older tables have it for others too."
+        },
+        {
+            "command": "tr_TR.UTF-8 date command",
+            "kind": "chosen",
+            "why": "Made from names and an order that come from CLDR here, with one form for all locales rather than a Mac's older one for each."
+        },
+        {
+            "command": "tr_TR.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "ru_RU.UTF-8 weekday",
+            "kind": "chosen",
+            "why": "The names of days: from CLDR here, as everything else on this system is. A Mac's C locale files are older than its own Foundation's data, which is what's matched exactly."
+        },
+        {
+            "command": "ru_RU.UTF-8 %c",
+            "kind": "chosen",
+            "why": "Made from the names of days and months, which come from CLDR here."
+        },
+        {
+            "command": "ru_RU.UTF-8 date command",
+            "kind": "chosen",
+            "why": "Made from names and an order that come from CLDR here, with one form for all locales rather than a Mac's older one for each."
+        },
+        {
+            "command": "ru_RU.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "he_IL.UTF-8 money",
+            "kind": "chosen",
+            "why": "The currency symbol is CLDR's, with what a Mac's Foundation says for it where that's different."
+        },
+        {
+            "command": "he_IL.UTF-8 %c",
+            "kind": "chosen",
+            "why": "Made from the names of days and months, which come from CLDR here."
+        },
+        {
+            "command": "he_IL.UTF-8 am or pm",
+            "kind": "chosen",
+            "why": "As %r: only for a locale that CLDR says uses twelve hours, and with CLDR's word for it."
+        },
+        {
+            "command": "he_IL.UTF-8 %r",
+            "kind": "chosen",
+            "why": "The twelve-hour time's only there for a locale CLDR says uses twelve hours; a Mac's older tables have it for others too."
+        },
+        {
+            "command": "he_IL.UTF-8 date command",
+            "kind": "chosen",
+            "why": "Made from names and an order that come from CLDR here, with one form for all locales rather than a Mac's older one for each."
+        },
+        {
+            "command": "he_IL.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "ja_JP.UTF-8 money",
+            "kind": "chosen",
+            "why": "The currency symbol is CLDR's, with what a Mac's Foundation says for it where that's different."
+        },
+        {
+            "command": "ja_JP.UTF-8 month",
+            "kind": "chosen",
+            "why": "The names of months: from CLDR here. A Mac's C locale files are older than its own Foundation's data, which is what's matched exactly."
+        },
+        {
+            "command": "ja_JP.UTF-8 %X",
+            "kind": "chosen",
+            "why": "How a time's written: as digits with colons here, where a Mac's older table has some words in it."
+        },
+        {
+            "command": "ja_JP.UTF-8 %c",
+            "kind": "chosen",
+            "why": "Made from the names of days and months, which come from CLDR here."
+        },
+        {
+            "command": "ja_JP.UTF-8 am or pm",
+            "kind": "chosen",
+            "why": "As %r: only for a locale that CLDR says uses twelve hours, and with CLDR's word for it."
+        },
+        {
+            "command": "ja_JP.UTF-8 %r",
+            "kind": "chosen",
+            "why": "The twelve-hour time's only there for a locale CLDR says uses twelve hours; a Mac's older tables have it for others too."
+        },
+        {
+            "command": "ja_JP.UTF-8 date command",
+            "kind": "chosen",
+            "why": "Made from names and an order that come from CLDR here, with one form for all locales rather than a Mac's older one for each."
+        },
+        {
+            "command": "ja_JP.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "ko_KR.UTF-8 month",
+            "kind": "chosen",
+            "why": "The names of months: from CLDR here. A Mac's C locale files are older than its own Foundation's data, which is what's matched exactly."
+        },
+        {
+            "command": "ko_KR.UTF-8 %x",
+            "kind": "chosen",
+            "why": "How a date's written: from CLDR's short format here, and from an older table on a Mac, which Foundation there doesn't agree with either."
+        },
+        {
+            "command": "ko_KR.UTF-8 %X",
+            "kind": "chosen",
+            "why": "How a time's written: as digits with colons here, where a Mac's older table has some words in it."
+        },
+        {
+            "command": "ko_KR.UTF-8 %c",
+            "kind": "chosen",
+            "why": "Made from the names of days and months, which come from CLDR here."
+        },
+        {
+            "command": "ko_KR.UTF-8 %r",
+            "kind": "chosen",
+            "why": "The twelve-hour time's only there for a locale CLDR says uses twelve hours; a Mac's older tables have it for others too."
+        },
+        {
+            "command": "ko_KR.UTF-8 date command",
+            "kind": "chosen",
+            "why": "Made from names and an order that come from CLDR here, with one form for all locales rather than a Mac's older one for each."
+        },
+        {
+            "command": "ko_KR.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "zh_CN.UTF-8 weekday",
+            "kind": "chosen",
+            "why": "The names of days: from CLDR here, as everything else on this system is. A Mac's C locale files are older than its own Foundation's data, which is what's matched exactly."
+        },
+        {
+            "command": "zh_CN.UTF-8 month",
+            "kind": "chosen",
+            "why": "The names of months: from CLDR here. A Mac's C locale files are older than its own Foundation's data, which is what's matched exactly."
+        },
+        {
+            "command": "zh_CN.UTF-8 %X",
+            "kind": "chosen",
+            "why": "How a time's written: as digits with colons here, where a Mac's older table has some words in it."
+        },
+        {
+            "command": "zh_CN.UTF-8 %c",
+            "kind": "chosen",
+            "why": "Made from the names of days and months, which come from CLDR here."
+        },
+        {
+            "command": "zh_CN.UTF-8 am or pm",
+            "kind": "chosen",
+            "why": "As %r: only for a locale that CLDR says uses twelve hours, and with CLDR's word for it."
+        },
+        {
+            "command": "zh_CN.UTF-8 %r",
+            "kind": "chosen",
+            "why": "The twelve-hour time's only there for a locale CLDR says uses twelve hours; a Mac's older tables have it for others too."
+        },
+        {
+            "command": "zh_CN.UTF-8 date command",
+            "kind": "chosen",
+            "why": "Made from names and an order that come from CLDR here, with one form for all locales rather than a Mac's older one for each."
+        },
+        {
+            "command": "zh_CN.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        },
+        {
+            "command": "hi_IN.UTF-8 %c",
+            "kind": "chosen",
+            "why": "Made from the names of days and months, which come from CLDR here."
+        },
+        {
+            "command": "hi_IN.UTF-8 am or pm",
+            "kind": "chosen",
+            "why": "As %r: only for a locale that CLDR says uses twelve hours, and with CLDR's word for it."
+        },
+        {
+            "command": "hi_IN.UTF-8 %r",
+            "kind": "chosen",
+            "why": "The twelve-hour time's only there for a locale CLDR says uses twelve hours; a Mac's older tables have it for others too."
+        },
+        {
+            "command": "hi_IN.UTF-8 date command",
+            "kind": "chosen",
+            "why": "Made from names and an order that come from CLDR here, with one form for all locales rather than a Mac's older one for each."
+        },
+        {
+            "command": "hi_IN.UTF-8 langinfo",
+            "kind": "chosen",
+            "why": "What's above, by nl_langinfo()."
+        }
+    ]
+}

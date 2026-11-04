@@ -1,0 +1,36 @@
+.\" Copyright (c) 2022-2026, Krisna Pranav
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.TH LAUNCHCTL 1 "November 2026" "vultureOS" "General Commands Manual"
+.SH NAME
+launchctl \- talk to the launch daemon
+.SH SYNOPSIS
+.B launchctl
+.I subcommand
+.RI [ arguments ]
+.SH DESCRIPTION
+.B launchctl
+asks
+.B vlaunchd
+about the jobs it looks after, and tells it what to do with them. Everything but
+.B list
+takes root.
+.SH SUBCOMMANDS
+.TP
+.B list \fR[\fIlabel\fR]
+With no label, a line for every job: its process, how it last ended, and its label. With one, what's known about that job.
+.TP
+.B start \fIlabel
+Starts a job that's loaded, now.
+.TP
+.B stop \fIlabel
+Asks a job to stop. If it's kept alive, it comes back.
+.TP
+.B load \fIpath
+Loads a job from a property list.
+.TP
+.B unload \fIpath
+Stops a job and forgets it.
+.SH EXIT STATUS
+0 if it worked. 113 if there's no such job, and 1 for anything else.
+.SH SEE ALSO
+.BR launchd.plist (5)

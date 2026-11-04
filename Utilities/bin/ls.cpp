@@ -5,6 +5,7 @@
  */
 
 #include "Common.h"
+#include <locale.h>
 #include <dirent.h>
 #include <errno.h>
 #include <grp.h>
@@ -346,6 +347,7 @@ void list_directory(char const* path, bool print_header)
 
 int main(int argc, char** argv)
 {
+    setlocale(LC_ALL, "");
     s_now = time(nullptr);
     int first = 1;
     for (; first < argc && argv[first][0] == '-' && argv[first][1]; ++first) {

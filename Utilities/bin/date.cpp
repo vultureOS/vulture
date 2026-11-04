@@ -5,6 +5,7 @@
  */
 
 #include "Common.h"
+#include <locale.h>
 #include <time.h>
 
 // date [-u] [-r seconds] [+format]: the time, as macOS prints it
@@ -13,7 +14,8 @@ int main(int argc, char** argv)
 {
     bool utc = false;
     time_t when = time(nullptr);
-    char const* format = "%a %b %e %H:%M:%S %Z %Y";
+    setlocale(LC_ALL, "");
+    char const* format = "%+";
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-u") == 0) {
             utc = true;

@@ -177,6 +177,14 @@ public:
             setenv("TERM", "xterm-256color", 1);
             setenv("COLORTERM", "truecolor", 1);
             setenv("TERM_PROGRAM", "Terminal", 1);
+            // How things are written, for the programs in it, as a Mac's Terminal says too.
+            {
+                Desktop::Preferences preferences("com.vulture.desktop"_sv);
+                StringBuilder language;
+                language.append(preferences.string("region"_sv).value_or("en_US"_sv));
+                language.append(".UTF-8"_sv);
+                setenv("LANG", MUST(language.to_string()).characters(), 1);
+            }
             setenv("SHELL", shell, 1);
             setenv("HOME", home, 1);
             if (!getenv("PATH"))
