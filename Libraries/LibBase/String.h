@@ -96,6 +96,25 @@ public:
 
     void append(StringView text) { write(text); }
     void append(char c) { write({ &c, 1 }); }
+    // As UTF-8.
+    void append_code_point(u32 code)
+    {
+        if (code < 0x80) {
+            append(static_cast<char>(code));
+        } else if (code < 0x800) {
+            append(static_cast<char>(0xc0 | (code >> 6)));
+            append(static_cast<char>(0x80 | (code & 0x3f)));
+        } else if (code < 0x10000) {
+            append(static_cast<char>(0xe0 | (code >> 12)));
+            append(static_cast<char>(0x80 | ((code >> 6) & 0x3f)));
+            append(static_cast<char>(0x80 | (code & 0x3f)));
+        } else {
+            append(static_cast<char>(0xf0 | (code >> 18)));
+            append(static_cast<char>(0x80 | ((code >> 12) & 0x3f)));
+            append(static_cast<char>(0x80 | ((code >> 6) & 0x3f)));
+            append(static_cast<char>(0x80 | (code & 0x3f)));
+        }
+    }
 
     template<typename... Args>
     void appendff(CheckedFormatString<TypeIdentity<Args>...> format, Args const&... args)
