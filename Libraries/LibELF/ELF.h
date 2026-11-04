@@ -29,6 +29,7 @@ constexpr u8 EV_CURRENT = 1;
 
 constexpr Elf64_Half ET_EXEC = 2;
 constexpr Elf64_Half ET_DYN = 3;
+constexpr Elf64_Half ET_CORE = 4;
 
 constexpr Elf64_Half EM_X86_64 = 62;
 constexpr Elf64_Half EM_AARCH64 = 183;
@@ -42,6 +43,7 @@ constexpr Elf64_Half EM_NATIVE = EM_AARCH64;
 constexpr Elf64_Word PT_LOAD = 1;
 constexpr Elf64_Word PT_DYNAMIC = 2;
 constexpr Elf64_Word PT_INTERP = 3;
+constexpr Elf64_Word PT_NOTE = 4;
 constexpr Elf64_Word PT_PHDR = 6;
 constexpr Elf64_Word PT_TLS = 7;
 constexpr Elf64_Word PT_GNU_RELRO = 0x6474e552;
@@ -146,6 +148,12 @@ struct Elf64_Ehdr {
     Elf64_Half e_shentsize;
     Elf64_Half e_shnum;
     Elf64_Half e_shstrndx;
+};
+
+struct Elf64_Nhdr {
+    u32 n_namesz;
+    u32 n_descsz;
+    u32 n_type;
 };
 
 struct Elf64_Phdr {

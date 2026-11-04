@@ -182,7 +182,7 @@ int main(int argc, char** argv)
 
     // DYLD_LIBRARY_PATH finds it elsewhere.
     CHECK(mkdir("/tmp/dyld-test/lib", 0755) == 0);
-    static char library[512 * 1024];
+    static char library[4 * 1024 * 1024];
     CHECK(read_all("/usr/lib/libSystem.B.dylib", library, sizeof(library), length));
     CHECK(write_all("/tmp/dyld-test/lib/libSystem.X.dylib", library, length, 0755));
     auto found = run("/tmp/dyld-test/needs-missing", "DYLD_LIBRARY_PATH=/tmp/dyld-test/lib");

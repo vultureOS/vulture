@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <Kernel/API/POSIX/resource.h>
 #include <Kernel/API/POSIX/signal_numbers.h>
 #include <Kernel/Arch/TrapFrame.h>
 #include <Kernel/FileSystem/FileDescription.h>
@@ -47,7 +48,9 @@ struct SignalAction {
 // waitpid(); a process whose threads have gone is a zombie until then.
 class Process final : public RefCounted<Process> {
 public:
-    static constexpr size_t max_open_files = 64;
+    // The most a process could be allowed: it starts with a limit of default_open_file_limit, as on a Mac, and may raise it.
+    static constexpr size_t max_open_files = 65536;
+    static constexpr size_t default_open_file_limit = 256;
 
     // Starts `path` from the boot archive as process 1.
     [[nodiscard]] static ErrorOr<NonnullRefPtr<Process>> create_init(StringView path, Span<StringView const> arguments);
@@ -74,6 +77,14 @@ public:
     static void set_tracing(bool);
     [[nodiscard]] static bool is_tracing();
     [[nodiscard]] bool is_zombie() const { return m_zombie.load(MemoryOrder::Acquire); }
+    // For kqueue: whether it's ended, and how; how many of a signal have been sent here; how many times it's forked or exec'd.
+    [[nodiscard]] bool has_exited() const { return is_zombie(); }
+    // Is it using this filesystem at all: an open file, a mapping, or somewhere under `path` as its working directory.
+    [[nodiscard]] bool is_using(FileSystem const&, StringView path);
+    [[nodiscard]] int exit_status() const { return m_exit_status; }
+    [[nodiscard]] u32 signal_count(int signal) const { return m_signal_counts[signal].load(); }
+    [[nodiscard]] u32 fork_count() const { return m_fork_count.load(); }
+    [[nodiscard]] u32 exec_count() const { return m_exec_count.load(); }
     [[nodiscard]] bool is_being_killed() const;
     // Job control: the process group and session.
     [[nodiscard]] ProcessID pgid() const { return m_pgid.load(); }
@@ -106,6 +117,8 @@ public:
     void thread_finished(Thread&);
     // A new thread of this process.
     void add_thread(Thread&);
+    // Its thread with this ID, if that's still running.
+    [[nodiscard]] RefPtr<Thread> thread_with_id(u64);
 
     // System calls (see Kernel/API/Syscalls.def).
 #define SYSCALL(name, arguments) ErrorOr<FlatPtr> sys_##name(TrapFrame&, SyscallArguments const&);
@@ -123,6 +136,10 @@ public:
     // process is stopped, or end the thread).
     [[nodiscard]] bool has_work_before_user() const;
     void do_work_before_user(TrapFrame&);
+    // There's no more of that: anything that a signal interrupted is either to be told so by now, or to carry on.
+    void finish_interrupted_syscall(TrapFrame&);
+    // pthread_cancel() has got to this thread: off to where the C library said.
+    void enter_cancel_handler(TrapFrame&);
 
     // Should the thread stop waiting and return toward user mode (it has a
     // signal to take, or must end)?
@@ -160,6 +177,23 @@ private:
     void notify_parent(int code, int status);
     void wait_while_stopped(Thread const&);
 
+    // ptrace (Syscalls/DebugCalls.cpp). The tracer gets to decide about each signal before it does anything: what's stopped here waits
+    // for it, and this says what it decided (0 for nothing).
+    int stop_for_tracer(TrapFrame&, int signal);
+    // No longer traced, and back with its real parent. With the tree lock, as it's changing that.
+    void detach_from_tracer(int signal);
+    void resume_from_tracer(int signal);
+    Atomic<ProcessID> m_tracer_pid { 0 };
+    ProcessID m_parent_before_tracing { 0 };
+    Atomic<bool> m_deny_attach { false };
+    Atomic<bool> m_trace_stopped { false };
+    Atomic<int> m_trace_resume_signal { 0 };
+    Atomic<bool> m_trace_step { false };
+    TrapFrame* m_trace_frame { nullptr };
+
+    // RLIMIT_CORE lets it: /cores/core.PID, with what's in its memory and its registers. Whether that worked.
+    [[nodiscard]] bool write_core_dump(TrapFrame const&, int signal);
+
     // Threads. end_other_threads() makes every other thread end and waits
     // for that; if another thread got there first, the caller ends instead.
     void end_other_threads();
@@ -170,11 +204,16 @@ private:
     void reroute_pending_signals(u64 signals);
     [[nodiscard]] bool blocked_by_every_thread(int signal);
     [[nodiscard]] String current_directory();
+    // For the *at() calls.
+    ErrorOr<String> directory_for(int fd, StringView path);
+    ErrorOr<String> absolute_path_for(int fd, StringView path);
+    ErrorOr<FlatPtr> open_from(StringView path, StringView directory, int flags, u32 mode);
 
     ErrorOr<int> allocate_fd(NonnullRefPtr<FileDescription>, bool close_on_exec, int lowest = 0);
     void release_fd(int fd);
     ErrorOr<NonnullRefPtr<FileDescription>> file(int fd);
     ErrorOr<NonnullRefPtr<Net::Socket>> socket_for(int fd);
+    friend class KQueue;
     ErrorOr<FlatPtr> socket_ioctl(unsigned request, FlatPtr argument);
     void set_name(StringView);
     ErrorOr<String> copy_path_from_user(FlatPtr);
@@ -227,23 +266,68 @@ private:
         bool close_on_exec { false };
     };
 
+    // The table of open files grows as it's needed, up to the limit. Under the lock: everything in it, and that every
+    // descriptor below m_first_free_fd is in use, which is what keeps opening the ten-thousandth file from being slow.
     SpinLock m_files_lock;
-    FileDescriptor m_files[max_open_files];
+    FileDescriptor* m_files { nullptr };
+    size_t m_file_capacity { 0 };
+    size_t m_first_free_fd { 0 };
+
+    // What the descriptor table has room for: at least this. Not with the lock held.
+    ErrorOr<void> ensure_file_capacity(size_t);
+    // With the lock held: this descriptor's entry, or nullptr if the table doesn't reach it.
+    [[nodiscard]] FileDescriptor* file_entry(int fd);
+    // Takes it out of the table, to be dropped when the lock isn't held.
+    FileDescriptor take_file_descriptor(int fd);
+    // Empties the table, closing everything.
+    void close_all_files();
+    void close_files_on_exec();
+
+    // setrlimit's, each as it was given. Only the number of open files and core dumps change what this kernel does.
+    vulture_rlimit m_limits[VULTURE_RLIM_NLIMITS] {
+        { VULTURE_RLIM_INFINITY, VULTURE_RLIM_INFINITY }, // CPU
+        { VULTURE_RLIM_INFINITY, VULTURE_RLIM_INFINITY }, // FSIZE
+        { VULTURE_RLIM_INFINITY, VULTURE_RLIM_INFINITY }, // DATA
+        { 8 * 1024 * 1024, 64 * 1024 * 1024 }, // STACK
+        { 0, VULTURE_RLIM_INFINITY }, // CORE
+        { VULTURE_RLIM_INFINITY, VULTURE_RLIM_INFINITY }, // AS
+        { VULTURE_RLIM_INFINITY, VULTURE_RLIM_INFINITY }, // MEMLOCK
+        { VULTURE_RLIM_INFINITY, VULTURE_RLIM_INFINITY }, // NPROC
+        { default_open_file_limit, VULTURE_RLIM_INFINITY }, // NOFILE
+    };
 
     // Signals sent to the process and what each does; masks, and signals
     // sent to one thread, are the thread's (see Thread.h).
     mutable SpinLock m_signal_lock;
     Atomic<u64> m_pending_signals { 0 };
+    Atomic<u32> m_signal_counts[NSIG] {};
+    Atomic<u32> m_fork_count { 0 };
+    Atomic<FlatPtr> m_cancel_handler { 0 };
+    Atomic<u32> m_exec_count { 0 };
     SignalAction m_signal_actions[NSIG];
     vulture_siginfo m_signal_info[NSIG] {};
 
     // Job control.
     // sigsuspend() and sigtimedwait() wait here.
     WaitQueue m_suspend_wait;
-    // alarm(): SIGALRM when it fires.
+    // alarm() and setitimer(ITIMER_REAL): SIGALRM when it fires, and again after the interval if there is one.
     Mutex m_alarm_lock;
     Timer m_alarm_timer;
     u64 m_alarm_deadline { 0 };
+    u64 m_alarm_interval { 0 };
+    void arm_alarm(u64 deadline);
+    // setitimer(ITIMER_VIRTUAL and ITIMER_PROF), by processor time, which there's no tick to count: while either's set, a timer
+    // looks at what's been used, this often. (m_alarm_lock to change them, with the timer stopped.)
+    struct CpuTimer {
+        u64 next { 0 }; // In ticks of processor time; none if 0.
+        u64 interval { 0 };
+    };
+    static constexpr u64 cpu_timer_look_microseconds = 10'000;
+    SpinLock m_cpu_timers_lock;
+    CpuTimer m_cpu_timers[2];
+    Timer m_cpu_timer_look;
+    void look_at_cpu_timers();
+    [[nodiscard]] u64 cpu_ticks_used();
 
     Credentials m_credentials;
     RefPtr<SandboxProfile> m_sandbox;

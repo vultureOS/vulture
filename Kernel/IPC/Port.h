@@ -16,6 +16,8 @@
 
 namespace Kernel {
 
+class Process;
+
 class FileDescription;
 
 // One message on its way: what the sender gave, held by the kernel until
@@ -33,6 +35,7 @@ struct PortMessage {
     };
     Vector<Region> regions;
     i32 sender_pid { 0 };
+    QoS sender_qos { QoS::Background };
     u32 sender_uid { 0 };
     u32 sender_gid { 0 };
 
@@ -93,6 +96,12 @@ private:
     WaitQueue m_sendable;
     size_t m_capacity { queue_limit };
     bool m_is_reply_port { false };
+    // Who took a message from here last. (Not the thread itself: a process waits for the last reference to each of its threads before it can exec or
+    // go, so nothing else gets to keep one for long.)
+    RefPtr<Process> m_last_receiver_process;
+    u64 m_last_receiver_thread { 0 };
+    void note_receiver(Thread&);
+    [[nodiscard]] RefPtr<Thread> last_receiver();
 
     // Wakes the pollers of the receive right (`receivers`) or of send
     // rights; the first onto this processor with `handoff`.

@@ -11,13 +11,18 @@
 
 __BEGIN_DECLS
 
-// Unnamed semaphores, between the threads of one process.
+// Semaphores: in memory that a program has, or by name, for anyone.
 typedef struct {
     unsigned value;
     unsigned waiters;
 } sem_t;
 
 #define SEM_VALUE_MAX 2147483647
+#define SEM_FAILED ((sem_t*)-1)
+
+sem_t* sem_open(char const* name, int flags, ...);
+int sem_close(sem_t*);
+int sem_unlink(char const* name);
 
 int sem_init(sem_t*, int shared, unsigned value);
 int sem_destroy(sem_t*);

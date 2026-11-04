@@ -11,6 +11,8 @@
 #include <Kernel/Memory/PhysicalAddress.h>
 #include <LibBase/Error.h>
 
+struct vulture_thread_state;
+
 // A user thread's register state, as the arch keeps it in its trap frame.
 
 namespace Kernel::Arch {
@@ -48,5 +50,17 @@ ErrorOr<u64> pop_signal_frame(TrapFrame&);
 // After writing code into a page through another mapping, makes the
 // instruction cache see it.
 void make_code_coherent(PhysicalAddress page);
+
+// Back to the system call instruction that got it here, to make the same call again: EINTR wasn't the answer after all.
+void rewind_syscall(TrapFrame&, u64 number, u64 first_argument);
+// Back in user mode, in this function of the program's, on the stack it's on, with nothing to return to.
+void enter_user_function(TrapFrame&, FlatPtr function);
+// One instruction, then a trap: on the way back to user mode in this frame.
+void set_single_step(TrapFrame&, bool on);
+// Is a thread that's stepping about to run, or not? (Some processors want telling, not just the frame.)
+void note_single_stepping(bool);
+// ptrace's registers.
+void read_thread_state(TrapFrame const&, vulture_thread_state&);
+void write_thread_state(TrapFrame&, vulture_thread_state const&);
 
 }

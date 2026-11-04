@@ -44,6 +44,8 @@ public:
     BootstrapEndpoint::LookUpAnswer look_up(IPC::Sender const&, String name) override;
     BootstrapEndpoint::CheckInAnswer check_in(IPC::Sender const&, String name) override;
     i32 register_service(IPC::Sender const&, String name, IPC::Port service) override;
+    String list_jobs(IPC::Sender const&) override;
+    i32 control_job(IPC::Sender const&, String verb, String what) override;
 
 private:
     bool m_graphical_session { false };
@@ -65,6 +67,13 @@ private:
     void spawn(Job&);
     void reap();
     void job_ended(Job&, int status);
+    // SIGTERM to all of it, then SIGKILL if it's still there after its ExitTimeOut.
+    void ask_to_stop(Job&);
+    void forget_job(Job&);
+    [[nodiscard]] Job* find_job(StringView label);
+    // What a plist's label is, if it's a job at all.
+    [[nodiscard]] static Optional<String> label_in_plist(char const* path);
+    void start_after_loading(Job&);
     void check_stopped();
 
     Core::EventLoop& m_loop;

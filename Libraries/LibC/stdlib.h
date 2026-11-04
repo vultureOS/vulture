@@ -34,6 +34,14 @@ long long strtoll(char const*, char** end, int base);
 unsigned long long strtoull(char const*, char** end, int base);
 
 char* getenv(char const* name);
+// Multibyte strings are UTF-8.
+#define MB_CUR_MAX 4
+int mbtowc(wchar_t*, char const*, size_t);
+int mblen(char const*, size_t);
+int wctomb(char*, wchar_t);
+size_t mbstowcs(wchar_t*, char const*, size_t);
+size_t wcstombs(char*, wchar_t const*, size_t);
+
 int setenv(char const* name, char const* value, int overwrite);
 int unsetenv(char const* name);
 int putenv(char* entry);
@@ -46,6 +54,7 @@ int system(char const* command);
 double strtod(char const*, char** end);
 float strtof(char const*, char** end);
 double atof(char const*);
+int getloadavg(double* averages, int count);
 void* bsearch(void const* key, void const* base, size_t count, size_t size, int (*compare)(void const*, void const*));
 char const* getprogname(void);
 void setprogname(char const* name);

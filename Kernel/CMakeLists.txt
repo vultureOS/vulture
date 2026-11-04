@@ -60,6 +60,7 @@ add_executable(Kernel
     Devices/Net/E1000.cpp
     Devices/Net/VirtIONet.cpp
     Net/NetworkStack.cpp
+    Net/LocalSocket.cpp
     Net/Socket.cpp
     Net/TCP.cpp
     Debug/Sanitizers.cpp
@@ -89,6 +90,7 @@ add_executable(Kernel
     FileSystem/FileDescription.cpp
     FileSystem/IOBuffer.cpp
     FileSystem/Inode.cpp
+    FileSystem/KQueue.cpp
     FileSystem/Pipe.cpp
     IPC/Port.cpp
     FileSystem/Poll.cpp
@@ -111,7 +113,9 @@ add_executable(Kernel
     Memory/UserAccess.cpp
     Security/Credentials.cpp
     Security/Random.cpp
+    Syscalls/DebugCalls.cpp
     Syscalls/Dispatch.cpp
+    Syscalls/EventCalls.cpp
     Syscalls/FileCalls.cpp
     Syscalls/IdentityCalls.cpp
     Syscalls/MemoryCalls.cpp
@@ -121,6 +125,7 @@ add_executable(Kernel
     Syscalls/SystemCalls.cpp
     Syscalls/ThreadCalls.cpp
     Syscalls/TimeCalls.cpp
+    Syscalls/VolumeCalls.cpp
     Tasks/Process.cpp
     Tasks/Processor.cpp
     Tasks/Scheduler.cpp

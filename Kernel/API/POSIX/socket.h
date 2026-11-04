@@ -9,7 +9,12 @@
 // BSD sockets, with the numbers and structures macOS has for them.
 
 #define AF_UNSPEC 0
+#define AF_UNIX 1
+#define AF_LOCAL AF_UNIX
 #define AF_INET 2
+#define PF_UNSPEC AF_UNSPEC
+#define PF_UNIX AF_UNIX
+#define PF_LOCAL AF_UNIX
 #define PF_INET AF_INET
 
 #define SOCK_STREAM 1
@@ -42,8 +47,12 @@
 #define IP_TTL 4
 #define IP_BOUND_IF 25
 
+#define MSG_OOB 0x1
 #define MSG_PEEK 0x2
 #define MSG_DONTROUTE 0x4
+#define MSG_EOR 0x8
+#define MSG_TRUNC 0x10
+#define MSG_CTRUNC 0x20
 #define MSG_WAITALL 0x40
 #define MSG_DONTWAIT 0x80
 #define MSG_NOSIGNAL 0x80000
@@ -76,6 +85,50 @@ struct sockaddr_in {
     struct in_addr sin_addr;
     char sin_zero[8];
 };
+
+// A Unix-domain socket's name: a path.
+struct vulture_sockaddr_un {
+    unsigned char sun_len;
+    unsigned char sun_family;
+    char sun_path[104];
+};
+
+// getsockopt's, at level SOL_LOCAL.
+#define VULTURE_SOL_LOCAL 0
+#define VULTURE_LOCAL_PEERCRED 1
+
+struct vulture_xucred {
+    unsigned int cr_version;
+    unsigned int cr_uid;
+    short cr_ngroups;
+    unsigned int cr_groups[16];
+};
+
+struct vulture_iovec {
+    void* iov_base;
+    unsigned long iov_len;
+};
+
+struct vulture_msghdr {
+    void* msg_name;
+    unsigned int msg_namelen;
+    struct vulture_iovec* msg_iov;
+    int msg_iovlen;
+    void* msg_control;
+    unsigned int msg_controllen;
+    int msg_flags;
+};
+
+struct vulture_cmsghdr {
+    unsigned int cmsg_len;
+    int cmsg_level;
+    int cmsg_type;
+};
+
+// Open files, in a control message at level SOL_SOCKET.
+#define SCM_RIGHTS 1
+
+#define VULTURE_IOV_MAX 1024
 
 struct sockaddr_storage {
     unsigned char ss_len;

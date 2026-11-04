@@ -79,6 +79,14 @@ void sync(void);
 
 int unlink(char const* path);
 int rmdir(char const* path);
+int fchdir(int fd);
+int unlinkat(int directory, char const* path, int flags);
+int faccessat(int directory, char const* path, int mode, int flags);
+int fchownat(int directory, char const* path, uid_t, gid_t, int flags);
+int linkat(int from_directory, char const* from, int to_directory, char const* to, int flags);
+int symlinkat(char const* target, int directory, char const* path);
+ssize_t readlinkat(int directory, char const* path, char* buffer, size_t);
+int getdtablesize(void);
 int chdir(char const* path);
 char* getcwd(char* buffer, size_t size);
 ssize_t readlink(char const* path, char* buffer, size_t size);

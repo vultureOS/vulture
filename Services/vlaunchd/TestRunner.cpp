@@ -30,6 +30,10 @@ struct Test {
 };
 
 Test const s_tests_when_asked[] = {
+    { "/usr/tests/file-cache", 0, 0 },
+    { "/usr/tests/commands", 0, 0 },
+    { "/usr/tests/locale-files", 0, 0 },
+    { "/usr/tests/locale-print", 0, 0 },
     { "/usr/tests/usb-disk", 0, 0 },
     { "/usr/tests/sd-card", 0, 0 },
 };
@@ -46,6 +50,10 @@ Test const s_tests[] = {
     { "/usr/tests/memory", 0, 0 },
     { "/usr/tests/bad-pointers", 0, 0 },
     { "/usr/tests/signals", 0, 0 },
+    { "/usr/tests/debugging", 0, 0 },
+    { "/usr/tests/priority", 0, 0 },
+    { "/usr/tests/plugins", 0, 0 },
+    { "/usr/tests/many-files", 0, 0 },
     { "/usr/tests/sockets", 0, 0 },
     { "/usr/tests/crypto", 0, 0 },
     { "/usr/tests/hardening", 0, 0 },

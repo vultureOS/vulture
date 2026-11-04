@@ -5,7 +5,8 @@
 #
 
 add_executable(TestLibArchive
-    TestTar.cpp)
+    TestTar.cpp
+    TestZip.cpp)
 
-target_link_libraries(TestLibArchive PRIVATE LibTest LibArchive LibBase)
+target_link_libraries(TestLibArchive PRIVATE LibTest LibArchive LibCompress LibBase)
 add_test(NAME LibArchive COMMAND TestLibArchive)

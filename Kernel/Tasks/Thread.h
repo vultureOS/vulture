@@ -20,6 +20,7 @@
 namespace Kernel {
 
 class Process;
+class RunQueue;
 class WaitQueue;
 
 // Quality of service: what a thread's work is for, from least to most
@@ -99,7 +100,27 @@ public:
 
     [[nodiscard]] u64 id() const { return m_id; }
     [[nodiscard]] StringView name() const { return { m_name, m_name_length }; }
-    [[nodiscard]] QoS qos() const { return m_qos; }
+    // How urgent it is now. Which is what it was asked to be, or more, if something more urgent is waiting for it.
+    [[nodiscard]] QoS qos() const { return static_cast<QoS>(m_effective_qos.load(MemoryOrder::Acquire)); }
+    [[nodiscard]] QoS base_qos() const { return m_qos; }
+    void set_base_qos(QoS);
+    // `key` says who's asking: a lock, or someone waiting for one. At least this...
+    void raise_boost(void const* key, QoS);
+    // ...or exactly this, as that's changed...
+    void set_boost(void const* key, QoS);
+    // ...and that's over. There's room for so many at once, and those that don't fit aren't anything worse than a slower thread.
+    void remove_boost(void const* key);
+    // A message for it, from someone this urgent; until it goes back for another. Background is no boost.
+    void set_message_boost(QoS);
+    void raise_message_boost(QoS);
+    // While it's waiting for this thread: which then has to go as fast as this one does, as it changes.
+    void set_boost_target(Thread*);
+    // pthread_cancel()'s.
+    void request_cancel() { m_cancel_requested.store(true); }
+    void set_cancel_enabled(bool on) { m_cancel_enabled.store(on); }
+    void set_cancel_async(bool on) { m_cancel_async.store(on); }
+    void set_in_cancellation_point(bool on) { m_in_cancellation_point.store(on); }
+    [[nodiscard]] bool cancellation_is_due() const { return m_cancel_requested.load() && m_cancel_enabled.load() && (m_in_cancellation_point.load() || m_cancel_async.load()); }
     [[nodiscard]] State state() const { return m_state.load(MemoryOrder::Relaxed); }
     [[nodiscard]] Optional<u32> pinned_processor() const { return m_pinned_processor; }
     [[nodiscard]] u32 last_processor() const { return m_last_processor.load(MemoryOrder::Relaxed); }
@@ -108,6 +129,16 @@ public:
 
     // User threads belong to a process (null for kernel threads).
     [[nodiscard]] Process* process() const { return m_process.ptr(); }
+    // Its tracer's asked for one instruction at a time.
+    [[nodiscard]] bool is_single_stepping() const { return m_single_stepping.load(); }
+    void set_single_stepping(bool on) { m_single_stepping.store(on); }
+    // A signal interrupted this system call: it may yet be made again.
+    void note_syscall_interrupted(u64 number, u64 first_argument)
+    {
+        m_syscall_interrupted = true;
+        m_interrupted_syscall = number;
+        m_interrupted_syscall_argument = first_argument;
+    }
     void set_process(Process&);
     // Where the registers of user mode are saved on entry to the kernel:
     // the top of the thread's kernel stack.
@@ -133,6 +164,25 @@ private:
     char m_name[32] {};
     size_t m_name_length { 0 };
     QoS m_qos { QoS::Default };
+    Atomic<u8> m_effective_qos { to_underlying(QoS::Default) };
+    // Which run queue it's on, and in which class there: under that queue's lock.
+    Atomic<RunQueue*> m_run_queue { nullptr };
+    u8 m_queued_class { 0 };
+    struct Boost {
+        void const* key { nullptr };
+        QoS qos { QoS::Background };
+    };
+    static constexpr size_t max_boosts = 8;
+    SpinLock m_boost_lock;
+    Boost m_boosts[max_boosts];
+    Atomic<u32> m_boost_count { 0 };
+    QoS m_message_boost { QoS::Background };
+    RefPtr<Thread> m_boost_target;
+    void update_effective_qos();
+    Atomic<bool> m_cancel_requested { false };
+    Atomic<bool> m_cancel_enabled { true };
+    Atomic<bool> m_cancel_async { false };
+    Atomic<bool> m_in_cancellation_point { false };
     Optional<u32> m_pinned_processor;
 
     Atomic<State> m_state { State::Created };
@@ -183,6 +233,11 @@ private:
     u64 m_switch_count { 0 };
     // CPU time used, in counter ticks; and when it last got a processor.
     Atomic<u64> m_cpu_ticks { 0 };
+    Atomic<bool> m_single_stepping { false };
+    // A system call that a signal interrupted, and that may yet be made again: see Syscalls/Dispatch.cpp.
+    bool m_syscall_interrupted { false };
+    u64 m_interrupted_syscall { 0 };
+    u64 m_interrupted_syscall_argument { 0 };
     u64 m_switched_in_at { 0 };
 
 public:

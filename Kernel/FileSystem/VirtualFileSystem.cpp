@@ -6,6 +6,7 @@
 
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/FileSystem/FileDescription.h>
+#include <Kernel/FileSystem/Pipe.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Locking/Mutex.h>
 #include <Kernel/Security/Credentials.h>
@@ -238,7 +239,14 @@ ErrorOr<NonnullRefPtr<FileDescription>> VirtualFileSystem::open(StringView path,
         TRY(check_access(parent.directory->metadata(), write_access | search_access));
         auto inode = TRY(parent.directory->create_child(parent.name.view(), InodeType::File, permissions & 07777, {}));
         assign_owner(*inode, *parent.directory);
-        return FileDescription::create(inode, flags);
+        auto created = TRY(FileDescription::create(inode, flags));
+        StringBuilder created_path;
+        if (parent.directory_path.view() != "/"_sv)
+            created_path.append(parent.directory_path.view());
+        created_path.append('/');
+        created_path.append(parent.name.view());
+        created->set_path(TRY(created_path.to_string()));
+        return created;
     }
     if ((flags & O_CREAT) && (flags & O_EXCL))
         return Error::from_errno(EEXIST);
@@ -275,7 +283,30 @@ ErrorOr<NonnullRefPtr<FileDescription>> VirtualFileSystem::open(StringView path,
     TRY(check_access(metadata, wanted));
     if ((flags & O_TRUNC) && (flags & O_ACCMODE) != O_RDONLY && metadata.type == InodeType::File)
         TRY(inode->truncate(0));
-    return FileDescription::create(TRY(inode->open_inode(flags)), flags);
+    // A socket's file isn't to be opened: connect() to it.
+    if (metadata.type == InodeType::Socket)
+        return Error::from_errno(EOPNOTSUPP);
+    if (metadata.type == InodeType::Fifo) {
+        // Each end waits for the other to be there. Not with O_NONBLOCK: then a reader carries on, and a writer's told there's
+        // nobody. Both ends in one description have what they were waiting for.
+        auto pipe = TRY(Pipe::for_fifo(*inode));
+        int const access = flags & O_ACCMODE;
+        if (access == O_WRONLY && (flags & O_NONBLOCK) && !pipe->has_readers()) {
+            Pipe::forget_fifo_if_unused(*inode, *pipe);
+            return Error::from_errno(ENXIO);
+        }
+        u64 const seen = pipe->times_other_end_opened(access == O_WRONLY);
+        auto fifo = TRY(FileDescription::create_for_fifo(inode, pipe, flags));
+        fifo->set_path(TRY(String::from_view(resolved.value().path.view())));
+        if (access != O_RDWR && !(flags & O_NONBLOCK)) {
+            if (!pipe->wait_for_other_end(access == O_WRONLY, seen))
+                return Error::from_errno(EINTR);
+        }
+        return fifo;
+    }
+    auto description = TRY(FileDescription::create(TRY(inode->open_inode(flags)), flags));
+    description->set_path(move(resolved.value().path));
+    return description;
 }
 
 ErrorOr<void> VirtualFileSystem::mkdir(StringView path, StringView cwd, u32 permissions)
@@ -288,6 +319,49 @@ ErrorOr<void> VirtualFileSystem::mkdir(StringView path, StringView cwd, u32 perm
     TRY(check_access(parent.directory->metadata(), write_access | search_access));
     auto directory = TRY(parent.directory->create_child(parent.name.view(), InodeType::Directory, permissions & 07777, {}));
     assign_owner(*directory, *parent.directory);
+    return {};
+}
+
+ErrorOr<void> VirtualFileSystem::make_node(StringView path, StringView cwd, InodeType type, u32 permissions)
+{
+    auto parent = TRY(resolve_parent(path, cwd));
+    if (!parent.directory->lookup(parent.name.view()).is_error())
+        return Error::from_errno(EEXIST);
+    TRY(check_may_write_entry(parent));
+    TRY(Seal::check_may_change(*parent.directory));
+    TRY(check_access(parent.directory->metadata(), write_access | search_access));
+    auto node = TRY(parent.directory->create_child(parent.name.view(), type, permissions & 07777, {}));
+    assign_owner(*node, *parent.directory);
+    return {};
+}
+
+ErrorOr<void> VirtualFileSystem::unmount(StringView path, StringView cwd, InUse in_use)
+{
+    auto target = TRY(resolve(path, cwd));
+    RefPtr<FileSystem> file_system;
+    {
+        MutexLocker locker(s_mounts_lock);
+        for (auto const& mount : s_mounts) {
+            if (mount.path.view() == target.path.view())
+                file_system = mount.file_system;
+        }
+    }
+    if (!file_system)
+        return Error::from_errno(EINVAL);
+    if (in_use(*file_system, target.path.view()))
+        return Error::from_errno(EBUSY);
+    TRY(file_system->sync());
+    MutexLocker locker(s_mounts_lock);
+    for (size_t i = s_mounts.size(); i > 0; --i) {
+        auto const& mount = s_mounts[i - 1];
+        if (mount.file_system.ptr() == file_system.ptr()) {
+            s_mounts.remove(i - 1);
+            return {};
+        }
+        // Something mounted within it has to go first.
+        if (mount.path.view().starts_with(target.path.view()) && mount.path.view() != target.path.view() && mount.path.view()[target.path.length()] == '/')
+            return Error::from_errno(EBUSY);
+    }
     return {};
 }
 
@@ -403,6 +477,42 @@ ErrorOr<void> VirtualFileSystem::for_each_mount_point(Function callback, void* c
     for (size_t i = 0; i < systems.size(); ++i)
         TRY(callback(context, *systems[i], paths[i].view()));
     return {};
+}
+
+static ErrorOr<Vector<NonnullRefPtr<FileSystem>>> all_file_systems()
+{
+    Vector<NonnullRefPtr<FileSystem>> all;
+    MutexLocker locker(s_mounts_lock);
+    if (s_root)
+        TRY(all.try_append(*s_root));
+    for (auto const& mount : s_mounts)
+        TRY(all.try_append(mount.file_system));
+    return all;
+}
+
+size_t VirtualFileSystem::release_file_cache(size_t pages)
+{
+    auto all = all_file_systems();
+    if (all.is_error())
+        return 0;
+    size_t released = 0;
+    for (auto& file_system : all.value()) {
+        if (released >= pages)
+            break;
+        released += file_system->release_cached_pages(pages - released);
+    }
+    return released;
+}
+
+size_t VirtualFileSystem::file_cache_pages()
+{
+    auto all = all_file_systems();
+    if (all.is_error())
+        return 0;
+    size_t total = 0;
+    for (auto& file_system : all.value())
+        total += file_system->cached_page_count();
+    return total;
 }
 
 ErrorOr<void> VirtualFileSystem::sync_all()

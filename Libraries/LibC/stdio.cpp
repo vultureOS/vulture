@@ -6,6 +6,9 @@
 
 #include "Lock.h"
 #include <LibSystem/ThreadPointer.h>
+#include "FloatText.h"
+#include <LibBase/Types.h>
+#include <LibSystem/Syscall.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
@@ -46,6 +49,7 @@ struct FILE {
 static FILE s_stdin { 0, Buffering::Line, false, false, 0, 0, 0, {}, {}, nullptr, 0 };
 static FILE s_stdout { 1, Buffering::Line, false, false, 0, 0, 0, {}, {}, nullptr, 0 };
 static FILE s_stderr { 2, Buffering::None, false, false, 0, 0, 0, {}, {}, nullptr, 0 };
+static bool s_stdout_buffering_decided = false;
 static FILE* s_open_files = nullptr;
 static LibC::Lock s_open_files_lock;
 
@@ -87,6 +91,27 @@ static void unlock_file(FILE* file)
     }
 }
 
+// With a file's lock held, so these can't be where a thread's cancelled: nobody could use that file ever again.
+static ssize_t read_not_cancelling(int fd, void* buffer, size_t size)
+{
+    long const result = System::syscall(System::Syscall::read_nocancel, static_cast<unsigned long>(fd), reinterpret_cast<unsigned long>(buffer), size);
+    if (result < 0) {
+        errno = static_cast<int>(-result);
+        return -1;
+    }
+    return result;
+}
+
+static ssize_t write_not_cancelling(int fd, void const* buffer, size_t size)
+{
+    long const result = System::syscall(System::Syscall::write_nocancel, static_cast<unsigned long>(fd), reinterpret_cast<unsigned long>(buffer), size);
+    if (result < 0) {
+        errno = static_cast<int>(-result);
+        return -1;
+    }
+    return result;
+}
+
 namespace {
 
 class FileLocker {
@@ -115,7 +140,7 @@ FILE* stderr = &s_stderr;
 static bool write_all(int fd, char const* data, size_t length)
 {
     while (length > 0) {
-        ssize_t written = write(fd, data, length);
+        ssize_t written = write_not_cancelling(fd, data, length);
         if (written <= 0)
             return false;
         data += written;
@@ -139,6 +164,14 @@ static int flush(FILE* file)
 
 static void put(FILE* file, char const* data, size_t length)
 {
+    // Whether anyone's reading this as it comes: the first time it matters, as it isn't known before.
+    if (file == &s_stdout && !s_stdout_buffering_decided) {
+        s_stdout_buffering_decided = true;
+        int const saved = errno;
+        if (file->buffering == Buffering::Line && !isatty(file->fd))
+            file->buffering = Buffering::Full;
+        errno = saved;
+    }
     if (file->buffering == Buffering::None) {
         if (!write_all(file->fd, data, length))
             file->error = true;
@@ -225,46 +258,78 @@ void write_unsigned(Output& out, Spec spec, uintmax_t value, unsigned base, bool
     write_padded(out, spec, prefix, body, length, true);
 }
 
-void write_double(Output& out, Spec spec, double value)
+// A long double's as good as a double here, for now: what's printed is what it comes to as one.
+double double_of(long double value)
 {
-    char const* sign = value < 0 ? "-" : (spec.plus ? "+" : (spec.space ? " " : ""));
-    if (value < 0)
+#if defined(__aarch64__)
+    // 128 bits, which there's no hardware for, and no runtime to do it: by hand, to the nearest.
+    u64 parts[2];
+    __builtin_memcpy(parts, &value, sizeof(parts));
+    u64 const low = parts[0];
+    u64 const high = parts[1];
+    bool const negative = high >> 63;
+    int const biased = static_cast<int>((high >> 48) & 0x7fff);
+    u64 const top = high & ((1ull << 48) - 1);
+    u64 result_bits;
+    if (biased == 0x7fff) {
+        result_bits = (0x7ffull << 52) | ((top | low) ? (1ull << 51) : 0);
+    } else {
+        int const exponent = biased - 16383 + 1023;
+        if (exponent >= 0x7ff) {
+            result_bits = 0x7ffull << 52;
+        } else if (exponent <= 0) {
+            // Too small even for what a double's smallest are, near enough.
+            result_bits = 0;
+        } else {
+            // 52 of the 112 bits are kept: 48 from the top word, and 4 from the next.
+            u64 mantissa = (top << 4) | (low >> 60);
+            u64 const lost = low << 4;
+            u64 const half = 1ull << 63;
+            result_bits = (static_cast<u64>(exponent) << 52) | mantissa;
+            if (lost > half || (lost == half && (mantissa & 1)))
+                ++result_bits;
+        }
+    }
+    if (negative)
+        result_bits |= 1ull << 63;
+    double result;
+    __builtin_memcpy(&result, &result_bits, sizeof(result));
+    return result;
+#else
+    return static_cast<double>(value);
+#endif
+}
+
+void write_double(Output& out, Spec spec, double value, char conversion)
+{
+    bool const negative = __builtin_signbit(value);
+    char const* sign = negative ? "-" : (spec.plus ? "+" : (spec.space ? " " : ""));
+    if (negative)
         value = -value;
+    bool const upper = conversion >= 'A' && conversion <= 'Z';
     if (value != value) {
-        write_padded(out, spec, sign, "nan", 3, false);
+        write_padded(out, spec, sign, upper ? "NAN" : "nan", 3, false);
         return;
     }
     if (value > 1.7976931348623157e308) {
-        write_padded(out, spec, sign, "inf", 3, false);
+        write_padded(out, spec, sign, upper ? "INF" : "inf", 3, false);
         return;
     }
-    int precision = spec.precision < 0 ? 6 : (spec.precision > 18 ? 18 : spec.precision);
-    double scale = 1;
-    for (int i = 0; i < precision; ++i)
-        scale *= 10;
-    double rounded = value + 0.5 / scale;
-    // Values beyond 2^64 print their integer part as an approximation.
-    uintmax_t whole = rounded >= 1.8e19 ? UINTMAX_MAX : static_cast<uintmax_t>(rounded);
-    double fraction = rounded - static_cast<double>(whole);
-    char body[96];
-    size_t length = 0;
-    char reversed[32];
-    size_t digits = 0;
-    do {
-        reversed[digits++] = static_cast<char>('0' + whole % 10);
-        whole /= 10;
-    } while (whole);
-    while (digits)
-        body[length++] = reversed[--digits];
-    if (precision > 0 || spec.alternate)
-        body[length++] = '.';
-    for (int i = 0; i < precision; ++i) {
-        fraction *= 10;
-        int digit = static_cast<int>(fraction);
-        if (digit > 9)
-            digit = 9;
-        body[length++] = static_cast<char>('0' + digit);
-        fraction -= digit;
+    // Room for every digit a double can have, and whatever's asked for beyond that.
+    constexpr int most_precision = 2000;
+    char body[1500 + most_precision];
+    int const precision = spec.precision > most_precision ? most_precision : spec.precision;
+    size_t const length = LibC::format_float(body, sizeof(body), value, conversion, precision, spec.alternate);
+    // Hexadecimal's 0x goes before any zeros it's padded with.
+    if ((conversion == 'a' || conversion == 'A') && length > 2) {
+        char prefix[8];
+        size_t const sign_length = strlen(sign);
+        memcpy(prefix, sign, sign_length);
+        prefix[sign_length] = body[0];
+        prefix[sign_length + 1] = body[1];
+        prefix[sign_length + 2] = 0;
+        write_padded(out, spec, prefix, body + 2, length - 2, true);
+        return;
     }
     write_padded(out, spec, sign, body, length, true);
 }
@@ -320,6 +385,7 @@ int format(Output& out, char const* format, va_list arguments)
         int longs = 0;
         bool size_type = false;
         bool half = false;
+        bool long_double = false;
         for (;; ++cursor) {
             if (*cursor == 'l')
                 ++longs;
@@ -327,6 +393,8 @@ int format(Output& out, char const* format, va_list arguments)
                 size_type = true;
             else if (*cursor == 'h')
                 half = true;
+            else if (*cursor == 'L')
+                long_double = true;
             else
                 break;
         }
@@ -375,8 +443,12 @@ int format(Output& out, char const* format, va_list arguments)
         case 'f':
         case 'F':
         case 'g':
+        case 'G':
         case 'e':
-            write_double(out, spec, va_arg(arguments, double));
+        case 'E':
+        case 'a':
+        case 'A':
+            write_double(out, spec, long_double ? double_of(va_arg(arguments, long double)) : va_arg(arguments, double), *cursor);
             break;
         case '%':
             out.write("%", 1);
@@ -607,7 +679,7 @@ size_t fwrite(void const* buffer, size_t size, size_t count, FILE* file)
 
 static bool fill(FILE* file)
 {
-    ssize_t result = read(file->fd, file->read_buffer, BUFSIZ);
+    ssize_t result = read_not_cancelling(file->fd, file->read_buffer, BUFSIZ);
     if (result < 0) {
         file->error = true;
         return false;
@@ -684,7 +756,7 @@ size_t fread(void* buffer, size_t size, size_t count, FILE* file)
     while (done < total) {
         // With nothing kept, what wouldn't fit in the buffer anyway comes straight in, in one piece.
         if (file != stdin && file->read_position == file->read_length && total - done >= BUFSIZ) {
-            ssize_t result = read(file->fd, bytes + done, total - done);
+            ssize_t result = read_not_cancelling(file->fd, bytes + done, total - done);
             if (result < 0) {
                 file->error = true;
                 break;
@@ -807,6 +879,8 @@ int setvbuf(FILE* file, char* buffer, int mode, size_t size)
     (void)size;
     FileLocker locker(file);
     flush(file);
+    if (file == &s_stdout)
+        s_stdout_buffering_decided = true;
     file->buffering = mode == _IONBF ? Buffering::None : (mode == _IOLBF ? Buffering::Line : Buffering::Full);
     return 0;
 }

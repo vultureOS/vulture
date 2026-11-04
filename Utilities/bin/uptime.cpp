@@ -45,6 +45,8 @@ int main()
         }
         free(processes);
     }
-    printf("%d user%s, load averages: 0.00 0.00 0.00\n", users, users == 1 ? "" : "s");
+    double load[3] = {};
+    (void)getloadavg(load, 3);
+    printf("%d user%s, load averages: %.2f %.2f %.2f\n", users, users == 1 ? "" : "s", load[0], load[1], load[2]);
     return 0;
 }

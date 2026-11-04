@@ -38,6 +38,11 @@ struct stat {
 int fstat(int fd, struct stat*);
 int stat(char const* path, struct stat*);
 int lstat(char const* path, struct stat*);
+int fstatat(int directory, char const* path, struct stat*, int flags);
+int mkdirat(int directory, char const* path, mode_t);
+int fchmodat(int directory, char const* path, mode_t, int flags);
+int mkfifo(char const* path, mode_t);
+int mknod(char const* path, mode_t, dev_t);
 int mkdir(char const* path, mode_t mode);
 int chmod(char const* path, mode_t mode);
 int fchmod(int fd, mode_t mode);

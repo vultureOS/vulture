@@ -82,6 +82,8 @@ struct Job {
     u32 runs { 0 };
     int restart_timer { 0 };
     int interval_timer { 0 };
+    // launchctl unload: when it's ended, that's the last of it.
+    bool unloading { false };
 
     [[nodiscard]] bool should_restart_after(int status) const;
 };

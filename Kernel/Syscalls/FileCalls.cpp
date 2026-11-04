@@ -6,6 +6,7 @@
 
 #include <Kernel/Security/Seal.h>
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/API/POSIX/socket.h>
 #include <Kernel/API/POSIX/termios.h>
 #include <Kernel/API/POSIX/time.h>
 #include <Kernel/FileSystem/Pipe.h>
@@ -15,6 +16,8 @@
 #include <Kernel/TTY/TTY.h>
 #include <Kernel/Tasks/Process.h>
 #include <Kernel/Time/Time.h>
+#include <LibBase/String.h>
+#include <LibBase/Vector.h>
 
 namespace Kernel {
 
@@ -23,15 +26,37 @@ static int as_int(u64 value)
     return static_cast<int>(static_cast<i32>(value));
 }
 
+// The directory that a path given with this descriptor starts from. A path that's absolute doesn't care.
+ErrorOr<String> Process::directory_for(int fd, StringView path)
+{
+    if (fd == AT_FDCWD || path.starts_with("/"_sv))
+        return current_directory();
+    auto description = TRY(file(fd));
+    if (!description->inode() || !description->inode()->is_directory() || description->path().is_empty())
+        return Error::from_errno(ENOTDIR);
+    return String::from_view(description->path());
+}
+
+ErrorOr<FlatPtr> Process::open_from(StringView path, StringView directory, int flags, u32 mode)
+{
+    auto description = TRY(VirtualFileSystem::open(path, directory, flags, mode & ~m_umask));
+    // A session leader without a terminal gets the first one it opens.
+    if (auto* tty = description->inode() ? description->inode()->as_tty() : nullptr; tty && !(flags & O_NOCTTY) && sid() == m_pid && !m_controlling_terminal)
+        (void)set_controlling_terminal(*tty);
+    return static_cast<FlatPtr>(TRY(allocate_fd(move(description), flags & O_CLOEXEC)));
+}
+
 ErrorOr<FlatPtr> Process::sys_open(TrapFrame&, SyscallArguments const& arguments)
 {
     auto path = TRY(copy_path_from_user(arguments.values[0]));
-    int flags = as_int(arguments.values[1]);
-    auto description = TRY(VirtualFileSystem::open(path.view(), current_directory().view(), flags, static_cast<u32>(arguments.values[2]) & ~m_umask));
-    // A session leader without a terminal gets the first one it opens.
-    if (auto* tty = description->inode()->as_tty(); tty && !(flags & O_NOCTTY) && sid() == m_pid && !m_controlling_terminal && tty->session() == 0)
-        (void)set_controlling_terminal(*tty);
-    return static_cast<FlatPtr>(TRY(allocate_fd(move(description), flags & O_CLOEXEC)));
+    return open_from(path.view(), current_directory().view(), as_int(arguments.values[1]), static_cast<u32>(arguments.values[2]));
+}
+
+ErrorOr<FlatPtr> Process::sys_openat(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[1]));
+    auto directory = TRY(directory_for(as_int(arguments.values[0]), path.view()));
+    return open_from(path.view(), directory.view(), as_int(arguments.values[2]), static_cast<u32>(arguments.values[3]));
 }
 
 ErrorOr<FlatPtr> Process::sys_ioctl(TrapFrame&, SyscallArguments const& arguments)
@@ -41,6 +66,10 @@ ErrorOr<FlatPtr> Process::sys_ioctl(TrapFrame&, SyscallArguments const& argument
     if (request == FIONBIO) {
         auto non_blocking = TRY(copy_from_user<int>(arguments.values[2]));
         description->set_status_flags(non_blocking ? (description->flags() | O_NONBLOCK) : (description->flags() & ~O_NONBLOCK));
+        return 0;
+    }
+    if (request == FIONREAD && (description->is_pipe() || description->local_socket() || description->socket())) {
+        TRY(copy_to_user(arguments.values[2], static_cast<int>(description->bytes_to_read())));
         return 0;
     }
     if (description->socket())
@@ -53,16 +82,9 @@ ErrorOr<FlatPtr> Process::sys_ioctl(TrapFrame&, SyscallArguments const& argument
 
 ErrorOr<FlatPtr> Process::sys_close(TrapFrame&, SyscallArguments const& arguments)
 {
-    int fd = as_int(arguments.values[0]);
-    if (fd < 0 || static_cast<size_t>(fd) >= max_open_files)
+    FileDescriptor closed = take_file_descriptor(as_int(arguments.values[0]));
+    if (!closed.description)
         return Error::from_errno(EBADF);
-    FileDescriptor closed;
-    {
-        SpinLockGuard guard(m_files_lock);
-        if (!m_files[fd].description)
-            return Error::from_errno(EBADF);
-        closed = move(m_files[fd]);
-    }
     return 0;
 }
 
@@ -106,6 +128,17 @@ ErrorOr<FlatPtr> Process::sys_write(TrapFrame&, SyscallArguments const& argument
     return TRY(description->write(IOBuffer::user(arguments.values[1]), arguments.values[2]));
 }
 
+// The same, and not cancellation points: for what the C library does itself, with its locks held (Mac has these too).
+ErrorOr<FlatPtr> Process::sys_read_nocancel(TrapFrame& frame, SyscallArguments const& arguments)
+{
+    return sys_read(frame, arguments);
+}
+
+ErrorOr<FlatPtr> Process::sys_write_nocancel(TrapFrame& frame, SyscallArguments const& arguments)
+{
+    return sys_write(frame, arguments);
+}
+
 ErrorOr<FlatPtr> Process::sys_lseek(TrapFrame&, SyscallArguments const& arguments)
 {
     auto description = TRY(file(as_int(arguments.values[0])));
@@ -139,6 +172,13 @@ ErrorOr<FlatPtr> Process::sys_lstat(TrapFrame&, SyscallArguments const& argument
     return stat_path(path.view(), current_directory().view(), arguments.values[1], false);
 }
 
+ErrorOr<FlatPtr> Process::sys_fstatat(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[1]));
+    auto directory = TRY(directory_for(as_int(arguments.values[0]), path.view()));
+    return stat_path(path.view(), directory.view(), arguments.values[2], !(arguments.values[3] & AT_SYMLINK_NOFOLLOW));
+}
+
 ErrorOr<FlatPtr> Process::sys_dup(TrapFrame&, SyscallArguments const& arguments)
 {
     auto description = TRY(file(as_int(arguments.values[0])));
@@ -150,10 +190,11 @@ ErrorOr<FlatPtr> Process::sys_dup2(TrapFrame&, SyscallArguments const& arguments
     int old_fd = as_int(arguments.values[0]);
     int new_fd = as_int(arguments.values[1]);
     auto description = TRY(file(old_fd));
-    if (new_fd < 0 || static_cast<size_t>(new_fd) >= max_open_files)
+    if (new_fd < 0 || static_cast<u64>(new_fd) >= min<u64>(m_limits[VULTURE_RLIMIT_NOFILE].rlim_cur, max_open_files))
         return Error::from_errno(EBADF);
     if (old_fd == new_fd)
         return static_cast<FlatPtr>(new_fd);
+    TRY(ensure_file_capacity(static_cast<size_t>(new_fd) + 1));
     FileDescriptor replaced;
     {
         SpinLockGuard guard(m_files_lock);
@@ -177,15 +218,13 @@ ErrorOr<FlatPtr> Process::sys_pipe(TrapFrame&, SyscallArguments const& arguments
     fds[0] = TRY(allocate_fd(reader, flags & O_CLOEXEC));
     auto second = allocate_fd(writer, flags & O_CLOEXEC);
     if (second.is_error()) {
-        SpinLockGuard guard(m_files_lock);
-        m_files[fds[0]] = {};
+        release_fd(fds[0]);
         return second.release_error();
     }
     fds[1] = second.value();
     if (auto result = copy_to_user(arguments.values[0], fds); result.is_error()) {
-        SpinLockGuard guard(m_files_lock);
-        m_files[fds[0]] = {};
-        m_files[fds[1]] = {};
+        release_fd(fds[0]);
+        release_fd(fds[1]);
         return result.release_error();
     }
     return 0;
@@ -196,6 +235,35 @@ ErrorOr<FlatPtr> Process::sys_mkdir(TrapFrame&, SyscallArguments const& argument
     auto path = TRY(copy_path_from_user(arguments.values[0]));
     TRY(VirtualFileSystem::mkdir(path.view(), current_directory().view(), static_cast<u32>(arguments.values[1]) & ~m_umask));
     return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_mkdirat(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[1]));
+    auto directory = TRY(directory_for(as_int(arguments.values[0]), path.view()));
+    TRY(VirtualFileSystem::mkdir(path.view(), directory.view(), static_cast<u32>(arguments.values[2]) & ~m_umask));
+    return 0;
+}
+
+// A named pipe, or nothing much else: device files aren't for making.
+ErrorOr<FlatPtr> Process::sys_mknod(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[0]));
+    auto const mode = static_cast<u32>(arguments.values[1]);
+    auto const directory = current_directory();
+    u32 const permissions = mode & ~m_umask & 07777;
+    switch (mode & S_IFMT) {
+    case S_IFIFO:
+        TRY(VirtualFileSystem::make_node(path.view(), directory.view(), InodeType::Fifo, permissions));
+        return 0;
+    case S_IFREG:
+    case 0: {
+        (void)TRY(VirtualFileSystem::open(path.view(), directory.view(), O_CREAT | O_EXCL | O_WRONLY, permissions));
+        return 0;
+    }
+    default:
+        return Error::from_errno(m_credentials.is_superuser() ? ENOTSUP : EPERM);
+    }
 }
 
 ErrorOr<FlatPtr> Process::sys_rmdir(TrapFrame&, SyscallArguments const& arguments)
@@ -212,11 +280,51 @@ ErrorOr<FlatPtr> Process::sys_unlink(TrapFrame&, SyscallArguments const& argumen
     return 0;
 }
 
+ErrorOr<FlatPtr> Process::sys_unlinkat(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[1]));
+    auto directory = TRY(directory_for(as_int(arguments.values[0]), path.view()));
+    auto const flags = as_int(arguments.values[2]);
+    if (flags & ~AT_REMOVEDIR)
+        return Error::from_errno(EINVAL);
+    if (flags & AT_REMOVEDIR)
+        TRY(VirtualFileSystem::rmdir(path.view(), directory.view()));
+    else
+        TRY(VirtualFileSystem::unlink(path.view(), directory.view()));
+    return 0;
+}
+
 ErrorOr<FlatPtr> Process::sys_rename(TrapFrame&, SyscallArguments const& arguments)
 {
     auto old_path = TRY(copy_path_from_user(arguments.values[0]));
     auto new_path = TRY(copy_path_from_user(arguments.values[1]));
     TRY(VirtualFileSystem::rename(old_path.view(), new_path.view(), current_directory().view()));
+    return 0;
+}
+
+// Both paths absolute by the time they get to the filesystem, as they may be from different places.
+ErrorOr<String> Process::absolute_path_for(int fd, StringView path)
+{
+    if (path.starts_with("/"_sv))
+        return String::from_view(path);
+    if (path.is_empty())
+        return Error::from_errno(ENOENT);
+    auto directory = TRY(directory_for(fd, path));
+    StringBuilder builder;
+    if (directory.view() != "/"_sv)
+        builder.append(directory.view());
+    builder.append('/');
+    builder.append(path);
+    return builder.to_string();
+}
+
+ErrorOr<FlatPtr> Process::sys_renameat(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto old_path = TRY(copy_path_from_user(arguments.values[1]));
+    auto new_path = TRY(copy_path_from_user(arguments.values[3]));
+    auto old_absolute = TRY(absolute_path_for(as_int(arguments.values[0]), old_path.view()));
+    auto new_absolute = TRY(absolute_path_for(as_int(arguments.values[2]), new_path.view()));
+    TRY(VirtualFileSystem::rename(old_absolute.view(), new_absolute.view(), "/"_sv));
     return 0;
 }
 
@@ -246,6 +354,21 @@ ErrorOr<FlatPtr> Process::sys_chdir(TrapFrame&, SyscallArguments const& argument
     return 0;
 }
 
+ErrorOr<FlatPtr> Process::sys_fchdir(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto description = TRY(file(as_int(arguments.values[0])));
+    auto* inode = description->inode();
+    if (!inode || !inode->is_directory())
+        return Error::from_errno(ENOTDIR);
+    TRY(check_access(inode->metadata(), X_OK));
+    auto path = TRY(String::from_view(description->path()));
+    if (path.is_empty())
+        return Error::from_errno(ENOTDIR);
+    MutexLocker locker(m_cwd_lock);
+    m_cwd = move(path);
+    return 0;
+}
+
 ErrorOr<FlatPtr> Process::sys_getdents(TrapFrame&, SyscallArguments const& arguments)
 {
     auto description = TRY(file(as_int(arguments.values[0])));
@@ -271,16 +394,28 @@ ErrorOr<FlatPtr> Process::sys_ftruncate(TrapFrame&, SyscallArguments const& argu
     return 0;
 }
 
-ErrorOr<FlatPtr> Process::sys_readlink(TrapFrame&, SyscallArguments const& arguments)
+static ErrorOr<FlatPtr> read_link_at(StringView path, StringView directory, FlatPtr buffer, size_t size)
 {
-    auto path = TRY(copy_path_from_user(arguments.values[0]));
-    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view(), false));
+    auto resolved = TRY(VirtualFileSystem::resolve(path, directory, false));
     TRY(sandbox_check(SandboxOperation::FileMetadata, resolved.path.view()));
     char target[VirtualFileSystem::max_path];
     size_t length = TRY(resolved.inode->read_link({ reinterpret_cast<u8*>(target), sizeof(target) }));
-    length = min<size_t>(length, arguments.values[2]);
-    TRY(copy_to_user(arguments.values[1], target, length));
+    length = min<size_t>(length, size);
+    TRY(copy_to_user(buffer, target, length));
     return length;
+}
+
+ErrorOr<FlatPtr> Process::sys_readlink(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[0]));
+    return read_link_at(path.view(), current_directory().view(), arguments.values[1], arguments.values[2]);
+}
+
+ErrorOr<FlatPtr> Process::sys_readlinkat(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[1]));
+    auto directory = TRY(directory_for(as_int(arguments.values[0]), path.view()));
+    return read_link_at(path.view(), directory.view(), arguments.values[2], arguments.values[3]);
 }
 
 ErrorOr<FlatPtr> Process::sys_symlink(TrapFrame&, SyscallArguments const& arguments)
@@ -288,6 +423,15 @@ ErrorOr<FlatPtr> Process::sys_symlink(TrapFrame&, SyscallArguments const& argume
     auto target = TRY(copy_path_from_user(arguments.values[0]));
     auto link_path = TRY(copy_path_from_user(arguments.values[1]));
     TRY(VirtualFileSystem::symlink(target.view(), link_path.view(), current_directory().view()));
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_symlinkat(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto target = TRY(copy_path_from_user(arguments.values[0]));
+    auto link_path = TRY(copy_path_from_user(arguments.values[2]));
+    auto directory = TRY(directory_for(as_int(arguments.values[1]), link_path.view()));
+    TRY(VirtualFileSystem::symlink(target.view(), link_path.view(), directory.view()));
     return 0;
 }
 
@@ -305,16 +449,35 @@ ErrorOr<FlatPtr> Process::sys_fcntl(TrapFrame&, SyscallArguments const& argument
     auto description = TRY(file(fd));
     switch (command) {
     case F_DUPFD:
-        if (argument >= max_open_files)
+        if (argument >= min<u64>(m_limits[VULTURE_RLIMIT_NOFILE].rlim_cur, max_open_files))
             return Error::from_errno(EINVAL);
         return static_cast<FlatPtr>(TRY(allocate_fd(move(description), false, static_cast<int>(argument))));
     case F_GETFD: {
         SpinLockGuard guard(m_files_lock);
-        return m_files[fd].close_on_exec ? FD_CLOEXEC : 0;
+        auto* entry = file_entry(fd);
+        if (!entry)
+            return Error::from_errno(EBADF);
+        return entry->close_on_exec ? FD_CLOEXEC : 0;
     }
     case F_SETFD: {
         SpinLockGuard guard(m_files_lock);
-        m_files[fd].close_on_exec = argument & FD_CLOEXEC;
+        auto* entry = file_entry(fd);
+        if (!entry)
+            return Error::from_errno(EBADF);
+        entry->close_on_exec = argument & FD_CLOEXEC;
+        return 0;
+    }
+    case F_DUPFD_CLOEXEC:
+        if (argument >= min<u64>(m_limits[VULTURE_RLIMIT_NOFILE].rlim_cur, max_open_files))
+            return Error::from_errno(EINVAL);
+        return static_cast<FlatPtr>(TRY(allocate_fd(move(description), true, static_cast<int>(argument))));
+    case F_GETPATH: {
+        // Into a buffer of MAXPATHLEN, as a Mac's does: there's no size to go by.
+        auto path = description->path();
+        if (path.is_empty() || path.length() + 1 > VirtualFileSystem::max_path)
+            return Error::from_errno(EBADF);
+        TRY(copy_to_user(argument, path.characters_without_null_termination(), path.length()));
+        TRY(copy_to_user(argument + path.length(), '\0'));
         return 0;
     }
     case F_GETFL:
@@ -327,16 +490,144 @@ ErrorOr<FlatPtr> Process::sys_fcntl(TrapFrame&, SyscallArguments const& argument
     }
 }
 
-ErrorOr<FlatPtr> Process::sys_access(TrapFrame&, SyscallArguments const& arguments)
+static ErrorOr<FlatPtr> check_path_access(StringView path, StringView directory, int mode, bool follow)
 {
-    auto path = TRY(copy_path_from_user(arguments.values[0]));
-    int mode = as_int(arguments.values[1]);
-    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view()));
+    auto resolved = TRY(VirtualFileSystem::resolve(path, directory, follow));
     TRY(sandbox_check(SandboxOperation::FileMetadata, resolved.path.view()));
     auto metadata = resolved.inode->metadata();
     TRY(check_access(metadata, mode & (R_OK | W_OK | X_OK)));
     if ((mode & W_OK) && resolved.inode->file_system().is_read_only())
         return Error::from_errno(EROFS);
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_access(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[0]));
+    return check_path_access(path.view(), current_directory().view(), as_int(arguments.values[1]), true);
+}
+
+ErrorOr<FlatPtr> Process::sys_faccessat(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[1]));
+    auto directory = TRY(directory_for(as_int(arguments.values[0]), path.view()));
+    return check_path_access(path.view(), directory.view(), as_int(arguments.values[2]), !(arguments.values[3] & AT_SYMLINK_NOFOLLOW));
+}
+
+// --- Several buffers at once ---
+
+// A pipe's or a socket's writes have to go in one piece (a datagram stays one, and a pipe's short writes don't get mixed up with
+// anyone else's), so those are gathered first, as far as what a single write of them could be anyway.
+static constexpr size_t max_gathered = 256 * KiB;
+
+ErrorOr<FlatPtr> Process::sys_readv(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto description = TRY(file(as_int(arguments.values[0])));
+    int const count = as_int(arguments.values[2]);
+    if (count <= 0 || count > VULTURE_IOV_MAX)
+        return Error::from_errno(EINVAL);
+    Vector<vulture_iovec> vectors;
+    TRY(vectors.try_resize(static_cast<size_t>(count)));
+    TRY(copy_from_user(vectors.data(), arguments.values[1], static_cast<size_t>(count) * sizeof(vulture_iovec)));
+    u64 total = 0;
+    for (auto const& vector : vectors) {
+        if (__builtin_add_overflow(total, vector.iov_len, &total) || total > 0x7fffffffull)
+            return Error::from_errno(EINVAL);
+        if (!is_user_range(reinterpret_cast<FlatPtr>(vector.iov_base), vector.iov_len))
+            return Error::from_errno(EFAULT);
+    }
+    size_t done = 0;
+    for (auto const& vector : vectors) {
+        if (vector.iov_len == 0)
+            continue;
+        auto read = description->read(IOBuffer::user(reinterpret_cast<FlatPtr>(vector.iov_base)), vector.iov_len);
+        if (read.is_error()) {
+            if (done)
+                return done;
+            return read.release_error();
+        }
+        done += read.value();
+        if (read.value() < vector.iov_len)
+            break;
+    }
+    return done;
+}
+
+ErrorOr<FlatPtr> Process::sys_writev(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto description = TRY(file(as_int(arguments.values[0])));
+    int const count = as_int(arguments.values[2]);
+    if (count <= 0 || count > VULTURE_IOV_MAX)
+        return Error::from_errno(EINVAL);
+    Vector<vulture_iovec> vectors;
+    TRY(vectors.try_resize(static_cast<size_t>(count)));
+    TRY(copy_from_user(vectors.data(), arguments.values[1], static_cast<size_t>(count) * sizeof(vulture_iovec)));
+    u64 total = 0;
+    for (auto const& vector : vectors) {
+        if (__builtin_add_overflow(total, vector.iov_len, &total) || total > 0x7fffffffull)
+            return Error::from_errno(EINVAL);
+        if (!is_user_range(reinterpret_cast<FlatPtr>(vector.iov_base), vector.iov_len))
+            return Error::from_errno(EFAULT);
+    }
+    if (total == 0)
+        return 0;
+    bool const in_one_piece = description->is_pipe() || description->socket() || description->local_socket();
+    if (in_one_piece && total <= max_gathered) {
+        Vector<u8> gathered;
+        TRY(gathered.try_resize(total));
+        size_t at = 0;
+        for (auto const& vector : vectors) {
+            if (vector.iov_len)
+                TRY(copy_from_user(gathered.data() + at, reinterpret_cast<FlatPtr>(vector.iov_base), vector.iov_len));
+            at += vector.iov_len;
+        }
+        return TRY(description->write(IOBuffer::kernel(gathered.data()), total));
+    }
+    size_t done = 0;
+    for (auto const& vector : vectors) {
+        if (vector.iov_len == 0)
+            continue;
+        auto written = description->write(IOBuffer::user(reinterpret_cast<FlatPtr>(vector.iov_base)), vector.iov_len);
+        if (written.is_error()) {
+            if (done)
+                return done;
+            return written.release_error();
+        }
+        done += written.value();
+        if (written.value() < vector.iov_len)
+            break;
+    }
+    return done;
+}
+
+// --- Limits ---
+
+ErrorOr<FlatPtr> Process::sys_getrlimit(TrapFrame&, SyscallArguments const& arguments)
+{
+    int const resource = as_int(arguments.values[0]);
+    if (resource < 0 || resource >= VULTURE_RLIM_NLIMITS)
+        return Error::from_errno(EINVAL);
+    vulture_rlimit limit;
+    {
+        SpinLockGuard guard(m_files_lock);
+        limit = m_limits[resource];
+    }
+    TRY(copy_to_user(arguments.values[1], limit));
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_setrlimit(TrapFrame&, SyscallArguments const& arguments)
+{
+    int const resource = as_int(arguments.values[0]);
+    if (resource < 0 || resource >= VULTURE_RLIM_NLIMITS)
+        return Error::from_errno(EINVAL);
+    auto const wanted = TRY(copy_from_user<vulture_rlimit>(arguments.values[1]));
+    if (wanted.rlim_cur > wanted.rlim_max)
+        return Error::from_errno(EINVAL);
+    SpinLockGuard guard(m_files_lock);
+    if (wanted.rlim_max > m_limits[resource].rlim_max && !m_credentials.is_superuser())
+        return Error::from_errno(EPERM);
+    m_limits[resource] = wanted;
     return 0;
 }
 
@@ -382,6 +673,16 @@ ErrorOr<FlatPtr> Process::sys_chmod(TrapFrame&, SyscallArguments const& argument
     return 0;
 }
 
+ErrorOr<FlatPtr> Process::sys_fchmodat(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[1]));
+    auto directory = TRY(directory_for(as_int(arguments.values[0]), path.view()));
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), directory.view(), !(arguments.values[3] & AT_SYMLINK_NOFOLLOW)));
+    TRY(sandbox_check(SandboxOperation::FileWrite, resolved.path.view()));
+    TRY(change_permissions(*resolved.inode, static_cast<u32>(arguments.values[2])));
+    return 0;
+}
+
 ErrorOr<FlatPtr> Process::sys_fchmod(TrapFrame&, SyscallArguments const& arguments)
 {
     auto description = TRY(file(as_int(arguments.values[0])));
@@ -403,6 +704,16 @@ ErrorOr<FlatPtr> Process::sys_chown(TrapFrame&, SyscallArguments const& argument
     return 0;
 }
 
+ErrorOr<FlatPtr> Process::sys_fchownat(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto path = TRY(copy_path_from_user(arguments.values[1]));
+    auto directory = TRY(directory_for(as_int(arguments.values[0]), path.view()));
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), directory.view(), !(arguments.values[4] & AT_SYMLINK_NOFOLLOW)));
+    TRY(sandbox_check(SandboxOperation::FileWrite, resolved.path.view()));
+    TRY(change_owner(*resolved.inode, static_cast<i32>(arguments.values[2]), static_cast<i32>(arguments.values[3])));
+    return 0;
+}
+
 ErrorOr<FlatPtr> Process::sys_fchown(TrapFrame&, SyscallArguments const& arguments)
 {
     auto description = TRY(file(as_int(arguments.values[0])));
@@ -419,6 +730,21 @@ ErrorOr<FlatPtr> Process::sys_link(TrapFrame&, SyscallArguments const& arguments
     auto existing = TRY(copy_path_from_user(arguments.values[0]));
     auto created = TRY(copy_path_from_user(arguments.values[1]));
     TRY(VirtualFileSystem::link(existing.view(), created.view(), current_directory().view()));
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_linkat(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto existing = TRY(copy_path_from_user(arguments.values[1]));
+    auto created = TRY(copy_path_from_user(arguments.values[3]));
+    auto existing_absolute = TRY(absolute_path_for(as_int(arguments.values[0]), existing.view()));
+    auto created_absolute = TRY(absolute_path_for(as_int(arguments.values[2]), created.view()));
+    // AT_SYMLINK_FOLLOW: a link to what a link names, not to the link. Which is what its target would have been.
+    if (arguments.values[4] & AT_SYMLINK_FOLLOW) {
+        auto resolved = TRY(VirtualFileSystem::resolve(existing_absolute.view(), "/"_sv));
+        existing_absolute = move(resolved.path);
+    }
+    TRY(VirtualFileSystem::link(existing_absolute.view(), created_absolute.view(), "/"_sv));
     return 0;
 }
 
@@ -457,12 +783,10 @@ static ErrorOr<void> change_times(Inode& inode, FlatPtr times_address)
 
 ErrorOr<FlatPtr> Process::sys_utimensat(TrapFrame&, SyscallArguments const& arguments)
 {
-    // Paths are relative to the working directory (AT_FDCWD) only.
-    if (as_int(arguments.values[0]) != AT_FDCWD)
-        return Error::from_errno(ENOTSUP);
     auto path = TRY(copy_path_from_user(arguments.values[1]));
+    auto directory = TRY(directory_for(as_int(arguments.values[0]), path.view()));
     bool follow = !(arguments.values[3] & AT_SYMLINK_NOFOLLOW);
-    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view(), follow));
+    auto resolved = TRY(VirtualFileSystem::resolve(path.view(), directory.view(), follow));
     TRY(sandbox_check(SandboxOperation::FileWrite, resolved.path.view()));
     TRY(change_times(*resolved.inode, arguments.values[2]));
     return 0;

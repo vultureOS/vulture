@@ -12,4 +12,10 @@ endpoint Bootstrap
     // A service of a process's own, by a send right to it (EEXIST if the
     // name is taken).
     register_service(String name, Port service) => (i32 error)
+
+    // launchctl's. What's loaded: a line for each, as a Mac lists them.
+    list_jobs() => (String listing)
+
+    // For root: "start" or "stop" a job by its label, "load" a job from a plist, "unload" by its plist or label.
+    control_job(String verb, String what) => (i32 error)
 }

@@ -33,9 +33,15 @@ typedef unsigned pthread_key_t;
 
 #define PTHREAD_BARRIER_SERIAL_THREAD (-1)
 
+#define PTHREAD_CANCELED ((void*)1)
+#define PTHREAD_CANCEL_ENABLE 0x01
+#define PTHREAD_CANCEL_DISABLE 0x00
+#define PTHREAD_CANCEL_DEFERRED 0x02
+#define PTHREAD_CANCEL_ASYNCHRONOUS 0x00
+
 typedef struct {
     int detach_state;
-    int reserved;
+    int qos; // A qos_class_t; 0 for what the creator has.
     size_t stack_size;
     size_t guard_size;
     void* stack_address;
@@ -46,11 +52,13 @@ typedef struct {
     int type;
     void* owner;
     unsigned count;
-    unsigned reserved;
+    unsigned holder; // Who's got it, as the kernel knows them, for it to make them hurry.
+    unsigned shared;
 } pthread_mutex_t;
 
 typedef struct {
     int type;
+    int shared;
 } pthread_mutexattr_t;
 
 typedef struct {
@@ -91,9 +99,9 @@ typedef struct {
 
 typedef volatile int pthread_spinlock_t;
 
-#define PTHREAD_MUTEX_INITIALIZER { 0, PTHREAD_MUTEX_NORMAL, 0, 0, 0 }
-#define PTHREAD_ERRORCHECK_MUTEX_INITIALIZER { 0, PTHREAD_MUTEX_ERRORCHECK, 0, 0, 0 }
-#define PTHREAD_RECURSIVE_MUTEX_INITIALIZER { 0, PTHREAD_MUTEX_RECURSIVE, 0, 0, 0 }
+#define PTHREAD_MUTEX_INITIALIZER { 0, PTHREAD_MUTEX_NORMAL, 0, 0, 0, 0 }
+#define PTHREAD_ERRORCHECK_MUTEX_INITIALIZER { 0, PTHREAD_MUTEX_ERRORCHECK, 0, 0, 0, 0 }
+#define PTHREAD_RECURSIVE_MUTEX_INITIALIZER { 0, PTHREAD_MUTEX_RECURSIVE, 0, 0, 0, 0 }
 #define PTHREAD_COND_INITIALIZER { 0, 0, 0, 0 }
 #define PTHREAD_RWLOCK_INITIALIZER { 0, 0, 0 }
 #define PTHREAD_ONCE_INIT { 0 }
@@ -143,6 +151,17 @@ int pthread_mutexattr_gettype(pthread_mutexattr_t const*, int*);
 int pthread_mutexattr_settype(pthread_mutexattr_t*, int);
 int pthread_mutexattr_getpshared(pthread_mutexattr_t const*, int*);
 int pthread_mutexattr_setpshared(pthread_mutexattr_t*, int);
+int pthread_condattr_getpshared(pthread_condattr_t const*, int*);
+int pthread_condattr_setpshared(pthread_condattr_t*, int);
+int pthread_rwlockattr_getpshared(pthread_rwlockattr_t const*, int*);
+int pthread_rwlockattr_setpshared(pthread_rwlockattr_t*, int);
+int pthread_barrierattr_getpshared(pthread_barrierattr_t const*, int*);
+int pthread_barrierattr_setpshared(pthread_barrierattr_t*, int);
+
+int pthread_cancel(pthread_t);
+int pthread_setcancelstate(int state, int* previous);
+int pthread_setcanceltype(int type, int* previous);
+void pthread_testcancel(void);
 
 // Condition variables.
 int pthread_cond_init(pthread_cond_t*, pthread_condattr_t const*);

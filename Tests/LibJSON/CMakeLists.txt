@@ -5,7 +5,8 @@
 #
 
 add_executable(TestLibJSON
-    TestJSON.cpp)
+    TestJSON.cpp
+    TestPropertyList.cpp)
 
 target_link_libraries(TestLibJSON PRIVATE LibTest LibJSON LibBase)
 add_test(NAME LibJSON COMMAND TestLibJSON)

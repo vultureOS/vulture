@@ -313,6 +313,15 @@ int stat(char const* path, struct stat* result)
     return 0;
 }
 
+int fstatat(int directory, char const* path, struct stat* result, int flags)
+{
+    vulture_stat raw {};
+    if (check<int>(call(Syscall::fstatat, directory, path, &raw, flags)) < 0)
+        return -1;
+    to_stat(raw, result);
+    return 0;
+}
+
 pid_t waitpid(pid_t pid, int* status, int options)
 {
     return check<pid_t>(call(Syscall::waitpid, pid, status, options));
@@ -364,7 +373,7 @@ int clock_gettime(clockid_t clock, struct timespec* result)
 
 int nanosleep(struct timespec const* duration, struct timespec* remaining)
 {
-    if (check<int>(call(Syscall::nanosleep, duration)) < 0)
+    if (check<int>(call(Syscall::nanosleep, duration, remaining)) < 0)
         return -1;
     if (remaining) {
         remaining->tv_sec = 0;
@@ -385,8 +394,11 @@ time_t time(time_t* result)
 unsigned sleep(unsigned seconds)
 {
     struct timespec duration { static_cast<time_t>(seconds), 0 };
-    nanosleep(&duration, nullptr);
-    return 0;
+    struct timespec remaining {};
+    if (nanosleep(&duration, &remaining) == 0)
+        return 0;
+    // What it didn't get: as seconds, rounded up.
+    return static_cast<unsigned>(remaining.tv_sec) + (remaining.tv_nsec ? 1 : 0);
 }
 
 int usleep(useconds_t microseconds)

@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <Kernel/API/POSIX/resource.h>
+
 #include <sys/cdefs.h>
 #include <sys/types.h>
 
@@ -16,7 +18,7 @@ __BEGIN_DECLS
 // (which last until it execs). Not yet enforced beyond the kernel's.
 
 typedef unsigned long long rlim_t;
-#define RLIM_INFINITY (~(rlim_t)0)
+#define RLIM_INFINITY VULTURE_RLIM_INFINITY
 #define RLIM_SAVED_MAX RLIM_INFINITY
 #define RLIM_SAVED_CUR RLIM_INFINITY
 

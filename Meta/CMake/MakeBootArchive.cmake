@@ -23,6 +23,7 @@ list(FILTER files EXCLUDE REGEX "^usr/tests/package-payload")
 # Entries whose mode is not the usual one (0755 for directories and
 # programs, 0644 for other files), as macOS has them.
 set(special_modes
+    "cores=1777"
     "tmp=1777"
     "var/tmp=1777"
     "Users/Shared=1777"

@@ -32,6 +32,7 @@ public:
     [[nodiscard]] u32 stealable_count() const { return m_stealable_count.load(MemoryOrder::Relaxed); }
 
 private:
+    friend class Scheduler;
     void remove(Thread&);
 
     Thread::WaitList m_classes[qos_class_count];

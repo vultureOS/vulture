@@ -94,10 +94,11 @@ boot_tampered() { # name boot-arguments expected-text
         status=1
     fi
 }
-tamper() { printf 'y' | dd of=System/Library/Seal/Manifest bs=1 seek=200 conv=notrunc 2> /dev/null; }
+# (/bin/dd by name: this is done from inside a copy of the system, which has a dd of its own, and a relative PATH would find that one.)
+tamper() { printf 'y' | /bin/dd of=System/Library/Seal/Manifest bs=1 seek=200 conv=notrunc 2> /dev/null; }
 make_tampered_disk manifest
 boot_tampered manifest "" "KERNEL PANIC: the system's seal is broken: the manifest isn't signed"
-tamper() { rm -f usr/bin/true; }
+tamper() { /bin/rm -f usr/bin/true; }
 make_tampered_disk missing
 boot_tampered missing "" "KERNEL PANIC: the system's seal is broken: something is missing: usr/bin/true"
 tamper() { printf 'x' >> usr/bin/true; }
@@ -107,8 +108,8 @@ boot_tampered longer noseal "Seal: off, by the boot word noseal"
 # A change that keeps its size is only found when it is read: that file stops working, not the system.
 # And one more file than was signed isn't there at all.
 tamper() {
-    printf 'x' | dd of=usr/bin/logname bs=1 seek=4000 conv=notrunc 2> /dev/null
-    cp bin/ls usr/bin/extra-program
+    printf 'x' | /bin/dd of=usr/bin/logname bs=1 seek=4000 conv=notrunc 2> /dev/null
+    /bin/cp bin/ls usr/bin/extra-program
     echo extra > System/Library/extra-file
 }
 make_tampered_disk contents

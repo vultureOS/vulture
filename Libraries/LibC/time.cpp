@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "LocaleFiles.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -197,6 +198,7 @@ int gettimeofday(struct timeval* result, void*)
 
 size_t strftime(char* buffer, size_t size, char const* format, struct tm const* broken)
 {
+    auto const& names = LibC::time_names();
     size_t length = 0;
     auto append = [&](char const* text) {
         while (*text) {
@@ -230,26 +232,27 @@ size_t strftime(char* buffer, size_t size, char const* format, struct tm const* 
         char p = pad == '\0' ? '0' : pad;
         switch (*cursor) {
         case 'a':
-            append(broken->tm_wday >= 0 && broken->tm_wday < 7 ? s_weekdays[broken->tm_wday] : "?");
-            length -= (broken->tm_wday >= 0 && broken->tm_wday < 7) ? strlen(s_weekdays[broken->tm_wday]) - 3 : 0;
+            append(broken->tm_wday >= 0 && broken->tm_wday < 7 ? names.short_days[broken->tm_wday] : "?");
             break;
         case 'A':
-            append(broken->tm_wday >= 0 && broken->tm_wday < 7 ? s_weekdays[broken->tm_wday] : "?");
+            append(broken->tm_wday >= 0 && broken->tm_wday < 7 ? names.days[broken->tm_wday] : "?");
             break;
         case 'b':
-        case 'h': {
-            char text[4] = { 0 };
-            if (broken->tm_mon >= 0 && broken->tm_mon < 12)
-                memcpy(text, s_months[broken->tm_mon], 3);
+        case 'h':
+            append(broken->tm_mon >= 0 && broken->tm_mon < 12 ? names.short_months[broken->tm_mon] : "?");
+            break;
+        case 'B':
+            append(broken->tm_mon >= 0 && broken->tm_mon < 12 ? names.months[broken->tm_mon] : "?");
+            break;
+        case '+': {
+            char text[128];
+            strftime(text, sizeof(text), names.date_command_format, broken);
             append(text);
             break;
         }
-        case 'B':
-            append(broken->tm_mon >= 0 && broken->tm_mon < 12 ? s_months[broken->tm_mon] : "?");
-            break;
         case 'c': {
-            char text[64];
-            strftime(text, sizeof(text), "%a %b %e %H:%M:%S %Y", broken);
+            char text[128];
+            strftime(text, sizeof(text), names.date_time_format, broken);
             append(text);
             break;
         }
@@ -299,11 +302,11 @@ size_t strftime(char* buffer, size_t size, char const* format, struct tm const* 
             append("\n");
             break;
         case 'p':
-            append(broken->tm_hour < 12 ? "AM" : "PM");
+            append(broken->tm_hour < 12 ? names.am : names.pm);
             break;
         case 'r': {
-            char text[32];
-            strftime(text, sizeof(text), "%I:%M:%S %p", broken);
+            char text[64];
+            strftime(text, sizeof(text), names.am_pm_format, broken);
             append(text);
             break;
         }
@@ -337,14 +340,14 @@ size_t strftime(char* buffer, size_t size, char const* format, struct tm const* 
             number(broken->tm_wday, 1, '0');
             break;
         case 'x': {
-            char text[16];
-            strftime(text, sizeof(text), "%m/%d/%y", broken);
+            char text[64];
+            strftime(text, sizeof(text), names.date_format, broken);
             append(text);
             break;
         }
         case 'X': {
-            char text[16];
-            strftime(text, sizeof(text), "%H:%M:%S", broken);
+            char text[64];
+            strftime(text, sizeof(text), names.time_format, broken);
             append(text);
             break;
         }

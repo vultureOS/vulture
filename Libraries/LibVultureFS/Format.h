@@ -147,6 +147,8 @@ constexpr u32 mode_type_mask = 0170000;
 constexpr u32 mode_directory = 0040000;
 constexpr u32 mode_regular = 0100000;
 constexpr u32 mode_symbolic_link = 0120000;
+constexpr u32 mode_fifo = 0010000;
+constexpr u32 mode_socket = 0140000;
 
 struct [[gnu::packed]] InodeRecord {
     u32 mode;
@@ -185,6 +187,8 @@ struct [[gnu::packed]] ExtentRecord {
 constexpr u8 type_directory = 4;
 constexpr u8 type_regular = 8;
 constexpr u8 type_symbolic_link = 10;
+constexpr u8 type_fifo = 1;
+constexpr u8 type_socket = 12;
 
 constexpr u8 directory_type_for_mode(u32 mode)
 {
@@ -193,6 +197,10 @@ constexpr u8 directory_type_for_mode(u32 mode)
         return type_directory;
     case mode_symbolic_link:
         return type_symbolic_link;
+    case mode_fifo:
+        return type_fifo;
+    case mode_socket:
+        return type_socket;
     default:
         return type_regular;
     }

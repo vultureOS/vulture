@@ -34,7 +34,8 @@ int main()
     snprintf(buffer, sizeof(buffer), "[%s|%.3s|%8s|%-8s|%c]", "text", "abcdef", "right", "left", 'Z');
     CHECK(strcmp(buffer, "[text|abc|   right|left    |Z]") == 0);
     snprintf(buffer, sizeof(buffer), "%.2f|%f|%.0f|%5.1f", 3.14159, -2.5, 2.5, 9.96);
-    CHECK(strcmp(buffer, "3.14|-2.500000|3| 10.0") == 0);
+    // (2.5 is exactly between 2 and 3, and goes to the even one, as a Mac prints it.)
+    CHECK(strcmp(buffer, "3.14|-2.500000|2| 10.0") == 0);
     snprintf(buffer, sizeof(buffer), "%p", reinterpret_cast<void*>(0x1234));
     CHECK(strcmp(buffer, "0x1234") == 0);
     // Truncation still reports the full length (the size is opaque to the

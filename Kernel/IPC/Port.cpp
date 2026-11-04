@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Tasks/Process.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/FileSystem/FileDescription.h>
 #include <Kernel/FileSystem/Poll.h>
@@ -53,10 +54,13 @@ void Port::detach(bool receive_right)
             // Nobody will take what is queued: let the rights in it go
             // (which may end other conversations in turn).
             Vector<OwnPtr<PortMessage>> dropped;
+            RefPtr<Process> last_receiver;
             {
                 SpinLockGuard guard(m_lock);
                 dropped = move(m_queue);
                 m_count.store(0);
+                last_receiver = move(m_last_receiver_process);
+                m_last_receiver_thread = 0;
             }
             m_sendable.wake_all();
             // Senders now see the hang-up.
@@ -69,8 +73,34 @@ void Port::detach(bool receive_right)
     }
 }
 
+void Port::note_receiver(Thread& thread)
+{
+    // (What it replaces goes once the lock's let go: it could be the last of that process.)
+    RefPtr<Process> previous;
+    SpinLockGuard guard(m_lock);
+    if (m_last_receiver_thread == thread.id())
+        return;
+    previous = move(m_last_receiver_process);
+    m_last_receiver_process = thread.process();
+    m_last_receiver_thread = thread.id();
+}
+
+RefPtr<Thread> Port::last_receiver()
+{
+    RefPtr<Process> process;
+    u64 id;
+    {
+        SpinLockGuard guard(m_lock);
+        process = m_last_receiver_process;
+        id = m_last_receiver_thread;
+    }
+    return process ? process->thread_with_id(id) : RefPtr<Thread> {};
+}
+
 void Port::add_poller(Thread& thread, bool receive_right)
 {
+    if (receive_right)
+        note_receiver(thread);
     SpinLockGuard guard(m_poller_lock);
     auto& pollers = receive_right ? m_receive_pollers : m_send_pollers;
     for (auto& slot : pollers.threads) {
@@ -124,6 +154,7 @@ void Port::wake_pollers(bool receivers, bool handoff)
 ErrorOr<void> Port::send(NonnullOwnPtr<PortMessage> message, bool nonblocking, bool handoff)
 {
     OwnPtr<PortMessage> pending = move(message);
+    auto const sender_qos = pending->sender_qos;
     for (;;) {
         {
             SpinLockGuard guard(m_lock);
@@ -140,6 +171,9 @@ ErrorOr<void> Port::send(NonnullOwnPtr<PortMessage> message, bool nonblocking, b
         if (!m_sendable.wait_until_interruptible([&] { return m_count.load() < m_capacity || m_receivers.load() == 0; }))
             return Error::from_errno(EINTR);
     }
+    // Whoever takes messages from here, if anyone's yet: it's working for the sender now, as fast as that.
+    if (auto receiver = last_receiver())
+        receiver->raise_message_boost(sender_qos);
     // An answer goes straight back to the caller, waiting for nothing else.
     bool direct = handoff || m_is_reply_port;
     if (direct)
@@ -155,6 +189,7 @@ ErrorOr<void> Port::send(NonnullOwnPtr<PortMessage> message, bool nonblocking, b
 ErrorOr<NonnullOwnPtr<PortMessage>> Port::receive(bool nonblocking, size_t max_size, size_t max_rights, size_t max_regions, size_t& needed_size)
 {
     OwnPtr<PortMessage> message;
+    note_receiver(Thread::current());
     for (;;) {
         {
             SpinLockGuard guard(m_lock);

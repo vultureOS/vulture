@@ -5,4 +5,5 @@
 #
 
 add_library(LibArchive STATIC
-    Tar.cpp)
+    Tar.cpp
+    Zip.cpp)

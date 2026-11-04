@@ -32,6 +32,9 @@ u32 InodeMetadata::mode() const
     case InodeType::Fifo:
         type_bits = S_IFIFO;
         break;
+    case InodeType::Socket:
+        type_bits = S_IFSOCK;
+        break;
     }
     return type_bits | (permissions & 07777);
 }
@@ -81,6 +84,8 @@ u8 directory_entry_type(InodeType type)
         return DT_BLK;
     case InodeType::Fifo:
         return DT_FIFO;
+    case InodeType::Socket:
+        return DT_SOCK;
     }
     return DT_UNKNOWN;
 }

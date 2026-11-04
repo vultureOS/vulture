@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <Kernel/Time/TimerQueue.h>
+
 #include <Kernel/Tasks/Thread.h>
 
 namespace Kernel {
@@ -70,6 +72,10 @@ public:
 
     // A thread's rank for comparisons: 0 for idle, then the QoS classes.
     [[nodiscard]] static u8 rank(QoS qos) { return static_cast<u8>(to_underlying(qos) + 1); }
+    // How many have been wanting to run, on average over a minute, five and fifteen, in thousandths.
+    static void load_averages(u64 (&averages)[3]);
+    // How urgent a thread is now: it goes where that says, whether it's running or waiting to.
+    static void change_qos(Thread&, QoS);
 
 private:
     friend void ::kernel_thread_start(Arch::ThreadEntry, void*);

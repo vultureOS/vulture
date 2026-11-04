@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/API/POSIX/ptrace.h>
 #include <Kernel/Arch/UserContext.h>
 #include <Kernel/Arch/x86_64/ProcessorArea.h>
 #include <Kernel/Memory/MemoryManager.h>
@@ -181,6 +182,79 @@ ErrorOr<u64> pop_signal_frame(TrapFrame& frame)
 void make_code_coherent(PhysicalAddress)
 {
     // The instruction cache keeps up with memory, on this architecture.
+}
+
+void rewind_syscall(TrapFrame& frame, u64 number, u64)
+{
+    // syscall is 2 bytes; the arguments are all still there, and only the number was overwritten.
+    frame.rip -= 2;
+    frame.rax = number;
+}
+
+void enter_user_function(TrapFrame& frame, FlatPtr function)
+{
+    // (As if called: what's on top would be the return address.)
+    frame.rsp = ((frame.rsp - 128) & ~u64(15)) - 8;
+    frame.rip = function;
+    frame.rbp = 0;
+}
+
+void set_single_step(TrapFrame& frame, bool on)
+{
+    constexpr u64 trap_flag = 1ull << 8;
+    if (on)
+        frame.rflags |= trap_flag;
+    else
+        frame.rflags &= ~trap_flag;
+}
+
+void note_single_stepping(bool)
+{
+    // Only the frame's flags come into it.
+}
+
+void read_thread_state(TrapFrame const& frame, vulture_thread_state& state)
+{
+    state.r15 = frame.r15;
+    state.r14 = frame.r14;
+    state.r13 = frame.r13;
+    state.r12 = frame.r12;
+    state.r11 = frame.r11;
+    state.r10 = frame.r10;
+    state.r9 = frame.r9;
+    state.r8 = frame.r8;
+    state.rdi = frame.rdi;
+    state.rsi = frame.rsi;
+    state.rbp = frame.rbp;
+    state.rdx = frame.rdx;
+    state.rcx = frame.rcx;
+    state.rbx = frame.rbx;
+    state.rax = frame.rax;
+    state.rip = frame.rip;
+    state.rflags = frame.rflags;
+    state.rsp = frame.rsp;
+}
+
+void write_thread_state(TrapFrame& frame, vulture_thread_state const& state)
+{
+    frame.r15 = state.r15;
+    frame.r14 = state.r14;
+    frame.r13 = state.r13;
+    frame.r12 = state.r12;
+    frame.r11 = state.r11;
+    frame.r10 = state.r10;
+    frame.r9 = state.r9;
+    frame.r8 = state.r8;
+    frame.rdi = state.rdi;
+    frame.rsi = state.rsi;
+    frame.rbp = state.rbp;
+    frame.rdx = state.rdx;
+    frame.rcx = state.rcx;
+    frame.rbx = state.rbx;
+    frame.rax = state.rax;
+    frame.rip = state.rip;
+    frame.rsp = state.rsp;
+    frame.rflags = user_rflags | (state.rflags & user_settable_flags);
 }
 
 }

@@ -299,7 +299,9 @@ void test_mutexes()
 
     pthread_mutexattr_t attributes;
     pthread_mutexattr_init(&attributes);
-    CHECK(pthread_mutexattr_setpshared(&attributes, PTHREAD_PROCESS_SHARED) == ENOTSUP);
+    CHECK(pthread_mutexattr_setpshared(&attributes, PTHREAD_PROCESS_SHARED) == 0);
+    CHECK(pthread_mutexattr_setpshared(&attributes, PTHREAD_PROCESS_PRIVATE) == 0);
+    CHECK(pthread_mutexattr_setpshared(&attributes, 99) == EINVAL);
     CHECK(pthread_mutexattr_settype(&attributes, 99) == EINVAL);
 
     pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);

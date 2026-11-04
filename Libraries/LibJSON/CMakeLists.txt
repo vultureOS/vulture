@@ -7,4 +7,5 @@
 # JSON: vultureOS's property lists. Built for the host too, for tools and
 # tests.
 add_library(LibJSON STATIC
-    JSON.cpp)
+    JSON.cpp
+    PropertyList.cpp)

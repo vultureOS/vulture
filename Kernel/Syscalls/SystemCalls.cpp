@@ -26,6 +26,7 @@
 #include <Kernel/Memory/UserAccess.h>
 #include <Kernel/Security/Random.h>
 #include <Kernel/Tasks/Process.h>
+#include <Kernel/Tasks/Scheduler.h>
 #include <Kernel/Tasks/Processor.h>
 #include <Kernel/Time/Time.h>
 
@@ -80,12 +81,20 @@ ErrorOr<FlatPtr> Process::sys_poll(TrapFrame&, SyscallArguments const& arguments
     FlatPtr address = arguments.values[0];
     size_t count = arguments.values[1];
     i64 timeout = static_cast<i32>(arguments.values[2]);
-    constexpr size_t max_descriptors = 256;
-    if (count > max_descriptors)
+    if (count > max_open_files)
         return Error::from_errno(EINVAL);
-    vulture_pollfd descriptors[max_descriptors];
+    // On the stack for the usual few.
+    constexpr size_t usual_descriptors = 64;
+    vulture_pollfd usual[usual_descriptors];
+    Vector<vulture_pollfd> many;
+    if (count > usual_descriptors)
+        TRY(many.try_resize(count));
+    auto* descriptors = count > usual_descriptors ? many.data() : usual;
     if (count > 0)
         TRY(copy_from_user(descriptors, address, count * sizeof(vulture_pollfd)));
+    // Going back for more: whatever it's been doing for anyone else is done.
+    if (timeout != 0)
+        Thread::current().set_message_boost(QoS::Background);
     u64 deadline = timeout < 0 ? ~0ull : Time::now() + Time::ticks_from_microseconds(static_cast<u64>(timeout) * 1000);
 
     // Ports we poll know we do, and wake us themselves.
@@ -244,6 +253,18 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
         set_number(static_cast<u64>(physical_memory().statistics().managed_pages * page_size));
     } else if (name == "hw.freemem"_sv) {
         set_number(static_cast<u64>(physical_memory().statistics().free_pages * page_size));
+    } else if (name == "vm.loadavg"_sv) {
+        u64 averages[3];
+        Scheduler::load_averages(averages);
+        // (In thousandths: there's no floating point in here.)
+        if (old_buffer) {
+            auto const room = TRY(copy_from_user<size_t>(arguments.values[3]));
+            TRY(copy_to_user(old_buffer, averages, min(room, sizeof(averages))));
+        }
+        TRY(copy_to_user(arguments.values[3], sizeof(averages)));
+        return 0;
+    } else if (name == "vm.file_cache_pages"_sv) {
+        set_number(VirtualFileSystem::file_cache_pages());
     } else if (name == "vm.compressor.pages"_sv) {
         set_number(Compressor::statistics().pages);
     } else if (name == "vm.compressor.pool_bytes"_sv) {

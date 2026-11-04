@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/Arch/UserContext.h>
 #include <Kernel/API/POSIX/signal_numbers.h>
 #include <Kernel/Arch/CPU.h>
 #include <Kernel/Arch/InterruptController.h>
@@ -62,6 +63,11 @@ void handle_user_exception(TrapFrame& frame)
         process.handle_user_exception(frame, SIGFPE);
         break;
     case vector_debug:
+        // Done: that was the one.
+        Thread::current().set_single_stepping(false);
+        Arch::set_single_step(frame, false);
+        process.handle_user_exception(frame, SIGTRAP);
+        break;
     case vector_breakpoint:
     case vector_overflow:
         process.handle_user_exception(frame, SIGTRAP);
@@ -89,8 +95,12 @@ void prepare_return_to_user(TrapFrame& frame)
     for (;;) {
         Scheduler::preempt_if_needed();
         auto* process = Process::current();
-        if (!process || !process->has_work_before_user())
+        if (!process)
             return;
+        if (!process->has_work_before_user()) {
+            process->finish_interrupted_syscall(frame);
+            return;
+        }
         Arch::enable_interrupts();
         process->do_work_before_user(frame);
         Arch::mask_interrupts();

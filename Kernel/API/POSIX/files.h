@@ -53,6 +53,8 @@
 
 // fcntl() commands and descriptor flags.
 #define F_DUPFD 0
+#define F_GETPATH 50
+#define F_DUPFD_CLOEXEC 67
 #define F_GETFD 1
 #define F_SETFD 2
 #define F_GETFL 3
@@ -68,6 +70,7 @@
 // Directory entry types (d_type).
 #define DT_UNKNOWN 0
 #define DT_FIFO 1
+#define DT_SOCK 12
 #define DT_CHR 2
 #define DT_DIR 4
 #define DT_BLK 6
@@ -111,6 +114,9 @@ struct vulture_stat {
 // The *at() calls: a directory descriptor, or this for the working directory.
 #define AT_FDCWD -100
 #define AT_SYMLINK_NOFOLLOW 0x100
+#define AT_REMOVEDIR 0x200
+#define AT_SYMLINK_FOLLOW 0x400
+#define AT_EACCESS 0x800
 
 // utimensat(): leave a time alone, or set it to now.
 #define UTIME_NOW ((1l << 30) - 1l)

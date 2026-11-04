@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/API/POSIX/ptrace.h>
 #include <Kernel/Arch/UserContext.h>
 #include <Kernel/Arch/aarch64/SystemRegisters.h>
 #include <Kernel/Memory/MemoryManager.h>
@@ -130,6 +131,63 @@ void make_code_coherent(PhysicalAddress page)
                  "dsb ish\n"
                  "isb" ::
                      : "memory");
+}
+
+void rewind_syscall(TrapFrame& frame, u64, u64 first_argument)
+{
+    // svc is 4 bytes; the number's still in x8, as only x0 is ever changed by a call.
+    frame.elr -= 4;
+    frame.x[0] = first_argument;
+}
+
+void enter_user_function(TrapFrame& frame, FlatPtr function)
+{
+    frame.user_sp = (frame.user_sp - 128) & ~u64(15);
+    frame.elr = function;
+    frame.x[30] = 0;
+    frame.x[29] = 0;
+}
+
+void set_single_step(TrapFrame& frame, bool on)
+{
+    constexpr u64 software_step = 1ull << 21;
+    if (on)
+        frame.spsr |= software_step;
+    else
+        frame.spsr &= ~software_step;
+}
+
+// With MDSCR_EL1.SS set, a thread that isn't stepping traps before its first instruction; so it's set only while one that is, is running.
+void note_single_stepping(bool on)
+{
+    u64 value;
+    asm volatile("mrs %0, mdscr_el1" : "=r"(value));
+    u64 const wanted = on ? (value | 1) : (value & ~u64(1));
+    if (wanted == value)
+        return;
+    // The OS lock, which firmware may have left on, would hold it off.
+    asm volatile("msr oslar_el1, xzr\n"
+                 "msr mdscr_el1, %0\n"
+                 "isb" : : "r"(wanted));
+}
+
+void read_thread_state(TrapFrame const& frame, vulture_thread_state& state)
+{
+    for (size_t i = 0; i < 31; ++i)
+        state.x[i] = frame.x[i];
+    state.sp = frame.user_sp;
+    state.pc = frame.elr;
+    state.pstate = frame.spsr;
+}
+
+void write_thread_state(TrapFrame& frame, vulture_thread_state const& state)
+{
+    for (size_t i = 0; i < 31; ++i)
+        frame.x[i] = state.x[i];
+    frame.user_sp = state.sp;
+    frame.elr = state.pc;
+    // Its flags, and nothing that would have it come back as anything else.
+    frame.spsr = (frame.spsr & ~user_condition_flags) | (state.pstate & user_condition_flags);
 }
 
 }

@@ -11,7 +11,9 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 // The EFI System Partition, read through the FAT driver at /Volumes/EFI.
@@ -72,5 +74,45 @@ int main()
     CHECK(open("/Volumes/EFI/new-file", O_WRONLY | O_CREAT, 0644) < 0 && errno == EROFS);
     CHECK(mkdir("/Volumes/EFI/new-directory", 0755) < 0 && errno == EROFS);
     CHECK(open("/Volumes/EFI/missing", O_RDONLY) < 0 && errno == ENOENT);
+
+    // Mounting something more, and only for those who may.
+    char const* const place = "/tmp/volumes-test";
+    (void)mkdir(place, 0755);
+    pid_t child = fork();
+    CHECK(child >= 0);
+    if (child == 0) {
+        (void)setuid(501);
+        _exit(mount("tmpfs", place, 0, nullptr) < 0 && errno == EPERM ? 0 : 1);
+    }
+    int status = -1;
+    CHECK(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+
+    CHECK(mount("tmpfs", place, 0, nullptr) == 0);
+    int const file = open("/tmp/volumes-test/inside", O_RDWR | O_CREAT, 0644);
+    CHECK(file >= 0);
+    errno = 0;
+    CHECK(unmount(place, 0) < 0 && errno == EBUSY);
+    close(file);
+    CHECK(chdir(place) == 0);
+    errno = 0;
+    CHECK(unmount(place, 0) < 0 && errno == EBUSY);
+    CHECK(chdir("/") == 0);
+    // Under another mount is in use too, until that's gone.
+    CHECK(mkdir("/tmp/volumes-test/deeper", 0755) == 0);
+    CHECK(mount("tmpfs", "/tmp/volumes-test/deeper", 0, nullptr) == 0);
+    errno = 0;
+    CHECK(unmount(place, 0) < 0 && errno == EBUSY);
+    CHECK(unmount("/tmp/volumes-test/deeper", 0) == 0);
+    CHECK(unmount(place, 0) == 0);
+    struct stat after {};
+    CHECK(stat("/tmp/volumes-test/inside", &after) < 0 && errno == ENOENT);
+    errno = 0;
+    CHECK(unmount(place, 0) < 0 && errno == EINVAL);
+    errno = 0;
+    CHECK(mount("no-such-type", place, 0, nullptr) < 0 && errno == EOPNOTSUPP);
+    errno = 0;
+    CHECK(mount("tmpfs", "/tmp/no-such-directory", 0, nullptr) < 0 && errno == ENOENT);
+    errno = 0;
+    CHECK(mount("msdos", place, 0, const_cast<char*>("/tmp")) < 0 && errno == ENOTBLK);
     return finish();
 }

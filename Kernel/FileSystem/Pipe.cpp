@@ -10,8 +10,61 @@
 #include <Kernel/Memory/Heap.h>
 #include <Kernel/Tasks/Process.h>
 #include <LibBase/New.h>
+#include <LibBase/Vector.h>
 
 namespace Kernel {
+
+namespace {
+
+// Named pipes open now.
+struct OpenFifo {
+    NonnullRefPtr<Inode> inode;
+    NonnullRefPtr<Pipe> pipe;
+};
+
+Mutex s_fifos_lock;
+
+Vector<OpenFifo>& open_fifos()
+{
+    static Vector<OpenFifo> list;
+    return list;
+}
+
+}
+
+ErrorOr<NonnullRefPtr<Pipe>> Pipe::for_fifo(Inode& inode)
+{
+    MutexLocker locker(s_fifos_lock);
+    for (auto const& fifo : open_fifos()) {
+        if (fifo.inode.ptr() == &inode)
+            return fifo.pipe;
+    }
+    auto created = TRY(create());
+    TRY(open_fifos().try_append(OpenFifo { inode, created }));
+    return created;
+}
+
+void Pipe::forget_fifo_if_unused(Inode& inode, Pipe& pipe)
+{
+    if (pipe.has_readers() || pipe.has_writers())
+        return;
+    // Dropped once the lock's let go.
+    Vector<OpenFifo> gone;
+    MutexLocker locker(s_fifos_lock);
+    auto& list = open_fifos();
+    for (size_t i = 0; i < list.size(); ++i) {
+        if (list[i].inode.ptr() == &inode && list[i].pipe.ptr() == &pipe && !pipe.has_readers() && !pipe.has_writers()) {
+            (void)gone.try_append(move(list[i]));
+            list.remove(i);
+            break;
+        }
+    }
+}
+
+bool Pipe::wait_for_other_end(bool writer, u64 seen)
+{
+    return m_other_end.wait_until_interruptible([&] { return (writer ? has_readers() : has_writers()) || times_other_end_opened(writer) != seen; });
+}
 
 Pipe::Pipe(u8* buffer)
     : m_buffer(buffer)
@@ -39,6 +92,8 @@ Pipe::~Pipe()
 void Pipe::attach(bool writer)
 {
     (writer ? m_writers : m_readers).fetch_add(1);
+    (writer ? m_writer_opens : m_reader_opens).fetch_add(1);
+    m_other_end.wake_all();
 }
 
 void Pipe::detach(bool writer)

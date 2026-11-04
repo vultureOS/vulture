@@ -28,6 +28,7 @@ enum class InodeType : u8 {
     CharacterDevice,
     BlockDevice,
     Fifo,
+    Socket,
 };
 
 struct InodeMetadata {

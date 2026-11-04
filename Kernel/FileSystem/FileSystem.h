@@ -29,6 +29,9 @@ public:
     [[nodiscard]] virtual StringView device_name() const { return name(); }
     // Writes everything to stable storage.
     virtual ErrorOr<void> sync() { return {}; }
+    // Memory's short: gives back up to this many pages of what it's only keeping to save reading it again. How many it did.
+    virtual size_t release_cached_pages(size_t) { return 0; }
+    [[nodiscard]] virtual size_t cached_page_count() const { return 0; }
 
     // Moves a name within this filesystem, replacing an existing target.
     virtual ErrorOr<void> rename(Inode& old_parent, StringView old_name, Inode& new_parent, StringView new_name);

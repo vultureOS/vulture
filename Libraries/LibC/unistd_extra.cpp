@@ -16,6 +16,7 @@
 #include <string.h>
 #include <sys/sysctl.h>
 #include <termios.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 using System::Syscall;
@@ -112,8 +113,11 @@ long sysconf(int name)
         sysctlbyname("hw.ncpu", &count, &length, nullptr, 0);
         return count;
     }
-    case _SC_OPEN_MAX:
-        return 64;
+    case _SC_OPEN_MAX: {
+        rlimit limit {};
+        getrlimit(RLIMIT_NOFILE, &limit);
+        return static_cast<long>(limit.rlim_cur);
+    }
     case _SC_CLK_TCK:
         return 100;
     case _SC_ARG_MAX:

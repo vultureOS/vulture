@@ -39,6 +39,7 @@ StringView qos_name(QoS qos)
 Thread::Thread(StringView name, ThreadOptions options)
     : m_id(s_next_thread_id.fetch_add(1, MemoryOrder::Relaxed))
     , m_qos(options.qos)
+    , m_effective_qos(to_underlying(options.qos))
     , m_pinned_processor(options.pinned_processor)
 {
     m_name_length = min(name.length(), sizeof(m_name));
@@ -218,7 +219,141 @@ void Thread::interrupt_waits()
 
 bool Thread::has_pending_signal() const
 {
-    return m_process && m_process->has_deliverable_signal(*this);
+    return m_process && (m_process->has_deliverable_signal(*this) || cancellation_is_due());
+}
+
+void Thread::update_effective_qos()
+{
+    RefPtr<Thread> target;
+    QoS effective;
+    {
+        SpinLockGuard guard(m_boost_lock);
+        u8 best = to_underlying(m_qos);
+        for (u32 i = 0; i < m_boost_count.load(); ++i)
+            best = max(best, to_underlying(m_boosts[i].qos));
+        best = max(best, to_underlying(m_message_boost));
+        if (best == m_effective_qos.load(MemoryOrder::Acquire))
+            return;
+        effective = static_cast<QoS>(best);
+        target = m_boost_target;
+    }
+    Scheduler::change_qos(*this, effective);
+    // (This ends, even if they're all waiting for each other: there's a point where nothing's changing.)
+    if (target)
+        target->set_boost(this, effective);
+}
+
+void Thread::set_base_qos(QoS qos)
+{
+    {
+        SpinLockGuard guard(m_boost_lock);
+        m_qos = qos;
+    }
+    update_effective_qos();
+}
+
+void Thread::raise_boost(void const* key, QoS qos)
+{
+    {
+        SpinLockGuard guard(m_boost_lock);
+        u32 const count = m_boost_count.load();
+        bool found = false;
+        for (u32 i = 0; i < count; ++i) {
+            if (m_boosts[i].key == key) {
+                m_boosts[i].qos = static_cast<QoS>(max(to_underlying(m_boosts[i].qos), to_underlying(qos)));
+                found = true;
+            }
+        }
+        if (!found) {
+            if (count == max_boosts)
+                return;
+            m_boosts[count] = { key, qos };
+            m_boost_count.store(count + 1);
+        }
+    }
+    update_effective_qos();
+}
+
+void Thread::set_boost(void const* key, QoS qos)
+{
+    {
+        SpinLockGuard guard(m_boost_lock);
+        u32 const count = m_boost_count.load();
+        bool found = false;
+        for (u32 i = 0; i < count; ++i) {
+            if (m_boosts[i].key == key) {
+                m_boosts[i].qos = qos;
+                found = true;
+            }
+        }
+        if (!found) {
+            if (count == max_boosts)
+                return;
+            m_boosts[count] = { key, qos };
+            m_boost_count.store(count + 1);
+        }
+    }
+    update_effective_qos();
+}
+
+void Thread::remove_boost(void const* key)
+{
+    if (m_boost_count.load() == 0)
+        return;
+    {
+        SpinLockGuard guard(m_boost_lock);
+        u32 const count = m_boost_count.load();
+        bool found = false;
+        for (u32 i = 0; i < count; ++i) {
+            if (m_boosts[i].key == key) {
+                m_boosts[i] = m_boosts[count - 1];
+                m_boost_count.store(count - 1);
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return;
+    }
+    update_effective_qos();
+}
+
+void Thread::set_message_boost(QoS qos)
+{
+    {
+        SpinLockGuard guard(m_boost_lock);
+        if (m_message_boost == qos)
+            return;
+        m_message_boost = qos;
+    }
+    update_effective_qos();
+}
+
+void Thread::raise_message_boost(QoS qos)
+{
+    {
+        SpinLockGuard guard(m_boost_lock);
+        if (to_underlying(m_message_boost) >= to_underlying(qos))
+            return;
+        m_message_boost = qos;
+    }
+    update_effective_qos();
+}
+
+void Thread::set_boost_target(Thread* target)
+{
+    RefPtr<Thread> previous;
+    QoS effective;
+    {
+        SpinLockGuard guard(m_boost_lock);
+        previous = move(m_boost_target);
+        m_boost_target = target;
+        effective = qos();
+    }
+    if (previous)
+        previous->remove_boost(this);
+    if (target)
+        target->raise_boost(this, effective);
 }
 
 void Thread::interrupt_for_signal()

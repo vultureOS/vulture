@@ -7,6 +7,7 @@
 #include <Kernel/Arch/InterruptController.h>
 #include <Kernel/Debug/Panic.h>
 #include <Kernel/Tasks/Processor.h>
+#include <Kernel/Arch/UserContext.h>
 #include <Kernel/Tasks/Scheduler.h>
 #include <Kernel/Time/Time.h>
 
@@ -27,7 +28,9 @@ Atomic<bool> Scheduler::s_running { false };
 void RunQueue::push(Thread& thread)
 {
     VERIFY(lock.is_locked_by_current_processor());
-    m_classes[to_underlying(thread.qos())].append(thread);
+    thread.m_queued_class = to_underlying(thread.qos());
+    m_classes[thread.m_queued_class].append(thread);
+    thread.m_run_queue.store(this, MemoryOrder::Release);
     m_count.fetch_add(1, MemoryOrder::Relaxed);
     if (!thread.m_pinned_processor.has_value())
         m_stealable_count.fetch_add(1, MemoryOrder::Relaxed);
@@ -36,7 +39,9 @@ void RunQueue::push(Thread& thread)
 void RunQueue::push_front(Thread& thread)
 {
     VERIFY(lock.is_locked_by_current_processor());
-    m_classes[to_underlying(thread.qos())].prepend(thread);
+    thread.m_queued_class = to_underlying(thread.qos());
+    m_classes[thread.m_queued_class].prepend(thread);
+    thread.m_run_queue.store(this, MemoryOrder::Release);
     m_count.fetch_add(1, MemoryOrder::Relaxed);
     if (!thread.m_pinned_processor.has_value())
         m_stealable_count.fetch_add(1, MemoryOrder::Relaxed);
@@ -44,7 +49,8 @@ void RunQueue::push_front(Thread& thread)
 
 void RunQueue::remove(Thread& thread)
 {
-    m_classes[to_underlying(thread.qos())].remove(thread);
+    m_classes[thread.m_queued_class].remove(thread);
+    thread.m_run_queue.store(nullptr, MemoryOrder::Release);
     m_count.fetch_sub(1, MemoryOrder::Relaxed);
     if (!thread.m_pinned_processor.has_value())
         m_stealable_count.fetch_sub(1, MemoryOrder::Relaxed);
@@ -218,6 +224,7 @@ void Scheduler::switch_to(Processor& processor, Thread& current, Thread& next)
     processor.m_running_rank.store(&next == processor.m_idle_thread ? 0 : rank(next.qos()), MemoryOrder::Relaxed);
     ++processor.m_context_switches;
     next.activate_user_space();
+    Arch::note_single_stepping(next.is_single_stepping());
     // A fresh slice for the thread coming in.
     if (processor.m_time_slice.is_pending())
         processor.m_time_slice.cancel();
@@ -305,6 +312,89 @@ void Scheduler::notify(Processor& target, Thread& thread)
     // The target only needs telling if it must switch now, or arm its slice.
     if (thread_rank > target.m_running_rank.load(MemoryOrder::Relaxed) || !target.m_time_slice_armed.load(MemoryOrder::Relaxed))
         Arch::send_ipi(target.hardware_id(), IPI::Wakeup);
+}
+
+// How many have been wanting to run, as moving averages over 1, 5 and 15 minutes. Unix samples these every five seconds, but there's no periodic tick here to do it
+// on, and nothing should wake up an idle machine for it: so it's worked out when it's asked for, from how much of the time since then the processors weren't idle.
+// The factors are for five seconds (e^(-5/60), e^(-5/300), e^(-5/900)), in millionths.
+static constexpr u64 load_step_microseconds = 5'000'000;
+static constexpr u64 load_factors[3] = { 920044, 983471, 994459 };
+static constexpr u64 load_scale = 1'000'000;
+
+void Scheduler::load_averages(u64 (&averages)[3])
+{
+    static SpinLock s_lock;
+    static u64 s_averages[3] {};
+    static u64 s_last_time = 0;
+    static u64 s_last_idle_ticks = 0;
+
+    SpinLockGuard guard(s_lock);
+    u64 const now = Time::now();
+    u64 const step = Time::ticks_from_microseconds(load_step_microseconds);
+    u64 const elapsed = now - s_last_time;
+    if (elapsed >= step) {
+        u64 idle_ticks = 0;
+        u64 online = 0;
+        u64 queued = 0;
+        for (u32 id = 0; id < Processor::count(); ++id) {
+            auto& processor = Processor::with_id(id);
+            if (!processor.is_online())
+                continue;
+            ++online;
+            idle_ticks += processor.m_idle_thread->cpu_ticks();
+            queued += processor.m_run_queue.count();
+        }
+        u64 const idle_since = idle_ticks - s_last_idle_ticks;
+        u64 const all_of_it = elapsed * online;
+        u64 const busy = all_of_it > idle_since ? all_of_it - idle_since : 0;
+        u64 const wanting = busy / (elapsed / 1000) + queued * 1000; // In thousandths.
+        // Past an hour or so, what it was before makes no difference.
+        u64 const steps = elapsed / step;
+        for (u64 n = 0; n < min<u64>(steps, 720); ++n) {
+            for (size_t i = 0; i < 3; ++i)
+                s_averages[i] = (s_averages[i] * load_factors[i] + wanting * (load_scale - load_factors[i])) / load_scale;
+        }
+        s_last_time = now;
+        s_last_idle_ticks = idle_ticks;
+    }
+    for (size_t i = 0; i < 3; ++i)
+        averages[i] = s_averages[i];
+}
+
+void Scheduler::change_qos(Thread& thread, QoS qos)
+{
+    InterruptDisabler disabler;
+    for (;;) {
+        auto* queue = thread.m_run_queue.load(MemoryOrder::Acquire);
+        if (!queue) {
+            thread.m_effective_qos.store(to_underlying(qos), MemoryOrder::Release);
+            // Gone on a queue in the meantime? In its old class, perhaps, so round again.
+            if (thread.m_run_queue.load(MemoryOrder::Acquire))
+                continue;
+            if (thread.state() == Thread::State::Running) {
+                auto& running_on = Processor::with_id(thread.last_processor());
+                if (running_on.m_current_thread == &thread)
+                    running_on.m_running_rank.store(rank(qos), MemoryOrder::Relaxed);
+            }
+            return;
+        }
+        Processor* owner = nullptr;
+        for (u32 id = 0; id < Processor::count(); ++id) {
+            if (&Processor::with_id(id).m_run_queue == queue)
+                owner = &Processor::with_id(id);
+        }
+        VERIFY(owner);
+        {
+            SpinLockGuard guard(queue->lock);
+            if (thread.m_run_queue.load(MemoryOrder::Acquire) != queue)
+                continue;
+            queue->remove(thread);
+            thread.m_effective_qos.store(to_underlying(qos), MemoryOrder::Release);
+            queue->push(thread);
+        }
+        notify(*owner, thread);
+        return;
+    }
 }
 
 void Scheduler::enqueue(Thread& thread)

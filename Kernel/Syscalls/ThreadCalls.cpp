@@ -25,10 +25,18 @@ namespace {
 // bucket; one that comes before changed the word first, which the waiter
 // then sees. Each waiter has its own wait queue, so a wake wakes exactly
 // the ones it chose.
+//
+// What's waited for is an address in an address space; or, in memory that's shared, a place in the file it's the memory of, so that
+// everyone mapping that's waiting for the same thing.
+struct FutexKey {
+    void const* where { nullptr };
+    u64 offset { 0 };
+    [[nodiscard]] bool operator==(FutexKey const&) const = default;
+};
+
 struct FutexWaiter {
     IntrusiveListNode node;
-    AddressSpace const* space { nullptr };
-    FlatPtr address { 0 };
+    FutexKey key;
     Atomic<bool> woken { false };
     WaitQueue queue;
 };
@@ -41,15 +49,22 @@ struct FutexBucket {
 constexpr size_t bucket_count = 256;
 FutexBucket s_buckets[bucket_count];
 
-FutexBucket& bucket_for(AddressSpace const& space, FlatPtr address)
+FutexKey key_for(AddressSpace& space, FlatPtr address)
 {
-    FlatPtr key = reinterpret_cast<FlatPtr>(&space) ^ (address >> 2) ^ (address >> 12);
+    if (auto location = space.shared_location(address); location.has_value())
+        return { location->file, location->offset };
+    return { &space, address };
+}
+
+FutexBucket& bucket_for(FutexKey const& futex)
+{
+    FlatPtr key = reinterpret_cast<FlatPtr>(futex.where) ^ (futex.offset >> 2) ^ (futex.offset >> 12);
     return s_buckets[(key ^ (key >> 8)) % bucket_count];
 }
 
-size_t futex_wake(AddressSpace const& space, FlatPtr address, size_t count)
+size_t futex_wake(FutexKey const& key, size_t count)
 {
-    auto& bucket = bucket_for(space, address);
+    auto& bucket = bucket_for(key);
     size_t woken = 0;
     SpinLockGuard guard(bucket.lock);
     // A woken waiter leaves the list here: it takes this lock before it goes
@@ -57,7 +72,7 @@ size_t futex_wake(AddressSpace const& space, FlatPtr address, size_t count)
     for (auto iterator = bucket.waiters.begin(); iterator != bucket.waiters.end() && woken < count;) {
         auto& waiter = *iterator;
         ++iterator;
-        if (waiter.space != &space || waiter.address != address)
+        if (waiter.key != key)
             continue;
         bucket.waiters.remove(waiter);
         waiter.woken.store(true);
@@ -76,12 +91,48 @@ ErrorOr<FlatPtr> Process::sys_futex(TrapFrame&, SyscallArguments const& argument
     u32 value = static_cast<u32>(arguments.values[2]);
     if (address % sizeof(u32) != 0 || !is_user_range(address, sizeof(u32)))
         return Error::from_errno(EINVAL);
-    auto& space = *m_address_space;
+    auto const key = key_for(*m_address_space, address);
 
     if (operation == VULTURE_FUTEX_WAKE)
-        return static_cast<FlatPtr>(futex_wake(space, address, value));
-    if (operation != VULTURE_FUTEX_WAIT)
+        return static_cast<FlatPtr>(futex_wake(key, value));
+    if (operation != VULTURE_FUTEX_WAIT && operation != VULTURE_FUTEX_WAIT_FOR_HOLDER && operation != VULTURE_FUTEX_WAIT_CANCELLABLE)
         return Error::from_errno(EINVAL);
+
+    auto& self = Thread::current();
+    bool const cancellable = operation == VULTURE_FUTEX_WAIT_CANCELLABLE;
+    if (cancellable) {
+        self.set_in_cancellation_point(true);
+        if (self.cancellation_is_due()) {
+            self.set_in_cancellation_point(false);
+            return Error::from_errno(ECANCELED);
+        }
+    }
+
+    // Someone in this process that's in the way: they've got to get on with it, and this waits with them for as long as that takes.
+    RefPtr<Thread> holder;
+    if (operation == VULTURE_FUTEX_WAIT_FOR_HOLDER && arguments.values[4]) {
+        SpinLockGuard guard(m_threads_lock);
+        for (auto& thread : m_threads) {
+            if (thread.id() == arguments.values[4]) {
+                holder = thread;
+                break;
+            }
+        }
+    }
+    struct Done {
+        Thread& self;
+        bool cancellable;
+        bool boosting;
+        ~Done()
+        {
+            if (boosting)
+                self.set_boost_target(nullptr);
+            if (cancellable)
+                self.set_in_cancellation_point(false);
+        }
+    } done { self, cancellable, holder && holder.ptr() != &self };
+    if (done.boosting)
+        self.set_boost_target(holder.ptr());
 
     bool timed = arguments.values[3] != 0;
     u64 deadline = 0;
@@ -93,9 +144,8 @@ ErrorOr<FlatPtr> Process::sys_futex(TrapFrame&, SyscallArguments const& argument
     }
 
     FutexWaiter waiter;
-    waiter.space = &space;
-    waiter.address = address;
-    auto& bucket = bucket_for(space, address);
+    waiter.key = key;
+    auto& bucket = bucket_for(key);
     {
         SpinLockGuard guard(bucket.lock);
         bucket.waiters.append(waiter);
@@ -129,8 +179,11 @@ ErrorOr<FlatPtr> Process::sys_futex(TrapFrame&, SyscallArguments const& argument
     }
     leave();
     // Woken just as it gave up: the wake counted, so it must say so.
-    if (error && !waiter.woken.load())
+    if (error && !waiter.woken.load()) {
+        if (cancellable && self.cancellation_is_due())
+            return Error::from_errno(ECANCELED);
         return Error::from_errno(error);
+    }
     return 0;
 }
 
@@ -192,7 +245,7 @@ ErrorOr<FlatPtr> Process::sys_thread_exit(TrapFrame&, SyscallArguments const& ar
     if (thread.m_clear_tid_address) {
         u32 zero = 0;
         (void)copy_to_user(thread.m_clear_tid_address, zero);
-        futex_wake(*m_address_space, thread.m_clear_tid_address, NumericLimits<u32>::max());
+        futex_wake(key_for(*m_address_space, thread.m_clear_tid_address), NumericLimits<u32>::max());
     }
     bool last = false;
     {
@@ -243,6 +296,55 @@ ErrorOr<FlatPtr> Process::sys_set_thread_pointer(TrapFrame&, SyscallArguments co
         return Error::from_errno(EINVAL);
     Arch::set_current_user_thread_pointer(pointer);
     return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_set_thread_qos(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto const wanted = arguments.values[0];
+    auto& self = Thread::current();
+    auto const previous = self.base_qos();
+    if (wanted == VULTURE_QOS_JUST_ASKING)
+        return static_cast<FlatPtr>(to_underlying(previous));
+    if (wanted >= qos_class_count)
+        return Error::from_errno(EINVAL);
+    self.set_base_qos(static_cast<QoS>(wanted));
+    return static_cast<FlatPtr>(to_underlying(previous));
+}
+
+ErrorOr<FlatPtr> Process::sys_thread_cancel_control(TrapFrame&, SyscallArguments const& arguments)
+{
+    auto const value = arguments.values[1];
+    auto& self = Thread::current();
+    switch (static_cast<i32>(arguments.values[0])) {
+    case VULTURE_CANCEL_THREAD: {
+        RefPtr<Thread> target;
+        {
+            SpinLockGuard guard(m_threads_lock);
+            for (auto& thread : m_threads) {
+                if (thread.id() == value) {
+                    target = thread;
+                    break;
+                }
+            }
+        }
+        if (!target)
+            return Error::from_errno(ESRCH);
+        target->request_cancel();
+        target->interrupt_for_signal();
+        return 0;
+    }
+    case VULTURE_CANCEL_ENABLE:
+        self.set_cancel_enabled(value != 0);
+        return 0;
+    case VULTURE_CANCEL_ASYNC:
+        self.set_cancel_async(value != 0);
+        return 0;
+    case VULTURE_CANCEL_HANDLER:
+        m_cancel_handler.store(value);
+        return 0;
+    default:
+        return Error::from_errno(EINVAL);
+    }
 }
 
 }

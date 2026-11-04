@@ -13,6 +13,7 @@
 #include <Kernel/Memory/Heap.h>
 #include <Kernel/Memory/UserAccess.h>
 #include <Kernel/TTY/TTY.h>
+#include <Kernel/FileSystem/Poll.h>
 #include <Kernel/Tasks/Process.h>
 #include <LibBase/New.h>
 
@@ -76,10 +77,26 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
         SpinLockGuard guard(child->m_describe_lock);
         child->m_address_space = move(space);
     }
-    {
+    // (Round again if another thread's table grows meanwhile.)
+    for (size_t room = 0;;) {
+        TRY(child->ensure_file_capacity(room));
         SpinLockGuard guard(m_files_lock);
-        for (size_t fd = 0; fd < max_open_files; ++fd)
+        if (m_file_capacity > child->m_file_capacity) {
+            room = m_file_capacity;
+            continue;
+        }
+        child->m_first_free_fd = m_first_free_fd;
+        for (size_t fd = 0; fd < m_file_capacity; ++fd) {
+            // A kqueue is about this process, and stays with it.
+            if (m_files[fd].description && m_files[fd].description->kqueue()) {
+                child->m_first_free_fd = min(child->m_first_free_fd, fd);
+                continue;
+            }
             child->m_files[fd] = m_files[fd];
+        }
+        for (size_t limit = 0; limit < VULTURE_RLIM_NLIMITS; ++limit)
+            child->m_limits[limit] = m_limits[limit];
+        break;
     }
     {
         SpinLockGuard guard(m_signal_lock);
@@ -106,6 +123,9 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
 
     child->register_with_parent();
     thread->start();
+    m_fork_count.fetch_add(1);
+    child->m_cancel_handler.store(m_cancel_handler.load());
+    notify_pollers();
     return static_cast<FlatPtr>(child->pid());
 }
 
@@ -204,7 +224,8 @@ ErrorOr<FlatPtr> Process::sys_waitpid(TrapFrame&, SyscallArguments const& argume
                     child.unregister_from_table();
                     break;
                 }
-                if (options & WUNTRACED) {
+                // A tracer always wants to know.
+                if ((options & WUNTRACED) || child.m_tracer_pid.load() == m_pid) {
                     if (int signal = child.m_unreported_stop.exchange(0)) {
                         changed_pid = child.pid();
                         changed_status = VULTURE_W_STOPPED(signal);

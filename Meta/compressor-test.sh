@@ -33,6 +33,17 @@ for memory in 1G 512M; do
         status=1
     fi
 done
+
+# And files: what's in memory only to save reading it again goes before anything else does. That takes a real disk.
+output="$("$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --memory 512M --boot-args utest=file-cache \
+    --expect "file-cache: PASS" --wait-for-exit --timeout 300 2>&1)"
+if [ $? -eq 0 ] && ! printf '%s\n' "$output" | grep -aq "KERNEL PANIC"; then
+    printf '%s\n' "$output" | grep -a "^file-cache: " | sed "s/^file-cache: /compressor-test: /"
+else
+    echo "compressor-test: FAIL: the file cache" >&2
+    printf '%s\n' "$output" | grep -a "KERNEL PANIC\|Backtrace\|  #[0-9]\|file-cache\|out of memory" | head -30 >&2
+    status=1
+fi
 if [ "$status" -eq 0 ]; then
     echo "compressor-test: PASS"
 else

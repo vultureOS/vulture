@@ -131,6 +131,33 @@ extern "C" int __libc_register_exit_handler(void (*function)(void*), void* argum
     return 0;
 }
 
+// A library's going away. What it wanted done at exit gets done now, while it's still there to do it: anything of its, as
+// the function or as what's given to it (which is where atexit()'s function is).
+extern "C" void __libc_run_exit_handlers_in(unsigned long start, unsigned long size)
+{
+    auto const belongs = [&](void const* address) { return reinterpret_cast<unsigned long>(address) - start < size; };
+    for (;;) {
+        ExitHandler handler {};
+        bool found = false;
+        {
+            LibC::LockGuard guard(s_exit_handlers_lock);
+            for (int i = s_exit_handler_count - 1; i >= 0; --i) {
+                if (!belongs(reinterpret_cast<void const*>(s_exit_handlers[i].function)) && !belongs(s_exit_handlers[i].argument))
+                    continue;
+                handler = s_exit_handlers[i];
+                for (int n = i; n + 1 < s_exit_handler_count; ++n)
+                    s_exit_handlers[n] = s_exit_handlers[n + 1];
+                --s_exit_handler_count;
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return;
+        handler.function(handler.argument);
+    }
+}
+
 // The C library's own setup, before any other initializer (the dynamic
 // linker calls it, like every initializer, with the arguments and
 // environment).

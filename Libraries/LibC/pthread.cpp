@@ -7,13 +7,20 @@
 #include "Lock.h"
 #include <Kernel/API/POSIX/memory.h>
 #include <LibBase/Types.h>
+#include <Kernel/API/POSIX/thread.h>
 #include <LibSystem/ThreadPointer.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
+#include <pthread/qos.h>
 #include <sched.h>
 #include <semaphore.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -74,6 +81,8 @@ void pause_processor()
 
 }
 
+static long cancellable_futex_wait(unsigned* word, unsigned expected, void const* timeout);
+
 struct vulture_pthread {
     // Written by the kernel before the thread starts; zero once it has ended.
     unsigned tid;
@@ -89,6 +98,11 @@ struct vulture_pthread {
     size_t stack_size;
     __pthread_handler_rec* cleanup_handlers;
     ExitHandler* exit_handlers;
+    // pthread_cancel()'s: asked for, and whether it's let. The kernel has its own copy, for when it's in the middle of something.
+    unsigned cancel_requested;
+    unsigned cancel_state;
+    unsigned cancel_type;
+    int initial_qos;
     char name[64];
     struct {
         unsigned generation;
@@ -197,6 +211,8 @@ void __pthread_initialize()
 {
     s_main_thread.tid = static_cast<unsigned>(System::syscall(Syscall::gettid));
     s_main_thread.state = Joinable;
+    s_main_thread.cancel_state = PTHREAD_CANCEL_ENABLE;
+    s_main_thread.cancel_type = PTHREAD_CANCEL_DEFERRED;
     s_main_thread.stack_top = reinterpret_cast<void*>(main_stack_top);
     s_main_thread.stack_size = main_stack_size;
     System::thread_control_block()->thread = &s_main_thread;
@@ -287,6 +303,8 @@ int pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(vo
 [[noreturn]] static void thread_entry(void* argument)
 {
     auto* thread = static_cast<pthread_t>(argument);
+    if (thread->initial_qos)
+        pthread_set_qos_class_self_np(static_cast<qos_class_t>(thread->initial_qos), 0);
     pthread_exit(thread->start_routine(thread->argument));
 }
 
@@ -318,6 +336,9 @@ int pthread_create(pthread_t* result, pthread_attr_t const* attributes, void* (*
     thread->state = attributes && attributes->detach_state == PTHREAD_CREATE_DETACHED ? Detached : Joinable;
     thread->start_routine = start_routine;
     thread->argument = argument;
+    thread->cancel_state = PTHREAD_CANCEL_ENABLE;
+    thread->cancel_type = PTHREAD_CANCEL_DEFERRED;
+    thread->initial_qos = attributes ? attributes->qos : 0;
     thread->mapping = mapping;
     thread->mapping_size = total;
     thread->stack_top = reinterpret_cast<void*>(stack_top);
@@ -378,7 +399,12 @@ static void wait_until_ended(pthread_t thread)
         unsigned tid = __atomic_load_n(&thread->tid, __ATOMIC_ACQUIRE);
         if (tid == 0)
             return;
-        futex_wait(&thread->tid, tid);
+        // A cancellation point, and with nothing yet to clean up.
+        if (cancellable_futex_wait(&thread->tid, tid, nullptr) == -ECANCELED) {
+            // It's still there for someone else to join.
+            __atomic_store_n(&thread->joined, 0u, __ATOMIC_RELEASE);
+            pthread_exit(PTHREAD_CANCELED);
+        }
     }
 }
 
@@ -573,7 +599,7 @@ int pthread_attr_setstack(pthread_attr_t* attributes, void* address, size_t size
 
 int pthread_mutex_init(pthread_mutex_t* mutex, pthread_mutexattr_t const* attributes)
 {
-    *mutex = { 0, attributes ? attributes->type : PTHREAD_MUTEX_NORMAL, nullptr, 0, 0 };
+    *mutex = { 0, attributes ? attributes->type : PTHREAD_MUTEX_NORMAL, nullptr, 0, 0, attributes && attributes->shared == PTHREAD_PROCESS_SHARED };
     return 0;
 }
 
@@ -582,13 +608,19 @@ int pthread_mutex_destroy(pthread_mutex_t* mutex)
     return __atomic_load_n(&mutex->state, __ATOMIC_RELAXED) ? EBUSY : 0;
 }
 
-// For the kinds that keep an owner: 0 to carry on and take the word, else
-// the result. (The owner field can only match the caller if the caller put
-// it there, so reading it unlocked is fine.)
+// Is it this thread's? The owner field can only match the caller if the caller put it there, so reading it unlocked is fine. A mutex that's between
+// processes wants the kernel's name for it too: a thread's address is the same in a process and in the copy that fork() made of it.
+static bool is_held_by(pthread_mutex_t const* mutex, pthread_t thread)
+{
+    if (__atomic_load_n(&mutex->owner, __ATOMIC_RELAXED) != thread)
+        return false;
+    return !mutex->shared || __atomic_load_n(&mutex->holder, __ATOMIC_RELAXED) == thread->tid;
+}
+
 static int check_owner_before_lock(pthread_mutex_t* mutex, pthread_t thread, bool& done)
 {
     done = false;
-    if (mutex->type == PTHREAD_MUTEX_NORMAL || __atomic_load_n(&mutex->owner, __ATOMIC_RELAXED) != thread)
+    if (mutex->type == PTHREAD_MUTEX_NORMAL || !is_held_by(mutex, thread))
         return 0;
     done = true;
     if (mutex->type == PTHREAD_MUTEX_RECURSIVE) {
@@ -598,25 +630,41 @@ static int check_owner_before_lock(pthread_mutex_t* mutex, pthread_t thread, boo
     return EDEADLK;
 }
 
+static void note_mutex_taken(pthread_mutex_t* mutex, pthread_t thread)
+{
+    __atomic_store_n(&mutex->holder, thread->tid, __ATOMIC_RELAXED);
+    if (mutex->type != PTHREAD_MUTEX_NORMAL) {
+        __atomic_store_n(&mutex->owner, thread, __ATOMIC_RELAXED);
+        mutex->count = 1;
+    }
+}
+
+// Waiting for it, and for whoever has it to get on with it: however little else they'd been given to run.
+static void take_contended_mutex(pthread_mutex_t* mutex)
+{
+    while (__atomic_exchange_n(&mutex->state, 2u, __ATOMIC_ACQUIRE) != 0) {
+        System::syscall(Syscall::futex, reinterpret_cast<unsigned long>(&mutex->state), VULTURE_FUTEX_WAIT_FOR_HOLDER, 2, 0,
+            mutex->shared ? 0 : __atomic_load_n(&mutex->holder, __ATOMIC_RELAXED));
+    }
+}
+
 int pthread_mutex_lock(pthread_mutex_t* mutex)
 {
-    auto* thread = mutex->type == PTHREAD_MUTEX_NORMAL ? nullptr : self();
+    auto* thread = self();
     bool done;
     int result = check_owner_before_lock(mutex, thread, done);
     if (done)
         return result;
-    lock_word(&mutex->state);
-    if (thread) {
-        __atomic_store_n(&mutex->owner, thread, __ATOMIC_RELAXED);
-        mutex->count = 1;
-    }
+    if (!try_lock_word(&mutex->state))
+        take_contended_mutex(mutex);
+    note_mutex_taken(mutex, thread);
     return 0;
 }
 
 int pthread_mutex_trylock(pthread_mutex_t* mutex)
 {
-    auto* thread = mutex->type == PTHREAD_MUTEX_NORMAL ? nullptr : self();
-    if (thread && __atomic_load_n(&mutex->owner, __ATOMIC_RELAXED) == thread) {
+    auto* thread = self();
+    if (mutex->type != PTHREAD_MUTEX_NORMAL && is_held_by(mutex, thread)) {
         if (mutex->type == PTHREAD_MUTEX_RECURSIVE) {
             ++mutex->count;
             return 0;
@@ -625,16 +673,13 @@ int pthread_mutex_trylock(pthread_mutex_t* mutex)
     }
     if (!try_lock_word(&mutex->state))
         return EBUSY;
-    if (thread) {
-        __atomic_store_n(&mutex->owner, thread, __ATOMIC_RELAXED);
-        mutex->count = 1;
-    }
+    note_mutex_taken(mutex, thread);
     return 0;
 }
 
 int pthread_mutex_timedlock(pthread_mutex_t* mutex, timespec const* absolute_time)
 {
-    auto* thread = mutex->type == PTHREAD_MUTEX_NORMAL ? nullptr : self();
+    auto* thread = self();
     bool done;
     int result = check_owner_before_lock(mutex, thread, done);
     if (done)
@@ -646,26 +691,26 @@ int pthread_mutex_timedlock(pthread_mutex_t* mutex, timespec const* absolute_tim
             timespec left;
             if (!time_left(CLOCK_REALTIME, absolute_time, left))
                 return ETIMEDOUT;
-            if (futex_wait(&mutex->state, 2, &left) == -ETIMEDOUT)
+            long const waited = System::syscall(Syscall::futex, reinterpret_cast<unsigned long>(&mutex->state), VULTURE_FUTEX_WAIT_FOR_HOLDER, 2,
+                reinterpret_cast<unsigned long>(&left), mutex->shared ? 0 : __atomic_load_n(&mutex->holder, __ATOMIC_RELAXED));
+            if (waited == -ETIMEDOUT)
                 return ETIMEDOUT;
         }
     }
-    if (thread) {
-        __atomic_store_n(&mutex->owner, thread, __ATOMIC_RELAXED);
-        mutex->count = 1;
-    }
+    note_mutex_taken(mutex, thread);
     return 0;
 }
 
 int pthread_mutex_unlock(pthread_mutex_t* mutex)
 {
     if (mutex->type != PTHREAD_MUTEX_NORMAL) {
-        if (__atomic_load_n(&mutex->owner, __ATOMIC_RELAXED) != self())
+        if (!is_held_by(mutex, self()))
             return EPERM;
         if (--mutex->count > 0)
             return 0;
         __atomic_store_n(&mutex->owner, static_cast<void*>(nullptr), __ATOMIC_RELAXED);
     }
+    __atomic_store_n(&mutex->holder, 0u, __ATOMIC_RELAXED);
     unlock_word(&mutex->state);
     return 0;
 }
@@ -673,6 +718,7 @@ int pthread_mutex_unlock(pthread_mutex_t* mutex)
 int pthread_mutexattr_init(pthread_mutexattr_t* attributes)
 {
     attributes->type = PTHREAD_MUTEX_DEFAULT;
+    attributes->shared = PTHREAD_PROCESS_PRIVATE;
     return 0;
 }
 
@@ -695,16 +741,60 @@ int pthread_mutexattr_settype(pthread_mutexattr_t* attributes, int type)
     return 0;
 }
 
-int pthread_mutexattr_getpshared(pthread_mutexattr_t const*, int* shared)
+int pthread_mutexattr_getpshared(pthread_mutexattr_t const* attributes, int* shared)
+{
+    *shared = attributes->shared;
+    return 0;
+}
+
+int pthread_mutexattr_setpshared(pthread_mutexattr_t* attributes, int shared)
+{
+    if (shared != PTHREAD_PROCESS_PRIVATE && shared != PTHREAD_PROCESS_SHARED)
+        return EINVAL;
+    attributes->shared = shared;
+    return 0;
+}
+
+// These don't care: all they keep is in the memory that's being shared, and a futex there is the same one for everyone.
+static int get_any_sharing(int* shared)
 {
     *shared = PTHREAD_PROCESS_PRIVATE;
     return 0;
 }
 
-int pthread_mutexattr_setpshared(pthread_mutexattr_t*, int shared)
+static int check_sharing(int shared)
 {
-    // Futexes are private to a process.
-    return shared == PTHREAD_PROCESS_PRIVATE ? 0 : ENOTSUP;
+    return shared == PTHREAD_PROCESS_PRIVATE || shared == PTHREAD_PROCESS_SHARED ? 0 : EINVAL;
+}
+
+int pthread_condattr_getpshared(pthread_condattr_t const*, int* shared)
+{
+    return get_any_sharing(shared);
+}
+
+int pthread_condattr_setpshared(pthread_condattr_t*, int shared)
+{
+    return check_sharing(shared);
+}
+
+int pthread_rwlockattr_getpshared(pthread_rwlockattr_t const*, int* shared)
+{
+    return get_any_sharing(shared);
+}
+
+int pthread_rwlockattr_setpshared(pthread_rwlockattr_t*, int shared)
+{
+    return check_sharing(shared);
+}
+
+int pthread_barrierattr_getpshared(pthread_barrierattr_t const*, int* shared)
+{
+    return get_any_sharing(shared);
+}
+
+int pthread_barrierattr_setpshared(pthread_barrierattr_t*, int shared)
+{
+    return check_sharing(shared);
 }
 
 // --- Condition variables ---
@@ -720,9 +810,15 @@ int pthread_cond_destroy(pthread_cond_t* condition)
     return __atomic_load_n(&condition->waiters, __ATOMIC_RELAXED) ? EBUSY : 0;
 }
 
+static long cancellable_futex_wait(unsigned* word, unsigned expected, void const* timeout)
+{
+    return System::syscall(Syscall::futex, reinterpret_cast<unsigned long>(word), VULTURE_FUTEX_WAIT_CANCELLABLE, expected, reinterpret_cast<unsigned long>(timeout));
+}
+
 static int cond_wait(pthread_cond_t* condition, pthread_mutex_t* mutex, timespec const* absolute_time)
 {
-    if (mutex->type != PTHREAD_MUTEX_NORMAL && __atomic_load_n(&mutex->owner, __ATOMIC_RELAXED) != self())
+    auto* thread = self();
+    if (mutex->type != PTHREAD_MUTEX_NORMAL && !is_held_by(mutex, thread))
         return EPERM;
     if (absolute_time && !is_valid_time(absolute_time))
         return EINVAL;
@@ -736,22 +832,31 @@ static int cond_wait(pthread_cond_t* condition, pthread_mutex_t* mutex, timespec
         __atomic_store_n(&mutex->owner, static_cast<void*>(nullptr), __ATOMIC_RELAXED);
         mutex->count = 0;
     }
+    __atomic_store_n(&mutex->holder, 0u, __ATOMIC_RELAXED);
     unlock_word(&mutex->state);
 
     int result = 0;
+    bool cancelled = false;
     timespec left;
     if (absolute_time && !time_left(condition->clock, absolute_time, left)) {
         result = ETIMEDOUT;
-    } else if (futex_wait(&condition->sequence, sequence, absolute_time ? &left : nullptr) == -ETIMEDOUT) {
-        result = ETIMEDOUT;
+    } else {
+        long const waited = cancellable_futex_wait(&condition->sequence, sequence, absolute_time ? &left : nullptr);
+        if (waited == -ETIMEDOUT)
+            result = ETIMEDOUT;
+        cancelled = waited == -ECANCELED;
     }
 
     __atomic_sub_fetch(&condition->waiters, 1, __ATOMIC_SEQ_CST);
-    lock_word_contended(&mutex->state);
+    take_contended_mutex(mutex);
+    __atomic_store_n(&mutex->holder, thread->tid, __ATOMIC_RELAXED);
     if (mutex->type != PTHREAD_MUTEX_NORMAL) {
         __atomic_store_n(&mutex->owner, owner, __ATOMIC_RELAXED);
         mutex->count = count;
     }
+    // With the mutex held, as POSIX says: that's what its cleanup handlers expect.
+    if (cancelled)
+        pthread_exit(PTHREAD_CANCELED);
     return result;
 }
 
@@ -1056,10 +1161,8 @@ int sem_init(sem_t* semaphore, int shared, unsigned value)
         errno = EINVAL;
         return -1;
     }
-    if (shared) {
-        errno = ENOSYS;
-        return -1;
-    }
+    // (Between processes as well, if it's in memory that they share: it makes no difference to how it works.)
+    (void)shared;
     *semaphore = { value, 0 };
     return 0;
 }
@@ -1108,8 +1211,10 @@ static int sem_wait_until(sem_t* semaphore, timespec const* absolute_time)
             return -1;
         }
         __atomic_add_fetch(&semaphore->waiters, 1, __ATOMIC_SEQ_CST);
-        long result = futex_wait(&semaphore->value, 0, absolute_time ? &left : nullptr);
+        long result = cancellable_futex_wait(&semaphore->value, 0, absolute_time ? &left : nullptr);
         __atomic_sub_fetch(&semaphore->waiters, 1, __ATOMIC_SEQ_CST);
+        if (result == -ECANCELED)
+            pthread_exit(PTHREAD_CANCELED);
         if (result == -EINTR) {
             errno = EINTR;
             return -1;
@@ -1131,6 +1236,87 @@ int sem_timedwait(sem_t* semaphore, timespec const* absolute_time)
     return sem_wait_until(semaphore, absolute_time);
 }
 
+// Named ones are a file in a place of their own, that's all shared memory. Names are flat, and a '/' to start is all they have.
+static bool semaphore_path(char const* name, char* path, size_t size)
+{
+    if (name[0] == '/')
+        ++name;
+    if (!name[0] || strchr(name, '/')) {
+        errno = EINVAL;
+        return false;
+    }
+    if (strlen(name) > 255) {
+        errno = ENAMETOOLONG;
+        return false;
+    }
+    snprintf(path, size, "/tmp/.semaphores/%s", name);
+    return true;
+}
+
+sem_t* sem_open(char const* name, int flags, ...)
+{
+    char path[512];
+    if (!semaphore_path(name, path, sizeof(path)))
+        return SEM_FAILED;
+    unsigned mode = 0;
+    unsigned value = 0;
+    if (flags & O_CREAT) {
+        va_list arguments;
+        va_start(arguments, flags);
+        mode = va_arg(arguments, unsigned);
+        value = va_arg(arguments, unsigned);
+        va_end(arguments);
+        if (value > SEM_VALUE_MAX) {
+            errno = EINVAL;
+            return SEM_FAILED;
+        }
+    }
+    (void)mkdir("/tmp/.semaphores", 01777);
+    int fd = -1;
+    bool created = false;
+    if (flags & O_CREAT) {
+        fd = open(path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, mode);
+        created = fd >= 0;
+        if (fd < 0 && (errno != EEXIST || (flags & O_EXCL)))
+            return SEM_FAILED;
+    }
+    if (fd < 0)
+        fd = open(path, O_RDWR | O_CLOEXEC);
+    if (fd < 0)
+        return SEM_FAILED;
+    if (created && ftruncate(fd, sizeof(sem_t)) != 0) {
+        int const failure = errno;
+        close(fd);
+        unlink(path);
+        errno = failure;
+        return SEM_FAILED;
+    }
+    // Whoever made it may not have got as far as saying how large it is: they're about to.
+    struct stat status;
+    for (int tries = 0; tries < 1000 && fstat(fd, &status) == 0 && status.st_size < static_cast<off_t>(sizeof(sem_t)); ++tries)
+        sched_yield();
+    auto* semaphore = static_cast<sem_t*>(mmap(nullptr, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+    close(fd);
+    if (semaphore == MAP_FAILED)
+        return SEM_FAILED;
+    if (created)
+        __atomic_store_n(&semaphore->value, value, __ATOMIC_RELEASE);
+    return semaphore;
+}
+
+int sem_close(sem_t* semaphore)
+{
+    return munmap(semaphore, sizeof(sem_t));
+}
+
+int sem_unlink(char const* name)
+{
+    char path[512];
+    if (!semaphore_path(name, path, sizeof(path)))
+        return -1;
+    return unlink(path);
+}
+
 int sem_getvalue(sem_t* semaphore, int* value)
 {
     *value = static_cast<int>(__atomic_load_n(&semaphore->value, __ATOMIC_RELAXED));
@@ -1150,4 +1336,144 @@ void lock_word_slowly(unsigned* word)
     lock_word_contended(word);
 }
 
+}
+
+// ---- Cancellation.
+
+// Where the kernel sends a thread that's to go, on its own stack. It's already stopped being cancellable.
+extern "C" [[noreturn]] void __pthread_cancelled()
+{
+    self()->cancel_state = PTHREAD_CANCEL_DISABLE;
+    pthread_exit(PTHREAD_CANCELED);
+}
+
+int pthread_cancel(pthread_t thread)
+{
+    static unsigned s_handler_registered = 0;
+    if (!__atomic_exchange_n(&s_handler_registered, 1u, __ATOMIC_ACQ_REL))
+        System::syscall(Syscall::thread_cancel_control, VULTURE_CANCEL_HANDLER, reinterpret_cast<unsigned long>(__pthread_cancelled));
+    unsigned const tid = __atomic_load_n(&thread->tid, __ATOMIC_ACQUIRE);
+    if (tid == 0)
+        return ESRCH;
+    __atomic_store_n(&thread->cancel_requested, 1u, __ATOMIC_RELEASE);
+    long const result = System::syscall(Syscall::thread_cancel_control, VULTURE_CANCEL_THREAD, tid);
+    return result < 0 ? static_cast<int>(-result) : 0;
+}
+
+int pthread_setcancelstate(int state, int* previous)
+{
+    if (state != PTHREAD_CANCEL_ENABLE && state != PTHREAD_CANCEL_DISABLE)
+        return EINVAL;
+    auto* thread = self();
+    if (previous)
+        *previous = static_cast<int>(thread->cancel_state);
+    thread->cancel_state = static_cast<unsigned>(state);
+    System::syscall(Syscall::thread_cancel_control, VULTURE_CANCEL_ENABLE, state == PTHREAD_CANCEL_ENABLE);
+    return 0;
+}
+
+int pthread_setcanceltype(int type, int* previous)
+{
+    if (type != PTHREAD_CANCEL_DEFERRED && type != PTHREAD_CANCEL_ASYNCHRONOUS)
+        return EINVAL;
+    auto* thread = self();
+    if (previous)
+        *previous = static_cast<int>(thread->cancel_type);
+    thread->cancel_type = static_cast<unsigned>(type);
+    System::syscall(Syscall::thread_cancel_control, VULTURE_CANCEL_ASYNC, type == PTHREAD_CANCEL_ASYNCHRONOUS);
+    return 0;
+}
+
+void pthread_testcancel()
+{
+    auto* thread = self();
+    if (thread->cancel_state == PTHREAD_CANCEL_ENABLE && __atomic_load_n(&thread->cancel_requested, __ATOMIC_ACQUIRE)) {
+        thread->cancel_state = PTHREAD_CANCEL_DISABLE;
+        System::syscall(Syscall::thread_cancel_control, VULTURE_CANCEL_ENABLE, 0);
+        pthread_exit(PTHREAD_CANCELED);
+    }
+}
+
+// ---- What a thread's work is for.
+
+static int kernel_class_of(qos_class_t qos)
+{
+    switch (qos) {
+    case QOS_CLASS_BACKGROUND:
+        return VULTURE_QOS_BACKGROUND;
+    case QOS_CLASS_UTILITY:
+        return VULTURE_QOS_UTILITY;
+    case QOS_CLASS_DEFAULT:
+        return VULTURE_QOS_DEFAULT;
+    case QOS_CLASS_USER_INITIATED:
+        return VULTURE_QOS_USER_INITIATED;
+    case QOS_CLASS_USER_INTERACTIVE:
+        return VULTURE_QOS_USER_INTERACTIVE;
+    default:
+        return -1;
+    }
+}
+
+static qos_class_t class_of_kernel(long qos)
+{
+    switch (qos) {
+    case VULTURE_QOS_BACKGROUND:
+        return QOS_CLASS_BACKGROUND;
+    case VULTURE_QOS_UTILITY:
+        return QOS_CLASS_UTILITY;
+    case VULTURE_QOS_USER_INITIATED:
+        return QOS_CLASS_USER_INITIATED;
+    case VULTURE_QOS_USER_INTERACTIVE:
+        return QOS_CLASS_USER_INTERACTIVE;
+    default:
+        return QOS_CLASS_DEFAULT;
+    }
+}
+
+int pthread_set_qos_class_self_np(qos_class_t qos, int relative_priority)
+{
+    int const wanted = kernel_class_of(qos);
+    if (wanted < 0 || relative_priority > 0 || relative_priority < QOS_MIN_RELATIVE_PRIORITY)
+        return EINVAL;
+    long const result = System::syscall(Syscall::set_thread_qos, static_cast<unsigned long>(wanted));
+    return result < 0 ? static_cast<int>(-result) : 0;
+}
+
+qos_class_t qos_class_self()
+{
+    return class_of_kernel(System::syscall(Syscall::set_thread_qos, VULTURE_QOS_JUST_ASKING));
+}
+
+qos_class_t qos_class_main()
+{
+    return QOS_CLASS_USER_INITIATED;
+}
+
+int pthread_get_qos_class_np(pthread_t thread, qos_class_t* qos, int* relative_priority)
+{
+    // Only one's own: the kernel's the only one to ask, and that's what it'll say.
+    if (thread != self())
+        return ESRCH;
+    if (qos)
+        *qos = qos_class_self();
+    if (relative_priority)
+        *relative_priority = 0;
+    return 0;
+}
+
+int pthread_attr_set_qos_class_np(pthread_attr_t* attributes, qos_class_t qos, int relative_priority)
+{
+    if (kernel_class_of(qos) < 0 || relative_priority > 0 || relative_priority < QOS_MIN_RELATIVE_PRIORITY)
+        return EINVAL;
+    attributes->qos = qos;
+    return 0;
+}
+
+int pthread_attr_get_qos_class_np(pthread_attr_t* attributes, qos_class_t* qos, int* relative_priority)
+{
+    if (qos)
+        *qos = static_cast<qos_class_t>(attributes->qos);
+    if (relative_priority)
+        *relative_priority = 0;
+    return 0;
 }

@@ -274,6 +274,24 @@ ErrorOr<FlatPtr> Process::sys_sigaltstack(TrapFrame& frame, SyscallArguments con
     return 0;
 }
 
+void Process::arm_alarm(u64 deadline)
+{
+    m_alarm_deadline = deadline;
+    m_alarm_timer.context = this;
+    InterruptDisabler disabler;
+    Processor::current().timer_queue().add(m_alarm_timer, deadline, [](Timer& timer) {
+        auto* process = static_cast<Process*>(timer.context);
+        vulture_siginfo info {};
+        info.si_code = SI_KERNEL;
+        process->send_signal(SIGALRM, info);
+        // (Only ever changed once this timer's been stopped, so there's no one else here.)
+        if (process->m_alarm_interval)
+            process->arm_alarm(max(process->m_alarm_deadline + process->m_alarm_interval, Time::now()));
+        else
+            process->m_alarm_deadline = 0;
+    });
+}
+
 ErrorOr<FlatPtr> Process::sys_alarm(TrapFrame&, SyscallArguments const& arguments)
 {
     u64 seconds = arguments.values[0];
@@ -284,17 +302,104 @@ ErrorOr<FlatPtr> Process::sys_alarm(TrapFrame&, SyscallArguments const& argument
     if (m_alarm_timer.cancel() && m_alarm_deadline > now)
         remaining = (Time::microseconds_from_ticks(m_alarm_deadline - now) + 999'999) / 1'000'000;
     m_alarm_deadline = 0;
-    if (seconds > 0) {
-        m_alarm_deadline = now + Time::ticks_from_microseconds(seconds * 1'000'000);
-        m_alarm_timer.context = this;
-        InterruptDisabler disabler;
-        Processor::current().timer_queue().add(m_alarm_timer, m_alarm_deadline, [](Timer& timer) {
-            vulture_siginfo info {};
-            info.si_code = SI_KERNEL;
-            static_cast<Process*>(timer.context)->send_signal(SIGALRM, info);
-        });
-    }
+    m_alarm_interval = 0;
+    if (seconds > 0)
+        arm_alarm(now + Time::ticks_from_microseconds(seconds * 1'000'000));
     return remaining;
+}
+
+static void split_ticks(u64 ticks, long long& seconds, long long& microseconds)
+{
+    u64 const total = Time::microseconds_from_ticks(ticks);
+    seconds = static_cast<long long>(total / 1'000'000);
+    microseconds = static_cast<long long>(total % 1'000'000);
+}
+
+ErrorOr<FlatPtr> Process::sys_getitimer(TrapFrame&, SyscallArguments const& arguments)
+{
+    int const which = static_cast<i32>(arguments.values[0]);
+    vulture_itimerval answer {};
+    MutexLocker locker(m_alarm_lock);
+    switch (which) {
+    case VULTURE_ITIMER_REAL: {
+        u64 const now = Time::now();
+        if (m_alarm_deadline > now)
+            split_ticks(m_alarm_deadline - now, answer.value_seconds, answer.value_microseconds);
+        split_ticks(m_alarm_interval, answer.interval_seconds, answer.interval_microseconds);
+        break;
+    }
+    case VULTURE_ITIMER_VIRTUAL:
+    case VULTURE_ITIMER_PROF: {
+        u64 const used = cpu_ticks_used();
+        SpinLockGuard guard(m_cpu_timers_lock);
+        auto const& timer = m_cpu_timers[which - VULTURE_ITIMER_VIRTUAL];
+        if (timer.next)
+            split_ticks(timer.next > used ? timer.next - used : 1, answer.value_seconds, answer.value_microseconds);
+        split_ticks(timer.interval, answer.interval_seconds, answer.interval_microseconds);
+        break;
+    }
+    default:
+        return Error::from_errno(EINVAL);
+    }
+    TRY(copy_to_user(arguments.values[1], answer));
+    return 0;
+}
+
+ErrorOr<FlatPtr> Process::sys_setitimer(TrapFrame&, SyscallArguments const& arguments)
+{
+    int const which = static_cast<i32>(arguments.values[0]);
+    if (which != VULTURE_ITIMER_REAL && which != VULTURE_ITIMER_VIRTUAL && which != VULTURE_ITIMER_PROF)
+        return Error::from_errno(EINVAL);
+    vulture_itimerval wanted {};
+    if (arguments.values[1])
+        wanted = TRY(copy_from_user<vulture_itimerval>(arguments.values[1]));
+    if (wanted.value_seconds < 0 || wanted.interval_seconds < 0 || wanted.value_microseconds < 0 || wanted.value_microseconds >= 1'000'000 || wanted.interval_microseconds < 0 || wanted.interval_microseconds >= 1'000'000)
+        return Error::from_errno(EINVAL);
+    auto const ticks_of = [](long long seconds, long long microseconds) {
+        u64 const ticks = Time::ticks_from_microseconds(static_cast<u64>(seconds) * 1'000'000 + static_cast<u64>(microseconds));
+        // Anything that was asked for at all is at least something.
+        return !ticks && (seconds || microseconds) ? 1ull : ticks;
+    };
+    u64 const value = ticks_of(wanted.value_seconds, wanted.value_microseconds);
+    u64 const interval = ticks_of(wanted.interval_seconds, wanted.interval_microseconds);
+
+    vulture_itimerval previous {};
+    MutexLocker locker(m_alarm_lock);
+    if (which == VULTURE_ITIMER_REAL) {
+        u64 const now = Time::now();
+        bool const was_running = m_alarm_timer.cancel();
+        if (was_running && m_alarm_deadline > now)
+            split_ticks(m_alarm_deadline - now, previous.value_seconds, previous.value_microseconds);
+        split_ticks(m_alarm_interval, previous.interval_seconds, previous.interval_microseconds);
+        m_alarm_deadline = 0;
+        m_alarm_interval = interval;
+        if (value)
+            arm_alarm(now + value);
+    } else {
+        m_cpu_timer_look.cancel();
+        u64 const used = cpu_ticks_used();
+        bool any_left = false;
+        {
+            SpinLockGuard guard(m_cpu_timers_lock);
+            auto& timer = m_cpu_timers[which - VULTURE_ITIMER_VIRTUAL];
+            if (timer.next)
+                split_ticks(timer.next > used ? timer.next - used : 1, previous.value_seconds, previous.value_microseconds);
+            split_ticks(timer.interval, previous.interval_seconds, previous.interval_microseconds);
+            timer.next = value ? used + value : 0;
+            timer.interval = interval;
+            any_left = m_cpu_timers[0].next || m_cpu_timers[1].next;
+        }
+        if (any_left) {
+            m_cpu_timer_look.context = this;
+            InterruptDisabler disabler;
+            Processor::current().timer_queue().add(m_cpu_timer_look, Time::now() + Time::ticks_from_microseconds(cpu_timer_look_microseconds), [](Timer& timer) {
+                static_cast<Process*>(timer.context)->look_at_cpu_timers();
+            });
+        }
+    }
+    if (arguments.values[2])
+        TRY(copy_to_user(arguments.values[2], previous));
+    return 0;
 }
 
 }

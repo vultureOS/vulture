@@ -13,9 +13,11 @@
 #include <LibBase/Optional.h>
 #include <LibBase/OwnPtr.h>
 #include <LibBase/RefPtr.h>
+#include <LibBase/Vector.h>
 
 namespace Kernel {
 
+class FileSystem;
 class Inode;
 
 // A contiguous, page-aligned range of a process's memory with one
@@ -98,6 +100,31 @@ public:
     // and the file was opened for writing.
     ErrorOr<Region*> map_file(FlatPtr address, size_t size, int protection, bool fixed, Inode&, u64 offset, bool shared, bool writer);
     ErrorOr<void> unmap(FlatPtr address, size_t size);
+    // madvise's "don't need this": what's there goes, and comes back as zeroes or what the file has. Memory that's shared stays.
+    ErrorOr<void> discard(FlatPtr address, size_t size);
+    // If this address is in memory that's shared: what's there, in the file it's the memory of.
+    struct SharedLocation {
+        Inode const* file;
+        u64 offset;
+    };
+    [[nodiscard]] Optional<SharedLocation> shared_location(FlatPtr address);
+    // A debugger's way in, or a core dump's: copies to or from this address space, whatever its protections say, from any process. A
+    // write to something the program can't write (a breakpoint, in its code) gets it a copy of that page of its own. There's no writing
+    // what's shared and read-only here: that's somebody else's.
+    ErrorOr<void> debugger_read(FlatPtr address, Bytes);
+    ErrorOr<void> debugger_write(FlatPtr address, ReadonlyBytes);
+    // What a core dump says is here. What's the same as a file doesn't need its contents kept.
+    struct CoreRegion {
+        FlatPtr base;
+        size_t size;
+        int protection;
+        bool has_contents;
+    };
+    ErrorOr<Vector<CoreRegion>> describe_for_core();
+    // ENOMEM if any of it isn't mapped.
+    ErrorOr<void> check_mapped(FlatPtr address, size_t size);
+    // Is there a mapping of a file on this filesystem? (For unmounting.)
+    [[nodiscard]] bool maps_file_system(FileSystem const&);
     // Unmaps everything. For a dying process, from its own thread: ending
     // a file mapping may sleep, which the scheduler's reaper (where the
     // rest of the address space goes) must not.
@@ -154,6 +181,8 @@ private:
     AddressSpace(Arch::PageTable, u16 asid);
 
     ErrorOr<FlatPtr> find_free_range(FlatPtr hint, size_t size) const;
+    // The page at this address, brought in if it has to be and made private if it's going to be written. Wants the lock held.
+    ErrorOr<PhysicalAddress> page_for_debugger(FlatPtr page_address, bool for_writing);
     ErrorOr<Region*> create_region(FlatPtr address, size_t size, int protection, StringView name, bool fixed);
     // Removes [start, end) of `region` from the page table and releases
     // the pages behind it.

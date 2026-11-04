@@ -25,7 +25,13 @@ int mprotect(void* address, size_t length, int protection);
 #define MS_SYNC 4
 int msync(void* address, size_t length, int flags);
 
-// Advice, taken note of (and nothing more, for now).
+// Named shared memory: for mmap(MAP_SHARED), by a name any process can find.
+int shm_open(char const* name, int flags, mode_t mode);
+int shm_unlink(char const* name);
+
+// Advice. MADV_DONTNEED and MADV_FREE give up the pages of private memory, which read as zeroes afterwards. The others are
+// noted, and do nothing more for now.
+#define MADV_FREE 5
 #define MADV_NORMAL 0
 #define MADV_RANDOM 1
 #define MADV_SEQUENTIAL 2

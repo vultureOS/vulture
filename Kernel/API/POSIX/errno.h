@@ -15,6 +15,7 @@
 #define EINTR 4
 #define EIO 5
 #define ENXIO 6
+#define ENOTBLK 15
 #define E2BIG 7
 #define ENOEXEC 8
 #define EBADF 9

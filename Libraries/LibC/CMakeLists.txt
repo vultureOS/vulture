@@ -10,14 +10,21 @@ add_library(crt0 OBJECT crt0.S)
 add_library(LibC STATIC
     ctype.cpp
     dirent.cpp
+    dlfcn.cpp
+    Encodings.cpp
+    fenv.cpp
+    FloatText.cpp
+    Generated/EncodingTables.cpp
     getopt.cpp
     glob.cpp
     identity.cpp
     libgen.cpp
+    langinfo.cpp
     locale.cpp
     malloc.cpp
     math.cpp
     netdb.cpp
+    posix_more.cpp
     pthread.cpp
     pwd.cpp
     regex.cpp
@@ -37,7 +44,13 @@ add_library(LibC STATIC
     syscalls.cpp
     termios.cpp
     time.cpp
-    unistd_extra.cpp)
+    unistd_extra.cpp
+    wchar.cpp
+    wctype.cpp
+    # What wctype.cpp asks, and nothing else of Unicode's. (Programs that want the rest have LibUnicode, which comes with its own copy.)
+    ../LibUnicode/Generated/CaseMapping.cpp
+    ../LibUnicode/Generated/EastAsianWidth.cpp
+    ../LibUnicode/Generated/GeneralCategory.cpp)
 
 # The C library implements the functions the compiler would otherwise turn
 # its loops into calls to.

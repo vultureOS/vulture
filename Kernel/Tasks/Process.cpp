@@ -21,6 +21,7 @@
 #include <Kernel/Memory/PhysicalMemory.h>
 #include <Kernel/Memory/UserAccess.h>
 #include <Kernel/TTY/TTY.h>
+#include <Kernel/FileSystem/Poll.h>
 #include <Kernel/Tasks/Process.h>
 #include <Kernel/Tasks/Processor.h>
 #include <Kernel/Tasks/Scheduler.h>
@@ -208,6 +209,16 @@ void Process::add_thread(Thread& thread)
     m_thread_objects.fetch_add(1);
 }
 
+RefPtr<Thread> Process::thread_with_id(u64 id)
+{
+    SpinLockGuard guard(m_threads_lock);
+    for (auto& thread : m_threads) {
+        if (thread.id() == id)
+            return thread;
+    }
+    return {};
+}
+
 void Process::thread_finished(Thread& thread)
 {
     m_exited_cpu_ticks.fetch_add(thread.cpu_ticks());
@@ -230,26 +241,134 @@ String Process::current_directory()
     return m_cwd;
 }
 
-ErrorOr<int> Process::allocate_fd(NonnullRefPtr<FileDescription> description, bool close_on_exec, int lowest)
+ErrorOr<void> Process::ensure_file_capacity(size_t wanted)
+{
+    for (;;) {
+        size_t capacity;
+        {
+            SpinLockGuard guard(m_files_lock);
+            capacity = m_file_capacity;
+        }
+        if (capacity >= wanted)
+            return {};
+        size_t new_capacity = max<size_t>(capacity * 2, 64);
+        while (new_capacity < wanted)
+            new_capacity *= 2;
+        new_capacity = min(new_capacity, max_open_files);
+        if (new_capacity < wanted)
+            return Error::from_errno(EMFILE);
+        // All zeroes is an empty FileDescriptor, and one can be moved by copying its bytes.
+        auto* grown = static_cast<FileDescriptor*>(kmalloc(new_capacity * sizeof(FileDescriptor)));
+        if (!grown)
+            return Error::from_errno(ENOMEM);
+        __builtin_memset(static_cast<void*>(grown), 0, new_capacity * sizeof(FileDescriptor));
+        FileDescriptor* old = nullptr;
+        {
+            SpinLockGuard guard(m_files_lock);
+            // Another thread may have got there first: then its table stays, and this goes.
+            if (m_file_capacity < new_capacity) {
+                if (m_files)
+                    __builtin_memcpy(static_cast<void*>(grown), static_cast<void const*>(m_files), m_file_capacity * sizeof(FileDescriptor));
+                old = m_files;
+                m_files = grown;
+                m_file_capacity = new_capacity;
+                grown = nullptr;
+            }
+        }
+        kfree(old);
+        kfree(grown);
+    }
+}
+
+Process::FileDescriptor* Process::file_entry(int fd)
+{
+    if (fd < 0 || static_cast<size_t>(fd) >= m_file_capacity)
+        return nullptr;
+    return &m_files[fd];
+}
+
+Process::FileDescriptor Process::take_file_descriptor(int fd)
 {
     SpinLockGuard guard(m_files_lock);
-    for (size_t fd = static_cast<size_t>(lowest); fd < max_open_files; ++fd) {
-        if (!m_files[fd].description) {
-            m_files[fd] = { move(description), close_on_exec };
-            return static_cast<int>(fd);
+    auto* entry = file_entry(fd);
+    if (!entry || !entry->description)
+        return {};
+    FileDescriptor taken = move(*entry);
+    *entry = {};
+    if (static_cast<size_t>(fd) < m_first_free_fd)
+        m_first_free_fd = static_cast<size_t>(fd);
+    return taken;
+}
+
+void Process::close_all_files()
+{
+    FileDescriptor* files;
+    size_t capacity;
+    {
+        SpinLockGuard guard(m_files_lock);
+        files = m_files;
+        capacity = m_file_capacity;
+        m_files = nullptr;
+        m_file_capacity = 0;
+        m_first_free_fd = 0;
+    }
+    if (!files)
+        return;
+    // Closed outside the lock: closing a pipe end wakes the other side.
+    for (size_t fd = 0; fd < capacity; ++fd)
+        files[fd] = {};
+    kfree(files);
+}
+
+void Process::close_files_on_exec()
+{
+    for (size_t fd = 0;; ++fd) {
+        FileDescriptor closing;
+        {
+            SpinLockGuard guard(m_files_lock);
+            while (fd < m_file_capacity && !(m_files[fd].description && m_files[fd].close_on_exec))
+                ++fd;
+            if (fd >= m_file_capacity)
+                return;
+            closing = move(m_files[fd]);
+            m_files[fd] = {};
+            if (fd < m_first_free_fd)
+                m_first_free_fd = fd;
         }
     }
-    return Error::from_errno(EMFILE);
+}
+
+ErrorOr<int> Process::allocate_fd(NonnullRefPtr<FileDescription> description, bool close_on_exec, int lowest)
+{
+    size_t const limit = min(static_cast<size_t>(min<u64>(m_limits[VULTURE_RLIMIT_NOFILE].rlim_cur, max_open_files)), max_open_files);
+    for (;;) {
+        size_t wanted;
+        {
+            SpinLockGuard guard(m_files_lock);
+            size_t const start = max(static_cast<size_t>(lowest), m_first_free_fd);
+            for (size_t fd = start; fd < m_file_capacity && fd < limit; ++fd) {
+                if (!m_files[fd].description) {
+                    m_files[fd] = { move(description), close_on_exec };
+                    if (start == m_first_free_fd)
+                        m_first_free_fd = fd + 1;
+                    return static_cast<int>(fd);
+                }
+            }
+            if (max(start, m_file_capacity) >= limit)
+                return Error::from_errno(EMFILE);
+            wanted = max(start, m_file_capacity) + 1;
+        }
+        TRY(ensure_file_capacity(wanted));
+    }
 }
 
 ErrorOr<NonnullRefPtr<FileDescription>> Process::file(int fd)
 {
-    if (fd < 0 || static_cast<size_t>(fd) >= max_open_files)
-        return Error::from_errno(EBADF);
     SpinLockGuard guard(m_files_lock);
-    if (!m_files[fd].description)
+    auto* entry = file_entry(fd);
+    if (!entry || !entry->description)
         return Error::from_errno(EBADF);
-    return NonnullRefPtr<FileDescription>(*m_files[fd].description);
+    return NonnullRefPtr<FileDescription>(*entry->description);
 }
 
 ErrorOr<String> Process::copy_path_from_user(FlatPtr address)
@@ -298,8 +417,10 @@ ErrorOr<NonnullRefPtr<Process>> Process::create_init(StringView path, Span<Strin
     }
 
     auto console = TRY(VirtualFileSystem::open("/dev/console"_sv, "/"_sv, O_RDWR, 0));
+    TRY(process->ensure_file_capacity(3));
     for (size_t fd = 0; fd < 3; ++fd)
         process->m_files[fd] = { console, false };
+    process->m_first_free_fd = 3;
 
     auto thread = TRY(Thread::create("init"_sv, [](void* argument) {
         auto* init = static_cast<InitArguments*>(argument);
@@ -621,6 +742,10 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
     // Nothing gets out of a sandbox by way of another user.
     if (m_sandbox && (program_file.permissions & 06000))
         return Error::from_errno(EPERM);
+    // A program that's being watched, and could be changed, doesn't get anyone else's rights.
+    bool const honours_set_id = !m_tracer_pid.load();
+    if (!honours_set_id)
+        program_file.permissions &= ~06000u;
     u32 new_euid = (program_file.permissions & 04000) ? program_file.uid : m_credentials.euid;
     u32 new_egid = (program_file.permissions & 02000) ? program_file.gid : m_credentials.egid;
     bool secure = new_euid != m_credentials.uid || new_egid != m_credentials.gid;
@@ -667,6 +792,15 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
         dmesgln("process: {} execs {} (user {})", m_pid, path, m_credentials.euid);
 
     m_executable = executable;
+    m_exec_count.fetch_add(1);
+    m_cancel_handler.store(0);
+    notify_pollers();
+    // The tracer gets to look before the first instruction.
+    if (m_tracer_pid.load()) {
+        vulture_siginfo info {};
+        info.si_code = SI_KERNEL;
+        force_signal(SIGTRAP, info);
+    }
     m_executable_bias = program.bias;
     m_interpreter = interpreter;
     m_interpreter_bias = linker.has_value() ? linker->bias : 0;
@@ -687,16 +821,7 @@ ErrorOr<void> Process::exec(StringView path, Span<StringView const> arguments, S
                 action = {};
         }
     }
-    FileDescriptor closing[max_open_files];
-    {
-        SpinLockGuard guard(m_files_lock);
-        for (size_t fd = 0; fd < max_open_files; ++fd) {
-            if (m_files[fd].description && m_files[fd].close_on_exec)
-                closing[fd] = move(m_files[fd]);
-        }
-    }
-    for (auto& file : closing)
-        file = {};
+    close_files_on_exec();
     Arch::prepare_user_entry(frame, linker.has_value() ? linker->entry : program.entry, stack_pointer);
     return {};
 }
@@ -720,18 +845,19 @@ void Process::terminate(int status)
         format_to(reason, "init exited (status {:#x})", status);
         panic(reason.view());
     }
-    // Closed outside the lock: closing a pipe end wakes the other side.
-    FileDescriptor closing[max_open_files];
-    {
-        SpinLockGuard guard(m_files_lock);
-        for (size_t fd = 0; fd < max_open_files; ++fd)
-            closing[fd] = move(m_files[fd]);
+    // Whoever it's been tracing carries on without it. And whoever's been tracing this has seen the last of it: what it ended with is
+    // for its real parent.
+    for (auto& process : Process::all()) {
+        if (process->m_tracer_pid.load() == m_pid && process.ptr() != this)
+            process->detach_from_tracer(0);
     }
-    for (auto& file : closing)
-        file = {};
+    if (m_tracer_pid.load())
+        detach_from_tracer(0);
+    close_all_files();
     m_address_space->remove_all_regions();
     lose_controlling_terminal();
     m_alarm_timer.cancel();
+    m_cpu_timer_look.cancel();
 
     Process* parent;
     {
@@ -751,6 +877,8 @@ void Process::terminate(int status)
         if (parent)
             parent->ref();
     }
+    // A kqueue somewhere may be waiting for this.
+    notify_pollers();
     if (parent) {
         vulture_siginfo info {};
         info.si_signo = SIGCHLD;
@@ -826,7 +954,29 @@ bool Process::has_deliverable_signal() const
 
 bool Process::has_work_before_user() const
 {
-    return has_deliverable_signal() || m_stopped.load();
+    auto const& thread = Thread::current();
+    return has_deliverable_signal() || m_stopped.load() || (thread.cancellation_is_due() && m_cancel_handler.load());
+}
+
+void Process::enter_cancel_handler(TrapFrame& frame)
+{
+    auto& thread = Thread::current();
+    auto const handler = m_cancel_handler.load();
+    if (!handler)
+        return;
+    // Only the once: it's on its way out, and has things to do first that mustn't be interrupted by this.
+    thread.set_cancel_enabled(false);
+    thread.m_syscall_interrupted = false;
+    Arch::enter_user_function(frame, handler);
+}
+
+void Process::finish_interrupted_syscall(TrapFrame& frame)
+{
+    auto& thread = Thread::current();
+    if (!thread.m_syscall_interrupted)
+        return;
+    thread.m_syscall_interrupted = false;
+    Arch::rewind_syscall(frame, thread.m_interrupted_syscall, thread.m_interrupted_syscall_argument);
 }
 
 void Process::do_work_before_user(TrapFrame& frame)
@@ -837,6 +987,11 @@ void Process::do_work_before_user(TrapFrame& frame)
     u64 pending = m_pending_signals.load() | thread.m_pending_signals.load();
     if (m_stopped.load() && !(pending & bit(SIGKILL))) {
         wait_while_stopped(thread);
+        return;
+    }
+    // Before anything else this thread might do on its way back: it isn't.
+    if (thread.cancellation_is_due() && m_cancel_handler.load()) {
+        enter_cancel_handler(frame);
         return;
     }
     dispatch_signal(frame);
@@ -875,9 +1030,96 @@ static bool is_ignored(SignalAction const& action, int signal);
 
 static constexpr u64 stop_signals = bit(SIGSTOP) | bit(SIGTSTP) | bit(SIGTTIN) | bit(SIGTTOU);
 
+void Process::detach_from_tracer(int signal)
+{
+    {
+        SpinLockGuard guard(s_tree_lock);
+        m_tracer_pid.store(0);
+        // Back where it was, if that's still around. Otherwise to whoever looks after orphans.
+        Process* parent_before = nullptr;
+        for (auto& candidate : s_processes) {
+            if (candidate.pid() == m_parent_before_tracing && !candidate.is_zombie()) {
+                parent_before = &candidate;
+                break;
+            }
+        }
+        if (!parent_before)
+            parent_before = s_init;
+        if (m_parent != parent_before && parent_before != this) {
+            if (m_parent)
+                m_parent->m_children.remove(*this);
+            m_parent = parent_before;
+            parent_before->m_children.append(*this);
+        }
+    }
+    if (m_trace_stopped.load())
+        resume_from_tracer(signal);
+}
+
+u64 Process::cpu_ticks_used()
+{
+    u64 ticks = m_exited_cpu_ticks.load();
+    SpinLockGuard guard(m_threads_lock);
+    for (auto& thread : m_threads)
+        ticks += thread.cpu_ticks();
+    return ticks;
+}
+
+void Process::look_at_cpu_timers()
+{
+    u64 const used = cpu_ticks_used();
+    bool fired[2] {};
+    bool any_left = false;
+    {
+        SpinLockGuard guard(m_cpu_timers_lock);
+        for (int which = 0; which < 2; ++which) {
+            auto& timer = m_cpu_timers[which];
+            if (timer.next && used >= timer.next) {
+                fired[which] = true;
+                timer.next = timer.interval ? used + timer.interval : 0;
+            }
+            any_left = any_left || timer.next;
+        }
+    }
+    vulture_siginfo info {};
+    info.si_code = SI_KERNEL;
+    if (fired[0])
+        send_signal(SIGVTALRM, info);
+    if (fired[1])
+        send_signal(SIGPROF, info);
+    if (any_left) {
+        Processor::current().timer_queue().add(m_cpu_timer_look, Time::now() + Time::ticks_from_microseconds(cpu_timer_look_microseconds), [](Timer& timer) {
+            static_cast<Process*>(timer.context)->look_at_cpu_timers();
+        });
+    }
+}
+
+bool Process::is_using(FileSystem const& file_system, StringView path)
+{
+    {
+        SpinLockGuard guard(m_files_lock);
+        for (size_t fd = 0; fd < m_file_capacity; ++fd) {
+            auto const& entry = m_files[fd];
+            if (entry.description && entry.description->inode() && &entry.description->inode()->file_system() == &file_system)
+                return true;
+        }
+    }
+    {
+        MutexLocker locker(m_cwd_lock);
+        auto const cwd = m_cwd.view();
+        if (cwd == path || (cwd.starts_with(path) && cwd.length() > path.length() && cwd[path.length()] == '/'))
+            return true;
+    }
+    auto space = address_space_reference();
+    return space && space->maps_file_system(file_system);
+}
+
 void Process::send_signal(int signal, vulture_siginfo const& info)
 {
     VERIFY(signal > 0 && signal < NSIG);
+    // Whether anything comes of it or not: kqueue says it was sent.
+    m_signal_counts[signal].fetch_add(1);
+    notify_pollers();
     // SIGCONT continues a stopped process even if it is ignored or caught.
     if (signal == SIGCONT)
         continue_running();
@@ -1018,6 +1260,9 @@ void Process::lose_controlling_terminal()
 
 void Process::continue_running()
 {
+    // Its tracer says when that is. SIGCONT stays pending, for it to hear about.
+    if (m_trace_stopped.load())
+        return;
     if (!m_stopped.exchange(false))
         return;
     m_unreported_stop.store(0);
@@ -1086,6 +1331,7 @@ static DefaultAction default_action(int signal)
     case SIGCONT:
     case SIGURG:
     case SIGWINCH:
+    case SIGIO:
         return DefaultAction::Ignore;
     case SIGSTOP:
     case SIGTSTP:
@@ -1132,6 +1378,22 @@ void Process::dispatch_signal(TrapFrame& frame)
         action = m_signal_actions[signal];
     }
 
+    // Its tracer hears about everything but the end of it, and may change its mind about what this is.
+    if (signal != SIGKILL && m_tracer_pid.load()) {
+        int const decided = stop_for_tracer(frame, signal);
+        if (decided == 0)
+            return;
+        if (decided != signal) {
+            signal = decided;
+            info = {};
+            info.si_signo = signal;
+            info.si_code = SI_USER;
+            info.si_pid = m_tracer_pid.load();
+        }
+        SpinLockGuard guard(m_signal_lock);
+        action = m_signal_actions[signal];
+    }
+
     if (signal == SIGKILL || signal == SIGSTOP || action.handler == VULTURE_SIG_DFL) {
         auto what = default_action(signal);
         if (what == DefaultAction::Ignore)
@@ -1141,14 +1403,21 @@ void Process::dispatch_signal(TrapFrame& frame)
             return;
         }
         // A crash report for faults, and for signals a process sends
-        // itself (abort()); not for `kill -SEGV` from elsewhere. No core
-        // files are written, so the status never says one was.
+        // itself (abort()); not for `kill -SEGV` from elsewhere.
         if (what == DefaultAction::CrashReport && (info.si_code != SI_USER || info.si_pid == m_pid))
             report_crash(frame, signal, info);
-        terminate(VULTURE_W_SIGNALED(signal, false));
+        bool const dumped = what == DefaultAction::CrashReport && write_core_dump(frame, signal);
+        terminate(VULTURE_W_SIGNALED(signal, dumped));
     }
     if (action.handler == VULTURE_SIG_IGN)
         return;
+
+    // A handler's going to run. What it interrupted says EINTR, unless the handler said otherwise: then it's made again, when that returns.
+    if (thread.m_syscall_interrupted) {
+        thread.m_syscall_interrupted = false;
+        if (action.flags & SA_RESTART)
+            Arch::rewind_syscall(frame, thread.m_interrupted_syscall, thread.m_interrupted_syscall_argument);
+    }
 
     // After sigsuspend(), the handler's return restores the mask from before it.
     u64 saved_mask = thread.m_mask_after_suspend.has_value() ? thread.m_mask_after_suspend.release_value() : thread.m_signal_mask.load();

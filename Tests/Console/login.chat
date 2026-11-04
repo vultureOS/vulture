@@ -37,7 +37,70 @@ expect Last login:
 expect  on console
 expect vulture@vulture ~ % 
 
-send sudo poweroff\r
+# What vlaunchd is looking after, and asking it to look after something else.
+send launchctl list | head -1\r
+expect PID	Status	Label
+expect vulture@vulture ~ % 
+send launchctl list no.such.job\r
+expect Could not find service "no.such.job"
+expect vulture@vulture ~ % 
+send launchctl stop no.such.job\r
+expect Not privileged to stop service
+expect vulture@vulture ~ % 
+send printf '{"Label":"test.sleeper","ProgramArguments":["/bin/sleep","600"],"RunAtLoad":true}' > /tmp/sleeper.plist\r
+expect vulture@vulture ~ % 
+send sudo launchctl load /tmp/sleeper.plist\r
 expect Password:
 send vulture\r
+expect vulture@vulture ~ % 
+send launchctl list test.sleeper | grep -c PID\r
+expect 1
+expect vulture@vulture ~ % 
+send sudo launchctl load /tmp/sleeper.plist\r
+expect service already loaded
+expect vulture@vulture ~ % 
+send sudo launchctl unload /tmp/sleeper.plist\r
+expect vulture@vulture ~ % 
+pause 1
+send launchctl list test.sleeper\r
+expect Could not find service "test.sleeper"
+expect vulture@vulture ~ % 
+
+# An editor, and what it wrote.
+send vi /tmp/note.txt\r
+pause 1
+send ihello from vi\x1b
+pause 1
+send :wq\r
+expect vulture@vulture ~ % 
+send cat /tmp/note.txt\r
+expect hello from vi
+expect vulture@vulture ~ % 
+
+# A manual page, set for the width of what's reading it.
+send man launchctl | head -6\r
+expect LAUNCHCTL(1)
+expect launchctl - talk to the launch daemon
+expect vulture@vulture ~ % 
+send man no-such-page\r
+expect No manual entry for no-such-page
+expect vulture@vulture ~ % 
+
+# What's mounted, and mounting.
+send mkdir /tmp/space\r
+expect vulture@vulture ~ % 
+send sudo mount -t tmpfs tmpfs /tmp/space\r
+expect vulture@vulture ~ % 
+send sudo sh -c 'echo inside > /tmp/space/file'\r
+expect vulture@vulture ~ % 
+send cat /tmp/space/file\r
+expect inside
+expect vulture@vulture ~ % 
+send sudo umount /tmp/space\r
+expect vulture@vulture ~ % 
+send ls /tmp/space | wc -l\r
+expect 0
+expect vulture@vulture ~ % 
+
+send sudo poweroff\r
 expect vlaunchd: powering off

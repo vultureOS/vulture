@@ -86,6 +86,7 @@ int vsscanf(char const* string, char const* format, va_list);
 int fclose(FILE*);
 void perror(char const* prefix);
 int rename(char const* old_path, char const* new_path);
+int renameat(int from_directory, char const* from, int to_directory, char const* to);
 int remove(char const* path);
 
 __END_DECLS

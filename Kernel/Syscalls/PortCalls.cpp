@@ -31,12 +31,7 @@ int as_int(u64 value)
 // let go (its last reference may detach a port, which wakes waiters).
 void Process::release_fd(int fd)
 {
-    FileDescriptor closing;
-    {
-        SpinLockGuard guard(m_files_lock);
-        if (fd >= 0 && static_cast<size_t>(fd) < max_open_files)
-            closing = move(m_files[fd]);
-    }
+    FileDescriptor closing = take_file_descriptor(fd);
 }
 
 ErrorOr<NonnullOwnPtr<PortMessage>> Process::build_port_message(FlatPtr user_message, bool& move_rights, Vector<int>& sent_fds,
@@ -53,6 +48,7 @@ ErrorOr<NonnullOwnPtr<PortMessage>> Process::build_port_message(FlatPtr user_mes
     message->flags = header.flags & ~VULTURE_PORT_MOVE;
     move_rights = header.flags & VULTURE_PORT_MOVE;
     message->sender_pid = m_pid;
+    message->sender_qos = Thread::current().qos();
     message->sender_uid = m_credentials.euid;
     message->sender_gid = m_credentials.egid;
 
@@ -105,6 +101,8 @@ ErrorOr<void> Process::deliver_port_message(Port& port, bool nonblocking, FlatPt
 {
     auto received = TRY(copy_from_user<vulture_port_received>(user_received));
     size_t needed = 0;
+    // That was the last one done with: it goes back to its own speed, until the next tells it otherwise.
+    Thread::current().set_message_boost(QoS::Background);
     auto taken = port.receive(nonblocking, received.capacity, received.right_capacity, received.region_capacity, needed);
     if (taken.is_error()) {
         if (taken.error().code() == EMSGSIZE) {
@@ -114,6 +112,7 @@ ErrorOr<void> Process::deliver_port_message(Port& port, bool nonblocking, FlatPt
         return taken.release_error();
     }
     auto message = taken.release_value();
+    Thread::current().set_message_boost(message->sender_qos);
 
     if (message->size)
         TRY(copy_to_user(reinterpret_cast<FlatPtr>(received.bytes), message->bytes, message->size));

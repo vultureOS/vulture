@@ -334,24 +334,174 @@ void Supervisor::load_directory(char const* directory)
     }
 }
 
+void Supervisor::start_after_loading(Job& job)
+{
+    Job* pointer = &job;
+    // KeepAlive of any kind implies RunAtLoad: whether to run again
+    // depends on how a run ended.
+    if (job.run_at_load || job.keep_alive != Job::KeepAlive::Never)
+        spawn(job);
+    if (job.start_interval > 0) {
+        job.interval_timer = m_loop.add_timer(static_cast<u64>(job.start_interval) * 1000, true, [this, pointer] {
+            if (!pointer->pid && !m_stopping)
+                spawn(*pointer);
+        });
+    }
+}
+
 void Supervisor::start()
 {
     // Services whose jobs wait for demand.
     for (auto& service : m_services)
         watch_for_demand(*service);
+    for (auto& job : m_jobs)
+        start_after_loading(*job);
+}
+
+Job* Supervisor::find_job(StringView label)
+{
     for (auto& job : m_jobs) {
-        Job* pointer = job.ptr();
-        // KeepAlive of any kind implies RunAtLoad: whether to run again
-        // depends on how a run ended.
-        if (job->run_at_load || job->keep_alive != Job::KeepAlive::Never)
-            spawn(*job);
-        if (job->start_interval > 0) {
-            job->interval_timer = m_loop.add_timer(static_cast<u64>(job->start_interval) * 1000, true, [this, pointer] {
-                if (!pointer->pid && !m_stopping)
-                    spawn(*pointer);
-            });
+        if (job->label.view() == label)
+            return job.ptr();
+    }
+    return nullptr;
+}
+
+void Supervisor::ask_to_stop(Job& job)
+{
+    if (!job.pid)
+        return;
+    kill(-job.pid, SIGTERM);
+    kill(job.pid, SIGTERM);
+    kill(-job.pid, SIGCONT);
+    // By its label: it could have been unloaded, and gone, by then.
+    pid_t pid = job.pid;
+    auto label = job.label;
+    m_loop.add_timer(static_cast<u64>(job.exit_timeout) * 1000, false, [this, label = move(label), pid] {
+        auto* still_there = find_job(label.view());
+        if (!still_there || still_there->pid != pid)
+            return;
+        log("(%s[%d]) Exited with SIGKILL after not stopping in time", label.characters(), pid);
+        kill(-pid, SIGKILL);
+        kill(pid, SIGKILL);
+    });
+}
+
+void Supervisor::forget_job(Job& job)
+{
+    stop_watching(job);
+    if (job.restart_timer)
+        m_loop.cancel_timer(job.restart_timer);
+    if (job.interval_timer)
+        m_loop.cancel_timer(job.interval_timer);
+    // Its services go with it: whoever had a right to them hears that nobody's there.
+    for (size_t i = m_services.size(); i > 0; --i) {
+        if (m_services[i - 1]->job == &job)
+            m_services.remove(i - 1);
+    }
+    for (size_t i = 0; i < m_jobs.size(); ++i) {
+        if (m_jobs[i].ptr() == &job) {
+            m_jobs.remove(i);
+            return;
         }
     }
+}
+
+Optional<String> Supervisor::label_in_plist(char const* path)
+{
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return {};
+    Vector<char> text;
+    char buffer[4096];
+    ssize_t got;
+    while ((got = read(fd, buffer, sizeof(buffer))) > 0) {
+        for (ssize_t i = 0; i < got; ++i)
+            text.append(buffer[i]);
+    }
+    close(fd);
+    auto plist = JSON::parse(StringView(text.data(), text.size()));
+    if (plist.is_error())
+        return {};
+    auto label = plist.value().get_string("Label"_sv);
+    if (!label.has_value())
+        return {};
+    return MUST(String::from_view(label.value()));
+}
+
+String Supervisor::list_jobs(IPC::Sender const&)
+{
+    StringBuilder listing;
+    listing.append("PID\tStatus\tLabel\n"_sv);
+    for (auto const& job : m_jobs) {
+        char line[512];
+        char pid[16] = "-";
+        if (job->pid)
+            snprintf(pid, sizeof(pid), "%d", job->pid);
+        // How it last ended: its exit status, or the signal as a negative number, as a Mac says it.
+        int status = 0;
+        if (WIFEXITED(job->last_status))
+            status = WEXITSTATUS(job->last_status);
+        else if (WIFSIGNALED(job->last_status))
+            status = -WTERMSIG(job->last_status);
+        snprintf(line, sizeof(line), "%s\t%d\t%s\n", pid, status, job->label.characters());
+        listing.append(StringView(line, strlen(line)));
+    }
+    return MUST(listing.to_string());
+}
+
+i32 Supervisor::control_job(IPC::Sender const& sender, String verb, String what)
+{
+    if (sender.uid != 0)
+        return EPERM;
+    if (verb.view() == "start"_sv) {
+        auto* job = find_job(what.view());
+        if (!job)
+            return ESRCH;
+        if (!job->pid)
+            spawn(*job);
+        return 0;
+    }
+    if (verb.view() == "stop"_sv) {
+        auto* job = find_job(what.view());
+        if (!job)
+            return ESRCH;
+        ask_to_stop(*job);
+        return 0;
+    }
+    if (verb.view() == "load"_sv) {
+        auto label = label_in_plist(what.characters());
+        if (!label.has_value())
+            return EINVAL;
+        if (find_job(label->view()))
+            return EEXIST;
+        load_file(what.characters());
+        auto* job = find_job(label->view());
+        if (!job)
+            return EINVAL;
+        for (auto& service : m_services) {
+            if (service->job == job)
+                watch_for_demand(*service);
+        }
+        start_after_loading(*job);
+        return 0;
+    }
+    if (verb.view() == "unload"_sv) {
+        auto label = what.view().starts_with("/"_sv) ? label_in_plist(what.characters()) : Optional<String>(MUST(String::from_view(what.view())));
+        if (!label.has_value())
+            return EINVAL;
+        auto* job = find_job(label->view());
+        if (!job)
+            return ESRCH;
+        if (job->pid) {
+            job->unloading = true;
+            ask_to_stop(*job);
+            return 0;
+        }
+        forget_job(*job);
+        return 0;
+    }
+    return EINVAL;
 }
 
 void Supervisor::spawn(Job& job)
@@ -405,6 +555,11 @@ void Supervisor::job_ended(Job& job, int status)
     job.last_status = status;
     if (m_stopping)
         return;
+    if (job.unloading) {
+        Job* pointer = &job;
+        m_loop.deferred_invoke([this, pointer] { forget_job(*pointer); });
+        return;
+    }
     if (!job.should_restart_after(status)) {
         // Until a message comes for one of its services.
         for (auto& service : m_services) {

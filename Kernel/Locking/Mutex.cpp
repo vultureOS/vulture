@@ -32,6 +32,9 @@ void Mutex::lock()
         m_lock.unlock(state);
         return;
     }
+    // Whoever has it goes as fast as whoever's waiting for it, or this could be waiting for something that isn't getting to run.
+    if (to_underlying(self.qos()) > to_underlying(m_owner->qos()))
+        m_owner->raise_boost(this, self.qos());
     Scheduler::block(&m_waiters, &m_lock, state);
     // unlock() made us the owner before waking us.
     VERIFY(m_owner == &self);
@@ -56,7 +59,16 @@ void Mutex::unlock()
         panic("Mutex: unlocked by a thread that does not hold it"_sv);
     Thread* next = m_waiters.take_first();
     m_owner = next;
+    if (next) {
+        // It's now in the way of the rest.
+        u8 most_urgent = 0;
+        for (auto& waiter : m_waiters)
+            most_urgent = max(most_urgent, to_underlying(waiter.qos()));
+        if (most_urgent > to_underlying(next->qos()))
+            next->raise_boost(this, static_cast<QoS>(most_urgent));
+    }
     m_lock.unlock(state);
+    Thread::current().remove_boost(this);
     if (next) {
         Scheduler::wake(*next);
         Scheduler::reschedule_if_needed();

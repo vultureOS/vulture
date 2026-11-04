@@ -15,3 +15,15 @@ struct vulture_timespec {
     long long tv_sec;
     long tv_nsec;
 };
+
+#define VULTURE_ITIMER_REAL 0
+#define VULTURE_ITIMER_VIRTUAL 1
+#define VULTURE_ITIMER_PROF 2
+
+// As <sys/time.h> has them: two of its timevals, each a time_t and microseconds.
+struct vulture_itimerval {
+    long long interval_seconds;
+    long long interval_microseconds;
+    long long value_seconds;
+    long long value_microseconds;
+};

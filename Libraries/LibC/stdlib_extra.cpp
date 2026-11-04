@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "FloatText.h"
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -326,7 +327,7 @@ int system(char const* command)
 
 // --- Numbers ---
 
-double strtod(char const* string, char** end)
+static double parse_number(char const* string, char** end, int mantissa_bits)
 {
     char const* cursor = string;
     while (isspace(static_cast<unsigned char>(*cursor)))
@@ -341,100 +342,41 @@ double strtod(char const* string, char** end)
     };
     if (strncasecmp(cursor, "inf", 3) == 0)
         return finish(__builtin_inf(), cursor + (strncasecmp(cursor, "infinity", 8) == 0 ? 8 : 3));
-    if (strncasecmp(cursor, "nan", 3) == 0)
-        return finish(__builtin_nan(""), cursor + 3);
-
-    bool hexadecimal = cursor[0] == '0' && (cursor[1] == 'x' || cursor[1] == 'X');
-    if (hexadecimal)
-        cursor += 2;
-    unsigned base = hexadecimal ? 16 : 10;
-    auto digit = [&](char c) -> int {
-        if (c >= '0' && c <= '9')
-            return c - '0';
-        if (hexadecimal && c >= 'a' && c <= 'f')
-            return c - 'a' + 10;
-        if (hexadecimal && c >= 'A' && c <= 'F')
-            return c - 'A' + 10;
-        return -1;
-    };
-    // Up to 19 significant digits exactly, the rest as a scale.
-    unsigned long long mantissa = 0;
-    int digits = 0, scale = 0;
-    bool any = false;
-    for (; digit(*cursor) >= 0; ++cursor) {
-        any = true;
-        if (digits < 19) {
-            mantissa = mantissa * base + static_cast<unsigned>(digit(*cursor));
-            if (mantissa)
-                ++digits;
-        } else {
-            ++scale;
+    if (strncasecmp(cursor, "nan", 3) == 0) {
+        char const* after = cursor + 3;
+        // nan(whatever)
+        if (*after == '(') {
+            char const* closing = after + 1;
+            while (isalnum(static_cast<unsigned char>(*closing)) || *closing == '_')
+                ++closing;
+            if (*closing == ')')
+                after = closing + 1;
         }
+        return finish(__builtin_nan(""), after);
     }
-    if (*cursor == '.') {
-        ++cursor;
-        for (; digit(*cursor) >= 0; ++cursor) {
-            any = true;
-            if (digits < 19) {
-                mantissa = mantissa * base + static_cast<unsigned>(digit(*cursor));
-                if (mantissa)
-                    ++digits;
-                --scale;
-            }
-        }
+    bool out_of_range = false;
+    char const* stop = nullptr;
+    double const value = LibC::parse_float(cursor, &stop, mantissa_bits, out_of_range);
+    if (stop == cursor) {
+        // Not a number at all.
+        if (end)
+            *end = const_cast<char*>(string);
+        return 0;
     }
-    if (!any)
-        return finish(0, string);
-    int exponent = 0;
-    char exponent_mark = hexadecimal ? 'p' : 'e';
-    if (*cursor == exponent_mark || *cursor == exponent_mark - 32) {
-        char const* exponent_start = cursor++;
-        bool exponent_negative = false;
-        if (*cursor == '+' || *cursor == '-')
-            exponent_negative = *cursor++ == '-';
-        if (*cursor >= '0' && *cursor <= '9') {
-            while (*cursor >= '0' && *cursor <= '9') {
-                if (exponent < 100000)
-                    exponent = exponent * 10 + (*cursor - '0');
-                ++cursor;
-            }
-            if (exponent_negative)
-                exponent = -exponent;
-        } else {
-            cursor = exponent_start;
-        }
-    }
-    double value = static_cast<double>(mantissa);
-    if (hexadecimal) {
-        // Each hex digit of scale is 4 bits; the exponent is in bits.
-        int bits = scale * 4 + exponent;
-        while (bits > 0) {
-            value *= 2;
-            --bits;
-        }
-        while (bits < 0) {
-            value /= 2;
-            ++bits;
-        }
-    } else {
-        int power = scale + exponent;
-        double factor = 10;
-        unsigned magnitude = static_cast<unsigned>(power < 0 ? -power : power);
-        double multiplier = 1;
-        while (magnitude) {
-            if (magnitude & 1)
-                multiplier *= factor;
-            factor *= factor;
-            magnitude >>= 1;
-        }
-        value = power < 0 ? value / multiplier : value * multiplier;
-    }
-    if (value == __builtin_inf())
+    if (out_of_range)
         errno = ERANGE;
-    return finish(value, cursor);
+    return finish(value, stop);
 }
 
-float strtof(char const* string, char** end) { return static_cast<float>(strtod(string, end)); }
+double strtod(char const* string, char** end)
+{
+    return parse_number(string, end, 53);
+}
+
+float strtof(char const* string, char** end)
+{
+    return static_cast<float>(parse_number(string, end, 24));
+}
 double atof(char const* string) { return strtod(string, nullptr); }
 
 void* bsearch(void const* key, void const* base, size_t count, size_t size, int (*compare)(void const*, void const*))

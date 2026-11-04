@@ -10,6 +10,7 @@
 #include <Kernel/Locking/SpinLock.h>
 #include <Kernel/Locking/WaitQueue.h>
 #include <Kernel/Memory/AddressSpace.h>
+#include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Memory/Compressor.h>
 #include <Kernel/Memory/PhysicalMemory.h>
 #include <Kernel/Tasks/Process.h>
@@ -198,6 +199,14 @@ struct RoundResult {
 RoundResult run_round()
 {
     RoundResult result;
+    // What can just be read again goes first: that's nothing but a copy of what's on a disk.
+    size_t const from_files = VirtualFileSystem::release_file_cache(s_pages_per_round);
+    if (from_files) {
+        result.freed += from_files;
+        physical_memory().drain_processor_cache();
+        if (physical_memory().has_plenty_free() && !s_demand.load())
+            return result;
+    }
     auto processes = Process::all();
     for (auto& process : processes) {
         auto space = process->address_space_reference();

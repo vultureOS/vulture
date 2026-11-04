@@ -252,6 +252,153 @@ ErrorOr<void> AddressSpace::unmap(FlatPtr address, size_t size)
     return {};
 }
 
+ErrorOr<void> AddressSpace::discard(FlatPtr address, size_t size)
+{
+    size = align_up<size_t>(size, page_size);
+    if (!is_valid_user_range(address, size))
+        return Error::from_errno(EINVAL);
+    MutexLocker locker(m_lock);
+    for (FlatPtr page = address; page < address + size; page += page_size) {
+        if (!find_region(page))
+            return Error::from_errno(ENOMEM);
+    }
+    for (FlatPtr page = address; page < address + size;) {
+        auto* region = find_region(page);
+        FlatPtr const end = min(region->end(), address + size);
+        if (!region->is_shared())
+            release_range(*region, page, end);
+        page = end;
+    }
+    return {};
+}
+
+// A page for a program, as long as that leaves enough for making room: the compressor's pool has to
+// be able to grow, and the kernel to go on working, for any of this to get better.
+static ErrorOr<PhysicalAddress> allocate_page_for_program()
+{
+    if (physical_memory().is_nearly_out())
+        return Error::from_errno(ENOMEM);
+    return physical_memory().allocate_user_page();
+}
+
+ErrorOr<PhysicalAddress> AddressSpace::page_for_debugger(FlatPtr page_address, bool for_writing)
+{
+    auto* region = find_region(page_address);
+    if (!region)
+        return Error::from_errno(EFAULT);
+    if (for_writing && region->is_shared() && !(region->protection() & PROT_WRITE))
+        return Error::from_errno(EFAULT);
+    size_t const index = region->object_index(page_address);
+    auto& object = region->object();
+    auto physical = object.page(index);
+    if (auto const compressed = object.compressed_page(index)) {
+        auto page = TRY(allocate_page_for_program());
+        Compressor::load(compressed, physical_to_virtual(page));
+        object.set_page(index, page);
+        physical = page;
+    } else if (!physical.get() && region->file()) {
+        auto page = TRY(region->file()->mapped_page(region->file_page(index)));
+        object.set_page(index, page);
+        physical = page;
+    } else if (!physical.get()) {
+        auto page = TRY(allocate_page_for_program());
+        object.set_page(index, page);
+        physical = page;
+    }
+    int const protection = region->protection();
+    bool exclusive = region->is_shared() || physical_memory().user_page_references(physical) == 1;
+    if (for_writing && !exclusive) {
+        auto copy = TRY(allocate_page_for_program());
+        __builtin_memcpy(physical_to_virtual(copy), physical_to_virtual(physical), page_size);
+        object.set_page(index, copy);
+        physical = copy;
+        exclusive = true;
+    }
+    if (protection != PROT_NONE)
+        TRY(m_page_table.map_user_page(page_address, physical, protection_for(protection, exclusive)));
+    return physical;
+}
+
+ErrorOr<void> AddressSpace::debugger_read(FlatPtr address, Bytes bytes)
+{
+    size_t done = 0;
+    while (done < bytes.size()) {
+        FlatPtr const at = address + done;
+        size_t const offset = at % page_size;
+        size_t const chunk = min(bytes.size() - done, page_size - offset);
+        MutexLocker locker(m_lock);
+        auto const physical = TRY(page_for_debugger(at - offset, false));
+        __builtin_memcpy(bytes.data() + done, physical_to_virtual(physical) + offset, chunk);
+        done += chunk;
+    }
+    return {};
+}
+
+ErrorOr<void> AddressSpace::debugger_write(FlatPtr address, ReadonlyBytes bytes)
+{
+    size_t done = 0;
+    while (done < bytes.size()) {
+        FlatPtr const at = address + done;
+        size_t const offset = at % page_size;
+        size_t const chunk = min(bytes.size() - done, page_size - offset);
+        MutexLocker locker(m_lock);
+        auto const physical = TRY(page_for_debugger(at - offset, true));
+        __builtin_memcpy(physical_to_virtual(physical) + offset, bytes.data() + done, chunk);
+        // That may have been code.
+        if (find_region(at)->protection() & PROT_EXEC)
+            Arch::make_code_coherent(physical);
+        done += chunk;
+    }
+    return {};
+}
+
+ErrorOr<Vector<AddressSpace::CoreRegion>> AddressSpace::describe_for_core()
+{
+    Vector<CoreRegion> regions;
+    MutexLocker locker(m_lock);
+    for (auto& region : m_regions) {
+        bool const same_as_file = region.file() && !(region.protection() & PROT_WRITE);
+        bool const unreadable = !(region.protection() & (PROT_READ | PROT_WRITE | PROT_EXEC));
+        TRY(regions.try_append({ region.base(), region.size(), region.protection(), !same_as_file && !unreadable }));
+    }
+    return regions;
+}
+
+ErrorOr<void> AddressSpace::check_mapped(FlatPtr address, size_t size)
+{
+    size = align_up<size_t>(size, page_size);
+    if (!is_valid_user_range(address, size))
+        return Error::from_errno(EINVAL);
+    MutexLocker locker(m_lock);
+    for (FlatPtr page = address; page < address + size;) {
+        auto* region = find_region(page);
+        if (!region)
+            return Error::from_errno(ENOMEM);
+        page = region->end();
+    }
+    return {};
+}
+
+bool AddressSpace::maps_file_system(FileSystem const& file_system)
+{
+    MutexLocker locker(m_lock);
+    for (auto& region : m_regions) {
+        if (region.file() && &region.file()->file_system() == &file_system)
+            return true;
+    }
+    return false;
+}
+
+Optional<AddressSpace::SharedLocation> AddressSpace::shared_location(FlatPtr address)
+{
+    MutexLocker locker(m_lock);
+    auto* region = find_region(address);
+    if (!region || !region->file() || !region->is_shared())
+        return {};
+    FlatPtr const page = align_down<FlatPtr>(address, page_size);
+    return SharedLocation { region->file(), region->file_page(region->object_index(page)) * page_size + (address - page) };
+}
+
 Optional<AddressSpace::FileLocation> AddressSpace::file_location(FlatPtr address)
 {
     MutexLocker locker(m_lock);
@@ -401,15 +548,6 @@ PageFaultResult AddressSpace::handle_fault(FlatPtr address, AccessKind access)
         if ((process && process->is_being_killed()) || !Compressor::wait_for_memory())
             return result;
     }
-}
-
-// A page for a program, as long as that leaves enough for making room: the compressor's pool has to
-// be able to grow, and the kernel to go on working, for any of this to get better.
-static ErrorOr<PhysicalAddress> allocate_page_for_program()
-{
-    if (physical_memory().is_nearly_out())
-        return Error::from_errno(ENOMEM);
-    return physical_memory().allocate_user_page();
 }
 
 PageFaultResult AddressSpace::handle_fault_once(FlatPtr address, AccessKind access)

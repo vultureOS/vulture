@@ -8,6 +8,7 @@
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Devices/Storage/BlockDevice.h>
 #include <Kernel/FileSystem/VultureFS.h>
+#include <Kernel/Memory/Compressor.h>
 #include <Kernel/Locking/Mutex.h>
 #include <Kernel/Memory/Heap.h>
 #include <Kernel/Memory/MemoryManager.h>
@@ -49,6 +50,10 @@ InodeType type_of(InodeRecord const& record)
         return InodeType::Directory;
     case VultureFS::mode_symbolic_link:
         return InodeType::SymbolicLink;
+    case VultureFS::mode_fifo:
+        return InodeType::Fifo;
+    case VultureFS::mode_socket:
+        return InodeType::Socket;
     default:
         return InodeType::File;
     }
@@ -116,6 +121,8 @@ public:
         m_dirty_pages = static_cast<size_t>(static_cast<i64>(m_dirty_pages) + dirty);
     }
     [[nodiscard]] bool has_too_many_dirty_pages() const { return m_dirty_pages > dirty_page_limit; }
+    size_t release_cached_pages(size_t) override;
+    [[nodiscard]] size_t cached_page_count() const override { return m_cached_pages; }
     ErrorOr<void> sync_locked();
 
 private:
@@ -133,6 +140,7 @@ private:
     Mutex m_lock;
     HashMap<InodeNumber, RefPtr<VultureFSInode>> m_inodes;
     size_t m_cached_pages { 0 };
+    InodeNumber m_last_released_from { 0 };
     size_t m_dirty_pages { 0 };
 };
 
@@ -192,6 +200,8 @@ public:
     // are some, every page counts as dirty.
     [[nodiscard]] bool is_dirty() const { return m_dirty_count > 0 || m_times_dirty || m_shared_writers > 0; }
     ErrorOr<void> write_back();
+    // Gives back pages that nobody's mapped and that the disk has the same as. How many it did.
+    size_t release_clean_pages(size_t budget);
 
 private:
     struct CachedPage {
@@ -287,6 +297,31 @@ ErrorOr<void> VultureFileSystem::sync_locked()
     return m_volume->checkpoint();
 }
 
+// Memory's short, and these can be read again. Not from one file until there's none left of it, if it can be helped: it starts from
+// where it got to last time.
+size_t VultureFileSystem::release_cached_pages(size_t budget)
+{
+    // Someone holding this may be doing something slow. There'll be another round.
+    if (!m_lock.try_lock())
+        return 0;
+    size_t released = 0;
+    auto const go_through = [&](bool after_last_time) {
+        m_inodes.for_each([&](InodeNumber number, RefPtr<VultureFSInode>& inode) {
+            if (released >= budget || (number > m_last_released_from) != after_last_time)
+                return;
+            size_t const from_this = inode->release_clean_pages(budget - released);
+            if (from_this) {
+                released += from_this;
+                m_last_released_from = number;
+            }
+        });
+    };
+    go_through(true);
+    go_through(false);
+    m_lock.unlock();
+    return released;
+}
+
 // Drops inodes nobody else holds: always those with no names left (which
 // deletes them), the rest when the cache is large.
 void VultureFileSystem::forget_unused_inodes()
@@ -322,6 +357,28 @@ ErrorOr<void> VultureFileSystem::rename(Inode& old_parent, StringView old_name, 
     return {};
 }
 
+size_t VultureFSInode::release_clean_pages(size_t budget)
+{
+    // These could change at any moment, whatever they say.
+    if (m_shared_writers > 0)
+        return 0;
+    constexpr size_t most_at_once = 256;
+    u64 going[most_at_once];
+    size_t count = 0;
+    size_t const wanted = min(budget, most_at_once);
+    m_pages.for_each([&](u64 index, CachedPage& page) {
+        // Referenced by more than this cache means it's mapped.
+        if (count < wanted && !page.dirty && physical_memory().user_page_references(page.address) == 1)
+            going[count++] = index;
+    });
+    for (size_t i = 0; i < count; ++i) {
+        physical_memory().unref_user_page(m_pages.get(going[i])->address);
+        m_pages.remove(going[i]);
+    }
+    fs().count_pages(-static_cast<i64>(count), 0);
+    return count;
+}
+
 InodeMetadata VultureFSInode::metadata_locked() const
 {
     InodeMetadata metadata;
@@ -349,6 +406,11 @@ ErrorOr<void> VultureFSInode::read_ahead(u64 index)
     if (count == 0)
         count = 1;
     auto* buffer = static_cast<u8*>(kmalloc(count * page_size));
+    // Reading ahead is a luxury, when memory's short.
+    if (!buffer && count > 1) {
+        count = 1;
+        buffer = static_cast<u8*>(kmalloc(page_size));
+    }
     if (!buffer)
         return Error::from_errno(ENOMEM);
     auto read = fs().volume().read(this->index(), index * page_size, { buffer, count * page_size });
@@ -361,7 +423,9 @@ ErrorOr<void> VultureFSInode::read_ahead(u64 index)
     for (size_t i = 0; i < count && !result.is_error(); ++i) {
         auto page = physical_memory().allocate_user_page();
         if (page.is_error()) {
-            result = page.release_error();
+            // As long as it's got the one that was asked for.
+            if (i == 0)
+                result = page.release_error();
             break;
         }
         if (i * page_size < got)
@@ -432,6 +496,7 @@ ErrorOr<size_t> VultureFSInode::read(u64 offset, size_t count, IOBuffer const& b
         PhysicalAddress address;
         size_t in_page = (offset + done) % page_size;
         size_t chunk;
+        bool short_of_memory = false;
         {
             MutexLocker locker(fs().lock());
             auto type = type_of(m_record);
@@ -440,7 +505,20 @@ ErrorOr<size_t> VultureFSInode::read(u64 offset, size_t count, IOBuffer const& b
             if (offset + done >= m_record.size)
                 break;
             chunk = min<size_t>(min<size_t>(count - done, page_size - in_page), m_record.size - (offset + done));
-            address = TRY(page((offset + done) / page_size, true));
+            auto got = page((offset + done) / page_size, true);
+            if (got.is_error() && got.error().code() != ENOMEM)
+                return got.release_error();
+            short_of_memory = got.is_error();
+            if (!short_of_memory)
+                address = got.value();
+        }
+        // There's memory to be had from somewhere, in the end. That's not something a program reading a file should have to think about.
+        if (short_of_memory) {
+            if (Compressor::wait_for_memory())
+                continue;
+            if (done)
+                break;
+            return Error::from_errno(ENOMEM);
         }
         // Copied without the lock (it may fault); the reference keeps the
         // page alive even if the file shrinks meanwhile.
@@ -460,6 +538,7 @@ ErrorOr<size_t> VultureFSInode::write(u64 offset, size_t count, IOBuffer const& 
         size_t chunk = min(count - done, page_size - in_page);
         u64 index = (offset + done) / page_size;
         PhysicalAddress address;
+        bool short_of_memory = false;
         {
             MutexLocker locker(fs().lock());
             auto type = type_of(m_record);
@@ -469,7 +548,19 @@ ErrorOr<size_t> VultureFSInode::write(u64 offset, size_t count, IOBuffer const& 
             // overwritten or it lies past the end.
             bool whole = in_page == 0 && chunk == page_size;
             bool past_end = index * page_size >= m_record.size;
-            address = TRY(page(index, !whole && !past_end));
+            auto got = page(index, !whole && !past_end);
+            if (got.is_error() && got.error().code() != ENOMEM)
+                return got.release_error();
+            short_of_memory = got.is_error();
+            if (!short_of_memory)
+                address = got.value();
+        }
+        if (short_of_memory) {
+            if (Compressor::wait_for_memory())
+                continue;
+            if (done)
+                break;
+            return Error::from_errno(ENOMEM);
         }
         auto result = buffer.read(done, { physical_to_virtual(address) + in_page, chunk });
         bool sync_now = false;
@@ -638,6 +729,8 @@ ErrorOr<void> VultureFSInode::traverse(DirectoryVisitor& visitor)
             }
             auto type = entry.type == VultureFS::type_directory ? InodeType::Directory
                 : entry.type == VultureFS::type_symbolic_link   ? InodeType::SymbolicLink
+                : entry.type == VultureFS::type_fifo            ? InodeType::Fifo
+                : entry.type == VultureFS::type_socket          ? InodeType::Socket
                                                                 : InodeType::File;
             result = entries.try_append(Entry { copy.release_value(), entry.inode, type });
             return result.is_error() ? VultureFS::Iteration::Stop : VultureFS::Iteration::Continue;
@@ -663,6 +756,12 @@ ErrorOr<NonnullRefPtr<Inode>> VultureFSInode::create_child(StringView name, Inod
         break;
     case InodeType::SymbolicLink:
         mode = VultureFS::mode_symbolic_link;
+        break;
+    case InodeType::Fifo:
+        mode = VultureFS::mode_fifo;
+        break;
+    case InodeType::Socket:
+        mode = VultureFS::mode_socket;
         break;
     default:
         return Error::from_errno(ENOTSUP);
