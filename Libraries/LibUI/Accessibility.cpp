@@ -78,7 +78,7 @@ namespace {
 
 void collect(View& view, Vector<Node>& into)
 {
-    if (view.is_hidden())
+    if (view.is_hidden() || !view.has_room_to_be_seen())
         return;
     auto label = view.accessibility_label();
     auto role = view.accessibility_role();

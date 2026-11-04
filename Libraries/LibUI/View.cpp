@@ -301,9 +301,15 @@ void View::set_fixed_height(float height)
         m_parent->set_needs_layout();
 }
 
+bool View::has_room_to_be_seen() const
+{
+    auto const spill = overflow();
+    return m_frame.width + spill.left + spill.right > 0 && m_frame.height + spill.top + spill.bottom > 0;
+}
+
 View* View::hit_test(FloatPoint in_parent)
 {
-    if (m_hidden)
+    if (m_hidden || !has_room_to_be_seen())
         return nullptr;
     auto point = in_parent - m_frame.origin() - m_translation + m_bounds_origin;
     bool inside = bounds().contains(point);

@@ -142,6 +142,8 @@ public:
     virtual void layout();
     // How big it would like to be; negative in a direction where it has no opinion.
     [[nodiscard]] virtual Gfx::FloatSize intrinsic_size() const { return { -1, -1 }; }
+    // With none, in either direction, neither it nor what's in it is drawn, so nobody can find or press them either.
+    [[nodiscard]] bool has_room_to_be_seen() const;
     // What layouts go by: the fixed sizes if set, or else intrinsic_size, or else what
     // its layout needs.
     [[nodiscard]] Gfx::FloatSize preferred_size() const;

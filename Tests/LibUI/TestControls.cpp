@@ -1344,3 +1344,23 @@ TEST_CASE(a_spell_checker_knows_words_and_their_forms)
     EXPECT(checker.suggestions("wlak"_sv)[0].view() == "walk"_sv);
     EXPECT(checker.suggestions("zzzzzzzz"_sv).is_empty());
 }
+
+TEST_CASE(what_has_no_room_cannot_be_found_or_pressed)
+{
+    TestWindow test;
+    auto& holder = test.place<View>({ 0, 0, 200, 100 });
+    auto& button = holder.add<Button>("Inside"_sv);
+    button.set_frame({ 10, 10, 80, 24 });
+    FloatPoint const middle { 50, 22 };
+
+    auto tree = Accessibility::tree_of(*test.window);
+    EXPECT(Accessibility::find(tree, Accessibility::Role::Button, "Inside"_sv) != nullptr);
+    EXPECT(test.window->root_view().hit_test(middle) == &button);
+
+    // A sheet was found and pressed at no height at all, with nothing drawn: it isn't there to anyone looking.
+    holder.set_frame({ 0, 0, 200, 0 });
+    EXPECT(!holder.has_room_to_be_seen());
+    tree = Accessibility::tree_of(*test.window);
+    EXPECT(Accessibility::find(tree, Accessibility::Role::Button, "Inside"_sv) == nullptr);
+    EXPECT(test.window->root_view().hit_test(middle) != &button);
+}
