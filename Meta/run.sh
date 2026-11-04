@@ -652,10 +652,17 @@ type_on_keyboard() {
                 ;;
         esac
     done
-    press_keys "${presses[@]}"
-    # QEMU takes them in its own time, each held 10 ms and let go: it is not finished
-    # typing for a while yet, and the next step must not overtake it.
-    sleep "$(awk "BEGIN { print ${#presses[@]} * 0.03 }")"
+    # A few at a time. QEMU takes them in its own time, each held 10 ms and let go, and it forgets the rest when the
+    # connection they came on goes, which it does after a second: with a key still down, which then repeats.
+    local first=0 count
+    while [ "$first" -lt "${#presses[@]}" ]; do
+        count=$((${#presses[@]} - first))
+        [ "$count" -gt 16 ] && count=16
+        press_keys "${presses[@]:first:count}"
+        # It is not finished typing for a while yet, and the next step must not overtake it.
+        sleep "$(awk "BEGIN { print $count * 0.03 }")"
+        first=$((first + count))
+    done
 }
 
 # Saves the screen as PNG: QEMU's machine protocol, negotiating capabilities and
