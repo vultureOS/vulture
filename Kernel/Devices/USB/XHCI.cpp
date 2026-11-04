@@ -181,6 +181,8 @@ public:
     Mutex lock;
     // Each transfer that finishes: how it went.
     Atomic<u32> finished { 0 };
+    // How many have gone on the ring: as many as have finished, if nothing's under way. (Interrupt endpoints don't count these.)
+    u32 pushed { 0 };
     Atomic<u32> code { 0 };
     Atomic<u32> residue { 0 };
     WaitQueue done;
@@ -404,7 +406,7 @@ ErrorOr<size_t> XHCIDevice::wait_for_transfer(XHCIEndpoint& endpoint, u32 finish
 {
     // In a panic, the thread that reads events has stopped with everything else.
     if (is_panicking()) {
-        u64 const deadline = Time::now() + Time::ticks_from_milliseconds(5'000);
+        u64 const deadline = Time::now() + Time::ticks_from_milliseconds(15'000);
         while (endpoint.finished.load() == finished_before && Time::now() < deadline) {
             m_controller.drain_events();
             Arch::pause();
@@ -496,7 +498,16 @@ ErrorOr<size_t> XHCIDevice::bulk(Endpoint& opened, PhysicalAddress buffer, size_
 {
     auto& endpoint = static_cast<XHCIEndpoint&>(opened);
     MutexLocker locker(endpoint.lock);
+    // In a panic, what was already on its way has to get there first, or its ending would pass for this one's.
+    if (is_panicking()) {
+        u64 const deadline = Time::now() + Time::ticks_from_milliseconds(5'000);
+        while (endpoint.pushed != endpoint.finished.load() && Time::now() < deadline) {
+            m_controller.drain_events();
+            Arch::pause();
+        }
+    }
     u32 const finished_before = endpoint.finished.load();
+    ++endpoint.pushed;
     endpoint.ring.push(buffer.get(), static_cast<u32>(length), (trb_normal << 10) | control_interrupt_on_completion | control_interrupt_short);
     Arch::device_barrier();
     m_controller.ring_doorbell(m_slot, endpoint.dci);

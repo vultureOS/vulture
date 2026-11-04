@@ -7,6 +7,7 @@
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/Devices/Storage/StorageControllers.h>
+#include <Kernel/Debug/Panic.h>
 #include <Kernel/Devices/USB/USB.h>
 #include <Kernel/Locking/Mutex.h>
 #include <Kernel/Memory/MemoryManager.h>
@@ -74,6 +75,7 @@ public:
     ErrorOr<void> read_blocks(u64 first, size_t count, Bytes destination) override
     {
         MutexLocker locker(m_lock);
+        finish_what_a_panic_interrupted();
         size_t done = 0;
         while (done < count) {
             size_t const now = min(count - done, blocks_per_command);
@@ -87,6 +89,7 @@ public:
     ErrorOr<void> write_blocks(u64 first, size_t count, ReadonlyBytes source) override
     {
         MutexLocker locker(m_lock);
+        finish_what_a_panic_interrupted();
         size_t done = 0;
         while (done < count) {
             size_t const now = min(count - done, blocks_per_command);
@@ -100,6 +103,7 @@ public:
     ErrorOr<void> flush() override
     {
         MutexLocker locker(m_lock);
+        finish_what_a_panic_interrupted();
         u8 const command[10] = { scsi_synchronize };
         // (Not all of them have one, and not having one isn't something to fail over.)
         (void)run_command(command, sizeof(command), 0, false);
@@ -143,6 +147,18 @@ private:
         return run_command(command, sizeof(command), count * block_size, in);
     }
 
+    // A command is three steps, and the device won't hear of a new one until the last of them is done. The thread that
+    // was in the middle of one was stopped by a panic, and what's in the panic log depends on it being finished for it.
+    void finish_what_a_panic_interrupted()
+    {
+        if (!is_panicking() || m_step == Step::Idle)
+            return;
+        if (m_step == Step::WrapperSent && m_data_length > 0)
+            (void)m_device.bulk(m_data_in ? m_in : m_out, m_buffer, m_data_length);
+        (void)m_device.bulk(m_in, m_small.offset(64), sizeof(StatusWrapper));
+        m_step = Step::Idle;
+    }
+
     ErrorOr<void> run_command(u8 const* command, size_t command_length, size_t data_length, bool in)
     {
         auto* wrapper = reinterpret_cast<CommandWrapper*>(physical_to_virtual(m_small));
@@ -153,6 +169,9 @@ private:
         wrapper->flags = in ? 0x80 : 0;
         wrapper->command_length = static_cast<u8>(command_length);
         __builtin_memcpy(wrapper->command, command, command_length);
+        m_data_length = data_length;
+        m_data_in = in;
+        m_step = Step::WrapperSent;
         TRY(m_device.bulk(m_out, m_small, sizeof(*wrapper)));
 
         if (data_length > 0) {
@@ -163,6 +182,7 @@ private:
                 TRY(m_device.clear_stall(in ? m_in : m_out));
             }
         }
+        m_step = Step::DataMoved;
 
         PhysicalAddress const status_address = m_small.offset(64);
         auto const answered = m_device.bulk(m_in, status_address, sizeof(StatusWrapper));
@@ -175,6 +195,7 @@ private:
         auto const* status = reinterpret_cast<StatusWrapper const*>(physical_to_virtual(status_address));
         if (status->signature != status_signature || status->tag != m_tag)
             return Error::from_errno(EIO);
+        m_step = Step::Idle;
         if (status->status != 0)
             return Error::from_errno(EIO);
         return {};
@@ -187,6 +208,14 @@ private:
     PhysicalAddress m_small;
     Mutex m_lock;
     u32 m_tag { 0 };
+    enum class Step : u8 {
+        Idle,
+        WrapperSent,
+        DataMoved,
+    };
+    Step m_step { Step::Idle };
+    size_t m_data_length { 0 };
+    bool m_data_in { false };
 };
 
 }
