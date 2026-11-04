@@ -10,8 +10,14 @@
 #define SCHAR_MIN (-128)
 #define SCHAR_MAX 127
 #define UCHAR_MAX 255
-#define CHAR_MIN 0
-#define CHAR_MAX 255
+// Whether a char has a sign depends on the machine: on ARM it hasn't.
+#ifdef __CHAR_UNSIGNED__
+#    define CHAR_MIN 0
+#    define CHAR_MAX 255
+#else
+#    define CHAR_MIN (-128)
+#    define CHAR_MAX 127
+#endif
 #define SHRT_MIN (-32768)
 #define SHRT_MAX 32767
 #define USHRT_MAX 65535

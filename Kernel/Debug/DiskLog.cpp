@@ -154,7 +154,11 @@ void write_panic()
     u64 in_file = 0;
     while (in_file < kept) {
         auto written = write_part(s_panic, start + in_file, in_file, kept - in_file);
-        if (written.is_error() || written.value() == 0)
+        if (written.is_error()) {
+            dmesgln("Log: couldn't write Logs/panic.txt: {}", written.error());
+            break;
+        }
+        if (written.value() == 0)
             break;
         // Whole blocks, unless it's the end of what there is.
         in_file += written.value();

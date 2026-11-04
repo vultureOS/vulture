@@ -116,6 +116,8 @@ void build_interrupt_table()
     for (u32 vector = 0; vector < 256; ++vector)
         set_gate(vector, x86_64_interrupt_stubs + vector * 16, 0);
     // A panic stops the other processors with this, whatever they are doing.
+    // A program may run into a breakpoint of its own: that's what a debugger puts there.
+    s_idt[3].attributes = 0xee;
     set_gate(2, x86_64_stop_processor, ist_nmi);
     // A kernel stack that has overflowed is no place to report that.
     set_gate(8, x86_64_interrupt_stubs + 8 * 16, ist_double_fault);
