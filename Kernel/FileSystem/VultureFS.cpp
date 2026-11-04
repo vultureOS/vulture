@@ -305,9 +305,11 @@ size_t VultureFileSystem::release_cached_pages(size_t budget)
     if (!m_lock.try_lock())
         return 0;
     size_t released = 0;
+    // Where it got to last time, for all of this: that moves as it goes, and each one has to be on one side of it or the other.
+    InodeNumber const resuming_after = m_last_released_from;
     auto const go_through = [&](bool after_last_time) {
         m_inodes.for_each([&](InodeNumber number, RefPtr<VultureFSInode>& inode) {
-            if (released >= budget || (number > m_last_released_from) != after_last_time)
+            if (released >= budget || (number > resuming_after) != after_last_time)
                 return;
             size_t const from_this = inode->release_clean_pages(budget - released);
             if (from_this) {
