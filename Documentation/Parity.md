@@ -617,26 +617,26 @@ the rows aren't equally large, and the list is what's been thought of so far.
 
 | Suite | Result | Commit | Finished |
 |---|---|---|---|
-| `budgets` | passed | `5ac25e3e6493` (not the latest commit) | 2026-11-04T08:46:26Z |
-| `test-boot` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:42:57Z |
-| `test-compressor` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:41:12Z |
-| `test-debug-boot` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T10:20:44Z |
-| `test-desktop-boot` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T10:20:32Z |
-| `test-disk-log` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:45:37Z |
-| `test-hardening` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:26:14Z |
-| `test-hardware` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T10:29:11Z |
-| `test-harness` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T10:53:03Z |
-| `test-host` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T10:20:19Z |
-| `test-kernel` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:43:14Z |
-| `test-keyboard` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T10:59:11Z |
-| `test-login` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T10:58:59Z |
-| `test-network` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T10:43:31Z |
-| `test-oracle` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:42:02Z |
-| `test-panic` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:43:03Z |
-| `test-persistence` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:44:28Z |
-| `test-raspberry-pi` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:12:12Z |
-| `test-sanitized-kernel` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T10:42:30Z |
-| `test-sound` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T10:21:04Z |
-| `test-ui` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:07:27Z |
-| `test-userland` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:44:10Z |
-| `test-volume` | passed | `2eb9a33c27e9` (with uncommitted changes) | 2026-11-04T11:42:46Z |
+| `budgets` | passed | `a3785ed066a4` (not the latest commit, with uncommitted changes) | 2026-11-04T12:07:00Z |
+| `test-boot` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:42:57Z |
+| `test-compressor` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:41:12Z |
+| `test-debug-boot` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T10:20:44Z |
+| `test-desktop-boot` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T10:20:32Z |
+| `test-disk-log` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:57:59Z |
+| `test-hardening` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:26:14Z |
+| `test-hardware` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:56:54Z |
+| `test-harness` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T10:53:03Z |
+| `test-host` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T10:20:19Z |
+| `test-kernel` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:43:14Z |
+| `test-keyboard` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T10:59:11Z |
+| `test-login` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T10:58:59Z |
+| `test-network` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T10:43:31Z |
+| `test-oracle` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:42:02Z |
+| `test-panic` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:43:03Z |
+| `test-persistence` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:44:28Z |
+| `test-raspberry-pi` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:12:12Z |
+| `test-sanitized-kernel` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T10:42:30Z |
+| `test-sound` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T10:21:04Z |
+| `test-ui` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:07:27Z |
+| `test-userland` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:44:10Z |
+| `test-volume` | passed | `2eb9a33c27e9` (not the latest commit, with uncommitted changes) | 2026-11-04T11:42:46Z |

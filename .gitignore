@@ -2,6 +2,9 @@
 /build/
 /build-*/
 
+# What a walkthrough run by hand leaves where it's run
+/*.png
+
 # Left over from the Rust tree (see the v0.1-rust tag)
 /target/
 

@@ -153,6 +153,30 @@ def count(rows):
     return counts
 
 
+def render_bar(fraction, features):
+    """The score, as a picture for the README: which then can't say anything but what the last results did."""
+    width = 640
+    filled = max(14, round(width * fraction / 100))
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} 76" width="{width}" height="76">
+  <style>
+    text {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; text-anchor: middle; fill: #1f2328; }}
+    .note {{ fill: #59636e; }}
+    .track {{ fill: #d1d9e0; }}
+    .fill {{ fill: #0a84ff; }}
+    @media (prefers-color-scheme: dark) {{
+      text {{ fill: #f0f6fc; }}
+      .note {{ fill: #9198a1; }}
+      .track {{ fill: #3d444d; }}
+    }}
+  </style>
+  <text x="{width / 2:.0f}" y="24" font-size="24" font-weight="600">{fraction:.1f}%</text>
+  <rect class="track" x="0" y="36" width="{width}" height="12" rx="6"/>
+  <rect class="fill" x="0" y="36" width="{filled}" height="12" rx="6"/>
+  <text class="note" x="{width / 2:.0f}" y="70" font-size="13">of {features} features, by the last test results</text>
+</svg>
+"""
+
+
 def score(counts):
     """Present counts whole, partial half: a rough figure, and it says so."""
     total = sum(counts.values())
@@ -264,6 +288,10 @@ def main():
 
     rows = [row for area in areas for row in area["rows"]]
     totals = count(rows)
+    if not arguments.check:
+        bar = output.parent / "Screenshots" / "parity.svg"
+        bar.parent.mkdir(parents=True, exist_ok=True)
+        bar.write_text(render_bar(score(totals), len(rows)))
     print(f"parity: {score(totals):.1f}% of {len(rows)} features: " + ", ".join(f"{totals[status]} {status}" for status in STATUS_ORDER))
     for area in areas:
         counts = count(area["rows"])

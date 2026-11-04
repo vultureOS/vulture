@@ -163,13 +163,13 @@ It's all C++23, and it takes security seriously: W^X, ASLR, KASLR, pointer authe
 
 ## How close is it?
 
-We keep a [scoreboard](Documentation/Parity.md). It lists 445 things macOS does, and it's generated from test results, so nothing counts until a test proves it.
+We keep a [scoreboard](Documentation/Parity.md). It lists what macOS does, feature by feature, and it's generated from test results, so nothing counts until a test proves it.
+
+<p align="center">
+  <img src="Documentation/Screenshots/parity.svg" width="640" alt="How much of macOS this covers, by the last test results">
+</p>
 
 <div align="center">
-
-**`████████░░░░░░░░░░░░` 38.9%**
-
-</div>
 
 <table>
   <tr>
@@ -191,10 +191,12 @@ We keep a [scoreboard](Documentation/Parity.md). It lists 445 things macOS does,
       Use mail, music or video<br>
       Plug in a USB stick and see it appear (it's next)<br>
       Run real Mac apps, which isn't the goal<br>
-      Trust it on real hardware: it has only ever run in QEMU
+      Trust it on real hardware: it's only run in QEMU
     </td>
   </tr>
 </table>
+
+</div>
 
 So please don't move your life onto it just yet. **You're early, and this is the fun part.** The [roadmap](Documentation/Roadmap.md) goes from here to a browser engine, Mail, Music, a developer IDE, and building vultureOS on vultureOS.
 
@@ -288,7 +290,7 @@ That's one bootable disk, laid out as a real machine has it: an EFI System Parti
 
 This is the most useful thing you could offer. vultureOS has never run on real hardware, and QEMU's devices aren't the real ones, so something will go wrong, and we'd love to know what.
 
-[Make a bootable disk](#try-it) and start from it. Even with no serial port, it keeps what happened in `Logs/boot.txt` and `Logs/panic.txt` on the EFI partition. **[Send us those](https://github.com/vultureOS/vulture/issues)**: a report from a real machine goes straight to the front of the queue.
+[Make a bootable disk](#try-it) and start from it. Even with no serial port, it keeps what happened in `Logs/boot.txt` and `Logs/panic.txt` on the EFI partition. **[Send those to krishpranav](https://github.com/krishpranav)**: a report from a real machine goes straight to the front of the queue.
 
 <br>
 
