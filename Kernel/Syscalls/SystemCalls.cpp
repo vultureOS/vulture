@@ -295,6 +295,16 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
             }
         }
         set_number(static_cast<i32>(0));
+    } else if (name == "vm.purge"_sv) {
+        // What's on the disk needn't be in memory too: all of it goes. Writing, which root only gets to do.
+        if (!m_credentials.is_superuser() || new_length == 0)
+            return Error::from_errno(EPERM);
+        (void)VirtualFileSystem::sync_all();
+        // (It only goes so far at a time, with memory short and things waiting.)
+        size_t released = 0;
+        while (size_t const more = VirtualFileSystem::release_file_cache(~static_cast<size_t>(0)))
+            released += more;
+        set_number(static_cast<u64>(released));
     } else if (name == "machdep.cpu.emulated"_sv) {
         set_number(static_cast<i32>(Arch::is_emulated_in_software() ? 1 : 0));
     } else if (name == "hw.pagesize"_sv) {

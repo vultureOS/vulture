@@ -2,8 +2,8 @@
 read /usr/lib
 read /usr/share
 read /System/Library
-read /etc/passwd
-read /etc/group
+read /private/etc/passwd
+read /private/etc/group
 read /dev/null
 write /dev/null
 read /dev/urandom

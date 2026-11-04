@@ -109,7 +109,55 @@ struct vulture_stat {
     long st_mtime_nanoseconds;
     long st_ctime_nanoseconds;
     long st_birthtime_nanoseconds;
+    unsigned int st_flags;
+    unsigned int st_gen;
 };
+
+// As a Mac has them, in st_flags.
+#define UF_NODUMP 0x00000001u
+#define UF_IMMUTABLE 0x00000002u
+#define UF_APPEND 0x00000004u
+#define UF_OPAQUE 0x00000008u
+#define UF_COMPRESSED 0x00000020u
+#define UF_TRACKED 0x00000040u
+#define UF_HIDDEN 0x00008000u
+// Only root may change these.
+#define SF_ARCHIVED 0x00010000u
+#define SF_IMMUTABLE 0x00020000u
+#define SF_APPEND 0x00040000u
+
+// Extended attributes, as a Mac's setxattr() and getxattr() have them.
+#define XATTR_NOFOLLOW 0x0001
+#define XATTR_CREATE 0x0002
+#define XATTR_REPLACE 0x0004
+#define XATTR_MAXNAMELEN 127
+#define VULTURE_XATTR_GET 0
+#define VULTURE_XATTR_SET 1
+#define VULTURE_XATTR_LIST 2
+#define VULTURE_XATTR_REMOVE 3
+
+// One line of an access control list: see LibVultureFS/Format.h for what the numbers mean.
+struct vulture_acl_entry {
+    unsigned char kind;
+    unsigned char tag;
+    unsigned short inheritance;
+    unsigned int id;
+    unsigned int permissions;
+};
+#define VULTURE_ACL_GET 0
+#define VULTURE_ACL_SET 1
+#define VULTURE_ACL_MAX_ENTRIES 96
+
+// clonefile().
+#define CLONE_NOFOLLOW 0x0001
+#define CLONE_NOOWNERCOPY 0x0002
+#define CLONE_ACL 0x0004
+
+// Snapshots of a volume.
+#define VULTURE_SNAPSHOT_CREATE 0
+#define VULTURE_SNAPSHOT_DELETE 1
+#define VULTURE_SNAPSHOT_REVERT 2
+#define VULTURE_SNAPSHOT_LIST 3
 
 // The *at() calls: a directory descriptor, or this for the working directory.
 #define AT_FDCWD -100

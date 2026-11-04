@@ -105,11 +105,7 @@ ErrorOr<void> write_partition_table(FILE*, u64 size, Span<PartitionSpec const>);
 // lists this partition (FAT32) too, after the entry that says there's a GPT. UEFI goes by that entry.
 ErrorOr<void> add_partition_to_mbr(FILE*, u64 first_sector, u64 sector_count);
 
-// The same with one vultureFS partition filling the disk.
-ErrorOr<Partition> create_disk_image(FILE*, u64 size, StringView partition_name);
-
-// The vultureFS partition of a GPT disk image, or, if the image is a bare
-// volume, all of it.
-ErrorOr<Partition> find_vulturefs_partition(FILE*);
+// The partitions of a GPT disk image of this type, in the order it lists them.
+ErrorOr<Vector<Partition>> find_partitions(FILE*, u8 const* type);
 
 }

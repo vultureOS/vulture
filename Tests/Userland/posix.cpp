@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/clonefile.h>
 #include <sys/event.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -41,6 +42,7 @@
 #include <sys/un.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <sys/xattr.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -582,7 +584,10 @@ void directories()
     char cwd[256];
     char original[256];
     getcwd(original, sizeof(original));
-    REQUIRE(chdir(path("d")) == 0 && getcwd(cwd, sizeof(cwd)) && strcmp(cwd, path("d")) == 0, "chdir(); getcwd() reports it");
+    // (By where it really is: on a Mac, as here, /tmp is a link to /private/tmp.)
+    char really[256];
+    REQUIRE(realpath(path("d"), really) != nullptr, "realpath() of a directory");
+    REQUIRE(chdir(path("d")) == 0 && getcwd(cwd, sizeof(cwd)) && strcmp(cwd, really) == 0, "chdir(); getcwd() reports it");
     REQUIRE(access("a", F_OK) == 0, "relative names start at the working directory");
     errno = 0;
     REQUIRE(chdir("a") == -1 && errno == ENOTDIR, "chdir() to a file: ENOTDIR");
@@ -934,6 +939,11 @@ int main()
     wide_characters();
     floating_environment();
     character_sets();
+    finding_programs();
+    extended_attributes();
+    clones();
+    file_flags();
+    names();
     system("rm -rf /tmp/posix");
     printf("posix: %d of %d requirements met: %s\n", s_total_passed, s_total_passed + s_total_failed, s_total_failed ? "FAIL" : "PASS");
     return s_total_failed ? 1 : 0;

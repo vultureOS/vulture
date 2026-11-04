@@ -2176,3 +2176,492 @@ void character_sets()
     iconv_close(convert);
     end_area();
 }
+
+// ---- What a file has besides its contents, and how names work: the things a Mac's own volumes do.
+
+void put_file(char const* name, char const* text)
+{
+    int fd = open(name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) {
+        (void)write(fd, text, strlen(text));
+        close(fd);
+    }
+}
+
+bool file_holds(char const* name, char const* text)
+{
+    int fd = open(name, O_RDONLY);
+    if (fd < 0)
+        return false;
+    char buffer[256] = {};
+    ssize_t got = read(fd, buffer, sizeof(buffer) - 1);
+    close(fd);
+    return got == static_cast<ssize_t>(strlen(text)) && memcmp(buffer, text, got) == 0;
+}
+
+bool listing_has(char const* directory, char const* name)
+{
+    DIR* listing = opendir(directory);
+    if (!listing)
+        return false;
+    bool found = false;
+    while (auto* entry = readdir(listing)) {
+        if (strcmp(entry->d_name, name) == 0)
+            found = true;
+    }
+    closedir(listing);
+    return found;
+}
+
+int listing_count(char const* directory)
+{
+    DIR* listing = opendir(directory);
+    if (!listing)
+        return -1;
+    int count = 0;
+    while (auto* entry = readdir(listing)) {
+        if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0)
+            ++count;
+    }
+    closedir(listing);
+    return count;
+}
+
+ino_t inode_of(char const* name)
+{
+    struct stat status;
+    return stat(name, &status) == 0 ? status.st_ino : 0;
+}
+
+void finding_programs()
+{
+    begin("finding programs");
+    // What's only in the place PATH says.
+    pid_t child = fork();
+    if (child == 0) {
+        setenv("PATH", "/usr/sbin", 1);
+        int const nothing = open("/dev/null", O_WRONLY);
+        dup2(nothing, 1);
+        char* arguments[] = { const_cast<char*>("sysctl"), const_cast<char*>("-n"), const_cast<char*>("hw.ncpu"), nullptr };
+        execvp("sysctl", arguments);
+        _exit(127);
+    }
+    int status = 0;
+    waitpid(child, &status, 0);
+    REQUIRE(WIFEXITED(status) && WEXITSTATUS(status) == 0, "execvp() goes by PATH");
+    child = fork();
+    if (child == 0) {
+        setenv("PATH", "/no/such/place", 1);
+        char* arguments[] = { const_cast<char*>("sysctl"), nullptr };
+        execvp("sysctl", arguments);
+        _exit(errno == ENOENT ? 42 : 1);
+    }
+    waitpid(child, &status, 0);
+    REQUIRE(WIFEXITED(status) && WEXITSTATUS(status) == 42, "execvp() of what isn't in PATH: ENOENT");
+    end_area();
+}
+
+void extended_attributes()
+{
+    begin("xattrs");
+    mkdir(path("x"), 0755);
+    char file[256];
+    strcpy(file, path("x/file"));
+    put_file(file, "contents");
+
+    REQUIRE(setxattr(file, "org.example.one", "hello", 5, 0, 0) == 0, "setxattr()");
+    REQUIRE(getxattr(file, "org.example.one", nullptr, 0, 0, 0) == 5, "getxattr() with nowhere to put it says how big it is");
+    char value[64] = {};
+    REQUIRE(getxattr(file, "org.example.one", value, sizeof(value), 0, 0) == 5 && memcmp(value, "hello", 5) == 0, "getxattr() gives back what was set");
+    errno = 0;
+    REQUIRE(getxattr(file, "org.example.one", value, 2, 0, 0) < 0 && errno == ERANGE, "getxattr() into too small a buffer: ERANGE");
+    errno = 0;
+    REQUIRE(getxattr(file, "org.example.none", value, sizeof(value), 0, 0) < 0 && errno == ENOATTR, "getxattr() of what isn't there: ENOATTR");
+    errno = 0;
+    REQUIRE(setxattr(file, "org.example.one", "x", 1, 0, XATTR_CREATE) < 0 && errno == EEXIST, "XATTR_CREATE when it's there: EEXIST");
+    errno = 0;
+    REQUIRE(setxattr(file, "org.example.two", "x", 1, 0, XATTR_REPLACE) < 0 && errno == ENOATTR, "XATTR_REPLACE when it isn't: ENOATTR");
+    REQUIRE(setxattr(file, "org.example.one", "changed", 7, 0, XATTR_REPLACE) == 0, "XATTR_REPLACE when it is");
+    REQUIRE(getxattr(file, "org.example.one", value, sizeof(value), 0, 0) == 7 && memcmp(value, "changed", 7) == 0, "the new value replaces the old");
+    REQUIRE(setxattr(file, "org.example.empty", "", 0, 0, 0) == 0 && getxattr(file, "org.example.empty", value, sizeof(value), 0, 0) == 0, "an attribute may be empty");
+
+    char names[256] = {};
+    ssize_t listed = listxattr(file, names, sizeof(names), 0);
+    // (A Mac may add its own, such as where the file came from.)
+    REQUIRE(listed >= static_cast<ssize_t>(strlen("org.example.one") + 1 + strlen("org.example.empty") + 1), "listxattr() says how long the names are");
+    bool one = false, empty = false;
+    for (char const* name = names; name < names + (listed > 0 ? listed : 0); name += strlen(name) + 1) {
+        one = one || strcmp(name, "org.example.one") == 0;
+        empty = empty || strcmp(name, "org.example.empty") == 0;
+    }
+    REQUIRE(one && empty, "listxattr() has each of them");
+    REQUIRE(listxattr(file, nullptr, 0, 0) == listed, "listxattr() with nowhere to put them says how much room they need");
+    errno = 0;
+    REQUIRE(listxattr(file, names, 3, 0) < 0 && errno == ERANGE, "listxattr() into too small a buffer: ERANGE");
+
+    // Longer than fits along with the file's own details.
+    size_t const big_size = 200 * 1024;
+    auto* big = static_cast<char*>(malloc(big_size));
+    auto* read_back = static_cast<char*>(malloc(big_size));
+    for (size_t i = 0; i < big_size; ++i)
+        big[i] = static_cast<char>(i * 7 + (i >> 8));
+    REQUIRE(setxattr(file, "org.example.big", big, big_size, 0, 0) == 0, "a big attribute");
+    REQUIRE(getxattr(file, "org.example.big", read_back, big_size, 0, 0) == static_cast<ssize_t>(big_size) && memcmp(big, read_back, big_size) == 0, "a big attribute reads back the same");
+    REQUIRE(setxattr(file, "org.example.big", "small", 5, 0, 0) == 0 && getxattr(file, "org.example.big", value, sizeof(value), 0, 0) == 5, "a big attribute can become a small one");
+    free(big);
+    free(read_back);
+
+    int fd = open(file, O_RDWR);
+    REQUIRE(fsetxattr(fd, "org.example.fd", "fd", 2, 0, 0) == 0, "fsetxattr()");
+    REQUIRE(fgetxattr(fd, "org.example.fd", value, sizeof(value), 0, 0) == 2 && getxattr(file, "org.example.fd", value, sizeof(value), 0, 0) == 2, "fgetxattr() and getxattr() see the same");
+    REQUIRE(flistxattr(fd, names, sizeof(names), 0) > 0, "flistxattr()");
+    REQUIRE(fremovexattr(fd, "org.example.fd", 0) == 0, "fremovexattr()");
+    close(fd);
+
+    REQUIRE(removexattr(file, "org.example.empty", 0) == 0, "removexattr()");
+    errno = 0;
+    REQUIRE(removexattr(file, "org.example.empty", 0) < 0 && errno == ENOATTR, "removexattr() of what isn't there: ENOATTR");
+    errno = 0;
+    REQUIRE(getxattr(path("x/absent"), "org.example.one", value, sizeof(value), 0, 0) < 0 && errno == ENOENT, "getxattr() of no such file: ENOENT");
+
+    char long_name[200];
+    memset(long_name, 'n', 127);
+    long_name[127] = 0;
+    REQUIRE(setxattr(file, long_name, "x", 1, 0, 0) == 0, "a name of 127 bytes");
+    memset(long_name, 'n', 128);
+    long_name[128] = 0;
+    errno = 0;
+    REQUIRE(setxattr(file, long_name, "x", 1, 0, 0) < 0 && errno == ENAMETOOLONG, "a name of 128 bytes: ENAMETOOLONG");
+    errno = 0;
+    REQUIRE(setxattr(file, "", "x", 1, 0, 0) < 0 && errno == EINVAL, "an empty name: EINVAL");
+
+    // A link and what it leads to each have their own.
+    symlink("file", path("x/link"));
+    REQUIRE(setxattr(path("x/link"), "org.example.through", "1", 1, 0, 0) == 0, "setxattr() goes through a link");
+    REQUIRE(getxattr(file, "org.example.through", value, sizeof(value), 0, 0) == 1, "and it's on the file");
+    REQUIRE(setxattr(path("x/link"), "org.example.own", "1", 1, 0, XATTR_NOFOLLOW) == 0, "XATTR_NOFOLLOW sets it on the link itself");
+    errno = 0;
+    REQUIRE(getxattr(file, "org.example.own", value, sizeof(value), 0, 0) < 0 && errno == ENOATTR, "and it isn't on the file");
+    REQUIRE(getxattr(path("x/link"), "org.example.own", value, sizeof(value), 0, XATTR_NOFOLLOW) == 1, "XATTR_NOFOLLOW reads it from the link");
+
+    mkdir(path("x/dir"), 0755);
+    REQUIRE(setxattr(path("x/dir"), "org.example.dir", "d", 1, 0, 0) == 0, "a directory can have them");
+    REQUIRE(getxattr(path("x/dir"), "org.example.dir", value, sizeof(value), 0, 0) == 1, "and read them");
+
+    // They go with the file.
+    REQUIRE(rename(file, path("x/renamed")) == 0 && getxattr(path("x/renamed"), "org.example.one", value, sizeof(value), 0, 0) == 7, "they stay through a rename");
+    link(path("x/renamed"), path("x/second"));
+    REQUIRE(getxattr(path("x/second"), "org.example.one", value, sizeof(value), 0, 0) == 7, "another name has the same ones");
+    chmod(path("x/renamed"), 0644);
+    int reader = open(path("x/renamed"), O_RDONLY);
+    REQUIRE(reader >= 0 && fsetxattr(reader, "org.example.ro", "1", 1, 0, 0) == 0, "fsetxattr() on a file open for reading only");
+    close(reader);
+    end_area();
+}
+
+void clones()
+{
+    begin("clones");
+    mkdir(path("c"), 0755);
+    char original[256];
+    strcpy(original, path("c/original"));
+    int fd = open(original, O_WRONLY | O_CREAT | O_TRUNC, 0640);
+    size_t const size = 3 * 1024 * 1024 + 123;
+    auto* bytes = static_cast<char*>(malloc(size));
+    for (size_t i = 0; i < size; ++i)
+        bytes[i] = static_cast<char>(i ^ (i >> 9));
+    REQUIRE(write(fd, bytes, size) == static_cast<ssize_t>(size), "a file to clone");
+    close(fd);
+    setxattr(original, "org.example.one", "hello", 5, 0, 0);
+
+    REQUIRE(clonefile(original, path("c/copy"), 0) == 0, "clonefile()");
+    struct stat first, second;
+    stat(original, &first);
+    REQUIRE(stat(path("c/copy"), &second) == 0 && second.st_ino != first.st_ino, "the copy is a file of its own");
+    REQUIRE(second.st_size == first.st_size && (second.st_mode & 07777) == (first.st_mode & 07777), "with the same size and mode");
+    REQUIRE(second.st_nlink == 1, "and one name");
+    char value[16] = {};
+    REQUIRE(getxattr(path("c/copy"), "org.example.one", value, sizeof(value), 0, 0) == 5, "and the same attributes");
+
+    auto* seen = static_cast<char*>(malloc(size));
+    auto read_all = [&](char const* name) {
+        int reader = open(name, O_RDONLY);
+        ssize_t got = read(reader, seen, size);
+        close(reader);
+        return got == static_cast<ssize_t>(size);
+    };
+    REQUIRE(read_all(path("c/copy")) && memcmp(seen, bytes, size) == 0, "the copy reads the same");
+
+    fd = open(path("c/copy"), O_WRONLY);
+    pwrite(fd, "CHANGED", 7, 1024 * 1024);
+    close(fd);
+    REQUIRE(read_all(original) && memcmp(seen, bytes, size) == 0, "writing to the copy leaves the original");
+    REQUIRE(read_all(path("c/copy")) && memcmp(seen + 1024 * 1024, "CHANGED", 7) == 0, "the copy has what was written");
+    fd = open(original, O_WRONLY);
+    pwrite(fd, "OTHER", 5, 2 * 1024 * 1024);
+    close(fd);
+    REQUIRE(read_all(path("c/copy")) && memcmp(seen + 2 * 1024 * 1024, bytes + 2 * 1024 * 1024, 5) == 0, "writing to the original leaves the copy");
+    REQUIRE(read_all(original) && memcmp(seen + 2 * 1024 * 1024, "OTHER", 5) == 0, "the original has what was written");
+
+    REQUIRE(unlink(original) == 0 && read_all(path("c/copy")), "removing the original leaves the copy");
+    free(bytes);
+    free(seen);
+
+    errno = 0;
+    REQUIRE(clonefile(path("c/copy"), path("c/copy"), 0) < 0 && errno == EEXIST, "clonefile() onto what's there: EEXIST");
+    errno = 0;
+    REQUIRE(clonefile(path("c/absent"), path("c/made"), 0) < 0 && errno == ENOENT, "clonefile() of nothing: ENOENT");
+    errno = 0;
+    REQUIRE(clonefile(path("c/copy"), path("c/nowhere/made"), 0) < 0 && errno == ENOENT, "clonefile() into no such directory: ENOENT");
+    errno = 0;
+    REQUIRE(clonefile("/dev/null", path("c/made"), 0) < 0 && errno == EINVAL, "clonefile() of a device: EINVAL");
+    errno = 0;
+    REQUIRE(clonefile(path("c/copy"), "/dev/made", 0) < 0 && errno == EXDEV, "clonefile() to another volume: EXDEV");
+
+    // A directory, and all it holds.
+    mkdir(path("c/folder"), 0750);
+    put_file(path("c/folder/inside"), "inside");
+    mkdir(path("c/folder/deeper"), 0755);
+    put_file(path("c/folder/deeper/more"), "more");
+    REQUIRE(clonefile(path("c/folder"), path("c/folder-copy"), 0) == 0, "clonefile() of a directory");
+    REQUIRE(file_holds(path("c/folder-copy/inside"), "inside") && file_holds(path("c/folder-copy/deeper/more"), "more"), "has all it held");
+    struct stat folder;
+    REQUIRE(stat(path("c/folder-copy"), &folder) == 0 && (folder.st_mode & 0777) == 0750, "with the same mode");
+    put_file(path("c/folder-copy/inside"), "changed");
+    REQUIRE(file_holds(path("c/folder/inside"), "inside"), "and is a copy");
+
+    // A link: with the flag, the link itself.
+    symlink("copy", path("c/link"));
+    REQUIRE(clonefile(path("c/link"), path("c/link-copy"), CLONE_NOFOLLOW) == 0, "CLONE_NOFOLLOW clones a link as a link");
+    struct stat status;
+    REQUIRE(lstat(path("c/link-copy"), &status) == 0 && S_ISLNK(status.st_mode), "so it's a link");
+    REQUIRE(clonefile(path("c/link"), path("c/link-followed"), 0) == 0, "without it, clonefile() of a link");
+    REQUIRE(lstat(path("c/link-followed"), &status) == 0 && S_ISREG(status.st_mode), "clones what it leads to");
+
+    int source = open(path("c/copy"), O_RDONLY);
+    REQUIRE(fclonefileat(source, AT_FDCWD, path("c/by-fd"), 0) == 0, "fclonefileat()");
+    close(source);
+    REQUIRE(stat(path("c/by-fd"), &status) == 0 && status.st_size == static_cast<off_t>(size), "clones what's open");
+    int directory = open(path("c"), O_RDONLY | O_DIRECTORY);
+    REQUIRE(clonefileat(directory, "copy", directory, "by-at", 0) == 0 && access(path("c/by-at"), F_OK) == 0, "clonefileat()");
+    close(directory);
+    end_area();
+}
+
+void file_flags()
+{
+    begin("file flags");
+    mkdir(path("f"), 0755);
+    char file[256];
+    strcpy(file, path("f/file"));
+    put_file(file, "contents");
+    struct stat status;
+    REQUIRE(stat(file, &status) == 0 && status.st_flags == 0, "a new file has no flags");
+    REQUIRE(chflags(file, UF_HIDDEN) == 0 && stat(file, &status) == 0 && status.st_flags == UF_HIDDEN, "chflags(UF_HIDDEN) shows in stat()");
+    REQUIRE(chflags(file, 0) == 0 && stat(file, &status) == 0 && status.st_flags == 0, "chflags(0) clears them");
+
+    REQUIRE(chflags(file, UF_IMMUTABLE) == 0, "chflags(UF_IMMUTABLE)");
+    errno = 0;
+    REQUIRE(open(file, O_WRONLY) < 0 && errno == EPERM, "an immutable file can't be opened for writing: EPERM");
+    errno = 0;
+    REQUIRE(unlink(file) < 0 && errno == EPERM, "or removed: EPERM");
+    errno = 0;
+    REQUIRE(rename(file, path("f/moved")) < 0 && errno == EPERM, "or renamed: EPERM");
+    errno = 0;
+    REQUIRE(chmod(file, 0600) < 0 && errno == EPERM, "or have its mode changed: EPERM");
+    errno = 0;
+    REQUIRE(link(file, path("f/second")) < 0 && errno == EPERM, "or given another name: EPERM");
+    REQUIRE(chflags(file, 0) == 0, "but its owner can take that away");
+    REQUIRE(unlink(file) == 0, "and then remove it");
+
+    put_file(file, "start");
+    REQUIRE(chflags(file, UF_APPEND) == 0, "chflags(UF_APPEND)");
+    errno = 0;
+    REQUIRE(open(file, O_WRONLY) < 0 && errno == EPERM, "an append-only file can't be opened to write anywhere: EPERM");
+    int fd = open(file, O_WRONLY | O_APPEND);
+    REQUIRE(fd >= 0 && write(fd, "+more", 5) == 5, "but it can be appended to");
+    close(fd);
+    errno = 0;
+    REQUIRE(truncate(file, 0) < 0 && errno == EPERM, "and not truncated: EPERM");
+    errno = 0;
+    REQUIRE(unlink(file) < 0 && errno == EPERM, "or removed: EPERM");
+    chflags(file, 0);
+    REQUIRE(file_holds(file, "start+more"), "it's as it was left");
+
+    mkdir(path("f/dir"), 0755);
+    put_file(path("f/dir/inside"), "");
+    REQUIRE(chflags(path("f/dir"), UF_IMMUTABLE) == 0, "a directory may be immutable");
+    errno = 0;
+    REQUIRE(creat(path("f/dir/new"), 0644) < 0 && errno == EPERM, "nothing can be added to it: EPERM");
+    errno = 0;
+    REQUIRE(unlink(path("f/dir/inside")) < 0 && errno == EPERM, "or taken away: EPERM");
+    chflags(path("f/dir"), 0);
+
+    fd = open(file, O_RDONLY);
+    REQUIRE(fchflags(fd, UF_NODUMP) == 0 && fstat(fd, &status) == 0 && status.st_flags == UF_NODUMP, "fchflags()");
+    close(fd);
+    errno = 0;
+    REQUIRE(chflags(path("f/absent"), 0) < 0 && errno == ENOENT, "chflags() of no such file: ENOENT");
+    end_area();
+}
+
+// Each in the words of what it is: NFC, NFD, or how a Mac's names compare.
+#define E_ACUTE_NFC "\xc3\xa9"
+#define E_ACUTE_NFD "e\xcc\x81"
+
+bool one_name(char const* made, char const* asked)
+{
+    char directory[256];
+    strcpy(directory, path("n/one"));
+    system("rm -rf /tmp/posix/n/one");
+    mkdir(directory, 0755);
+    char a[512], b[512];
+    snprintf(a, sizeof(a), "%s/%s", directory, made);
+    snprintf(b, sizeof(b), "%s/%s", directory, asked);
+    int fd = open(a, O_WRONLY | O_CREAT, 0644);
+    if (fd < 0)
+        return false;
+    close(fd);
+    struct stat first, second;
+    if (stat(a, &first) != 0 || stat(b, &second) != 0 || first.st_ino != second.st_ino)
+        return false;
+    fd = open(b, O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd >= 0)
+        close(fd);
+    return fd < 0 && errno == EEXIST && listing_count(directory) == 1;
+}
+
+bool two_names(char const* made, char const* asked)
+{
+    char directory[256];
+    strcpy(directory, path("n/two"));
+    system("rm -rf /tmp/posix/n/two");
+    mkdir(directory, 0755);
+    char a[512], b[512];
+    snprintf(a, sizeof(a), "%s/%s", directory, made);
+    snprintf(b, sizeof(b), "%s/%s", directory, asked);
+    int fd = open(a, O_WRONLY | O_CREAT, 0644);
+    if (fd < 0)
+        return false;
+    close(fd);
+    struct stat status;
+    if (stat(b, &status) == 0 || errno != ENOENT)
+        return false;
+    fd = open(b, O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd < 0)
+        return false;
+    close(fd);
+    return listing_count(directory) == 2 && inode_of(a) != inode_of(b);
+}
+
+void repeated(char* into, char const* text, int times)
+{
+    *into = 0;
+    for (int i = 0; i < times; ++i)
+        strcat(into, text);
+}
+
+void names()
+{
+    begin("names");
+    mkdir(path("n"), 0755);
+
+    REQUIRE(one_name("caf" E_ACUTE_NFC, "cafe\xcc\x81"), "NFC and NFD are one name");
+    REQUIRE(one_name("cafe\xcc\x81", "caf" E_ACUTE_NFC), "NFD and NFC are one name");
+    REQUIRE(one_name("Name", "name") && one_name("name", "NAME"), "upper and lower case are one name");
+    REQUIRE(one_name("stra\xc3\x9f" "e", "STRASSE"), "sharp s and SS are one name");
+    REQUIRE(one_name("\xc3\x9f", "\xe1\xba\x9e"), "sharp s and capital sharp s are one name");
+    REQUIRE(one_name("ss", "\xc3\x9f"), "ss and sharp s are one name");
+    REQUIRE(one_name("\xcf\x83", "\xcf\x82"), "sigma and final sigma are one name");
+    REQUIRE(one_name("\xce\xa3", "\xcf\x82"), "capital sigma and final sigma are one name");
+    REQUIRE(one_name("\xc4\xb0", "i\xcc\x87"), "dotted capital I is i with a dot above");
+    REQUIRE(one_name("k", "\xe2\x84\xaa"), "k and the Kelvin sign are one name");
+    REQUIRE(one_name("\xc3\xa5", "\xe2\x84\xab"), "a-ring and the Angstrom sign are one name");
+    REQUIRE(one_name("\xef\xac\x81", "fi"), "the fi ligature and fi are one name");
+    REQUIRE(one_name("\xef\xbc\xa1", "\xef\xbd\x81"), "full-width A and a are one name");
+    REQUIRE(one_name("\xe1\x8e\xa0", "\xea\xad\xb0"), "Cherokee upper and lower case are one name");
+    REQUIRE(one_name("\xe1\x83\x90", "\xe1\xb2\x90"), "Georgian upper and lower case are one name");
+    REQUIRE(one_name("a\xcc\x88\xcc\xa3", "a\xcc\xa3\xcc\x88"), "the order of combining marks doesn't matter");
+    REQUIRE(one_name("\xed\x95\x9c", "\xe1\x84\x92\xe1\x85\xa1\xe1\x86\xab"), "composed and separate Hangul are one name");
+
+    REQUIRE(two_names("I", "\xc4\xb1"), "I and dotless i stay two names");
+    REQUIRE(two_names("\xef\xbc\xa1", "A"), "full-width A and A stay two names");
+    REQUIRE(two_names("ab", "a\xe2\x80\x8d" "b"), "a joiner makes another name");
+    REQUIRE(two_names("ab", "a\xc2\xad" "b"), "a soft hyphen makes another name");
+    REQUIRE(two_names("a", "a\xef\xb8\x8f"), "a variation selector makes another name");
+    REQUIRE(two_names("\xc2\xbd", "1\xe2\x81\x84" "2"), "one half and 1/2 stay two names");
+    REQUIRE(two_names("a b", "a  b"), "spaces count");
+
+    // Bad UTF-8.
+    char const* bad = path("n/bad\xff");
+    errno = 0;
+    REQUIRE(creat(bad, 0644) < 0 && errno == EILSEQ, "making a name that isn't UTF-8: EILSEQ");
+    errno = 0;
+    struct stat status;
+    REQUIRE(stat(bad, &status) < 0 && errno == ENOENT, "looking for one: ENOENT");
+    errno = 0;
+    REQUIRE(mkdir(path("n/\xc0\xaf"), 0755) < 0 && errno == EILSEQ, "an overlong sequence: EILSEQ");
+    errno = 0;
+    REQUIRE(creat(path("n/\xed\xa0\x80"), 0644) < 0 && errno == EILSEQ, "half a surrogate pair: EILSEQ");
+
+    // How long they may be: in UTF-16, as they're given.
+    char text[2048];
+    char whole[2200];
+    auto can_make = [&](char const* unit, int times) {
+        repeated(text, unit, times);
+        snprintf(whole, sizeof(whole), "%s/n/%s", s_dir, text);
+        int fd = open(whole, O_WRONLY | O_CREAT, 0644);
+        if (fd < 0)
+            return false;
+        close(fd);
+        unlink(whole);
+        return true;
+    };
+    REQUIRE(can_make("a", 255), "255 letters");
+    errno = 0;
+    REQUIRE(!can_make("a", 256) && errno == ENAMETOOLONG, "256 letters: ENAMETOOLONG");
+    REQUIRE(can_make("\xc3\xa9", 255), "255 accented letters, of two bytes each");
+    REQUIRE(can_make("\xed\x95\x9c", 255), "255 Korean syllables, of three bytes each");
+    REQUIRE(can_make("\xf0\x9f\x98\x80", 127), "127 emoji");
+    errno = 0;
+    REQUIRE(!can_make("\xf0\x9f\x98\x80", 128) && errno == ENAMETOOLONG, "128 emoji, which is 256 in UTF-16: ENAMETOOLONG");
+    REQUIRE(can_make("e\xcc\x81", 127), "127 letters with separate accents");
+    errno = 0;
+    REQUIRE(!can_make("e\xcc\x81", 128) && errno == ENAMETOOLONG, "128 letters with separate accents: ENAMETOOLONG");
+
+    // A directory says what was typed.
+    mkdir(path("n/spelled"), 0755);
+    put_file(path("n/spelled/MiXeD"), "");
+    REQUIRE(listing_has(path("n/spelled"), "MiXeD"), "a listing has the name as it was made");
+    put_file(path("n/spelled/mixed"), "again");
+    REQUIRE(listing_has(path("n/spelled"), "MiXeD") && listing_count(path("n/spelled")) == 1, "writing it under another case doesn't change that");
+    put_file(path("n/spelled/caf" E_ACUTE_NFD), "");
+    REQUIRE(listing_has(path("n/spelled"), "caf" E_ACUTE_NFD) && !listing_has(path("n/spelled"), "caf" E_ACUTE_NFC), "a listing has NFD if it was made so");
+    system("rm -rf /tmp/posix/n/spelled/*");
+    put_file(path("n/spelled/caf" E_ACUTE_NFC), "");
+    REQUIRE(listing_has(path("n/spelled"), "caf" E_ACUTE_NFC) && !listing_has(path("n/spelled"), "caf" E_ACUTE_NFD), "and NFC if it was made so");
+
+    // Renaming, with all that.
+    mkdir(path("n/moves"), 0755);
+    put_file(path("n/moves/abc"), "text");
+    ino_t const before = inode_of(path("n/moves/abc"));
+    REQUIRE(rename(path("n/moves/abc"), path("n/moves/ABC")) == 0, "rename() to another case");
+    REQUIRE(listing_has(path("n/moves"), "ABC") && !listing_has(path("n/moves"), "abc"), "changes how it's spelled");
+    REQUIRE(inode_of(path("n/moves/abc")) == before, "and it's the same file");
+    put_file(path("n/moves/x"), "new");
+    put_file(path("n/moves/y"), "old");
+    REQUIRE(rename(path("n/moves/x"), path("n/moves/Y")) == 0, "rename() onto another spelling of something that's there");
+    REQUIRE(file_holds(path("n/moves/y"), "new") && access(path("n/moves/x"), F_OK) != 0, "replaces it");
+    REQUIRE(listing_has(path("n/moves"), "y") && !listing_has(path("n/moves"), "Y"), "and the listing has the old spelling");
+    put_file(path("n/moves/one"), "");
+    link(path("n/moves/one"), path("n/moves/another"));
+    REQUIRE(rename(path("n/moves/one"), path("n/moves/another")) == 0, "rename() onto another name for itself");
+    REQUIRE(access(path("n/moves/one"), F_OK) == 0 && access(path("n/moves/another"), F_OK) == 0, "does nothing");
+    errno = 0;
+    REQUIRE(mkdir(path("n/moves/ABC"), 0755) < 0 && errno == EEXIST, "mkdir() of another case of a file: EEXIST");
+    errno = 0;
+    REQUIRE(symlink("x", path("n/moves/aBc")) < 0 && errno == EEXIST, "symlink() of another case: EEXIST");
+    errno = 0;
+    REQUIRE(link(path("n/moves/one"), path("n/moves/Abc")) < 0 && errno == EEXIST, "link() of another case: EEXIST");
+    end_area();
+}

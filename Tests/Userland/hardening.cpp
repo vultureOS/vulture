@@ -259,7 +259,7 @@ void test_seal()
     CHECK(is_read_only(mkdir("/System/new-folder", 0755)));
     CHECK(is_read_only(symlink("/tmp", "/usr/bin/new-link")));
     CHECK(is_read_only(link("/bin/ls", "/usr/bin/ls2")));
-    CHECK(is_read_only(link("/bin/ls", "/Users/hard-link-to-ls")));
+    CHECK(is_read_only(link("/bin/ls", "/Users/hard-link-to-ls")) || errno == EXDEV);
     CHECK(is_read_only(chmod("/usr/bin/id", 04755)));
     CHECK(is_read_only(chown("/bin/ls", 501, 20)));
     CHECK(is_read_only(truncate("/bin/ls", 0)));
@@ -292,7 +292,7 @@ void test_seal()
     CHECK(mkdir("/Applications/Hardening-Test.app", 0755) == 0);
     CHECK(rmdir("/Applications/Hardening-Test.app") == 0);
     // What the system came with in there isn't open, though.
-    CHECK(is_read_only(rename("/Applications/Calculator.app", "/Applications/Calculator2.app")));
+    CHECK(is_read_only(rename("/System/Applications/Calculator.app", "/System/Applications/Calculator2.app")));
 }
 
 void test_stack_protector()

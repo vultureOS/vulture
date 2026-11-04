@@ -293,8 +293,8 @@ if [ "$headless" -eq 1 ]; then
     vars_file="$run_dir/efivars.fd"
 fi
 
-# The root disk: a GPT disk image with a vultureFS partition, made by mkvfs
-# from the boot archive. A disk kept between runs gets the system files of
+# The root disk: a GPT disk image with the system image on one partition and
+# its data on another, made by mkvfs. A disk kept between runs gets the system of
 # each new build (the user's own files stay), like a system update.
 disk_args=()
 if [ "$use_disk" -eq 1 ]; then
@@ -317,7 +317,11 @@ if [ "$use_disk" -eq 1 ]; then
         "$mkvfs" create "$disk" 2048 "$archive" > /dev/null
         touch "$disk.updated"
     elif [ "$archive" -nt "$disk.updated" ]; then
-        "$mkvfs" update "$disk" "$archive" > /dev/null
+        if ! "$mkvfs" update "$disk" "$archive" > /dev/null 2>&1; then
+            echo "run.sh: $disk is laid out as an older system's was, so it's being made anew" >&2
+            rm -f "$disk"
+            "$mkvfs" create "$disk" 2048 "$archive" > /dev/null
+        fi
         touch "$disk.updated"
     fi
     if [ "$real_devices" -eq 1 ]; then
@@ -1079,7 +1083,8 @@ if [ ${#chat_steps[@]} -gt 0 ] && [ -z "$chat_failure" ] && ! chat_done; then
 fi
 
 # Show the console without the firmware's terminal control sequences.
-sed -e $'s/\x1b\\[[0-9;?=]*[A-Za-z]//g' -e $'s/\r//g' "$log"
+# (Bytes, not characters: a program may say anything, and that's no reason to stop showing what's there.)
+LC_ALL=C sed -e $'s/\x1b\\[[0-9;?=]*[A-Za-z]//g' -e $'s/\r//g' "$log"
 
 status=0
 if [ "$wait_for_exit" -eq 1 ]; then

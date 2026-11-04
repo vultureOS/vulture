@@ -7,6 +7,7 @@
 #pragma once
 
 #include <Kernel/FileSystem/Inode.h>
+#include <LibBase/Function.h>
 
 namespace Kernel {
 
@@ -32,6 +33,22 @@ public:
     // Memory's short: gives back up to this many pages of what it's only keeping to save reading it again. How many it did.
     virtual size_t release_cached_pages(size_t) { return 0; }
     [[nodiscard]] virtual size_t cached_page_count() const { return 0; }
+
+    // A copy that has the same blocks as the original until one of them changes.
+    virtual ErrorOr<NonnullRefPtr<Inode>> clone(Inode& source, Inode& directory, StringView name, u32 uid, u32 gid);
+
+    // This moment of it, kept. Going back to one takes effect at the next mount.
+    virtual ErrorOr<void> create_snapshot(StringView name);
+    virtual ErrorOr<void> delete_snapshot(StringView name);
+    virtual ErrorOr<void> revert_to_snapshot(StringView name);
+    virtual ErrorOr<Vector<String>> snapshots();
+
+    // What's changed, where it's kept: see FSEvents.
+    virtual ErrorOr<u64> append_event(u32 flags, StringView path);
+    [[nodiscard]] virtual u64 next_event() { return 0; }
+    [[nodiscard]] virtual u64 oldest_event() { return 0; }
+    using EventVisitor = Function<bool(u64 id, u32 flags, StringView path)>;
+    virtual ErrorOr<void> for_each_event(u64 first, EventVisitor);
 
     // Moves a name within this filesystem, replacing an existing target.
     virtual ErrorOr<void> rename(Inode& old_parent, StringView old_name, Inode& new_parent, StringView new_name);

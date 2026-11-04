@@ -6,6 +6,7 @@
 
 #include <Kernel/API/POSIX/errno.h>
 #include <LibBase/FastRandom.h>
+#include <LibBase/HashMap.h>
 #include <LibTest/TestCase.h>
 #include <LibVultureFS/Check.h>
 #include <LibVultureFS/Volume.h>
@@ -375,7 +376,7 @@ TEST_CASE(thousands_of_files_grow_and_shrink_the_tree)
     EXPECT_EQ(shrunk.files, 0u);
     EXPECT_EQ(shrunk.tree_height, 1u);
     // Superblocks, one bitmap block and the root leaf.
-    EXPECT_EQ(shrunk.used_blocks, 4u);
+    EXPECT_EQ(shrunk.used_blocks, 5u); // The superblocks, a node, a block of bitmap and where that is.
 }
 
 TEST_CASE(rename_follows_posix)
@@ -692,6 +693,605 @@ void expect_matches(Volume& volume, Model const& model)
     EXPECT_EQ(directories, expected_directories);
 }
 
+}
+
+
+// ---- Version 2.
+
+static StringView sv(char const* text) { return { text, __builtin_strlen(text) }; }
+
+TEST_CASE(names_are_compared_as_a_mac_compares_them)
+{
+    MemoryStore store(2048);
+    auto volume = MUST(Volume::format(store, "Names"_sv, s_uuid, test_clock));
+    auto const file = MUST(volume->create(root_directory, "Foo"_sv, mode_regular | 0644, 0, 0));
+    EXPECT_EQ(MUST(volume->lookup(root_directory, "foo"_sv)).inode, file);
+    EXPECT_EQ(MUST(volume->lookup(root_directory, "FOO"_sv)).inode, file);
+    EXPECT_EQ(volume->create(root_directory, "fOO"_sv, mode_regular | 0644, 0, 0).error().code(), EEXIST);
+
+    // These all come out as the same file, or not, on a Mac.
+    struct Pair {
+        char const* first;
+        char const* second;
+        bool same;
+    };
+    Pair const pairs[] = {
+        { "\xc3\xa9", "e\xcc\x81", true },                       // é, and e with a combining accent.
+        { "e\xcc\x81x", "\xc3\xa9x", true },                     // The other way around.
+        { "stra\xc3\x9f" "e", "STRASSE", true },                 // straße.
+        { "\xc3\x9f", "\xe1\xba\x9e", true },                    // ß, ẞ.
+        { "\xcf\x83", "\xcf\x82", true },                        // σ, ς.
+        { "\xce\xa3", "\xcf\x82", true },                        // Σ, ς.
+        { "I", "\xc4\xb1", false },                              // I, ı: no special treatment for Turkish.
+        { "\xc4\xb0", "i\xcc\x87", true },                       // İ, and i with a dot.
+        { "K", "\xe2\x84\xaa", true },                           // K, the Kelvin sign.
+        { "\xc3\x85", "\xe2\x84\xab", true },                    // Å, the Angstrom sign.
+        { "\xef\xac\x81", "fi", true },                          // ﬁ.
+        { "\xef\xbc\xa1", "\xef\xbd\x81", true },                // Ａ, ａ, full width.
+        { "\xef\xbc\xa1", "A", false },                          // Ａ, A.
+        { "a\xe2\x80\x8d" "b", "ab", false },                    // A joiner.
+        { "a\xe2\x80\x8c" "b", "ab", false },                    // A non-joiner.
+        { "a\xc2\xad" "b", "ab", false },                        // A soft hyphen.
+        { "\xed\x95\x9c", "\xe1\x84\x92\xe1\x85\xa1\xe1\x86\xab", true }, // 한, and its parts.
+        { "\xe1\x8e\xa0", "\xea\xad\xb0", true },                // Cherokee.
+        { "\xe2\x9d\xa4\xef\xb8\x8f", "\xe2\x9d\xa4", false },   // ❤, with a variation selector.
+        { "a\xcc\xa3\xcc\x87", "a\xcc\x87\xcc\xa3", true },      // Marks in either order.
+        { "\xc2\xbd", "1\xe2\x81\x84" "2", false },              // ½.
+    };
+    for (auto const& pair : pairs) {
+        auto const made = MUST(volume->create(root_directory, sv(pair.first), mode_regular | 0644, 0, 0));
+        auto const found = volume->lookup(root_directory, sv(pair.second));
+        if (pair.same) {
+            EXPECT(!found.is_error());
+            if (!found.is_error())
+                EXPECT_EQ(found.value().inode, made);
+        } else {
+            EXPECT(found.is_error());
+        }
+        // It's listed as it was given.
+        bool listed = false;
+        MUST(volume->for_each_entry(root_directory, [&](StringView name, DirectoryEntry) {
+            listed = listed || name == sv(pair.first);
+            return Iteration::Continue;
+        }));
+        EXPECT(listed);
+        MUST(volume->release(MUST(volume->unlink(root_directory, sv(pair.second).is_empty() ? sv(pair.first) : sv(pair.first))).inode));
+    }
+
+    // What can't be made.
+    char const* const bad[] = { "\xff", "a\xc0\x80", "\xed\xa0\x80", "\xf4\x90\x80\x80" };
+    for (auto const* name : bad) {
+        EXPECT_EQ(volume->create(root_directory, sv(name), mode_regular | 0644, 0, 0).error().code(), EILSEQ);
+        EXPECT_EQ(volume->lookup(root_directory, sv(name)).error().code(), ENOENT);
+    }
+
+    // As long as 255 of what UTF-16 has: three bytes count once, and four bytes twice.
+    auto repeated = [](char const* text, size_t count) {
+        StringBuilder builder;
+        for (size_t i = 0; i < count; ++i)
+            builder.append(sv(text));
+        return MUST(builder.to_string());
+    };
+    EXPECT(!volume->create(root_directory, repeated("a", 255).view(), mode_regular | 0644, 0, 0).is_error());
+    EXPECT_EQ(volume->create(root_directory, repeated("a", 256).view(), mode_regular | 0644, 0, 0).error().code(), ENAMETOOLONG);
+    EXPECT(!volume->create(root_directory, repeated("\xed\x95\x9c", 255).view(), mode_regular | 0644, 0, 0).is_error());
+    EXPECT_EQ(volume->create(root_directory, repeated("\xed\x95\x9c", 256).view(), mode_regular | 0644, 0, 0).error().code(), ENAMETOOLONG);
+    EXPECT(!volume->create(root_directory, repeated("\xf0\x9f\x98\x80", 127).view(), mode_regular | 0644, 0, 0).is_error());
+    EXPECT_EQ(volume->create(root_directory, repeated("\xf0\x9f\x98\x80", 128).view(), mode_regular | 0644, 0, 0).error().code(), ENAMETOOLONG);
+
+    // A name can change only in the way it's written.
+    auto const before = MUST(volume->create(root_directory, "abc"_sv, mode_regular | 0644, 0, 0));
+    EXPECT(!MUST(volume->rename(root_directory, "abc"_sv, root_directory, "ABC"_sv)).has_value());
+    EXPECT_EQ(MUST(volume->lookup(root_directory, "abc"_sv)).inode, before);
+    bool has_new_spelling = false;
+    bool has_old_spelling = false;
+    MUST(volume->for_each_entry(root_directory, [&](StringView name, DirectoryEntry) {
+        has_new_spelling = has_new_spelling || name == "ABC"_sv;
+        has_old_spelling = has_old_spelling || name == "abc"_sv;
+        return Iteration::Continue;
+    }));
+    EXPECT(has_new_spelling);
+    EXPECT(!has_old_spelling);
+    MUST(volume->checkpoint());
+    expect_clean(store);
+
+    // By request, a volume where case matters. Accents still don't.
+    MemoryStore other(2048);
+    auto sensitive = MUST(Volume::format(other, "Sensitive"_sv, s_uuid, test_clock, { .case_sensitive = true }));
+    auto const lower = MUST(sensitive->create(root_directory, "a"_sv, mode_regular | 0644, 0, 0));
+    auto const upper = MUST(sensitive->create(root_directory, "A"_sv, mode_regular | 0644, 0, 0));
+    EXPECT(lower != upper);
+    auto const accented = MUST(sensitive->create(root_directory, sv("\xc3\xa9"), mode_regular | 0644, 0, 0));
+    EXPECT_EQ(MUST(sensitive->lookup(root_directory, sv("e\xcc\x81"))).inode, accented);
+    MUST(sensitive->checkpoint());
+    expect_clean(other);
+}
+
+TEST_CASE(a_volume_of_the_old_format_is_refused_clearly)
+{
+    MemoryStore store(256);
+    auto volume = MUST(Volume::format(store, "Old"_sv, s_uuid, test_clock));
+    MUST(volume->checkpoint());
+    u8 block[block_size];
+    MUST(store.read_blocks(1, 1, { block, block_size }));
+    __builtin_memcpy(block, old_superblock_magic, sizeof(old_superblock_magic));
+    MUST(store.write_blocks(0, 1, { block, block_size }));
+    MUST(store.write_blocks(1, 1, { block, block_size }));
+    MUST(store.flush());
+    auto const mounted = Volume::mount(store, test_clock);
+    EXPECT(mounted.is_error());
+    EXPECT(mounted.error().string_literal().contains("version 1"_sv));
+}
+
+TEST_CASE(pipes_and_sockets_have_names)
+{
+    MemoryStore store(512);
+    auto volume = MUST(Volume::format(store, "Nodes"_sv, s_uuid, test_clock));
+    auto const pipe = MUST(volume->create(root_directory, "pipe"_sv, mode_fifo | 0600, 0, 0));
+    auto const socket = MUST(volume->create(root_directory, "socket"_sv, mode_socket | 0600, 0, 0));
+    EXPECT_EQ(MUST(volume->lookup(root_directory, "pipe"_sv)).type, type_fifo);
+    EXPECT_EQ(MUST(volume->lookup(root_directory, "socket"_sv)).type, type_socket);
+    EXPECT_EQ(MUST(volume->inode(pipe)).mode & mode_type_mask, mode_fifo);
+    EXPECT_EQ(MUST(volume->inode(socket)).mode & mode_type_mask, mode_socket);
+    MUST(volume->checkpoint());
+    expect_clean(store);
+}
+
+static Vector<u8> pattern(size_t size, u32 seed)
+{
+    Vector<u8> data;
+    MUST(data.try_resize(size));
+    FastRandom random(seed);
+    for (size_t i = 0; i < size; ++i)
+        data[i] = static_cast<u8>(random.next_below(256));
+    return data;
+}
+
+static Vector<u8> compressible(size_t size)
+{
+    Vector<u8> data;
+    MUST(data.try_resize(size));
+    for (size_t i = 0; i < size; ++i)
+        data[i] = "All work and no play makes a dull file. "[i % 40];
+    return data;
+}
+
+TEST_CASE(clones_share_blocks_until_one_changes)
+{
+    MemoryStore store(8192);
+    auto volume = MUST(Volume::format(store, "Clones"_sv, s_uuid, test_clock));
+    auto const data = pattern(1024 * 1024, 7);
+    auto const original = MUST(volume->create(root_directory, "original"_sv, mode_regular | 04755, 5, 5));
+    MUST(volume->write(original, 0, { data.begin(), data.size() }));
+    MUST(volume->set_xattr(original, "user.note"_sv, text("kept")));
+    AclEntry entry {};
+    entry.kind = acl_allow;
+    entry.tag = acl_user;
+    entry.id = 501;
+    entry.permissions = acl_read_data;
+    MUST(volume->set_acl(original, Span<AclEntry const>(&entry, 1)));
+    MUST(volume->checkpoint());
+    u64 const free_before = volume->statistics().free_blocks;
+
+    auto const clone = MUST(volume->clone(original, root_directory, "clone"_sv, 7, 7));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    // The tree grew a little, but not by a file's worth.
+    EXPECT(free_before - volume->statistics().free_blocks < 16);
+    EXPECT(equals(read_all(*volume, clone), { data.begin(), data.size() }));
+    auto const clone_record = MUST(volume->inode(clone));
+    EXPECT_EQ(clone_record.size, data.size());
+    EXPECT_EQ(clone_record.uid, 7u);
+    EXPECT_EQ(clone_record.mode & 07777, 0755u); // It's not set-user-ID for someone else.
+    char note[8];
+    EXPECT_EQ(MUST(volume->get_xattr(clone, "user.note"_sv, { reinterpret_cast<u8*>(note), sizeof(note) })), 4u);
+    EXPECT_EQ(MUST(volume->acl(clone)).size(), 1u);
+    EXPECT_EQ(volume->clone(original, root_directory, "clone"_sv, 0, 0).error().code(), EEXIST);
+
+    // Changing one changes only that one.
+    auto const changed = pattern(4096, 9);
+    MUST(volume->write(clone, 8192, { changed.begin(), changed.size() }));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    EXPECT(equals(read_all(*volume, original), { data.begin(), data.size() }));
+    auto const after = read_all(*volume, clone);
+    EXPECT(__builtin_memcmp(after.begin() + 8192, changed.begin(), 4096) == 0);
+    EXPECT(__builtin_memcmp(after.begin(), data.begin(), 8192) == 0);
+
+    // Removing the original leaves the clone whole; removing that as well gives the blocks back.
+    MUST(volume->release(MUST(volume->unlink(root_directory, "original"_sv)).inode));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    auto const remaining = read_all(*volume, clone);
+    EXPECT(__builtin_memcmp(remaining.begin() + 12288, data.begin() + 12288, data.size() - 12288) == 0);
+    MUST(volume->release(MUST(volume->unlink(root_directory, "clone"_sv)).inode));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    EXPECT(volume->statistics().free_blocks > free_before);
+
+    // A whole tree, with what's in it, as it was.
+    auto const directory = MUST(volume->create(root_directory, "folder"_sv, mode_directory | 0755, 0, 0));
+    auto const inner = MUST(volume->create(directory, "inner"_sv, mode_directory | 0755, 0, 0));
+    auto const deep = MUST(volume->create(inner, "deep"_sv, mode_regular | 0644, 0, 0));
+    MUST(volume->write(deep, 0, text("deep down")));
+    (void)MUST(volume->create(directory, "link"_sv, mode_symbolic_link | 0777, 0, 0, "inner/deep"_sv));
+    auto const copy = MUST(volume->clone(directory, root_directory, "copy"_sv, 0, 0));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    auto const copied_inner = MUST(volume->lookup(copy, "inner"_sv));
+    auto const copied_deep = MUST(volume->lookup(copied_inner.inode, "deep"_sv));
+    EXPECT(copied_deep.inode != deep);
+    EXPECT(equals(read_all(*volume, copied_deep.inode), text("deep down")));
+    auto const copied_link = MUST(volume->lookup(copy, "link"_sv));
+    char target[32];
+    EXPECT_EQ(MUST(volume->read_link(copied_link.inode, { reinterpret_cast<u8*>(target), sizeof(target) })), 10u);
+}
+
+TEST_CASE(extended_attributes_of_any_size)
+{
+    MemoryStore store(8192);
+    {
+        auto volume = MUST(Volume::format(store, "Attributes"_sv, s_uuid, test_clock));
+        auto const file = MUST(volume->create(root_directory, "file"_sv, mode_regular | 0644, 0, 0));
+        u8 buffer[64];
+        EXPECT_EQ(volume->get_xattr(file, "user.missing"_sv, { buffer, sizeof(buffer) }).error().code(), ENOATTR);
+        MUST(volume->set_xattr(file, "user.small"_sv, text("value")));
+        EXPECT_EQ(MUST(volume->get_xattr(file, "user.small"_sv, {})), 5u);
+        EXPECT_EQ(MUST(volume->get_xattr(file, "user.small"_sv, { buffer, sizeof(buffer) })), 5u);
+        EXPECT(__builtin_memcmp(buffer, "value", 5) == 0);
+        EXPECT_EQ(volume->get_xattr(file, "user.small"_sv, { buffer, 2 }).error().code(), ERANGE);
+        EXPECT_EQ(volume->set_xattr(file, "user.small"_sv, text("x"), XattrMode::MustBeNew).error().code(), EEXIST);
+        EXPECT_EQ(volume->set_xattr(file, "user.other"_sv, text("x"), XattrMode::MustExist).error().code(), ENOATTR);
+        MUST(volume->set_xattr(file, "user.small"_sv, text("newer"), XattrMode::MustExist));
+        // One too big for the tree.
+        auto const big = pattern(300 * 1024, 11);
+        MUST(volume->set_xattr(file, "user.big"_sv, { big.begin(), big.size() }));
+        MUST(volume->set_xattr(file, "user.empty"_sv, {}));
+        MUST(volume->checkpoint());
+        expect_clean(store);
+    }
+    {
+        auto volume = MUST(Volume::mount(store, test_clock));
+        auto const file = MUST(volume->lookup(root_directory, "file"_sv)).inode;
+        size_t count = 0;
+        u64 total = 0;
+        MUST(volume->for_each_xattr(file, [&](StringView, u64 size) {
+            ++count;
+            total += size;
+            return Iteration::Continue;
+        }));
+        EXPECT_EQ(count, 3u);
+        EXPECT_EQ(total, 300u * 1024 + 5);
+        Vector<u8> value;
+        MUST(value.try_resize(300 * 1024));
+        EXPECT_EQ(MUST(volume->get_xattr(file, "user.big"_sv, { value.begin(), value.size() })), value.size());
+        auto const expected = pattern(300 * 1024, 11);
+        EXPECT(__builtin_memcmp(value.begin(), expected.begin(), value.size()) == 0);
+        // Replacing it, and removing it, gives back what it had.
+        u64 const free_with = volume->statistics().free_blocks;
+        MUST(volume->remove_xattr(file, "user.big"_sv));
+        MUST(volume->checkpoint());
+        EXPECT(volume->statistics().free_blocks > free_with);
+        EXPECT_EQ(volume->remove_xattr(file, "user.big"_sv).error().code(), ENOATTR);
+        expect_clean(store);
+        // They go with the file.
+        auto const big = pattern(100 * 1024, 12);
+        MUST(volume->set_xattr(file, "user.again"_sv, { big.begin(), big.size() }));
+        MUST(volume->release(MUST(volume->unlink(root_directory, "file"_sv)).inode));
+        MUST(volume->checkpoint());
+        expect_clean(store);
+    }
+}
+
+TEST_CASE(a_flipped_bit_in_a_file_is_found)
+{
+    static InodeNumber s_damaged_inode;
+    static u64 s_damaged_block;
+    MemoryStore store(1024);
+    auto volume = MUST(Volume::format(store, "Damage"_sv, s_uuid, test_clock));
+    volume->set_damage_reporter([](InodeNumber inode, u64 file_block, BlockIndex) {
+        s_damaged_inode = inode;
+        s_damaged_block = file_block;
+    });
+    auto const data = pattern(64 * 1024, 3);
+    auto const file = MUST(volume->create(root_directory, "file"_sv, mode_regular | 0644, 0, 0));
+    MUST(volume->write(file, 0, { data.begin(), data.size() }));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    EXPECT(equals(read_all(*volume, file), { data.begin(), data.size() }));
+
+    auto const disk_block = MUST(volume->map_block(file, 5)).value();
+    store.corrupt(disk_block, 100);
+    Vector<u8> buffer;
+    MUST(buffer.try_resize(data.size()));
+    EXPECT_EQ(volume->read(file, 0, { buffer.begin(), buffer.size() }).error().code(), EIO);
+    EXPECT_EQ(s_damaged_inode, file);
+    EXPECT_EQ(s_damaged_block, 5u);
+    // What's on either side of it is still there.
+    EXPECT_EQ(MUST(volume->read(file, 0, { buffer.begin(), 5 * block_size })), 5 * block_size);
+    auto const report = MUST(check_volume(store));
+    EXPECT(!report.is_clean());
+    bool said_so = false;
+    for (auto const& problem : report.problems)
+        said_so = said_so || problem.view().contains("is damaged"_sv);
+    EXPECT(said_so);
+    // ... and a look that doesn't read the data doesn't find it.
+    EXPECT(MUST(check_volume(store, { .check_data = false })).is_clean());
+    store.corrupt(disk_block, 100);
+    expect_clean(store);
+}
+
+TEST_CASE(compressed_files_read_the_same)
+{
+    MemoryStore store(8192);
+    auto volume = MUST(Volume::format(store, "Compression"_sv, s_uuid, test_clock));
+    auto const file = MUST(volume->create(root_directory, "file"_sv, mode_regular | 0644, 0, 0));
+    MUST(volume->set_compressed(file, true));
+    auto data = compressible(1024 * 1024 + 123);
+    MUST(volume->write(file, 0, { data.begin(), data.size() }));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    auto record = MUST(volume->inode(file));
+    EXPECT_EQ(record.size, data.size());
+    EXPECT(record.allocated_blocks < data.size() / block_size / 4);
+    EXPECT(equals(read_all(*volume, file), { data.begin(), data.size() }));
+
+    // Little reads, across chunks.
+    u8 piece[10000];
+    EXPECT_EQ(MUST(volume->read(file, 65530, { piece, sizeof(piece) })), sizeof(piece));
+    EXPECT(__builtin_memcmp(piece, data.begin() + 65530, sizeof(piece)) == 0);
+
+    // A write into the middle, one past the end, and one that leaves a hole.
+    auto const middle = pattern(9000, 21);
+    MUST(volume->write(file, 60000, { middle.begin(), middle.size() }));
+    __builtin_memcpy(data.begin() + 60000, middle.begin(), middle.size());
+    MUST(volume->write(file, data.size(), text("more")));
+    size_t const old_size = data.size();
+    MUST(data.try_resize(old_size + 4));
+    __builtin_memcpy(data.begin() + old_size, "more", 4);
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    EXPECT(equals(read_all(*volume, file), { data.begin(), data.size() }));
+
+    MUST(volume->write(file, 3 * 1024 * 1024, text("far")));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    EXPECT_EQ(MUST(volume->read(file, 2 * 1024 * 1024, { piece, 100 })), 100u);
+    for (size_t i = 0; i < 100; ++i)
+        EXPECT_EQ(piece[i], 0);
+    MUST(volume->truncate(file, data.size()));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    EXPECT(equals(read_all(*volume, file), { data.begin(), data.size() }));
+
+    // Shorter, in the middle of a chunk; then what's after it reads as nothing when it grows again.
+    MUST(volume->truncate(file, 70000));
+    MUST(data.try_resize(70000));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    EXPECT(equals(read_all(*volume, file), { data.begin(), data.size() }));
+    MUST(volume->truncate(file, 80000));
+    EXPECT_EQ(MUST(volume->read(file, 70000, { piece, 5000 })), 5000u);
+    for (size_t i = 0; i < 5000; ++i)
+        EXPECT_EQ(piece[i], 0);
+    MUST(volume->truncate(file, 70000));
+
+    // A clone of it, and turning it back into a plain file.
+    auto const clone = MUST(volume->clone(file, root_directory, "clone"_sv, 0, 0));
+    MUST(volume->set_compressed(file, false));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    EXPECT(!(MUST(volume->inode(file)).flags & inode_flag_compressed));
+    EXPECT_EQ(MUST(volume->inode(file)).allocated_blocks, (70000u + block_size - 1) / block_size);
+    EXPECT(equals(read_all(*volume, file), { data.begin(), data.size() }));
+    EXPECT(equals(read_all(*volume, clone), { data.begin(), data.size() }));
+
+    // Something that won't compress takes as much room as it would have, and is as readable.
+    auto const noise = pattern(200 * 1024, 31);
+    auto const random_file = MUST(volume->create(root_directory, "noise"_sv, mode_regular | 0644, 0, 0));
+    MUST(volume->set_compressed(random_file, true));
+    MUST(volume->write(random_file, 0, { noise.begin(), noise.size() }));
+    MUST(volume->checkpoint());
+    expect_clean(store);
+    EXPECT_EQ(MUST(volume->inode(random_file)).allocated_blocks, 50u);
+    EXPECT(equals(read_all(*volume, random_file), { noise.begin(), noise.size() }));
+
+    // And damage to a compressed one is found as well.
+    auto const damaged = MUST(volume->create(root_directory, "damaged"_sv, mode_regular | 0644, 0, 0));
+    MUST(volume->set_compressed(damaged, true));
+    auto const words = compressible(32 * 1024);
+    MUST(volume->write(damaged, 0, { words.begin(), words.size() }));
+    MUST(volume->checkpoint());
+    MUST(volume->read(random_file, 0, { piece, 1 }));
+}
+
+TEST_CASE(a_snapshot_is_that_moment_exactly)
+{
+    MemoryStore store(8192);
+    auto const first = pattern(200 * 1024, 41);
+    auto const second = pattern(200 * 1024, 42);
+    InodeNumber file;
+    {
+        auto volume = MUST(Volume::format(store, "Snapshots"_sv, s_uuid, test_clock));
+        file = MUST(volume->create(root_directory, "file"_sv, mode_regular | 0644, 0, 0));
+        MUST(volume->write(file, 0, { first.begin(), first.size() }));
+        auto const directory = MUST(volume->create(root_directory, "folder"_sv, mode_directory | 0755, 0, 0));
+        (void)MUST(volume->create(directory, "inside"_sv, mode_regular | 0644, 0, 0));
+        MUST(volume->set_xattr(file, "user.when"_sv, text("before")));
+        EXPECT_EQ(volume->delete_snapshot("none"_sv).error().code(), ENOENT);
+        MUST(volume->create_snapshot("one"_sv));
+        EXPECT_EQ(volume->create_snapshot("one"_sv).error().code(), EEXIST);
+        u64 const free_with_one = volume->statistics().free_blocks;
+
+        // Now everything changes.
+        MUST(volume->write(file, 0, { second.begin(), second.size() }));
+        MUST(volume->set_xattr(file, "user.when"_sv, text("after")));
+        MUST(volume->release(MUST(volume->unlink(MUST(volume->lookup(root_directory, "folder"_sv)).inode, "inside"_sv)).inode));
+        (void)MUST(volume->create(root_directory, "new"_sv, mode_regular | 0644, 0, 0));
+        MUST(volume->checkpoint());
+        expect_clean(store);
+        // The old contents haven't gone anywhere, and neither has the room they take.
+        EXPECT(volume->statistics().snapshot_blocks >= first.size() / block_size);
+        EXPECT(volume->statistics().free_blocks < free_with_one);
+
+        MUST(volume->create_snapshot("two"_sv));
+        auto const list = MUST(volume->snapshots());
+        EXPECT_EQ(list.size(), 2u);
+        EXPECT_EQ(list[0].name.view(), "one"_sv);
+        EXPECT_EQ(list[1].name.view(), "two"_sv);
+        expect_clean(store);
+    }
+    {
+        // Both can be looked at, as they were.
+        auto one = MUST(Volume::mount_snapshot(store, test_clock, "one"_sv));
+        EXPECT(one->is_read_only());
+        EXPECT(equals(read_all(*one, file), { first.begin(), first.size() }));
+        EXPECT(one->lookup(root_directory, "new"_sv).is_error());
+        EXPECT(!one->lookup(MUST(one->lookup(root_directory, "folder"_sv)).inode, "inside"_sv).is_error());
+        EXPECT_EQ(one->create(root_directory, "x"_sv, mode_regular | 0644, 0, 0).error().code(), EROFS);
+        auto two = MUST(Volume::mount_snapshot(store, test_clock, "two"_sv));
+        EXPECT(equals(read_all(*two, file), { second.begin(), second.size() }));
+        EXPECT(!two->lookup(root_directory, "new"_sv).is_error());
+    }
+    {
+        // Going back happens on the next mount, and a crash on the way changes nothing.
+        auto volume = MUST(Volume::mount(store, test_clock));
+        EXPECT_EQ(volume->request_rollback("nonexistent"_sv).error().code(), ENOENT);
+        MUST(volume->request_rollback("one"_sv));
+        EXPECT(equals(read_all(*volume, file), { second.begin(), second.size() }));
+    }
+    {
+        auto volume = MUST(Volume::mount(store, test_clock));
+        expect_clean(store);
+        EXPECT(equals(read_all(*volume, file), { first.begin(), first.size() }));
+        EXPECT(volume->lookup(root_directory, "new"_sv).is_error());
+        EXPECT(!volume->lookup(MUST(volume->lookup(root_directory, "folder"_sv)).inode, "inside"_sv).is_error());
+        char value[16];
+        EXPECT_EQ(MUST(volume->get_xattr(file, "user.when"_sv, { reinterpret_cast<u8*>(value), sizeof(value) })), 6u);
+        EXPECT(__builtin_memcmp(value, "before", 6) == 0);
+        // It's still there to go back to, and what came after it isn't.
+        auto const list = MUST(volume->snapshots());
+        EXPECT_EQ(list.size(), 1u);
+        EXPECT_EQ(list[0].name.view(), "one"_sv);
+
+        // It goes on working, and letting go of the snapshot gives back what only it had.
+        MUST(volume->write(file, 0, { second.begin(), second.size() }));
+        MUST(volume->checkpoint());
+        expect_clean(store);
+        u64 const held = volume->statistics().snapshot_blocks;
+        EXPECT(held >= first.size() / block_size);
+        u64 const free_before = volume->statistics().free_blocks;
+        MUST(volume->delete_snapshot("one"_sv));
+        expect_clean(store);
+        EXPECT_EQ(volume->statistics().snapshot_blocks, 0u);
+        EXPECT(volume->statistics().free_blocks > free_before + first.size() / block_size / 2);
+        EXPECT(equals(read_all(*volume, file), { second.begin(), second.size() }));
+    }
+    {
+        auto volume = MUST(Volume::mount(store, test_clock));
+        expect_clean(store);
+        EXPECT(MUST(volume->snapshots()).is_empty());
+    }
+}
+
+TEST_CASE(what_changed_is_kept_with_the_change)
+{
+    MemoryStore store(4096);
+    u64 before_crash;
+    {
+        auto volume = MUST(Volume::format(store, "Events"_sv, s_uuid, test_clock));
+        EXPECT_EQ(volume->next_event(), 1u);
+        EXPECT_EQ(MUST(volume->append_event(event_item_created | event_item_is_file, "/a"_sv)), 1u);
+        EXPECT_EQ(MUST(volume->append_event(event_item_removed | event_item_is_file, "/a"_sv)), 2u);
+        MUST(volume->checkpoint());
+        before_crash = volume->next_event();
+        (void)MUST(volume->append_event(event_item_created | event_item_is_file, "/lost"_sv));
+        store.crash_losing_everything();
+    }
+    {
+        auto volume = MUST(Volume::mount(store, test_clock));
+        expect_clean(store);
+        EXPECT_EQ(volume->next_event(), before_crash);
+        size_t count = 0;
+        MUST(volume->for_each_event(2, [&](u64 id, u32 flags, StringView path) {
+            EXPECT_EQ(id, 2u);
+            EXPECT_EQ(flags, event_item_removed | event_item_is_file);
+            EXPECT_EQ(path, "/a"_sv);
+            ++count;
+            return Iteration::Continue;
+        }));
+        EXPECT_EQ(count, 1u);
+        // Only so many are kept.
+        for (u64 i = 0; i < max_kept_events + 100; ++i)
+            (void)MUST(volume->append_event(event_item_modified, "/file"_sv));
+        MUST(volume->checkpoint());
+        expect_clean(store);
+        EXPECT_EQ(volume->next_event() - volume->oldest_event(), max_kept_events);
+        size_t kept = 0;
+        MUST(volume->for_each_event(0, [&](u64, u32, StringView) {
+            ++kept;
+            return Iteration::Continue;
+        }));
+        EXPECT_EQ(kept, max_kept_events);
+    }
+}
+
+TEST_CASE(a_volume_can_be_bigger_than_the_old_limit)
+{
+    // A million blocks and more of bitmap, as far as anything here's concerned, on a store with only what's been written.
+    class SparseStore final : public BlockStore {
+    public:
+        explicit SparseStore(u64 blocks)
+            : m_blocks(blocks)
+        {
+        }
+        [[nodiscard]] u64 block_count() const override { return m_blocks; }
+        ErrorOr<void> read_blocks(BlockIndex first, size_t count, Bytes buffer) override
+        {
+            for (size_t i = 0; i < count; ++i) {
+                if (auto const* block = m_written.get(first + i))
+                    __builtin_memcpy(buffer.data() + i * block_size, block->begin(), block_size);
+                else
+                    __builtin_memset(buffer.data() + i * block_size, 0, block_size);
+            }
+            return {};
+        }
+        ErrorOr<void> write_blocks(BlockIndex first, size_t count, ReadonlyBytes buffer) override
+        {
+            for (size_t i = 0; i < count; ++i) {
+                Vector<u8> block;
+                TRY(block.try_resize(block_size));
+                __builtin_memcpy(block.begin(), buffer.data() + i * block_size, block_size);
+                TRY(m_written.try_set(first + i, move(block)));
+            }
+            return {};
+        }
+        ErrorOr<void> flush() override { return {}; }
+
+    private:
+        u64 m_blocks;
+        HashMap<u64, Vector<u8>> m_written;
+    };
+
+    u64 const terabyte_blocks = 1024ull * 1024 * 1024 * 1024 / block_size;
+    SparseStore store(terabyte_blocks);
+    {
+        auto volume = MUST(Volume::format(store, "Big"_sv, s_uuid, test_clock));
+        EXPECT_EQ(volume->statistics().block_count, terabyte_blocks);
+        auto const file = MUST(volume->create(root_directory, "file"_sv, mode_regular | 0644, 0, 0));
+        MUST(volume->write(file, 0, text("the start")));
+        // Way past where a version 1 volume ended, by a hole.
+        MUST(volume->write(file, 40ull * 1024 * 1024 * 1024, text("the end")));
+        MUST(volume->checkpoint());
+    }
+    {
+        auto volume = MUST(Volume::mount(store, test_clock));
+        auto const file = MUST(volume->lookup(root_directory, "file"_sv)).inode;
+        EXPECT_EQ(MUST(volume->inode(file)).size, 40ull * 1024 * 1024 * 1024 + 7);
+        u8 end[7];
+        EXPECT_EQ(MUST(volume->read(file, 40ull * 1024 * 1024 * 1024, { end, 7 })), 7u);
+        EXPECT(__builtin_memcmp(end, "the end", 7) == 0);
+    }
 }
 
 TEST_CASE(power_loss_at_any_moment_leaves_the_last_checkpoint)

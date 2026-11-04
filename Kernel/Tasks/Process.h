@@ -203,7 +203,14 @@ private:
     void interrupt_a_thread_for(int signal);
     void reroute_pending_signals(u64 signals);
     [[nodiscard]] bool blocked_by_every_thread(int signal);
+
+public:
+    // For whoever's handling a request of this process's, with files and paths in it.
     [[nodiscard]] String current_directory();
+    ErrorOr<NonnullRefPtr<FileDescription>> file(int fd);
+    ErrorOr<String> copy_path_from_user(FlatPtr);
+
+private:
     // For the *at() calls.
     ErrorOr<String> directory_for(int fd, StringView path);
     ErrorOr<String> absolute_path_for(int fd, StringView path);
@@ -211,12 +218,10 @@ private:
 
     ErrorOr<int> allocate_fd(NonnullRefPtr<FileDescription>, bool close_on_exec, int lowest = 0);
     void release_fd(int fd);
-    ErrorOr<NonnullRefPtr<FileDescription>> file(int fd);
     ErrorOr<NonnullRefPtr<Net::Socket>> socket_for(int fd);
     friend class KQueue;
     ErrorOr<FlatPtr> socket_ioctl(unsigned request, FlatPtr argument);
     void set_name(StringView);
-    ErrorOr<String> copy_path_from_user(FlatPtr);
 
     ProcessID m_pid { 0 };
     char m_name[32] {};

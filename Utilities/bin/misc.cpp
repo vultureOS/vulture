@@ -299,7 +299,8 @@ int tool_sysctl(int argc, char** argv)
         }
         if (!values_only)
             printf("%s: ", copy);
-        bool text = length > 0 && value[length - 1] == '\0';
+        // Text ends with its one zero; a number's zeros are in with the rest of it.
+        bool text = length > 0 && value[length - 1] == '\0' && strlen(reinterpret_cast<char const*>(value)) == length - 1;
         if (text) {
             printf("%s\n", value);
         } else if (length == 4) {

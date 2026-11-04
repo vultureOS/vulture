@@ -10,13 +10,16 @@
 #include <Kernel/FileSystem/IOBuffer.h>
 #include <Kernel/Memory/PhysicalAddress.h>
 #include <LibBase/RefPtr.h>
+#include <LibBase/String.h>
 #include <LibBase/StringView.h>
+#include <LibBase/Vector.h>
 
 namespace Kernel {
 
 class FileDescription;
 class BlockDevice;
 class FileSystem;
+class Inode;
 class TTY;
 
 using InodeIndex = u64;
@@ -48,6 +51,11 @@ struct InodeMetadata {
     i64 birth_time_ns { 0 };
     u64 device { 0 }; // For device inodes: which device.
     u32 block_size { 4096 };
+    // How much of the disk it has, where a filesystem knows: otherwise, as much as it's long.
+    u64 allocated_bytes { ~0ull };
+    u32 flags { 0 }; // st_flags
+    // Whose access control list applies. Only set if it has one, so that nobody's looking for what isn't there.
+    Inode* acl_inode { nullptr };
 
     [[nodiscard]] u32 mode() const;
     [[nodiscard]] vulture_stat to_stat(u32 file_system_id) const;
@@ -108,6 +116,18 @@ public:
     virtual ErrorOr<void> set_owner(u32 uid, u32 gid);
     // Nanoseconds since 1970.
     virtual ErrorOr<void> set_times(i64 access_time, i64 modification_time);
+
+    // Extended attributes. `flags` is XATTR_CREATE, XATTR_REPLACE or neither; an empty `buffer` asks only for the size.
+    virtual ErrorOr<size_t> get_xattr(StringView name, Bytes buffer);
+    virtual ErrorOr<void> set_xattr(StringView name, ReadonlyBytes value, int flags);
+    virtual ErrorOr<void> remove_xattr(StringView name);
+    virtual ErrorOr<Vector<String>> list_xattrs();
+    virtual ErrorOr<Vector<vulture_acl_entry>> acl();
+    virtual ErrorOr<void> set_acl(Span<vulture_acl_entry const>);
+    // UF_* for what it's to have.
+    virtual ErrorOr<void> set_flags(u32 flags);
+    // EPERM if its flags say it may not change: at all, or (when `appending` isn't what's happening) other than at the end.
+    [[nodiscard]] ErrorOr<void> check_flags_allow_change(bool appending = false) const;
     virtual ErrorOr<void> sync();
 
     // Memory mapping (mmap): the page holding page `index` of the file,

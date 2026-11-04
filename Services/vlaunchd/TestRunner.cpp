@@ -35,6 +35,7 @@ Test const s_tests_when_asked[] = {
     { "/usr/tests/locale-files", 0, 0 },
     { "/usr/tests/locale-print", 0, 0 },
     { "/usr/tests/usb-disk", 0, 0 },
+    { "/usr/tests/volume-boots", 0, 0 },
     { "/usr/tests/sd-card", 0, 0 },
 };
 
@@ -68,6 +69,7 @@ Test const s_tests[] = {
     { "/usr/tests/devices", 0, 0 },
     { "/usr/tests/time", 0, 0 },
     { "/usr/tests/volumes", 0, 0 },
+    { "/usr/tests/data-volume", 0, 0 },
     { "/usr/tests/mapped-files", 0, 0 },
     { "/usr/tests/terminals", 0, 0 },
     { "/usr/tests/permissions", 0, 0 },

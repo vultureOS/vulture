@@ -1,6 +1,6 @@
 # vultureFS
 
-vultureFS is the root filesystem of vultureOS. It is a copy-on-write
+vultureFS is the filesystem of vultureOS, on both its volumes. It is a copy-on-write
 filesystem: nothing on disk that the last checkpoint uses is ever
 overwritten. A crash at any moment therefore leaves the last checkpoint
 whole, and mounting needs no journal replay and no repair.
@@ -19,9 +19,50 @@ A volume is an array of 4 KiB blocks:
 | 0, 1 | Superblocks. Checkpoint *N* is written to block *N* mod 2. |
 | anywhere else | B+tree nodes, allocation bitmap blocks and file data, wherever the allocator put them. |
 
-On a disk, the volume is a GPT partition of type
-`7675c7e1-56d1-4c4f-8f5e-76756c747572`. All integers are little-endian. The
+On a disk, a system image is a GPT partition of type
+`7675c7e1-56d1-4c4f-8f5e-76756c747573` and its data volume is the next partition of type
+`7675c7e1-56d1-4c4f-8f5e-76756c747564`. All integers are little-endian. The
 structures are defined in `Libraries/LibVultureFS/Format.h`.
+
+## Version 2
+
+A disk from version 1 is refused with a clear message: its names hash as raw bytes, its extents have no checksums, and its
+one partition fills the disk, so all of it would have been rewritten anyway.
+
+- **Limits.** 64-bit, and a bitmap index in the superblock, for 8 PiB. 28 GiB was the old limit.
+- **Names.** Canonically equivalent names are one name, and by default, names that differ only in case are too, by
+  full case folding, with no Turkish rule. A listing has a name as it was made. They're at most 255 UTF-16 units as
+  given. All that's as measured from a Mac by `Tests/Userland/PosixSystem.h`'s area `names`, on both.
+- **Extended attributes.** Up to 960 bytes in the tree, and past that in a nameless stream.
+- **Access control lists.** A Mac's: lines of allow or deny for a user, a group or everyone, checked before the mode.
+- **Clones.** `clonefile` makes a new inode with the same extents, and a note in the tree of which blocks are shared.
+  Copy on write means nothing else has to know, so it takes the same time for any size.
+- **Snapshots.** A checkpoint that's kept, with its blocks held in a third bitmap. `fs_snapshot_revert` takes
+  effect at the next mount, and the snapshot stays there to go back to again.
+- **Compression.** Whichever files it's been asked for, by `UF_COMPRESSED`: deflate, in chunks of 16 blocks, and only if a
+  chunk comes out a block smaller.
+- **File data checksums.** A CRC-32C of each block of a file, in the tree: the disk failing gives `EIO` and a line in
+  the log, not wrong data.
+- **FSEvents.** Each change is an item in the tree, in the same checkpoint as the change, so what's been said always
+  matches what's on the disk; the newest 32768 are kept. `/dev/fsevents` reads them.
+- **Feature flags.** In the superblock: unknown required ones refuse the mount, unknown read-only ones make it read-only.
+  Room is left for encryption (M43).
+
+## A system image
+
+`mkvfs system` makes a volume of the build's files, marked as read-only. `vseal seal` adds what it takes to believe it:
+
+| Blocks | What |
+|---|---|
+| 0 | `SealHeader`: how big it is, the hash of the hashes, and an Ed25519 signature of those |
+| 1 to H | The SHA-256 of each block of the volume |
+| H + 1 on | The volume |
+
+The kernel (`Kernel/Security/Seal.cpp`) checks the signature and the list, then gives the file system a device that checks
+each block it reads. The same bytes are a partition on a disk, and with no disk, what the loader brought into memory.
+
+Things the user can change go in `System/Library/Templates/Data` on it, which the kernel copies to the data volume, as
+far as they're missing, each time the data volume is attached (`Kernel/FileSystem/DataVolume.cpp`).
 
 ### Superblock
 

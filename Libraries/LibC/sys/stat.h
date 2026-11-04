@@ -28,6 +28,8 @@ struct stat {
     struct timespec st_mtim;
     struct timespec st_ctim;
     struct timespec st_birthtimespec;
+    unsigned int st_flags;
+    unsigned int st_gen;
 };
 
 #define st_atime st_atim.tv_sec
@@ -38,6 +40,8 @@ struct stat {
 int fstat(int fd, struct stat*);
 int stat(char const* path, struct stat*);
 int lstat(char const* path, struct stat*);
+int chflags(char const* path, unsigned int flags);
+int fchflags(int fd, unsigned int flags);
 int fstatat(int directory, char const* path, struct stat*, int flags);
 int mkdirat(int directory, char const* path, mode_t);
 int fchmodat(int directory, char const* path, mode_t, int flags);

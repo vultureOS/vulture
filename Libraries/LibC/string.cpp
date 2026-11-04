@@ -273,6 +273,7 @@ char* strerror(int error)
         { EALREADY, "Operation already in progress" },
         { EINPROGRESS, "Operation now in progress" },
         { ECANCELED, "Operation canceled" },
+        { ENOATTR, "Attribute not found" },
     };
     for (auto const& message : messages) {
         if (message.number == error)

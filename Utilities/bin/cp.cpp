@@ -7,10 +7,12 @@
 #include "Common.h"
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/clonefile.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-// cp [-Rfipv] source target / cp [-Rfipv] source... directory
+// cp [-Rcfipv] source target / cp [-Rcfipv] source... directory
+static bool s_clone = false;
 static bool s_recursive = false, s_force = false, s_interactive = false, s_preserve = false, s_verbose = false;
 static int s_status = 0;
 
@@ -23,6 +25,12 @@ static bool confirm(char const* target)
 
 static bool copy_file(char const* source, char const* target, struct stat const& information)
 {
+    // Sharing its blocks, if that can be done. If it can't, an ordinary copy does the same.
+    if (s_clone && clonefile(source, target, 0) == 0) {
+        if (s_verbose)
+            printf("%s -> %s\n", source, target);
+        return true;
+    }
     if (s_interactive && access(target, F_OK) == 0 && !confirm(target))
         return true;
     int in = open(source, O_RDONLY);
@@ -159,18 +167,21 @@ int main(int argc, char** argv)
             case 'a':
                 s_recursive = s_preserve = true;
                 break;
+            case 'c':
+                s_clone = true;
+                break;
             case 'v':
                 s_verbose = true;
                 break;
             default:
-                fprintf(stderr, "usage: cp [-R] [-fi] [-apv] source_file target_file\n       cp [-R] [-fi] [-apv] source_file ... target_directory\n");
+                fprintf(stderr, "usage: cp [-R] [-fi] [-acpv] source_file target_file\n       cp [-R] [-fi] [-acpv] source_file ... target_directory\n");
                 return 1;
             }
         }
     }
     int count = argc - first;
     if (count < 2) {
-        fprintf(stderr, "usage: cp [-R] [-fi] [-apv] source_file target_file\n       cp [-R] [-fi] [-apv] source_file ... target_directory\n");
+        fprintf(stderr, "usage: cp [-R] [-fi] [-acpv] source_file target_file\n       cp [-R] [-fi] [-acpv] source_file ... target_directory\n");
         return 1;
     }
     char const* target = argv[argc - 1];

@@ -15,7 +15,8 @@ __BEGIN_DECLS
 struct dirent {
     ino_t d_ino;
     unsigned char d_type;
-    char d_name[256];
+    // A name is up to 255 of UTF-16's units, and each of those can be three bytes.
+    char d_name[768];
 };
 
 typedef struct DIR DIR;

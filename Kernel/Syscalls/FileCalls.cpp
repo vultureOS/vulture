@@ -9,6 +9,7 @@
 #include <Kernel/API/POSIX/socket.h>
 #include <Kernel/API/POSIX/termios.h>
 #include <Kernel/API/POSIX/time.h>
+#include <Kernel/FileSystem/FSEvents.h>
 #include <Kernel/FileSystem/Pipe.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Memory/UserAccess.h>
@@ -390,7 +391,11 @@ ErrorOr<FlatPtr> Process::sys_ftruncate(TrapFrame&, SyscallArguments const& argu
     i64 size = static_cast<i64>(arguments.values[1]);
     if (size < 0)
         return Error::from_errno(EINVAL);
+    if (description->inode())
+        TRY(description->inode()->check_flags_allow_change());
     TRY(description->truncate(static_cast<u64>(size)));
+    if (description->inode() && !description->path().is_empty())
+        FSEvents::record(*description->inode(), description->path(), FSE_ITEM_MODIFIED);
     return 0;
 }
 
@@ -635,6 +640,7 @@ ErrorOr<FlatPtr> Process::sys_setrlimit(TrapFrame&, SyscallArguments const& argu
 
 static ErrorOr<void> change_permissions(Inode& inode, u32 mode)
 {
+    TRY(inode.check_flags_allow_change());
     TRY(Seal::check_may_change(inode));
     auto metadata = inode.metadata();
     TRY(check_owner(metadata));
@@ -647,6 +653,7 @@ static ErrorOr<void> change_permissions(Inode& inode, u32 mode)
 
 static ErrorOr<void> change_owner(Inode& inode, i64 uid, i64 gid)
 {
+    TRY(inode.check_flags_allow_change());
     TRY(Seal::check_may_change(inode));
     auto metadata = inode.metadata();
     auto const* credentials = current_credentials();
@@ -670,6 +677,7 @@ ErrorOr<FlatPtr> Process::sys_chmod(TrapFrame&, SyscallArguments const& argument
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view()));
     TRY(sandbox_check(SandboxOperation::FileWrite, resolved.path.view()));
     TRY(change_permissions(*resolved.inode, static_cast<u32>(arguments.values[1])));
+    FSEvents::record(*resolved.inode, resolved.path.view(), FSE_ITEM_METADATA_CHANGED);
     return 0;
 }
 
@@ -680,6 +688,7 @@ ErrorOr<FlatPtr> Process::sys_fchmodat(TrapFrame&, SyscallArguments const& argum
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), directory.view(), !(arguments.values[3] & AT_SYMLINK_NOFOLLOW)));
     TRY(sandbox_check(SandboxOperation::FileWrite, resolved.path.view()));
     TRY(change_permissions(*resolved.inode, static_cast<u32>(arguments.values[2])));
+    FSEvents::record(*resolved.inode, resolved.path.view(), FSE_ITEM_METADATA_CHANGED);
     return 0;
 }
 
@@ -691,6 +700,8 @@ ErrorOr<FlatPtr> Process::sys_fchmod(TrapFrame&, SyscallArguments const& argumen
     if (m_sandbox && !description->is_writable())
         return Error::from_errno(EPERM);
     TRY(change_permissions(*description->inode(), static_cast<u32>(arguments.values[1])));
+    if (!description->path().is_empty())
+        FSEvents::record(*description->inode(), description->path(), FSE_ITEM_METADATA_CHANGED);
     return 0;
 }
 
@@ -701,6 +712,7 @@ ErrorOr<FlatPtr> Process::sys_chown(TrapFrame&, SyscallArguments const& argument
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), current_directory().view(), follow));
     TRY(sandbox_check(SandboxOperation::FileWrite, resolved.path.view()));
     TRY(change_owner(*resolved.inode, static_cast<i32>(arguments.values[1]), static_cast<i32>(arguments.values[2])));
+    FSEvents::record(*resolved.inode, resolved.path.view(), FSE_ITEM_OWNER_CHANGED);
     return 0;
 }
 
@@ -711,6 +723,7 @@ ErrorOr<FlatPtr> Process::sys_fchownat(TrapFrame&, SyscallArguments const& argum
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), directory.view(), !(arguments.values[4] & AT_SYMLINK_NOFOLLOW)));
     TRY(sandbox_check(SandboxOperation::FileWrite, resolved.path.view()));
     TRY(change_owner(*resolved.inode, static_cast<i32>(arguments.values[2]), static_cast<i32>(arguments.values[3])));
+    FSEvents::record(*resolved.inode, resolved.path.view(), FSE_ITEM_OWNER_CHANGED);
     return 0;
 }
 
@@ -789,6 +802,7 @@ ErrorOr<FlatPtr> Process::sys_utimensat(TrapFrame&, SyscallArguments const& argu
     auto resolved = TRY(VirtualFileSystem::resolve(path.view(), directory.view(), follow));
     TRY(sandbox_check(SandboxOperation::FileWrite, resolved.path.view()));
     TRY(change_times(*resolved.inode, arguments.values[2]));
+    FSEvents::record(*resolved.inode, resolved.path.view(), FSE_ITEM_METADATA_CHANGED);
     return 0;
 }
 
@@ -800,6 +814,8 @@ ErrorOr<FlatPtr> Process::sys_futimens(TrapFrame&, SyscallArguments const& argum
     if (!description->inode())
         return Error::from_errno(EINVAL);
     TRY(change_times(*description->inode(), arguments.values[1]));
+    if (!description->path().is_empty())
+        FSEvents::record(*description->inode(), description->path(), FSE_ITEM_METADATA_CHANGED);
     return 0;
 }
 

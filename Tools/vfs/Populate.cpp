@@ -16,8 +16,7 @@ using namespace VultureFS;
 
 namespace {
 
-// Mount points and the top of the macOS-style hierarchy, made even when
-// the archive has nothing in them.
+// What a system has that's empty: mount points, and where the data volume shows through (usr/share/firmlinks).
 struct SkeletonDirectory {
     StringView path;
     u32 mode;
@@ -26,12 +25,59 @@ SkeletonDirectory const s_skeleton[] = {
     { "Applications"_sv, 0755 },
     { "Library"_sv, 0755 },
     { "System"_sv, 0755 },
+    { "System/Applications"_sv, 0755 },
     { "System/Library"_sv, 0755 },
+    { "System/Library/Caches"_sv, 0755 },
+    { "System/Volumes"_sv, 0755 },
+    { "System/Volumes/Data"_sv, 0755 },
     { "Users"_sv, 0755 },
     { "Volumes"_sv, 0755 },
+    { "cores"_sv, 01777 },
     { "dev"_sv, 0755 },
-    { "tmp"_sv, 01777 },
+    { "opt"_sv, 0755 },
+    { "private"_sv, 0755 },
+    { "usr"_sv, 0755 },
+    { "usr/local"_sv, 0755 },
 };
+
+constexpr StringView data_template = "System/Library/Templates/Data"_sv;
+
+// Where something from the build goes on a system volume, if it does.
+ErrorOr<String> place_on_system_volume(StringView path)
+{
+    auto is_under = [&](StringView root) {
+        return path == root || (path.starts_with(root) && path.length() > root.length() && path[root.length()] == '/');
+    };
+    auto moved = [&](StringView before, StringView after) -> ErrorOr<String> {
+        StringBuilder place;
+        place.append(after);
+        place.append(path.substring_view(before.length()));
+        return place.to_string();
+    };
+    if (path == "etc/ssl/cert.pem"_sv)
+        return String::from_view("System/Library/Security/cert.pem"_sv);
+    if (is_under("Applications"_sv))
+        return moved("Applications"_sv, "System/Applications"_sv);
+    StringBuilder under_template;
+    under_template.append(data_template);
+    under_template.append('/');
+    StringView const to_private[] = { "etc"_sv, "var"_sv, "tmp"_sv };
+    for (auto root : to_private) {
+        if (is_under(root)) {
+            under_template.append("private/"_sv);
+            under_template.append(path);
+            return under_template.to_string();
+        }
+    }
+    StringView const to_template[] = { "Users"_sv, "Library"_sv, "Volumes"_sv, "cores"_sv, "opt"_sv, "usr/local"_sv };
+    for (auto root : to_template) {
+        if (is_under(root)) {
+            under_template.append(path);
+            return under_template.to_string();
+        }
+    }
+    return String::from_view(path);
+}
 
 // Finds the directory `path` names, making any part that is missing.
 ErrorOr<InodeNumber> make_directories(Volume& volume, StringView path, PopulateCounts& counts)
@@ -85,10 +131,11 @@ ErrorOr<void> remove_tree(Volume& volume, InodeNumber directory, StringView name
 
 ErrorOr<void> add_entry(Volume& volume, Archive::TarEntry const& entry, PopulateCounts& counts)
 {
-    StringView parent_path, name = entry.path;
-    if (auto slash = entry.path.find_last('/'); slash.has_value()) {
-        parent_path = entry.path.substring_view(0, slash.value());
-        name = entry.path.substring_view(slash.value() + 1);
+    auto const place = TRY(place_on_system_volume(entry.path));
+    StringView parent_path, name = place.view();
+    if (auto slash = place.view().find_last('/'); slash.has_value()) {
+        parent_path = place.view().substring_view(0, slash.value());
+        name = place.view().substring_view(slash.value() + 1);
     }
     auto parent = TRY(make_directories(volume, parent_path, counts));
     auto existing = volume.lookup(parent, name);
@@ -132,17 +179,23 @@ ErrorOr<void> add_entry(Volume& volume, Archive::TarEntry const& entry, Populate
 
 }
 
-ErrorOr<void> make_skeleton(Volume& volume, PopulateCounts& counts)
+ErrorOr<void> make_system_volume(Volume& volume, ReadonlyBytes archive, PopulateCounts& counts)
 {
     for (auto const& directory : s_skeleton) {
         auto made = TRY(make_directories(volume, directory.path, counts));
         TRY(volume.set_permissions(made, directory.mode));
     }
-    return {};
-}
+    // As a Mac has them: what looks like it's at the top is really among the data.
+    struct Link {
+        StringView name;
+        StringView target;
+    };
+    Link const links[] = { { "etc"_sv, "private/etc"_sv }, { "tmp"_sv, "private/tmp"_sv }, { "var"_sv, "private/var"_sv } };
+    for (auto const& link : links) {
+        (void)TRY(volume.create(root_directory, link.name, mode_symbolic_link | 0755, 0, 0, link.target));
+        ++counts.links;
+    }
 
-ErrorOr<void> add_archive(Volume& volume, ReadonlyBytes archive, PopulateCounts& counts)
-{
     auto reader = TRY(Archive::TarReader::parse(archive));
     ErrorOr<void> result {};
     TRY(reader.for_each_entry([&](Archive::TarEntry const& entry) {
@@ -154,67 +207,61 @@ ErrorOr<void> add_archive(Volume& volume, ReadonlyBytes archive, PopulateCounts&
         }
         return Archive::IterationDecision::Continue;
     }));
-    return result;
+    TRY(result);
+
+    // Whoever looks in the usual place for the certificates finds the sealed ones.
+    StringBuilder ssl;
+    ssl.append(data_template);
+    ssl.append("/private/etc/ssl"_sv);
+    auto const ssl_directory = TRY(make_directories(volume, ssl.view(), counts));
+    (void)TRY(volume.create(ssl_directory, "cert.pem"_sv, mode_symbolic_link | 0755, 0, 0, "/System/Library/Security/cert.pem"_sv));
+    return {};
 }
 
-static constexpr StringView s_retired[] = {
-    "Applications/Activity Monitor.app"_sv,
-    "Applications/Archive Utility.app"_sv,
-    "Applications/Disk Utility.app"_sv,
-    "Applications/Launchpad.app"_sv,
-    "Applications/Preview.app"_sv,
-    "Applications/Software Center.app"_sv,
-    "Applications/TextEdit.app"_sv,
-    "Applications/WidgetGallery.app"_sv,
-    "System/Library/LaunchDaemons/com.vulture.WindowServerScene.plist"_sv,
-    "Applications/System Settings.app"_sv,
-    "System/Library/CoreServices/Finder.app"_sv,
-    "System/Library/CoreServices/SystemUIServer"_sv,
-    "System/Library/LaunchDaemons/com.vulture.mds.plist"_sv,
-    "System/Library/LaunchDaemons/com.vulture.pboard.plist"_sv,
-    "System/Library/LaunchDaemons/com.vulture.usernoted.plist"_sv,
-    "usr/libexec/mds"_sv,
-    "usr/libexec/pboard"_sv,
-    "usr/libexec/usernoted"_sv,
-    "System/Library/Icons/ActivityMonitor.vicns"_sv,
-    "System/Library/Icons/ArchiveUtility.vicns"_sv,
-    "System/Library/Icons/DiskUtility.vicns"_sv,
-    "System/Library/Icons/Finder.vicns"_sv,
-    "System/Library/Icons/Launchpad.vicns"_sv,
-    "System/Library/Icons/MissionControl.vicns"_sv,
-    "System/Library/Icons/Preview.vicns"_sv,
-    "System/Library/Icons/SoftwareCenter.vicns"_sv,
-    "System/Library/Icons/Spotlight.vicns"_sv,
-    "System/Library/Icons/SystemSettings.vicns"_sv,
-    "System/Library/Icons/TextEdit.vicns"_sv,
-};
-
-ErrorOr<void> remove_retired_files(Volume& volume, PopulateCounts& counts)
+u64 estimated_system_blocks(ReadonlyBytes archive)
 {
-    for (auto path : s_retired) {
-        // Down to its directory; any part missing and there is nothing to do.
-        StringView name = path;
-        InodeNumber directory = root_directory;
-        bool found = true;
-        if (auto slash = path.find_last('/'); slash.has_value()) {
-            name = path.substring_view(slash.value() + 1);
-            path.substring_view(0, slash.value()).for_each_split_view('/', SplitBehavior::SkipEmpty, [&](StringView component) {
-                if (!found)
-                    return;
-                auto entry = volume.lookup(directory, component);
-                if (entry.is_error() || entry.value().type != type_directory) {
-                    found = false;
-                    return;
-                }
-                directory = entry.value().inode;
-            });
-        }
-        if (!found || volume.lookup(directory, name).is_error())
-            continue;
-        TRY(remove_tree(volume, directory, name));
-        ++counts.removed;
-    }
+    u64 blocks = 4096;
+    auto reader = Archive::TarReader::parse(archive);
+    if (reader.is_error())
+        return blocks;
+    (void)reader.value().for_each_entry([&](Archive::TarEntry const& entry) {
+        blocks += (entry.data.size() + block_size - 1) / block_size + 1;
+        return Archive::IterationDecision::Continue;
+    });
+    return blocks + blocks / 8;
+}
+
+ErrorOr<u64> system_partition_sectors(u64 image_size, u64 sectors_available)
+{
+    u64 const image_sectors = (image_size + block_size - 1) / block_size * (block_size / sector_size);
+    // Room to grow, so a kept disk takes a good many updates; but a disk may be small.
+    u64 wanted = max<u64>(image_sectors * 2, 1024 * MiB / sector_size);
+    if (wanted > sectors_available / 2)
+        wanted = max<u64>(image_sectors, sectors_available / 2);
+    wanted = wanted / 8 * 8;
+    if (image_sectors + 2048 > sectors_available || wanted >= sectors_available)
+        return Error::from_string_literal("that disk is too small for this system");
+    return wanted;
+}
+
+ErrorOr<void> write_system(FILE* file, u64 first_sector, u64 sector_count, ReadonlyBytes image)
+{
+    if (image.size() > sector_count * sector_size)
+        return Error::from_string_literal("there isn't room for this system");
+    if (fseek(file, static_cast<long>(first_sector * sector_size), 0) != 0 || fwrite(image.data(), 1, image.size(), file) != image.size())
+        return Error::from_errno(EIO);
     return {};
+}
+
+ErrorOr<void> format_data(FILE* file, u64 first_sector, u64 sector_count, StringView name)
+{
+    ImageStore store(file, first_sector * sector_size, sector_count * sector_size / block_size);
+    u8 uuid[16];
+    random_bytes(uuid);
+    FormatOptions options;
+    options.role = role_data;
+    auto volume = TRY(Volume::format(store, name, uuid, host_clock, options));
+    return volume->checkpoint();
 }
 
 }

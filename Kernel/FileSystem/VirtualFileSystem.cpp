@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/FileSystem/FSEvents.h>
 #include <Kernel/FileSystem/FileDescription.h>
 #include <Kernel/FileSystem/Pipe.h>
 #include <Kernel/FileSystem/VirtualFileSystem.h>
@@ -40,6 +41,41 @@ FileSystem::FileSystem()
 {
 }
 
+ErrorOr<NonnullRefPtr<Inode>> FileSystem::clone(Inode&, Inode&, StringView, u32, u32)
+{
+    return Error::from_errno(ENOTSUP);
+}
+
+ErrorOr<void> FileSystem::create_snapshot(StringView)
+{
+    return Error::from_errno(ENOTSUP);
+}
+
+ErrorOr<void> FileSystem::delete_snapshot(StringView)
+{
+    return Error::from_errno(ENOTSUP);
+}
+
+ErrorOr<void> FileSystem::revert_to_snapshot(StringView)
+{
+    return Error::from_errno(ENOTSUP);
+}
+
+ErrorOr<Vector<String>> FileSystem::snapshots()
+{
+    return Error::from_errno(ENOTSUP);
+}
+
+ErrorOr<u64> FileSystem::append_event(u32, StringView)
+{
+    return Error::from_errno(ENOTSUP);
+}
+
+ErrorOr<void> FileSystem::for_each_event(u64, EventVisitor)
+{
+    return Error::from_errno(ENOTSUP);
+}
+
 ErrorOr<void> FileSystem::rename(Inode& old_parent, StringView old_name, Inode& new_parent, StringView new_name)
 {
     auto inode = TRY(old_parent.lookup(old_name));
@@ -61,6 +97,8 @@ struct Mount {
     InodeIndex host_inode;
     NonnullRefPtr<FileSystem> file_system;
     String path;
+    // A firmlink: this directory of it, not all of it.
+    RefPtr<Inode> directory {};
 };
 
 Mutex s_mounts_lock;
@@ -78,7 +116,7 @@ NonnullRefPtr<Inode> cross_mount(NonnullRefPtr<Inode> inode)
     MutexLocker locker(s_mounts_lock);
     for (auto const& mount : s_mounts) {
         if (mount.host_file_system == &inode->file_system() && mount.host_inode == inode->index())
-            return mount.file_system->root_inode();
+            return mount.directory ? NonnullRefPtr<Inode>(*mount.directory) : mount.file_system->root_inode();
     }
     return inode;
 }
@@ -96,16 +134,54 @@ ErrorOr<void> split_components(StringView path, Vector<String>& components)
     return {};
 }
 
-// What a sandbox sees: where something in `parent` would be, or is.
-ErrorOr<void> check_may_write_entry(ResolvedParent const& parent)
+StringBuilder path_of_entry(ResolvedParent const& parent)
 {
     StringBuilder path;
     if (parent.directory_path.view() != "/"_sv)
         path.append(parent.directory_path.view());
     path.append('/');
     path.append(parent.name.view());
+    return path;
+}
+
+// What a sandbox sees: where something in `parent` would be, or is.
+ErrorOr<void> check_may_write_entry(ResolvedParent const& parent)
+{
+    auto const path = path_of_entry(parent);
     TRY(sandbox_check(SandboxOperation::FileWrite, path.view()));
-    return Privacy::check(path.view());
+    TRY(Privacy::check(path.view()));
+    // A directory that may not change can't have things added or taken away, including at the end.
+    return parent.directory->check_flags_allow_change();
+}
+
+// A new thing in a directory gets what's meant for it from the directory's access control list.
+void inherit_access(Inode& created, Inode& directory)
+{
+    if (!directory.metadata().acl_inode)
+        return;
+    auto entries = directory.acl();
+    if (entries.is_error())
+        return;
+    constexpr unsigned short file_inherit = 1u << 4;
+    constexpr unsigned short directory_inherit = 1u << 5;
+    constexpr unsigned short limit_inherit = 1u << 6;
+    constexpr unsigned short only_inherit = 1u << 7;
+    constexpr unsigned short inherited = 1u << 0;
+    bool const is_directory = created.is_directory();
+    Vector<vulture_acl_entry> given;
+    for (auto entry : entries.value()) {
+        if (!(entry.inheritance & (is_directory ? directory_inherit : file_inherit)))
+            continue;
+        // It goes on being passed on, by a directory, unless it says otherwise.
+        if (is_directory && !(entry.inheritance & limit_inherit))
+            entry.inheritance = (entry.inheritance & ~only_inherit) | inherited;
+        else
+            entry.inheritance = inherited;
+        if (given.try_append(entry).is_error())
+            return;
+    }
+    if (!given.is_empty())
+        (void)created.set_acl(given.span());
 }
 
 ErrorOr<String> join(Vector<Step> const& steps, size_t count)
@@ -140,6 +216,16 @@ ErrorOr<void> VirtualFileSystem::mount(NonnullRefPtr<FileSystem> file_system, St
         return Error::from_errno(ENOTDIR);
     MutexLocker locker(s_mounts_lock);
     TRY(s_mounts.try_append(Mount { &target.inode->file_system(), target.inode->index(), file_system, move(target.path) }));
+    return {};
+}
+
+ErrorOr<void> VirtualFileSystem::firmlink(StringView path, FileSystem& file_system, NonnullRefPtr<Inode> directory)
+{
+    auto target = TRY(resolve(path, "/"_sv));
+    if (!target.inode->is_directory())
+        return Error::from_errno(ENOTDIR);
+    MutexLocker locker(s_mounts_lock);
+    TRY(s_mounts.try_append(Mount { &target.inode->file_system(), target.inode->index(), file_system, move(target.path), move(directory) }));
     return {};
 }
 
@@ -181,7 +267,6 @@ ErrorOr<ResolvedPath> VirtualFileSystem::resolve(StringView path, StringView cwd
         // Going through a directory takes search (execute) permission.
         TRY(check_access(directory_metadata, search_access));
         auto looked_up = TRY(directory->lookup(name));
-        TRY(Seal::check_child(*directory, *looked_up));
         auto child = cross_mount(looked_up);
 
         if (child->metadata().type == InodeType::SymbolicLink && (!is_last || follow_last_link)) {
@@ -239,13 +324,11 @@ ErrorOr<NonnullRefPtr<FileDescription>> VirtualFileSystem::open(StringView path,
         TRY(check_access(parent.directory->metadata(), write_access | search_access));
         auto inode = TRY(parent.directory->create_child(parent.name.view(), InodeType::File, permissions & 07777, {}));
         assign_owner(*inode, *parent.directory);
+        inherit_access(*inode, *parent.directory);
         auto created = TRY(FileDescription::create(inode, flags));
-        StringBuilder created_path;
-        if (parent.directory_path.view() != "/"_sv)
-            created_path.append(parent.directory_path.view());
-        created_path.append('/');
-        created_path.append(parent.name.view());
+        auto const created_path = path_of_entry(parent);
         created->set_path(TRY(created_path.to_string()));
+        FSEvents::record(*inode, created_path.view(), FSE_ITEM_CREATED);
         return created;
     }
     if ((flags & O_CREAT) && (flags & O_EXCL))
@@ -269,11 +352,10 @@ ErrorOr<NonnullRefPtr<FileDescription>> VirtualFileSystem::open(StringView path,
     bool const wants_to_write = (flags & O_ACCMODE) != O_RDONLY || (flags & O_TRUNC);
     if (wants_to_write) {
         TRY(Seal::check_may_change(*inode));
+        TRY(inode->check_flags_allow_change((flags & O_APPEND) && !(flags & O_TRUNC)));
         // Nor around the filesystem, to the disk underneath it.
         if (metadata.type == InodeType::BlockDevice && Seal::protects_block_device(inode->block_device_name()))
             return Error::from_errno(EPERM);
-    } else if (metadata.type == InodeType::File) {
-        TRY(Seal::check_contents(*inode));
     }
     int wanted = 0;
     if ((flags & O_ACCMODE) != O_WRONLY)
@@ -281,8 +363,10 @@ ErrorOr<NonnullRefPtr<FileDescription>> VirtualFileSystem::open(StringView path,
     if ((flags & O_ACCMODE) != O_RDONLY || (flags & O_TRUNC))
         wanted |= write_access;
     TRY(check_access(metadata, wanted));
-    if ((flags & O_TRUNC) && (flags & O_ACCMODE) != O_RDONLY && metadata.type == InodeType::File)
+    if ((flags & O_TRUNC) && (flags & O_ACCMODE) != O_RDONLY && metadata.type == InodeType::File) {
         TRY(inode->truncate(0));
+        FSEvents::record(*inode, resolved.value().path.view(), FSE_ITEM_MODIFIED);
+    }
     // A socket's file isn't to be opened: connect() to it.
     if (metadata.type == InodeType::Socket)
         return Error::from_errno(EOPNOTSUPP);
@@ -319,6 +403,8 @@ ErrorOr<void> VirtualFileSystem::mkdir(StringView path, StringView cwd, u32 perm
     TRY(check_access(parent.directory->metadata(), write_access | search_access));
     auto directory = TRY(parent.directory->create_child(parent.name.view(), InodeType::Directory, permissions & 07777, {}));
     assign_owner(*directory, *parent.directory);
+    inherit_access(*directory, *parent.directory);
+    FSEvents::record(*directory, path_of_entry(parent).view(), FSE_ITEM_CREATED);
     return {};
 }
 
@@ -332,6 +418,7 @@ ErrorOr<void> VirtualFileSystem::make_node(StringView path, StringView cwd, Inod
     TRY(check_access(parent.directory->metadata(), write_access | search_access));
     auto node = TRY(parent.directory->create_child(parent.name.view(), type, permissions & 07777, {}));
     assign_owner(*node, *parent.directory);
+    FSEvents::record(*node, path_of_entry(parent).view(), FSE_ITEM_CREATED);
     return {};
 }
 
@@ -342,8 +429,13 @@ ErrorOr<void> VirtualFileSystem::unmount(StringView path, StringView cwd, InUse 
     {
         MutexLocker locker(s_mounts_lock);
         for (auto const& mount : s_mounts) {
-            if (mount.path.view() == target.path.view())
+            if (mount.path.view() == target.path.view() && !mount.directory)
                 file_system = mount.file_system;
+        }
+        // What shows through elsewhere can't go.
+        for (auto const& mount : s_mounts) {
+            if (file_system && mount.directory && mount.file_system.ptr() == file_system.ptr())
+                return Error::from_errno(EBUSY);
         }
     }
     if (!file_system)
@@ -375,8 +467,11 @@ ErrorOr<void> VirtualFileSystem::unlink(StringView path, StringView cwd)
     TRY(check_may_write_entry(parent));
     TRY(Seal::check_may_change(*parent.directory));
     TRY(Seal::check_may_change(*inode));
+    TRY(inode->check_flags_allow_change());
     TRY(check_removal(parent.directory->metadata(), metadata));
-    return parent.directory->remove_child(parent.name.view());
+    TRY(parent.directory->remove_child(parent.name.view()));
+    FSEvents::record_removed(parent.directory->file_system(), metadata.type, path_of_entry(parent).view());
+    return {};
 }
 
 ErrorOr<void> VirtualFileSystem::rmdir(StringView path, StringView cwd)
@@ -390,10 +485,13 @@ ErrorOr<void> VirtualFileSystem::rmdir(StringView path, StringView cwd)
     TRY(check_may_write_entry(parent));
     TRY(Seal::check_may_change(*parent.directory));
     TRY(Seal::check_may_change(*inode));
+    TRY(inode->check_flags_allow_change());
     if (!TRY(inode->is_empty_directory()))
         return Error::from_errno(ENOTEMPTY);
     TRY(check_removal(parent.directory->metadata(), inode->metadata()));
-    return parent.directory->remove_child(parent.name.view());
+    TRY(parent.directory->remove_child(parent.name.view()));
+    FSEvents::record_removed(parent.directory->file_system(), InodeType::Directory, path_of_entry(parent).view());
+    return {};
 }
 
 ErrorOr<void> VirtualFileSystem::rename(StringView old_path, StringView new_path, StringView cwd)
@@ -408,10 +506,12 @@ ErrorOr<void> VirtualFileSystem::rename(StringView old_path, StringView new_path
     TRY(Seal::check_may_change(*old_parent.directory));
     TRY(Seal::check_may_change(*new_parent.directory));
     TRY(Seal::check_may_change(*moving));
+    TRY(moving->check_flags_allow_change());
     TRY(check_removal(old_parent.directory->metadata(), moving->metadata()));
     TRY(check_access(new_parent.directory->metadata(), write_access | search_access));
     if (auto existing = new_parent.directory->lookup(new_parent.name.view()); !existing.is_error()) {
         TRY(Seal::check_may_change(*existing.value()));
+        TRY(existing.value()->check_flags_allow_change());
         TRY(check_removal(new_parent.directory->metadata(), existing.value()->metadata()));
     }
     // A directory cannot move inside itself.
@@ -421,7 +521,28 @@ ErrorOr<void> VirtualFileSystem::rename(StringView old_path, StringView new_path
         if (destination == moving_path.path.view() || (destination.starts_with(moving_path.path.view()) && destination[moving_path.path.length()] == '/'))
             return Error::from_errno(EINVAL);
     }
-    return old_parent.directory->file_system().rename(*old_parent.directory, old_parent.name.view(), *new_parent.directory, new_parent.name.view());
+    TRY(old_parent.directory->file_system().rename(*old_parent.directory, old_parent.name.view(), *new_parent.directory, new_parent.name.view()));
+    FSEvents::record(*moving, path_of_entry(old_parent).view(), FSE_ITEM_RENAMED);
+    FSEvents::record(*moving, path_of_entry(new_parent).view(), FSE_ITEM_RENAMED);
+    return {};
+}
+
+ErrorOr<NonnullRefPtr<Inode>> VirtualFileSystem::clone(Inode& source, StringView source_path, StringView new_path, StringView cwd, u32 uid, u32 gid)
+{
+    auto parent = TRY(resolve_parent(new_path, cwd));
+    if (&parent.directory->file_system() != &source.file_system())
+        return Error::from_errno(EXDEV);
+    if (!parent.directory->lookup(parent.name.view()).is_error())
+        return Error::from_errno(EEXIST);
+    TRY(sandbox_check(SandboxOperation::FileRead, source_path));
+    TRY(Privacy::check(source_path));
+    TRY(check_may_write_entry(parent));
+    TRY(Seal::check_may_change(*parent.directory));
+    TRY(check_access(source.metadata(), read_access));
+    TRY(check_access(parent.directory->metadata(), write_access | search_access));
+    auto clone = TRY(parent.directory->file_system().clone(source, *parent.directory, parent.name.view(), uid, gid));
+    FSEvents::record(*clone, path_of_entry(parent).view(), FSE_ITEM_CREATED | FSE_ITEM_CLONED);
+    return clone;
 }
 
 ErrorOr<void> VirtualFileSystem::symlink(StringView target, StringView link_path, StringView cwd)
@@ -434,6 +555,7 @@ ErrorOr<void> VirtualFileSystem::symlink(StringView target, StringView link_path
     TRY(check_access(parent.directory->metadata(), write_access | search_access));
     auto link = TRY(parent.directory->create_child(parent.name.view(), InodeType::SymbolicLink, 0777, target));
     assign_owner(*link, *parent.directory);
+    FSEvents::record(*link, path_of_entry(parent).view(), FSE_ITEM_CREATED);
     return {};
 }
 
@@ -455,8 +577,11 @@ ErrorOr<void> VirtualFileSystem::link(StringView existing_path, StringView new_p
     // A second name for something sealed, somewhere it could be removed, would still be all right;
     // but a change to its link count isn't what the seal says either.
     TRY(Seal::check_may_change(*existing.inode));
+    TRY(existing.inode->check_flags_allow_change());
     TRY(check_access(parent.directory->metadata(), write_access | search_access));
-    return parent.directory->add_child(parent.name.view(), *existing.inode);
+    TRY(parent.directory->add_child(parent.name.view(), *existing.inode));
+    FSEvents::record(*existing.inode, path_of_entry(parent).view(), FSE_ITEM_CREATED);
+    return {};
 }
 
 ErrorOr<void> VirtualFileSystem::for_each_mount_point(Function callback, void* context)
@@ -470,6 +595,8 @@ ErrorOr<void> VirtualFileSystem::for_each_mount_point(Function callback, void* c
             TRY(paths.try_append(TRY(String::from_view("/"_sv))));
         }
         for (auto const& mount : s_mounts) {
+            if (mount.directory)
+                continue;
             TRY(systems.try_append(mount.file_system));
             TRY(paths.try_append(mount.path));
         }
@@ -485,8 +612,10 @@ static ErrorOr<Vector<NonnullRefPtr<FileSystem>>> all_file_systems()
     MutexLocker locker(s_mounts_lock);
     if (s_root)
         TRY(all.try_append(*s_root));
-    for (auto const& mount : s_mounts)
-        TRY(all.try_append(mount.file_system));
+    for (auto const& mount : s_mounts) {
+        if (!mount.directory)
+            TRY(all.try_append(mount.file_system));
+    }
     return all;
 }
 
@@ -522,8 +651,10 @@ ErrorOr<void> VirtualFileSystem::sync_all()
         MutexLocker locker(s_mounts_lock);
         if (s_root)
             TRY(all.try_append(*s_root));
-        for (auto const& mount : s_mounts)
-            TRY(all.try_append(mount.file_system));
+        for (auto const& mount : s_mounts) {
+            if (!mount.directory)
+                TRY(all.try_append(mount.file_system));
+        }
     }
     for (auto& file_system : all)
         TRY(file_system->sync());

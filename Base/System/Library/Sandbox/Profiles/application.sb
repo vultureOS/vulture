@@ -1,6 +1,7 @@
 # An application with a window, and nothing else.
 include system
 read /Applications
+read /System/Applications
 read ${HOME}/Library/Preferences
 service com.vulture.windowserver
 service com.vulture.pasteboard

@@ -3,6 +3,6 @@ include system
 network outbound
 network inbound
 network configure
-write /etc/resolv.conf
-write /etc/resolv.conf.new
-read /etc/hostname
+write /private/etc/resolv.conf
+write /private/etc/resolv.conf.new
+read /private/etc/hostname

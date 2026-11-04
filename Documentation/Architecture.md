@@ -55,7 +55,7 @@ The tree builds in three **parts**, each with its own toolchain file in
 | `userland` | `vulture-aarch64.cmake` with user flags | LibC, LibCxxRT, programs and tests, installed into the root filesystem staging tree `build/root/` |
 
 After the parts, `boot-archive` packs `build/root/` with the host tool
-`mkarchive` into `build/esp/System/Library/Kernels/vulture.bootarchive`.
+`mkarchive`, `mkvfs` and `vseal` into a signed system image, `build/esp/System/Library/Kernels/vulture.bootarchive`.
 
 The top-level `CMakeLists.txt` configured without `VULTURE_PART` is the
 **superbuild** (`Meta/CMake/Superbuild.cmake`). It runs each part as an
@@ -117,7 +117,7 @@ Kernel command line words:
 | `fault=KIND` | End the boot with a deliberate crash: `data-abort`, `trap`, `verify`, `panic`, `interrupt` (in a timer interrupt) or `processor` (on processor 1); or try something the kernel should stop: `stack-smash`, `text-write`, `rodata-write`, `data-execute`, `pac-return`, `bti-branch`, and on a sanitized kernel `kasan-*` and `ubsan-*` |
 | `debugfault=KIND` | Lets root ask the kernel to touch user memory the wrong way, through the `debug.fault` sysctl: `user-read`, `user-write`, `user-execute` (see `Tests/Userland/kernel-fault.cpp`) |
 | `nokaslr` | Don't move the kernel (`Meta/run.sh --gdb` adds it, so that symbols stay put) |
-| `noseal` | Don't check the system against its seal |
+| `noseal` | Don't check the system's blocks against what was signed (it's still read-only) |
 | `cursortopleft` | The display puts a cursor's picture by its corner and takes no notice of its hot spot, as QEMU's window on a Mac does: the driver moves the picture to make up for it. `Meta/run.sh` says this for that window |
 | `nocodesign` | Run anything, signed or not | Kernel code that does not touch hardware (such as
 `Kernel/BootArguments.cpp`) is compiled into host tests too; see
@@ -159,7 +159,7 @@ Kernel/        API (BootInfo) · Arch (interfaces; aarch64: entry, vectors, page
                Console (framebuffer, font, boot screen) · Debug (log, panic, symbols) · Devices/Serial
                Interrupts · Locking · Memory (buddy, physical memory, heap, memory manager)
                Tasks (Processor, Thread, Scheduler, Process) · Syscalls · Bus/PCI · Devices (VirtIO, Storage)
-               FileSystem (VFS, vultureFS, FAT, tmpfs, devfs, pipes, boot archive)
+               FileSystem (VFS, vultureFS, FAT, tmpfs, devfs, pipes, FSEvents)
                Time (timer queues) · Tests (ktest) · Library (C++ runtime) · Init.cpp
 Libraries/     LibBase · LibArchive · LibC · LibCxxRT · LibSystem (libSystem.B.dylib) · LibDyld (dyld)
                LibCore (event loop, accounts) · LibCrypto · LibIPC · LibJSON · LibServices · LibDeviceTree · LibELF · LibVultureFS · LibTest
@@ -181,7 +181,7 @@ macOS-style at the top, real Unix underneath:
 - `/Applications/*.app`, `/System/Library/{Kernels,CoreServices,Frameworks,LaunchDaemons,LaunchAgents,Fonts,Themes,Sounds,Desktop Pictures}`, `/Library`, `/Users/<name>/{Desktop,Documents,Downloads,Library}`, `/Volumes`
 - `/bin`, `/sbin`, `/usr/{bin,lib,share/man}`, `/private/{etc,var,tmp}` with symlinks at `/etc` and `/var`, and `/dev` (devfs)
 - App bundles: `Name.app/Contents/{Info.plist, MacOS/, Resources/}`
-- Today there's one volume, with what's sealed checked file by file, and `/tmp` is a directory of its own. Separate System and Data volumes, and `/tmp` where a Mac has it, come with vultureFS 2 (M19).
+- Two volumes, as on a Mac: the sealed system at `/`, and what changes at `/System/Volumes/Data`, showing through at each place `/usr/share/firmlinks` lists (`/Users`, `/private`, `/Applications`, `/Library`, `/usr/local` and so on). `/etc`, `/tmp` and `/var` are links to `private/...`. Applications the system came with are in `/System/Applications`; what's installed is in `/Applications`.
 
 ## Kernel design
 
@@ -370,8 +370,9 @@ macOS-style at the top, real Unix underneath:
   - **Page cache.** File data is cached in pages, and `read`, `write` and
     `mmap` share them. A sync thread commits every 5 seconds.
   - **Other filesystems.** FAT12/16/32 (read-only, for the EFI System
-    Partition at `/Volumes/EFI`); tmpfs at `/tmp`; devfs at `/dev`; pipes.
-    Without a disk, the boot archive is unpacked into a tmpfs root.
+    Partition at `/Volumes/EFI`); devfs at `/dev`; pipes.
+    Without a disk, the system image the loader brought in is the root, right where it is in memory, and
+    what changes is on a tmpfs.
   - **Shared with the host.** The same vultureFS code builds for the host
     as `mkvfs`, `fsck.vfs` and `mkimage`.
   - **Later.** Snapshots, clones, xattrs and ACLs.
@@ -395,15 +396,14 @@ macOS-style at the top, real Unix underneath:
   outside of `copy_from_user` and friends (PAN), or run it (PXN). Return addresses are signed,
   with a key for each address space in user mode and one for the kernel (PAC), branches land
   only where they're meant to (BTI, where the processor has it), and stacks have canaries.
-- **The seal and code signing (M13).** `vseal` writes a manifest of the system, with every file's
-  SHA-256, signed by a key made for the build; the kernel checks the signature when it boots
-  and each file when it's used, and refuses to change anything it covers (`EROFS`). A program
-  only runs if the seal lists it, or root has vouched for its hash, as the installer does for
-  a package whose signature it has checked. Executable memory comes only from such files.
-  Limits: the seal goes by whole files, so a block that is read again after leaving the cache
-  isn't checked again, which matters more now that the file cache gives memory back under
-  pressure (M16): M19's hash tree closes it. And nothing checks the loader or the kernel (no UEFI
-  secure boot).
+- **The seal and code signing (M13, M19).** The system is a read-only volume whose every block has
+  its SHA-256 in a list, signed by a key made for the build (`vseal`, `LibVultureFS/Sealed.h`). The
+  kernel checks the signature and the list before it uses anything on it, and each block each time
+  it's read from what holds it, so a change made after the system started is caught when the file
+  cache has let go of what was there. What can't be read says `EIO`, and it's logged. A program only
+  runs if it's on that volume, is the same as something that is, or root has vouched for its hash,
+  as the installer does for a package whose signature it has checked. Executable memory comes
+  only from such files. Limit: nothing checks the loader or the kernel (no UEFI secure boot).
 - **Sandboxes (M13).** A profile in `/System/Library/Sandbox/Profiles` says what a process may
   read, write, run and connect to, and which services it may look up; everything else is
   `EPERM`, and a line in the log. It is checked on canonical paths, so symbolic links and `..`
@@ -448,7 +448,7 @@ macOS-style at the top, real Unix underneath:
   [Roadmap 1](Roadmap-1.md) for what real machines have and haven't had the chance to show.
 - **Installer (M14).** `Applications/Installer` asks; `installd`, which runs as root, checks that the disk isn't in use and
   runs `/usr/libexec/vinstall`, which does as `mkimage` does (the same code, from `Tools/vfs`) on the machine itself: a GPT,
-  the EFI System Partition this system started from, and a vultureFS volume from the boot archive that's on it. The seal
+  the EFI System Partition this system started from, the system image and a new data volume from what's on it. The seal
   goes with the archive, so what's installed is as verifiable as what it came from.
 - **Debugging.** Serial log, embedded symbol table, symbolized backtraces
   (continuing through exceptions via a frame record in each trap frame),

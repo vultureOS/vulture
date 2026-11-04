@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "AccessList.h"
 #include "Common.h"
 #include <locale.h>
 #include <dirent.h>
@@ -16,6 +17,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -39,6 +41,10 @@ struct Options {
     bool inode = false;
     bool color = false;
     bool unsorted = false;
+    bool extended_attributes = false;
+    bool access_lists = false;
+    bool flags = false;
+    bool no_group = false;
 };
 
 Options s_options;
@@ -51,6 +57,57 @@ struct Entry {
     struct stat information;
     bool valid;
 };
+
+// What -O says: how long it is.
+size_t flags_text(unsigned flags, char* text, size_t room)
+{
+    struct Name {
+        unsigned bit;
+        char const* name;
+    };
+    static constexpr Name names[] = {
+        { UF_NODUMP, "nodump" },
+        { UF_IMMUTABLE, "uchg" },
+        { UF_APPEND, "uappnd" },
+        { UF_OPAQUE, "opaque" },
+        { UF_COMPRESSED, "compressed" },
+        { UF_TRACKED, "tracked" },
+        { UF_HIDDEN, "hidden" },
+        { SF_ARCHIVED, "arch" },
+        { SF_IMMUTABLE, "schg" },
+        { SF_APPEND, "sappnd" },
+    };
+    size_t at = 0;
+    text[0] = 0;
+    for (auto const& name : names) {
+        if (flags & name.bit)
+            at += static_cast<size_t>(snprintf(text + at, room - at, "%s%s", at ? "," : "", name.name));
+    }
+    if (at == 0)
+        at = static_cast<size_t>(snprintf(text, room, "-"));
+    return at;
+}
+
+// What -@ says: under the file, each name and how big it is. By their order, sorted.
+void print_attributes(char const* path, size_t bytes)
+{
+    auto* names = static_cast<char*>(malloc(bytes));
+    ssize_t const got = listxattr(path, names, bytes, XATTR_NOFOLLOW);
+    char const* order[256];
+    size_t count = 0;
+    for (ssize_t at = 0; at < got && count < 256; at += static_cast<ssize_t>(strlen(names + at)) + 1)
+        order[count++] = names + at;
+    for (size_t i = 1; i < count; ++i) {
+        for (size_t j = i; j > 0 && strcmp(order[j - 1], order[j]) > 0; --j) {
+            auto const* swapped = order[j];
+            order[j] = order[j - 1];
+            order[j - 1] = swapped;
+        }
+    }
+    for (size_t i = 0; i < count; ++i)
+        printf("\t%s\t%zd \n", order[i], getxattr(path, order[i], nullptr, 0, 0, XATTR_NOFOLLOW));
+    free(names);
+}
 
 char const* file_type_indicator(mode_t mode)
 {
@@ -190,6 +247,14 @@ void print_long(Entry* entries, size_t count, bool show_total)
     }
     if (show_total)
         printf("total %lld\n", blocks);
+    // The flags have a column of their own, as wide as the widest.
+    size_t flags_width = 1;
+    if (s_options.flags) {
+        for (size_t i = 0; i < count; ++i) {
+            if (entries[i].valid)
+                flags_width = max(flags_width, flags_text(entries[i].information.st_flags, buffer, sizeof(buffer)));
+        }
+    }
     for (size_t i = 0; i < count; ++i) {
         auto& entry = entries[i];
         if (!entry.valid)
@@ -224,8 +289,20 @@ void print_long(Entry* entries, size_t count, bool show_total)
         char date[32];
         bool recent = when <= s_now + 3600 && s_now - when < 182 * 86400;
         strftime(date, sizeof(date), recent ? "%b %e %H:%M" : "%b %e  %Y", &broken);
-        printf("%s  %*u %-*s  %-*s  %*s %s ", mode, static_cast<int>(link_width), information.st_nlink, static_cast<int>(user_width), user_text,
-            static_cast<int>(group_width), group_text, static_cast<int>(size_width), size_text, date);
+        // After the mode: @ if there's anything attached to it, + if not but it has an access list.
+        vulture_acl_entry access[VULTURE_ACL_MAX_ENTRIES];
+        int const access_count = vulture_acl_get(entry.path, access, VULTURE_ACL_MAX_ENTRIES, 0);
+        ssize_t const attribute_bytes = listxattr(entry.path, nullptr, 0, XATTR_NOFOLLOW);
+        char const mode_mark = attribute_bytes > 0 ? '@' : access_count > 0 ? '+' : ' ';
+        printf("%s%c %*u %-*s  ", mode, mode_mark, static_cast<int>(link_width), information.st_nlink, static_cast<int>(user_width), user_text);
+        if (!s_options.no_group)
+            printf("%-*s  ", static_cast<int>(group_width), group_text);
+        if (s_options.flags) {
+            char flags[128];
+            flags_text(information.st_flags, flags, sizeof(flags));
+            printf("%-*s ", static_cast<int>(flags_width), flags);
+        }
+        printf("%*s %s ", static_cast<int>(size_width), size_text, date);
         print_name(entry);
         if (S_ISLNK(information.st_mode)) {
             char target[PATH_MAX];
@@ -236,6 +313,12 @@ void print_long(Entry* entries, size_t count, bool show_total)
             }
         }
         putchar('\n');
+        if (s_options.extended_attributes && attribute_bytes > 0)
+            print_attributes(entry.path, static_cast<size_t>(attribute_bytes));
+        if (s_options.access_lists) {
+            for (int line = 0; line < access_count; ++line)
+                AccessList::print_line(static_cast<size_t>(line), access[line], S_ISDIR(information.st_mode));
+        }
     }
 }
 
@@ -365,6 +448,19 @@ int main(int argc, char** argv)
                 break;
             case 'l':
                 s_options.long_format = true;
+                break;
+            case 'o':
+                s_options.long_format = true;
+                s_options.no_group = true;
+                break;
+            case '@':
+                s_options.extended_attributes = true;
+                break;
+            case 'e':
+                s_options.access_lists = true;
+                break;
+            case 'O':
+                s_options.flags = true;
                 break;
             case '1':
                 s_options.one_per_line = true;

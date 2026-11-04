@@ -256,6 +256,41 @@ int main()
     run("networksetup -listallnetworkservices", "networksetup -listallnetworkservices | head -1");
     run("system_profiler", "system_profiler SPSoftwareDataType | head -3");
 
+    // What's attached to a file. (A Mac also says where a file came from, which isn't anybody's business here.)
+    (void)system("rm -f /tmp/commands-test/attached /tmp/commands-test/also");
+    write_file("attached", "");
+    write_file("also", "");
+    run("xattr -w and list", "xattr -w org.example.one hello attached; xattr -w org.example.two 'a value' attached; xattr attached | grep -v provenance");
+    run("xattr -l", "xattr -l attached | grep -v provenance");
+    run("xattr -p", "xattr -p org.example.one attached");
+    run("xattr -px", "xattr -px org.example.one attached");
+    run("xattr -p of nothing", "xattr -p org.example.none attached; echo status $?");
+    run("xattr -lx", "xattr -d org.example.two attached; xattr -lx attached | tail -n 3");
+    run("xattr -d of nothing", "xattr -d org.example.none attached; echo status $?");
+    run("xattr -wx", "xattr -wx org.example.hex 48656c6c6f attached; xattr -p org.example.hex attached");
+    run("xattr of two files", "xattr -w a b also; xattr attached also | grep -v provenance");
+    run("xattr -l of two files", "xattr -l attached also | grep -v provenance");
+    run("xattr of no file", "xattr nothing-here; echo status $?");
+    run("xattr -c", "xattr -c attached; xattr attached | grep -v provenance; echo done");
+    run("ls -l@", "xattr -w org.example.one hello also; ls -l@ also | tail -n +2 | grep -v provenance");
+    run("ls -lO", "ls -lO attached | awk '{print $5}'; chflags uchg attached; ls -lO attached | awk '{print $5}'; chflags nouchg attached");
+    run("ls -lO of two", "chflags hidden,nodump attached; ls -lO attached | awk '{print $5}'; chflags 0 attached; ls -lO attached | awk '{print $5}'");
+    run("ls -lo", "ls -lo attached | wc -w");
+    run("chflags of nonsense", "chflags nonsense attached; echo status $?");
+    run("chflags of no file", "chflags nouchg nothing-here; echo status $?");
+    run("chmod +a", "chmod +a 'everyone deny write' attached; ls -le attached | tail -n +2");
+    run("chmod +a allow", "chmod +a 'user:root allow read' attached; ls -le attached | tail -n +2");
+    run("chmod +a#", "chmod +a# 1 'everyone allow read' attached; ls -le attached | tail -n +2");
+    run("chmod -a#", "chmod -a# 0 attached; ls -le attached | tail -n +2");
+    run("chmod -a", "chmod -a 'everyone allow read' attached; ls -le attached | tail -n +2");
+    run("chmod =a#", "chmod =a# 0 'everyone deny execute' attached; ls -le attached | tail -n +2");
+    run("chmod -N", "chmod -N attached; ls -le attached | tail -n +2; echo done");
+    run("chmod +a of nonsense", "chmod +a 'nobody-of-the-name allow read' attached; echo status $?");
+    run("chmod +a of all a file has", "chmod +a 'everyone allow read,write,execute,delete,append,readattr,writeattr,readextattr,writeextattr,readsecurity,writesecurity,chown' attached; ls -le attached | tail -n +2; chmod -N attached");
+    run("chmod +a of all a directory has", "mkdir folder-with-rights; chmod +a 'everyone allow list,add_file,search,delete,add_subdirectory,delete_child,file_inherit,directory_inherit,limit_inherit,only_inherit' folder-with-rights; ls -lde folder-with-rights | tail -n +2; rmdir folder-with-rights");
+    run("ls -l with an access list", "chmod +a 'everyone deny write' also; xattr -c also; ls -l also | cut -c11; chmod -N also");
+    run("cp -c", "cp -c also also-copy; cat also-copy; xattr also-copy | grep -v provenance; rm also-copy");
+
     (void)system("rm -rf /tmp/commands-test");
     printf("commands: finished\n");
     return 0;

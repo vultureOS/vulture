@@ -128,7 +128,7 @@ Case const s_cases[] = {
     { "ps -p 1 | tail -1 | grep -c ' vlaunchd$'", "1\n", 0 },
     { "ps -p $$ | tail -1 | grep -c sh", "1\n", 0 },
     { "df | head -1", "Filesystem     512-blocks       Used  Available Capacity  Mounted on\n", 0 },
-    { "df | grep -c ' /tmp$'", "1\n", 0 },
+    { "df | grep -c ' /System/Volumes/Data$'", "1\n", 0 },
     { "sleep 0.01 && echo slept", "slept\n", 0 },
     { "sleep 5 & kill $!; wait $!; echo $?", "143\n", 0 },
     { "kill -l | head -1 | cut -d' ' -f1-3; kill -l 9; /bin/kill -l 143", "HUP INT QUIT\nKILL\nTERM\n", 0 },

@@ -13,7 +13,9 @@ namespace Kernel {
 class BlockDevice;
 
 // Whether a partition's GPT type says it holds vultureFS.
-[[nodiscard]] bool is_vulturefs_partition(BlockDevice&);
+// Whether a device is a partition for a system, or for its data.
+[[nodiscard]] bool is_system_partition(BlockDevice&);
+[[nodiscard]] bool is_data_partition(BlockDevice&);
 
 // Mounts the vultureFS volume on the device: the newest intact checkpoint,
 // with orphans from before a crash deleted. File data is cached in pages;

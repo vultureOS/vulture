@@ -16,8 +16,8 @@
 #include <unistd.h>
 
 // vinstall DISK: erases /dev/DISK, and makes it what this was started from, as mkimage makes a disk on the
-// machine that builds this: an EFI System Partition with what's on this one, and vultureFS with the
-// contents of the boot archive, which is there too. What it says is for installd: "P percent" as it goes,
+// machine that builds this: an EFI System Partition with what's on this one, the system image that's
+// there too on a partition of its own, and an empty data volume. What it says is for installd: "P percent" as it goes,
 // and last "S", or "F why".
 
 using namespace VultureFS;
@@ -145,11 +145,17 @@ int main(int argc, char** argv)
         return fail("That disk is too small: it takes at least 1 GB."_sv);
     }
 
-    u64 const data_first = Tools::partition_start_sector + esp_sectors;
-    u64 const data_count = ((Tools::last_usable_sector(size) - data_first + 1) / 8) * 8;
+    u64 const system_first = Tools::partition_start_sector + esp_sectors;
+    u64 const after_esp = Tools::last_usable_sector(size) - system_first + 1;
+    auto system_sectors = Tools::system_partition_sectors(archive.size(), after_esp);
+    if (system_sectors.is_error())
+        return fail_with("That disk won't do"_sv, system_sectors.error());
+    u64 const data_first = system_first + system_sectors.value();
+    u64 const data_count = (after_esp - system_sectors.value()) / 8 * 8;
     Tools::PartitionSpec const partitions[] = {
         { Tools::efi_system_partition_type, "EFI System Partition"_sv, Tools::partition_start_sector, esp_sectors },
-        { VultureFS::partition_type, "vultureOS"_sv, data_first, data_count },
+        { VultureFS::system_partition_type, Tools::system_volume_name, system_first, system_sectors.value() },
+        { VultureFS::data_partition_type, Tools::data_volume_name, data_first, data_count },
     };
     if (auto result = Tools::write_partition_table(image, size, partitions); result.is_error())
         return fail_with("Couldn't write the partition table"_sv, result.error());
@@ -165,21 +171,11 @@ int main(int argc, char** argv)
         return fail_with("Couldn't write the EFI System Partition"_sv, result.error());
     say_progress(40);
 
-    Tools::ImageStore store(image, data_first * Tools::sector_size, data_count * Tools::sector_size / block_size);
-    u8 uuid[16];
-    Tools::random_bytes(uuid);
-    auto volume = Volume::format(store, "Vulture HD"_sv, uuid, Tools::host_clock);
-    if (volume.is_error())
-        return fail_with("Couldn't format the disk"_sv, volume.error());
-    Tools::PopulateCounts counts;
-    if (auto result = Tools::make_skeleton(*volume.value(), counts); result.is_error())
-        return fail_with("Couldn't write the system"_sv, result.error());
-    say_progress(50);
-    if (auto result = Tools::add_archive(*volume.value(), { archive.begin(), archive.size() }, counts); result.is_error())
+    if (auto result = Tools::write_system(image, system_first, system_sectors.value(), { archive.begin(), archive.size() }); result.is_error())
         return fail_with("Couldn't write the system"_sv, result.error());
     say_progress(90);
-    if (auto result = volume.value()->checkpoint(); result.is_error())
-        return fail_with("Couldn't finish writing"_sv, result.error());
+    if (auto result = Tools::format_data(image, data_first, data_count, Tools::data_volume_name); result.is_error())
+        return fail_with("Couldn't format the disk"_sv, result.error());
     fflush(image);
     fsync(fileno(image));
     fclose(image);

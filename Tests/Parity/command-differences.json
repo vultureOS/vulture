@@ -35,6 +35,11 @@
             "command": "launchctl of nothing",
             "kind": "test",
             "why": "As for launchctl list."
+        },
+        {
+            "command": "ls -l with an access list",
+            "kind": "mac",
+            "why": "A Mac says where each file came from, in an attribute that can't be taken away, so it shows @ for that where a file with only an access list shows + here."
         }
     ]
 }

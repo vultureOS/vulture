@@ -13,7 +13,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-// The VFS on tmpfs (/tmp): files, directories, links, renames, paths.
+// The VFS on the data volume (/tmp): files, directories, links, renames, paths.
 
 static bool write_file(char const* path, char const* text)
 {
@@ -95,10 +95,10 @@ int main()
     // Working directory and relative paths, with ".." along the way.
     CHECK(chdir("/tmp/test") == 0);
     char cwd[256];
-    CHECK(getcwd(cwd, sizeof(cwd)) && strcmp(cwd, "/tmp/test") == 0);
+    CHECK(getcwd(cwd, sizeof(cwd)) && strcmp(cwd, "/private/tmp/test") == 0);
     CHECK(file_holds("a.txt", "alpha-beta"));
     CHECK(mkdir("sub", 0755) == 0 && chdir("sub/../sub/.") == 0);
-    CHECK(getcwd(cwd, sizeof(cwd)) && strcmp(cwd, "/tmp/test/sub") == 0);
+    CHECK(getcwd(cwd, sizeof(cwd)) && strcmp(cwd, "/private/tmp/test/sub") == 0);
     CHECK(file_holds("../a.txt", "alpha-beta"));
     CHECK(chdir("/") == 0);
 

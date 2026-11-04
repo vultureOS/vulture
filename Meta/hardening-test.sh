@@ -65,22 +65,20 @@ case "$fixed" in
     *) echo "hardening-test: FAIL: with nokaslr it is at $fixed" >&2; status=1 ;;
 esac
 
-# ---- The seal, against someone with the disk in their hands: a copy of the system, changed, then
-# made into a disk without being signed again.
+# ---- The seal, against someone with the disk in their hands: a disk with the signed system on it, then changed.
 tamper_dir="$build_dir/hardening-test"
 rm -rf "$tamper_dir"
 mkdir -p "$tamper_dir"
-make_tampered_disk() { # name; what to change is in the function "tamper", in the copy's directory
-    local name="$1" copy="$tamper_dir/$1"
-    rm -rf "$copy"
-    cp -R "$build_dir/root" "$copy"
-    ( cd "$copy" && tamper )
-    ( cd "$tamper_dir" && cmake -DTOOL="$build_dir/host/Tools/mkarchive/mkarchive" -DROOT="$copy" -DKEEP_SEAL=1 \
-        -DOUTPUT="$tamper_dir/$name.bootarchive" -P "$source_dir/Meta/CMake/MakeBootArchive.cmake" )
-    "$build_dir/host/Tools/vfs/mkvfs" create "$tamper_dir/$name.img" 2048 "$tamper_dir/$name.bootarchive" > /dev/null
+image="$build_dir/esp/System/Library/Kernels/vulture.bootarchive"
+# The system partition starts 1 MiB in; its first block is what's signed; then the hashes of the rest.
+system_partition=$((1024 * 1024))
+make_disk() { # name
+    "$build_dir/host/Tools/vfs/mkvfs" create "$tamper_dir/$1.img" 2048 "$image" > /dev/null
     # (run.sh would otherwise bring it up to date with the build, and undo all this.)
-    touch "$tamper_dir/$name.img.updated"
-    rm -rf "$copy"
+    touch "$tamper_dir/$1.img.updated"
+}
+change_byte_at() { # name offset
+    printf 'y' | /bin/dd of="$tamper_dir/$1.img" bs=1 seek="$2" conv=notrunc 2> /dev/null
 }
 boot_tampered() { # name boot-arguments expected-text
     local name="$1" arguments="$2" expected="$3" output
@@ -90,50 +88,54 @@ boot_tampered() { # name boot-arguments expected-text
         echo "hardening-test: ok: seal: $name: $expected"
     else
         echo "hardening-test: FAIL: seal: $name: wanted \"$expected\"" >&2
-        printf '%s\n' "$output" | grep -a "KERNEL PANIC\|Seal:\|Code signing:" | head -6 >&2
+        printf '%s\n' "$output" | grep -a "KERNEL PANIC\|Seal:\|Code signing:\|Root:" | head -6 >&2
         status=1
     fi
 }
-# (/bin/dd by name: this is done from inside a copy of the system, which has a dd of its own, and a relative PATH would find that one.)
-tamper() { printf 'y' | /bin/dd of=System/Library/Seal/Manifest bs=1 seek=200 conv=notrunc 2> /dev/null; }
-make_tampered_disk manifest
-boot_tampered manifest "" "KERNEL PANIC: the system's seal is broken: the manifest isn't signed"
-tamper() { /bin/rm -f usr/bin/true; }
-make_tampered_disk missing
-boot_tampered missing "" "KERNEL PANIC: the system's seal is broken: something is missing: usr/bin/true"
-tamper() { printf 'x' >> usr/bin/true; }
-make_tampered_disk longer
-boot_tampered longer "" "KERNEL PANIC: the system's seal is broken: a file has changed size: usr/bin/true"
-boot_tampered longer noseal "Seal: off, by the boot word noseal"
-# A change that keeps its size is only found when it is read: that file stops working, not the system.
-# And one more file than was signed isn't there at all.
-tamper() {
-    printf 'x' | /bin/dd of=usr/bin/logname bs=1 seek=4000 conv=notrunc 2> /dev/null
-    /bin/cp bin/ls usr/bin/extra-program
-    echo extra > System/Library/extra-file
-}
-make_tampered_disk contents
+make_disk signature
+change_byte_at signature $((system_partition + 70))
+boot_tampered signature "" "KERNEL PANIC: the system's seal is broken: it isn't signed by this system's key"
+make_disk size
+change_byte_at size $((system_partition + 8))
+boot_tampered size "" "KERNEL PANIC: the system's seal is broken: it isn't signed by this system's key"
+make_disk hashes
+change_byte_at hashes $((system_partition + 4096 + 100))
+boot_tampered hashes "" "KERNEL PANIC: the system's seal is broken: it isn't what was signed"
+boot_tampered hashes noseal "Seal: off, by the boot word noseal"
+# A change that doesn't touch those is only found when it is read: that file stops working, not the system. It doesn't
+# matter when: not at first, and not if it's been read before, and been let go of since.
+make_disk contents
+python3 -I "$source_dir/Meta/flip-block.py" "$tamper_dir/contents.img" file "$build_dir/root/usr/bin/seq" > /dev/null
 tamper_chat="$tamper_dir/contents.chat"
-cat > "$tamper_chat" <<'CHAT'
+cat > "$tamper_chat" <<CHAT
 expect login: 
 send vulture\r
 expect Password:
 send vulture\r
 expect vulture@vulture ~ % 
-send logname; echo logname-said=$?\r
-expect Seal: inode
-expect logname-said=
-send /usr/bin/extra-program; echo extra-said=$?\r
-expect extra-said=127
-send ls /System/Library/extra-file; echo file-said=$?\r
-expect No such file or directory
-expect file-said=1
-send /bin/ls /System/Library/Seal; echo ls-said=$?\r
+send seq 1 2; echo seq-said=\$?\r
+expect Seal: block
+expect seq-said=
+send /bin/ls /System/Library/Seal; echo ls-said=\$?\r
 expect Manifest
 expect ls-said=0
+send cat /usr/bin/uptime > /dev/null; echo uptime-read=\$?\r
+expect uptime-read=0
+host python3 -I "$source_dir/Meta/flip-block.py" "$tamper_dir/contents.img" file "$build_dir/root/usr/bin/uptime"
+send cat /usr/bin/uptime > /dev/null; echo uptime-cached=\$?\r
+expect uptime-cached=0
+send sudo purge; echo purge-said=\$?\r
+expect Password:
+send vulture\r
+expect purge-said=0
+send cat /usr/bin/uptime > /dev/null; echo uptime-evicted=\$?\r
+expect Seal: block
+expect uptime-evicted=1
+send hostname; echo hostname-said=\$?\r
+expect hostname-said=0
 CHAT
-if output="$("$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --disk "$tamper_dir/contents.img" --chat "$tamper_chat" --timeout 60 2>&1)"; then
-    echo "hardening-test: ok: seal: a changed file can't be run, an added one isn't there, and the system goes on"
+if output="$("$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --disk "$tamper_dir/contents.img" --chat "$tamper_chat" --timeout 90 2>&1)"; then
+    echo "hardening-test: ok: seal: a changed block can't be read, even of a file read before it was changed, and the system goes on"
 else
     echo "hardening-test: FAIL: seal: contents" >&2
     printf '%s\n' "$output" | tail -12 >&2

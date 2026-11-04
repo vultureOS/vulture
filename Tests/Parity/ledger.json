@@ -2208,7 +2208,7 @@
                     "proof": [
                         {
                             "suite": "test-hardening",
-                            "output": "seal: a changed file can't be run"
+                            "output": "seal: a changed block can't be read"
                         }
                     ]
                 },
@@ -2224,51 +2224,147 @@
                 },
                 {
                     "feature": "More than 28 GiB",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host",
+                            "output": "LibVultureFS"
+                        }
+                    ]
                 },
                 {
                     "feature": "Extended attributes",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "/usr/tests/posix"
+                        },
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: commands"
+                        }
+                    ]
                 },
                 {
                     "feature": "ACLs",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "/usr/tests/data-volume"
+                        },
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: commands"
+                        }
+                    ]
                 },
                 {
                     "feature": "Clones",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-volume",
+                            "output": "and it shares its blocks"
+                        },
+                        {
+                            "suite": "test-userland",
+                            "output": "/usr/tests/posix"
+                        }
+                    ]
                 },
                 {
                     "feature": "Snapshots",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-volume",
+                            "output": "a snapshot, gone back to across a reboot, is exactly what it was"
+                        }
+                    ]
                 },
                 {
                     "feature": "Case-insensitive names",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-oracle",
+                            "output": "oracle: posix"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibVultureFS"
+                        }
+                    ]
                 },
                 {
                     "feature": "/tmp where a Mac has it",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "/usr/tests/data-volume"
+                        }
+                    ]
                 },
                 {
                     "feature": "Compression",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "/usr/tests/data-volume"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibVultureFS"
+                        }
+                    ]
                 },
                 {
                     "feature": "File data checksums",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-volume",
+                            "output": "reading a flipped bit is an error"
+                        }
+                    ]
                 },
                 {
                     "feature": "FSEvents",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "/usr/tests/data-volume"
+                        },
+                        {
+                            "suite": "test-volume",
+                            "output": "it remembers what changed before then"
+                        }
+                    ]
                 },
                 {
                     "feature": "System and Data volumes",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "/usr/tests/data-volume"
+                        }
+                    ]
                 },
                 {
                     "feature": "A sealed system, checked block by block",
-                    "milestone": "M19"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-hardening",
+                            "output": "seal: a changed block can't be read, even of a file read before it was changed"
+                        }
+                    ]
                 },
                 {
                     "feature": "Plug in a USB stick",

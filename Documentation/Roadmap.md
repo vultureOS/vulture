@@ -98,7 +98,7 @@ Sizes are rough estimates of new lines, scaled from the reference figures above.
 | | M16 | [System completeness](#m16-system-completeness) | Done | Run real programs: plugins, kqueue, Unix sockets, 10,000 open files | 20k |
 | | M17 | [Unicode and locale](#m17-unicode-and-locale) | Done | Have text, dates and numbers handled correctly for any language | 15k |
 | | M18 | [Shaping and input](#m18-shaping-and-input) | Done | Read and type any language, with emoji, in any control | 30k |
-| | M19 | [vultureFS 2](#m19-vulturefs-2) | | Use a 1 TiB disk, duplicate files instantly, roll back a snapshot | 20k |
+| | M19 | [vultureFS 2](#m19-vulturefs-2) | Done | Use a 1 TiB disk, duplicate files instantly, roll back a snapshot | 20k |
 | | M20 | [External media](#m20-external-media) | | Plug in a USB stick; erase and repair disks; open disk images | 8k |
 | | M21 | [Layers](#m21-layers) | | See animations stay smooth even when an app hangs, with the spinning cursor | 18k |
 | | M22 | [Displays and gestures](#m22-displays-and-gestures) | | Use two displays, swipe between Spaces, record the screen | 8k |
@@ -560,7 +560,7 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on. M15 me
 | Cmd-Tab appears | ≤ 1 frame | |
 | Search, per keystroke | ≤ 50 ms | |
 | Application launch | < 300 ms | 28 ms (M18, Calculator, cold) |
-| Clone of a 1 GiB file | < 50 ms | |
+| Clone of a 1 GiB file | < 50 ms | Under 1 ms (M19): it takes the same for any size |
 | 1080p30 VP9 | no dropped frames | |
 | A PDF page | < 100 ms | |
 | Idle memory | tracked per release | |
@@ -599,6 +599,19 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **Testing inside a copy of the system.** With a `dd` of its own at last, a test that changes to a copy of the system and runs `dd` ran that one, for the wrong processor, if `PATH` had a relative entry in it. The seal tests then found nothing to catch, and said so as if the kernel had let a tampered file by.
 - **Tests that click by position go stale.** One new row in Settings moved everything under it, and each walkthrough that clicked one of those by coordinates went wrong, as M15 said it would. They go by name now.
 - **What a Mac does that's wrong.** Nine of POSIX's checks and seven of the commands are different on purpose. Each is written down in `Tests/Parity`, with why.
+
+### M19
+
+- **Two threads and one bounce buffer.** "The manifest isn't signed", sometimes, on x86_64 under software emulation. A virtio request's lock was dropped when the request ended, before the data was copied out of the one bounce buffer, so the next request could overwrite it first. A signature check is a fine way to find a race, as it can't be argued with.
+- **A signature comes before believing anything.** A flipped byte in the image's size went past the sanity check, was called "no system here", and the machine quietly started from the copy in memory. The first thing checked now is the signature on the block that says how big it is.
+- **`execvp` didn't look at `PATH`.** It went through a fixed list, and nobody noticed for as long as everything was in it. `/usr/sbin/purge` was the first thing that wasn't.
+- **A Mac keeps what it replaced's spelling.** Renaming `x` to `Y` with `y` already there leaves a file called `y`. There's no reason to guess that: it came from asking.
+- **Letting go of memory lost its place.** The file cache gives pages back in turn, from wherever it got to last time, and that moved while it went, so most files were skipped: a pass over the cache gave back a little of it. `purge`, which is what a test of a block changing after it left the cache needs, showed that up. Nothing had noticed under pressure, as it went round again soon enough.
+- **A log with bytes in it stopped being a log.** `run.sh` shows what the console said through `sed`, which on a Mac stops at the first byte that isn't UTF-8, and took everything after it with it. And `sysctl` printed a number as text whenever its top byte was zero, which is what put those bytes there.
+- **Some programs are copies.** Twenty tools share a binary, so flipping a bit in "`logname`" flipped it in whichever of them was first on the disk, and `logname` carried on working. The hash tree was right, and the test wasn't.
+- **Blocks that are hashed cost something at boot.** Each block read off the System volume is hashed, with no help from the processor yet. Reading what's needed to start takes a few more milliseconds; it hasn't troubled any budget so far.
+- **Limit: the hash list is in memory, and it's flat.** A signature, a hash of the list, and a hash of each block: two levels, where a real tree would have more, read as it's needed. For an image of 83 MiB, it's 650 KiB, which is fine for now. It should become a tree if the image grows by much.
+- **Limit: the Open and Save panels show all of `/`.** On a Mac, most of what's at the top is hidden, by a flag it has now: M27 is where that's looked at.
 
 ### M18
 

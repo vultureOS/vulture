@@ -1,6 +1,6 @@
 {
     "Label" : "com.vulture.test.gallery",
-    "ProgramArguments" : [ "/Applications/Widget Gallery.app/Contents/MacOS/WidgetGallery", "--still" ],
+    "ProgramArguments" : [ "/System/Applications/Widget Gallery.app/Contents/MacOS/WidgetGallery", "--still" ],
     "RunAtLoad" : true,
     "StandardOutPath" : "/dev/console",
     "StandardErrorPath" : "/dev/console"

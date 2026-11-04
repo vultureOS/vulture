@@ -96,6 +96,7 @@ public:
 
     [[nodiscard]] StringView name() const override { return "vultureFS"_sv; }
     [[nodiscard]] StringView device_name() const override { return m_device_name.view(); }
+    [[nodiscard]] bool is_read_only() const override { return m_volume->is_read_only(); }
     [[nodiscard]] Statistics statistics() override
     {
         MutexLocker locker(m_lock);
@@ -105,6 +106,23 @@ public:
     [[nodiscard]] NonnullRefPtr<Inode> root_inode() override;
     ErrorOr<void> sync() override;
     ErrorOr<void> rename(Inode& old_parent, StringView old_name, Inode& new_parent, StringView new_name) override;
+    ErrorOr<NonnullRefPtr<Inode>> clone(Inode& source, Inode& directory, StringView name, u32 uid, u32 gid) override;
+    ErrorOr<void> create_snapshot(StringView name) override;
+    ErrorOr<void> delete_snapshot(StringView name) override;
+    ErrorOr<void> revert_to_snapshot(StringView name) override;
+    ErrorOr<Vector<String>> snapshots() override;
+    ErrorOr<u64> append_event(u32 flags, StringView path) override;
+    [[nodiscard]] u64 next_event() override
+    {
+        MutexLocker locker(m_lock);
+        return m_volume->next_event();
+    }
+    [[nodiscard]] u64 oldest_event() override
+    {
+        MutexLocker locker(m_lock);
+        return m_volume->oldest_event();
+    }
+    ErrorOr<void> for_each_event(u64 first, EventVisitor) override;
 
     [[nodiscard]] Mutex& lock() { return m_lock; }
     [[nodiscard]] VultureFS::Volume& volume() { return *m_volume; }
@@ -181,6 +199,13 @@ public:
     ErrorOr<void> set_permissions(u32 permissions) override;
     ErrorOr<void> set_owner(u32 uid, u32 gid) override;
     ErrorOr<void> set_times(i64 access_time, i64 modification_time) override;
+    ErrorOr<size_t> get_xattr(StringView name, Bytes buffer) override;
+    ErrorOr<void> set_xattr(StringView name, ReadonlyBytes value, int flags) override;
+    ErrorOr<void> remove_xattr(StringView name) override;
+    ErrorOr<Vector<String>> list_xattrs() override;
+    ErrorOr<Vector<vulture_acl_entry>> acl() override;
+    ErrorOr<void> set_acl(Span<vulture_acl_entry const>) override;
+    ErrorOr<void> set_flags(u32 flags) override;
     ErrorOr<void> sync() override { return fs().sync(); }
     ErrorOr<PhysicalAddress> mapped_page(u64 index) override;
     void add_shared_writer() override;
@@ -234,6 +259,9 @@ ErrorOr<NonnullRefPtr<VultureFileSystem>> VultureFileSystem::create(BlockDevice&
         return Error::from_errno(ENOMEM);
     auto file_system = adopt_ref(*raw);
     file_system->m_volume = TRY(VultureFS::Volume::mount(file_system->m_store, kernel_clock));
+    file_system->m_volume->set_damage_reporter([](InodeNumber inode, u64 file_block, VultureFS::BlockIndex disk_block) {
+        dmesgln("vultureFS: inode {} is damaged: block {} of it, on block {} of the disk, isn't what was written", inode, file_block, disk_block);
+    });
     return file_system;
 }
 
@@ -359,6 +387,64 @@ ErrorOr<void> VultureFileSystem::rename(Inode& old_parent, StringView old_name, 
     return {};
 }
 
+ErrorOr<NonnullRefPtr<Inode>> VultureFileSystem::clone(Inode& source, Inode& directory, StringView name, u32 uid, u32 gid)
+{
+    bool const is_directory = source.is_directory();
+    MutexLocker locker(m_lock);
+    // What's on the disk is what's shared, so that has to be all of it. A directory has everything inside it to think of.
+    if (is_directory)
+        TRY(sync_locked());
+    else
+        TRY(static_cast<VultureFSInode&>(source).write_back());
+    auto const number = TRY(m_volume->clone(source.index(), directory.index(), name, uid, gid));
+    refresh(directory.index());
+    return NonnullRefPtr<Inode>(*TRY(inode(number)));
+}
+
+ErrorOr<void> VultureFileSystem::create_snapshot(StringView name)
+{
+    MutexLocker locker(m_lock);
+    // All that has been written so far is part of this moment.
+    TRY(sync_locked());
+    return m_volume->create_snapshot(name);
+}
+
+ErrorOr<void> VultureFileSystem::delete_snapshot(StringView name)
+{
+    MutexLocker locker(m_lock);
+    return m_volume->delete_snapshot(name);
+}
+
+ErrorOr<void> VultureFileSystem::revert_to_snapshot(StringView name)
+{
+    MutexLocker locker(m_lock);
+    return m_volume->request_rollback(name);
+}
+
+ErrorOr<Vector<String>> VultureFileSystem::snapshots()
+{
+    MutexLocker locker(m_lock);
+    auto const found = TRY(m_volume->snapshots());
+    Vector<String> names;
+    for (auto const& snapshot : found)
+        TRY(names.try_append(TRY(String::from_view(snapshot.name.view()))));
+    return names;
+}
+
+ErrorOr<u64> VultureFileSystem::append_event(u32 flags, StringView path)
+{
+    MutexLocker locker(m_lock);
+    return m_volume->append_event(flags, path);
+}
+
+ErrorOr<void> VultureFileSystem::for_each_event(u64 first, EventVisitor visitor)
+{
+    MutexLocker locker(m_lock);
+    return m_volume->for_each_event(first, [&](u64 id, u32 flags, StringView path) {
+        return visitor(id, flags, path) ? VultureFS::Iteration::Continue : VultureFS::Iteration::Stop;
+    });
+}
+
 size_t VultureFSInode::release_clean_pages(size_t budget)
 {
     // These could change at any moment, whatever they say.
@@ -397,6 +483,13 @@ InodeMetadata VultureFSInode::metadata_locked() const
     metadata.change_time_ns = m_record.change_time;
     metadata.birth_time_ns = m_record.birth_time;
     metadata.block_size = VultureFS::block_size;
+    // (What's waiting to be written will take its room soon enough.)
+    metadata.allocated_bytes = (m_record.allocated_blocks + m_dirty_count) * VultureFS::block_size;
+    if (m_record.flags & VultureFS::inode_flag_compressed)
+        metadata.flags |= UF_COMPRESSED;
+    metadata.flags |= m_record.reserved;
+    if (m_record.flags & VultureFS::inode_flag_has_acl)
+        metadata.acl_inode = const_cast<VultureFSInode*>(this);
     return metadata;
 }
 
@@ -691,6 +784,9 @@ ErrorOr<void> VultureFSInode::write_back()
                 fs().count_pages(0, -1);
             }
         }
+        // How much of the disk it takes now.
+        if (auto record = fs().volume().inode(index()); !record.is_error())
+            m_record.allocated_blocks = record.value().allocated_blocks;
     }
     if (m_times_dirty) {
         TRY(fs().volume().set_times(index(), m_record.access_time, m_record.modification_time));
@@ -831,10 +927,101 @@ ErrorOr<void> VultureFSInode::set_times(i64 access_time, i64 modification_time)
     return {};
 }
 
-bool is_vulturefs_partition(BlockDevice& device)
+ErrorOr<size_t> VultureFSInode::get_xattr(StringView name, Bytes buffer)
+{
+    MutexLocker locker(fs().lock());
+    return fs().volume().get_xattr(index(), name, buffer);
+}
+
+ErrorOr<void> VultureFSInode::set_xattr(StringView name, ReadonlyBytes value, int flags)
+{
+    MutexLocker locker(fs().lock());
+    auto const mode = (flags & XATTR_CREATE) ? VultureFS::XattrMode::MustBeNew : (flags & XATTR_REPLACE) ? VultureFS::XattrMode::MustExist
+                                                                                                         : VultureFS::XattrMode::Either;
+    TRY(fs().volume().set_xattr(index(), name, value, mode));
+    fs().refresh(index());
+    return {};
+}
+
+ErrorOr<void> VultureFSInode::remove_xattr(StringView name)
+{
+    MutexLocker locker(fs().lock());
+    TRY(fs().volume().remove_xattr(index(), name));
+    fs().refresh(index());
+    return {};
+}
+
+ErrorOr<Vector<String>> VultureFSInode::list_xattrs()
+{
+    MutexLocker locker(fs().lock());
+    Vector<String> names;
+    ErrorOr<void> result {};
+    TRY(fs().volume().for_each_xattr(index(), [&](StringView name, u64) {
+        auto copy = String::from_view(name);
+        if (copy.is_error()) {
+            result = copy.release_error();
+            return VultureFS::Iteration::Stop;
+        }
+        result = names.try_append(copy.release_value());
+        return result.is_error() ? VultureFS::Iteration::Stop : VultureFS::Iteration::Continue;
+    }));
+    TRY(result);
+    return names;
+}
+
+static_assert(sizeof(vulture_acl_entry) == sizeof(VultureFS::AclEntry));
+
+ErrorOr<Vector<vulture_acl_entry>> VultureFSInode::acl()
+{
+    MutexLocker locker(fs().lock());
+    Vector<vulture_acl_entry> entries;
+    if (!(m_record.flags & VultureFS::inode_flag_has_acl))
+        return entries;
+    auto const stored = TRY(fs().volume().acl(index()));
+    TRY(entries.try_resize(stored.size()));
+    if (!stored.is_empty())
+        __builtin_memcpy(entries.data(), stored.data(), stored.size() * sizeof(vulture_acl_entry));
+    return entries;
+}
+
+ErrorOr<void> VultureFSInode::set_acl(Span<vulture_acl_entry const> entries)
+{
+    MutexLocker locker(fs().lock());
+    TRY(fs().volume().set_acl(index(), { reinterpret_cast<VultureFS::AclEntry const*>(entries.data()), entries.size() }));
+    fs().refresh(index());
+    return {};
+}
+
+ErrorOr<void> VultureFSInode::set_flags(u32 flags)
+{
+    if (flags & ~(UF_NODUMP | UF_IMMUTABLE | UF_APPEND | UF_OPAQUE | UF_COMPRESSED | UF_TRACKED | UF_HIDDEN | SF_ARCHIVED | SF_IMMUTABLE | SF_APPEND))
+        return Error::from_errno(ENOTSUP);
+    MutexLocker locker(fs().lock());
+    bool const compressed = flags & UF_COMPRESSED;
+    if (compressed != static_cast<bool>(m_record.flags & VultureFS::inode_flag_compressed)) {
+        // What it's to do it to is what's on the disk.
+        TRY(write_back());
+        TRY(fs().volume().set_compressed(index(), compressed));
+    }
+    TRY(fs().volume().set_bsd_flags(index(), flags & ~UF_COMPRESSED));
+    fs().refresh(index());
+    return {};
+}
+
+static bool is_partition_of_type(BlockDevice& device, u8 const* type)
 {
     auto* partition = device.as_partition();
-    return partition && __builtin_memcmp(partition->type(), VultureFS::partition_type, 16) == 0;
+    return partition && __builtin_memcmp(partition->type(), type, 16) == 0;
+}
+
+bool is_system_partition(BlockDevice& device)
+{
+    return is_partition_of_type(device, VultureFS::system_partition_type);
+}
+
+bool is_data_partition(BlockDevice& device)
+{
+    return is_partition_of_type(device, VultureFS::data_partition_type);
 }
 
 ErrorOr<NonnullRefPtr<FileSystem>> mount_vulturefs(BlockDevice& device)

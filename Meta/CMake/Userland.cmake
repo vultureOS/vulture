@@ -83,7 +83,7 @@ endfunction()
 #                         [LIBRARIES <libs...>])
 #
 # An application bundle: <dir>/<name>.app, with Contents/MacOS/<target> and an Info.plist
-# saying what LibDesktop needs to know. Under /Applications, unless told otherwise.
+# saying what LibDesktop needs to know. Under Applications here, which is /System/Applications on the system, unless told otherwise.
 function(vulture_add_application target)
     cmake_parse_arguments(PARSE_ARGV 1 arg "" "NAME;IDENTIFIER;ICON;KIND;DESTINATION;SANDBOX" "SOURCES;LIBRARIES;EXTENSIONS")
     if(NOT arg_DESTINATION)

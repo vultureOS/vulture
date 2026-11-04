@@ -13,6 +13,7 @@ add_library(LibC STATIC
     dlfcn.cpp
     Encodings.cpp
     fenv.cpp
+    file_attributes.cpp
     FloatText.cpp
     Generated/EncodingTables.cpp
     getopt.cpp

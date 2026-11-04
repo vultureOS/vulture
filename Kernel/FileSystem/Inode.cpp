@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/API/POSIX/files.h>
 #include <Kernel/FileSystem/FileSystem.h>
 #include <Kernel/FileSystem/Inode.h>
 
@@ -50,7 +51,8 @@ vulture_stat InodeMetadata::to_stat(u32 file_system_id) const
     result.st_gid = gid;
     result.st_size = static_cast<long long>(size);
     result.st_blksize = block_size;
-    result.st_blocks = static_cast<long long>((size + 511) / 512);
+    result.st_blocks = static_cast<long long>(((allocated_bytes == ~0ull ? size : allocated_bytes) + 511) / 512);
+    result.st_flags = flags;
     result.st_mtime_seconds = modification_time;
     result.st_rdev = device;
     auto split = [&](i64 nanoseconds, long long& seconds, long& remainder) {
@@ -187,6 +189,51 @@ ErrorOr<void> Inode::set_owner(u32, u32)
 }
 
 ErrorOr<void> Inode::set_times(i64, i64)
+{
+    return Error::from_errno(file_system().is_read_only() ? EROFS : ENOTSUP);
+}
+
+ErrorOr<size_t> Inode::get_xattr(StringView, Bytes)
+{
+    return Error::from_errno(ENOTSUP);
+}
+
+ErrorOr<void> Inode::set_xattr(StringView, ReadonlyBytes, int)
+{
+    return Error::from_errno(file_system().is_read_only() ? EROFS : ENOTSUP);
+}
+
+ErrorOr<void> Inode::remove_xattr(StringView)
+{
+    return Error::from_errno(file_system().is_read_only() ? EROFS : ENOTSUP);
+}
+
+ErrorOr<Vector<String>> Inode::list_xattrs()
+{
+    return Error::from_errno(ENOTSUP);
+}
+
+ErrorOr<Vector<vulture_acl_entry>> Inode::acl()
+{
+    return Vector<vulture_acl_entry> {};
+}
+
+ErrorOr<void> Inode::set_acl(Span<vulture_acl_entry const>)
+{
+    return Error::from_errno(file_system().is_read_only() ? EROFS : ENOTSUP);
+}
+
+ErrorOr<void> Inode::check_flags_allow_change(bool appending) const
+{
+    auto const flags = metadata().flags;
+    if (flags & (UF_IMMUTABLE | SF_IMMUTABLE))
+        return Error::from_errno(EPERM);
+    if (!appending && (flags & (UF_APPEND | SF_APPEND)))
+        return Error::from_errno(EPERM);
+    return {};
+}
+
+ErrorOr<void> Inode::set_flags(u32)
 {
     return Error::from_errno(file_system().is_read_only() ? EROFS : ENOTSUP);
 }

@@ -75,8 +75,8 @@ vulture_add_part(host TOOLCHAIN host)
 # (The kernel needs a host tool for the key the system is sealed with.)
 vulture_add_part(target TOOLCHAIN vulture-${VULTURE_ARCH} INSTALL_DIR ${VULTURE_ESP_DIR} DEPENDS host)
 vulture_add_part(uefi TOOLCHAIN vulture-uefi-${VULTURE_ARCH} INSTALL_DIR ${VULTURE_ESP_DIR})
-# Programs install into the root filesystem staging tree, which is packed
-# into the boot archive the kernel mounts as /.
+# Programs install into the root filesystem staging tree, from which the
+# system image the kernel mounts as / is made.
 set(VULTURE_ROOT_DIR ${CMAKE_BINARY_DIR}/root)
 # It needs the host's ipcc for its IPC endpoints.
 vulture_add_part(userland TOOLCHAIN vulture-${VULTURE_ARCH} INSTALL_DIR ${VULTURE_ROOT_DIR} DEPENDS host)
@@ -90,6 +90,7 @@ add_custom_target(boot-archive ALL
     COMMAND ${CMAKE_COMMAND}
         -DTOOL=${CMAKE_BINARY_DIR}/host/Tools/mkarchive/mkarchive
         -DROOT=${VULTURE_ROOT_DIR}
+        -DMKVFS=${CMAKE_BINARY_DIR}/host/Tools/vfs/mkvfs
         -DSEAL_TOOL=${CMAKE_BINARY_DIR}/host/Tools/vseal/vseal
         -DSEAL_KEY=${CMAKE_BINARY_DIR}/signing/system.key
         -DOUTPUT=${VULTURE_ESP_DIR}/System/Library/Kernels/vulture.bootarchive
@@ -304,6 +305,13 @@ add_custom_target(test-oracle
     USES_TERMINAL
     VERBATIM)
 
+# What a data volume does that takes the disk from outside to see.
+add_custom_target(test-volume
+    COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-volume ${CMAKE_SOURCE_DIR}/Meta/volume-test.sh --build-dir ${CMAKE_BINARY_DIR}
+    DEPENDS host uefi target boot-archive
+    USES_TERMINAL
+    VERBATIM)
+
 # The test harness itself: reboots, hot-plugging, fingers, displays, things running on this machine, and a walkthrough
 # that finds everything by what it says.
 add_custom_target(test-harness
@@ -326,7 +334,7 @@ add_custom_target(parity
     USES_TERMINAL
     VERBATIM)
 
-add_custom_target(check DEPENDS test-disk-log test-oracle test-harness test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-sound test-network test-hardening test-compressor test-hardware test-raspberry-pi test-sanitized-kernel test-ui test-persistence)
+add_custom_target(check DEPENDS test-volume test-disk-log test-oracle test-harness test-host test-boot test-panic test-kernel test-userland test-login test-keyboard test-desktop-boot test-debug-boot test-sound test-network test-hardening test-compressor test-hardware test-raspberry-pi test-sanitized-kernel test-ui test-persistence)
 
 # M5's "done when": 100 power cuts at random moments while writing; each
 # must leave a disk that passes fsck and remounts with every committed

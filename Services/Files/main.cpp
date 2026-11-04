@@ -101,28 +101,35 @@ Vector<FileItem> list_folder(StringView path, bool show_hidden = false)
 {
     Vector<FileItem> items;
     auto terminated = MUST(String::from_view(path));
-    DIR* directory = opendir(terminated.characters());
-    if (!directory)
-        return items;
-    while (auto* entry = readdir(directory)) {
-        StringView name { entry->d_name, strlen(entry->d_name) };
-        if (name == "."_sv || name == ".."_sv)
-            continue;
-        if (!show_hidden && name.starts_with('.'))
-            continue;
-        FileItem item;
-        item.name = MUST(String::from_view(name));
-        item.path = joined(path, name);
-        struct stat info;
-        if (stat(item.path.characters(), &info) == 0) {
-            item.is_directory = S_ISDIR(info.st_mode);
-            item.size = static_cast<u64>(info.st_size);
-            item.modified = static_cast<i64>(info.st_mtime);
+    auto const add_from = [&](StringView folder) {
+        auto const folder_name = MUST(String::from_view(folder));
+        DIR* directory = opendir(folder_name.characters());
+        if (!directory)
+            return;
+        while (auto* entry = readdir(directory)) {
+            StringView name { entry->d_name, strlen(entry->d_name) };
+            if (name == "."_sv || name == ".."_sv)
+                continue;
+            if (!show_hidden && name.starts_with('.'))
+                continue;
+            FileItem item;
+            item.name = MUST(String::from_view(name));
+            item.path = joined(folder, name);
+            struct stat info;
+            if (stat(item.path.characters(), &info) == 0) {
+                item.is_directory = S_ISDIR(info.st_mode);
+                item.size = static_cast<u64>(info.st_size);
+                item.modified = static_cast<i64>(info.st_mtime);
+            }
+            item.icon = Desktop::icon_name_for_path(item.path.view());
+            items.append(move(item));
         }
-        item.icon = Desktop::icon_name_for_path(item.path.view());
-        items.append(move(item));
-    }
-    closedir(directory);
+        closedir(directory);
+    };
+    add_from(terminated.view());
+    // As in a Mac's Finder, the applications that came with the system are among the others, wherever they really are.
+    if (path == "/Applications"_sv)
+        add_from("/System/Applications"_sv);
     for (size_t i = 1; i < items.size(); ++i) {
         for (size_t j = i; j > 0 && sorts_before(items[j].name.view(), items[j - 1].name.view()); --j) {
             auto moved = move(items[j]);

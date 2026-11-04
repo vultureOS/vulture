@@ -11,25 +11,22 @@
 #include <LibBase/Vector.h>
 #include <LibCrypto/Curve25519.h>
 #include <LibCrypto/SHA2.h>
+#include <LibVultureFS/Sealed.h>
 
 // vseal key DIRECTORY HEADER
 //     The system's signing key, made in DIRECTORY if it isn't there yet, and its public half as a C++
 //     header, for the kernel. (A build that matters keeps that key somewhere safer than a build
 //     directory, and passes the directory by VULTURE_SIGNING_DIR.)
 //
-// vseal seal ARCHIVE KEYFILE MANIFEST SIGNATURE
-//     What the kernel checks the system against: for each thing under the sealed parts of the boot
-//     archive, a line of what it is; and an Ed25519 signature of that (see Kernel/Security/Seal.h).
+// vseal list ARCHIVE MANIFEST
+//     What the system's programs and libraries are, by their hashes: what may run, wherever a copy of it is.
 //
-//     seal 1
-//     d 0755 System                     a directory, with nothing in it but what is listed
-//     f 0644 SIZE SHA256 etc/ssl/cert.pem   a file
-//     x 0755 SIZE SHA256 bin/ls         the same, for a program or library: this is also what
-//                                       may run, wherever a copy of it is
-//     l SHA256 usr/x                    a symbolic link, by the hash of its target
-//     o usr/local                       a directory left open, inside a sealed one
+//     seal 2
+//     x SHA256 bin/ls
 //
-// Whatever is sealed, nobody can change while the system runs, root included.
+// vseal seal VOLUME KEYFILE IMAGE
+//     A system image, from a volume made by mkvfs: a hash of each of its blocks, and an Ed25519 signature
+//     of those (see LibVultureFS/Sealed.h, and Kernel/Security/Seal.h).
 
 extern "C" {
 struct FILE;
@@ -134,82 +131,73 @@ int make_key(char const* directory, char const* header_path)
     return 0;
 }
 
-// Sealed: these, whole. (Applications is open, for what gets installed; what the system came with
-// in it is sealed, one application at a time.)
-bool is_sealed_path(StringView path)
-{
-    auto is_under = [&](StringView root) {
-        return path == root || (path.starts_with(root) && path.length() > root.length() && path[root.length()] == '/');
-    };
-    if (is_under("usr/local"_sv))
-        return false;
-    if (path.starts_with("Applications/"_sv))
-        return true;
-    return is_under("System"_sv) || is_under("bin"_sv) || is_under("sbin"_sv) || is_under("usr"_sv) || is_under("etc/ssl"_sv);
-}
-
-int make_seal(char const* archive_path, char const* key_path, char const* manifest_path, char const* signature_path)
+int make_list(char const* archive_path, char const* manifest_path)
 {
     Vector<u8> archive;
     if (!read_file(archive_path, archive))
         return fail("can't read {}", StringView { archive_path });
-    Vector<u8> seed;
-    if (!read_file(key_path, seed) || seed.size() != Crypto::ed25519_seed_size)
-        return fail("{} is not a key", StringView { key_path });
     auto reader = Archive::TarReader::parse(archive.span());
     if (reader.is_error())
         return fail("{} is not an archive", StringView { archive_path });
 
     StringBuilder manifest;
-    manifest.append("seal 1\n"_sv);
-    // What holds the seal is sealed too, as a directory; it can't list itself.
-    manifest.append("d 0755 System/Library/Seal\n"_sv);
-    size_t count = 0;
+    manifest.append("seal 2\n"_sv);
     auto result = reader.value().for_each_entry([&](Archive::TarEntry const& entry) {
-        if (entry.path == "usr/local"_sv) {
-            manifest.append("o usr/local\n"_sv);
+        if (entry.type != Archive::TarEntryType::File)
             return Archive::IterationDecision::Continue;
-        }
-        if (!is_sealed_path(entry.path) || entry.path.starts_with("System/Library/Seal"_sv))
-            return Archive::IterationDecision::Continue;
-        ++count;
-        u32 const mode = entry.mode & 07777;
-        switch (entry.type) {
-        case Archive::TarEntryType::Directory:
-            manifest.appendff("d {:04o} {}\n", mode, entry.path);
-            break;
-        case Archive::TarEntryType::File: {
+        bool const is_code = entry.data.size() >= 4 && entry.data[0] == 0x7f && entry.data[1] == 'E' && entry.data[2] == 'L' && entry.data[3] == 'F';
+        if (is_code) {
             auto const digest = Crypto::SHA256::hash(entry.data);
-            bool const is_code = entry.data.size() >= 4 && entry.data[0] == 0x7f && entry.data[1] == 'E' && entry.data[2] == 'L' && entry.data[3] == 'F';
-            manifest.appendff("{} {:04o} {} ", is_code ? "x"_sv : "f"_sv, mode, entry.data.size());
+            manifest.append("x "_sv);
             append_hex(manifest, digest.span());
             manifest.appendff(" {}\n", entry.path);
-            break;
-        }
-        case Archive::TarEntryType::SymbolicLink: {
-            auto const digest = Crypto::SHA256::hash({ reinterpret_cast<u8 const*>(entry.link_target.characters_without_null_termination()), entry.link_target.length() });
-            manifest.append("l "_sv);
-            append_hex(manifest, digest.span());
-            manifest.appendff(" {}\n", entry.path);
-            break;
-        }
-        case Archive::TarEntryType::Other:
-            break;
         }
         return Archive::IterationDecision::Continue;
     });
     if (result.is_error())
         return fail("can't go through {}", StringView { archive_path });
-
     auto const text = manifest.view();
-    ReadonlyBytes const bytes { reinterpret_cast<u8 const*>(text.characters_without_null_termination()), text.length() };
-    u8 signature[Crypto::ed25519_signature_size];
-    Crypto::ed25519_sign(seed.data(), bytes, signature);
-    if (!write_file(manifest_path, bytes))
+    if (!write_file(manifest_path, { reinterpret_cast<u8 const*>(text.characters_without_null_termination()), text.length() }))
         return fail("can't write {}", StringView { manifest_path });
-    if (!write_file(signature_path, { signature, sizeof(signature) }))
-        return fail("can't write {}", StringView { signature_path });
     return 0;
+}
+
+int make_image(char const* volume_path, char const* key_path, char const* image_path)
+{
+    Vector<u8> volume;
+    if (!read_file(volume_path, volume) || volume.size() == 0 || volume.size() % VultureFS::block_size != 0)
+        return fail("{} isn't a volume", StringView { volume_path });
+    Vector<u8> seed;
+    if (!read_file(key_path, seed) || seed.size() != Crypto::ed25519_seed_size)
+        return fail("{} is not a key", StringView { key_path });
+
+    u64 const volume_blocks = volume.size() / VultureFS::block_size;
+    u64 const hash_blocks = VultureFS::seal_hash_blocks(volume_blocks);
+    Vector<u8> hashes;
+    MUST(hashes.try_resize(hash_blocks * VultureFS::block_size));
+    __builtin_memset(hashes.data(), 0, hashes.size());
+    for (u64 block = 0; block < volume_blocks; ++block) {
+        auto const digest = Crypto::SHA256::hash({ volume.data() + block * VultureFS::block_size, VultureFS::block_size });
+        __builtin_memcpy(hashes.data() + block * VultureFS::seal_hash_size, digest.data(), VultureFS::seal_hash_size);
+    }
+
+    u8 block[VultureFS::block_size] {};
+    auto* header = reinterpret_cast<VultureFS::SealHeader*>(block);
+    __builtin_memcpy(header->magic, VultureFS::seal_magic, sizeof(header->magic));
+    header->volume_blocks = volume_blocks;
+    header->hash_blocks = hash_blocks;
+    auto const of_hashes = Crypto::SHA256::hash(hashes.span());
+    __builtin_memcpy(header->hash_of_hashes, of_hashes.data(), sizeof(header->hash_of_hashes));
+    Crypto::ed25519_sign(seed.data(), { block, VultureFS::seal_signed_size() }, header->signature);
+
+    FILE* image = fopen(image_path, "wb");
+    if (!image)
+        return fail("can't write {}", StringView { image_path });
+    bool const written = fwrite(block, 1, sizeof(block), image) == sizeof(block)
+        && fwrite(hashes.data(), 1, hashes.size(), image) == hashes.size()
+        && fwrite(volume.data(), 1, volume.size(), image) == volume.size();
+    fclose(image);
+    return written ? 0 : fail("can't write {}", StringView { image_path });
 }
 
 }
@@ -218,7 +206,9 @@ int main(int argc, char** argv)
 {
     if (argc == 4 && StringView { argv[1] } == "key"_sv)
         return make_key(argv[2], argv[3]);
-    if (argc == 6 && StringView { argv[1] } == "seal"_sv)
-        return make_seal(argv[2], argv[3], argv[4], argv[5]);
-    return fail("usage: vseal key DIRECTORY HEADER | vseal seal ARCHIVE KEYFILE MANIFEST SIGNATURE");
+    if (argc == 4 && StringView { argv[1] } == "list"_sv)
+        return make_list(argv[2], argv[3]);
+    if (argc == 5 && StringView { argv[1] } == "seal"_sv)
+        return make_image(argv[2], argv[3], argv[4]);
+    return fail("usage: vseal key DIRECTORY HEADER | vseal list ARCHIVE MANIFEST | vseal seal VOLUME KEYFILE IMAGE");
 }

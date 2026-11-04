@@ -50,6 +50,8 @@ static void to_stat(vulture_stat const& source, struct stat* destination)
     destination->st_blksize = source.st_blksize;
     destination->st_blocks = source.st_blocks;
     destination->st_rdev = source.st_rdev;
+    destination->st_flags = source.st_flags;
+    destination->st_gen = source.st_gen;
     destination->st_atim = { source.st_atime_seconds, source.st_atime_nanoseconds };
     destination->st_mtim = { source.st_mtime_seconds, source.st_mtime_nanoseconds };
     destination->st_ctim = { source.st_ctime_seconds, source.st_ctime_nanoseconds };
@@ -146,6 +148,11 @@ ssize_t pwrite(int fd, void const* buffer, size_t count, off_t offset)
 ssize_t write(int fd, void const* buffer, size_t count)
 {
     return check<ssize_t>(call(Syscall::write, fd, buffer, count));
+}
+
+int creat(char const* path, mode_t mode)
+{
+    return open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
 }
 
 int open(char const* path, int flags, ...)

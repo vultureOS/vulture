@@ -38,7 +38,8 @@
 #include <Kernel/Devices/Storage/BlockDevice.h>
 #include <Kernel/Devices/Storage/StorageControllers.h>
 #include <Kernel/FileSystem/IOBuffer.h>
-#include <Kernel/FileSystem/BootArchive.h>
+#include <Kernel/FileSystem/DataVolume.h>
+#include <Kernel/FileSystem/FSEvents.h>
 #include <Kernel/FileSystem/DevFS.h>
 #include <Kernel/Debug/DiskLog.h>
 #include <Kernel/FileSystem/FATFS.h>
@@ -248,34 +249,79 @@ static bool is_system_for_this_machine(FileSystem& file_system)
     return read.value() >= name.length() && StringView(text, name.length()) == name;
 }
 
-// The root filesystem: the first vultureFS partition that mounts, or, with
-// none, a tmpfs filled from the boot archive (everything then lives in
-// memory and is gone at power off).
-static bool mount_root_file_system(API::BootInfo const& boot_info)
+// The root: the first system on a disk that's for this machine and signed by the key this kernel knows; or, with no
+// disk that has one, the image the loader brought in, which stays where it is in memory. A disk that has one
+// that isn't as signed, and nothing else to go on, stops the system: the point is not to start what can't
+// be vouched for. What comes with that is `s_data_device`, the partition after it for its data.
+static RefPtr<BlockDevice> s_data_device;
+
+static bool mount_root_file_system(API::BootInfo const& boot_info, bool checking)
 {
-    for (auto& device : BlockDevice::all()) {
-        if (!is_vulturefs_partition(*device))
+    int refused_by = 0;
+    auto& devices = BlockDevice::all();
+    for (size_t i = 0; i < devices.size(); ++i) {
+        auto& device = *devices[i];
+        if (!is_system_partition(device))
             continue;
-        auto file_system = mount_vulturefs(*device);
+        auto sealed = Seal::open_system_image(device, checking);
+        if (sealed.is_error()) {
+            dmesgln("Root: {} has no system on it that may start: {}", device.name(), sealed.error());
+            if (sealed.error().code() == EPERM || sealed.error().code() == EIO)
+                refused_by = sealed.error().code();
+            continue;
+        }
+        auto file_system = mount_vulturefs(*sealed.value());
         if (file_system.is_error()) {
-            dmesgln("Root: cannot mount {}: {}", device->name(), file_system.error());
+            dmesgln("Root: cannot mount {}: {}", device.name(), file_system.error());
             continue;
         }
         if (!is_system_for_this_machine(*file_system.value())) {
-            dmesgln("Root: {} is for another kind of machine", device->name());
+            dmesgln("Root: {} is for another kind of machine", device.name());
             continue;
         }
         VirtualFileSystem::mount_root(file_system.release_value());
-        dmesgln("Root: vultureFS on {}", device->name());
+        dmesgln("Root: vultureFS on {}", device.name());
+        for (size_t next = i + 1; next < devices.size() && !is_system_partition(*devices[next]); ++next) {
+            if (is_data_partition(*devices[next])) {
+                s_data_device = devices[next];
+                break;
+            }
+        }
         return true;
     }
-    VirtualFileSystem::mount_root(must("root filesystem"_sv, TmpFS::create()));
+    if (refused_by == EPERM)
+        Seal::broken("it isn't signed by this system's key"_sv);
+    if (refused_by == EIO)
+        Seal::broken("it isn't what was signed"_sv);
+
     if (boot_info.boot_archive.size == 0)
         return false;
-    ReadonlyBytes archive { physical_to_virtual(PhysicalAddress(boot_info.boot_archive.base)), boot_info.boot_archive.size };
-    auto unpacked = must("unpacking the boot archive"_sv, unpack_boot_archive(archive));
-    dmesgln("Root: tmpfs with {} files ({} KiB) and {} directories from the boot archive", unpacked.files, unpacked.bytes / KiB, unpacked.directories);
+    ReadonlyBytes const image { physical_to_virtual(PhysicalAddress(boot_info.boot_archive.base)), boot_info.boot_archive.size };
+    auto memory = must("the system in memory"_sv, create_memory_block_device(must("the system in memory"_sv, String::from_view("ram0"_sv)), image));
+    auto sealed = Seal::open_system_image(*memory, checking);
+    if (sealed.is_error()) {
+        dmesgln("Root: the system in memory: {}", sealed.error());
+        Seal::broken("it isn't what was signed"_sv);
+    }
+    VirtualFileSystem::mount_root(must("the system in memory"_sv, mount_vulturefs(*sealed.value())));
+    dmesgln("Root: vultureFS in memory, {} MiB", image.size() / MiB);
     return true;
+}
+
+// What changes goes on the partition for it, or, with none, in memory: so it's gone at power off.
+static void attach_data_volume()
+{
+    if (s_data_device) {
+        auto file_system = mount_vulturefs(*s_data_device);
+        if (!file_system.is_error()) {
+            must("the data volume"_sv, DataVolume::attach(file_system.release_value()));
+            FSEvents::use_volume(VirtualFileSystem::resolve("/System/Volumes/Data"_sv, "/"_sv).value().inode->file_system());
+            return;
+        }
+        dmesgln("Data: cannot mount {}: {}", s_data_device->name(), file_system.error());
+    }
+    must("the data volume"_sv, DataVolume::attach(must("the data volume"_sv, TmpFS::create())));
+    FSEvents::use_volume(VirtualFileSystem::resolve("/System/Volumes/Data"_sv, "/"_sv).value().inode->file_system());
 }
 
 // Every few seconds, everything changed is written and committed, so a
@@ -291,8 +337,8 @@ static void start_sync_thread()
     thread->start();
 }
 
-// Builds the file tree (the root, devfs at /dev, a fresh tmpfs at /tmp,
-// FAT volumes under /Volumes), then starts /sbin/vlaunchd as process 1.
+// Builds the file tree (the root, devfs at /dev, the data volume and all that
+// shows it, FAT volumes under /Volumes), then starts /sbin/vlaunchd as process 1.
 static void start_userland(API::BootInfo const& boot_info, BootArguments const& arguments)
 {
     // devfs comes first: disks add themselves to it as they are found.
@@ -309,21 +355,18 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     initialize_storage();
     // Keyboards, and also disks: so after those on the machine, and before looking for a root.
     USB::initialize();
-    if (!mount_root_file_system(boot_info)) {
-        dmesgln("Userland: no root disk and no boot archive, so no init");
+    bool const sealed = !arguments.has_flag("noseal"_sv);
+    if (!mount_root_file_system(boot_info, sealed)) {
+        dmesgln("Userland: no system on a disk and none in memory, so no init");
         return;
     }
-    make_directory("/dev"_sv);
-    make_directory("/tmp"_sv);
     must("devfs"_sv, VirtualFileSystem::mount(move(devices), "/dev"_sv));
+    must("fsevents"_sv, FSEvents::create_device());
+    attach_data_volume();
     mount_volumes();
     DiskLog::start();
-    Seal::initialize(!arguments.has_flag("noseal"_sv));
+    Seal::initialize(VirtualFileSystem::resolve("/"_sv, "/"_sv).value().inode->file_system(), sealed);
     CodeSigning::initialize(!arguments.has_flag("nocodesign"_sv));
-    auto temporary = must("tmpfs"_sv, TmpFS::create());
-    // Anyone may make files in /tmp; only their owners may remove them.
-    must("/tmp"_sv, temporary->root_inode()->set_permissions(01777));
-    must("/tmp"_sv, VirtualFileSystem::mount(move(temporary), "/tmp"_sv));
     start_sync_thread();
 
     // The boot screen gives way to the text console, /dev/console's screen.

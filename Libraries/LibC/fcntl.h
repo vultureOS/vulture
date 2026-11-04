@@ -15,5 +15,6 @@ __BEGIN_DECLS
 int open(char const* path, int flags, ...);
 int openat(int directory, char const* path, int flags, ...);
 int fcntl(int fd, int command, ...);
+int creat(char const* path, mode_t mode);
 
 __END_DECLS

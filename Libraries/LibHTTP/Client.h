@@ -49,7 +49,7 @@ struct Options {
     // Skip checking the server's certificate ("curl -k").
     bool insecure { false };
     // Where the roots we trust are.
-    StringView certificates_file { "/etc/ssl/cert.pem"_sv };
+    StringView certificates_file { "/System/Library/Security/cert.pem"_sv };
     // For the whole of it: nothing, for no limit.
     u32 timeout_seconds { 0 };
     u32 connect_timeout_seconds { 30 };

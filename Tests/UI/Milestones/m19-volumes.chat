@@ -1,0 +1,31 @@
+# M19: the system on a volume of its own and everything else on another, with Files and the Terminal none the wiser.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 1
+# ---- Applications holds what came with the system, and what's been installed, side by side.
+click button "Files"
+pause 1
+click row "Applications"
+pause 1
+ax-expect cell "Calculator.app"
+ax-expect cell "Terminal.app"
+key meta_l-q
+pause 0.5
+# ---- A copy that takes no room, with something attached to it, and a place that can't be written to.
+click button "Terminal"
+expect terminal: ready
+ax-expect textarea "Terminal"
+pause 1
+type cd ; echo notes > m19.txt ; cp -c m19.txt m19-copy.txt ; xattr -w org.example.tag work m19-copy.txt ; xattr -l m19-copy.txt ; ls -l@ m19-copy.txt | tail -n 1\r
+ax-expect textarea "Terminal" ~ org.example.tag: work
+type chflags uchg m19-copy.txt ; rm -f m19-copy.txt ; echo rm-said-$? ; chflags nouchg m19-copy.txt ; rm m19-copy.txt m19.txt\r
+ax-expect textarea "Terminal" ~ rm-said-1
+type touch /System/m19 ; echo touch-said-$?\r
+ax-expect textarea "Terminal" ~ Read-only file system
+ax-expect textarea "Terminal" ~ touch-said-1
+type ls -ld /tmp ; df | tail -n +2 | wc -l\r
+ax-expect textarea "Terminal" ~ /tmp -> private/tmp
+key meta_l-q
+ax-gone textarea "Terminal"

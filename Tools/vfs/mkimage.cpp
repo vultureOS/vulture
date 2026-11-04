@@ -9,15 +9,15 @@
 #include "Populate.h"
 #include <LibVultureFS/Volume.h>
 
-// mkimage OUTPUT SIZE_MIB ESP_DIRECTORY ARCHIVE[+ARCHIVE] [FILE...]
+// mkimage OUTPUT SIZE_MIB ESP_DIRECTORY SYSTEM_IMAGE[+SYSTEM_IMAGE] [FILE...]
 //
 // A whole bootable disk, as a real machine has: a GPT with an EFI System
 // Partition (FAT32, holding the FILEs, paths relative to ESP_DIRECTORY:
-// the loader and the kernel) and a vultureFS partition filling the rest,
-// holding the files of the boot archive. The firmware boots it with no
-// other disk attached.
+// the loader and the kernel), a partition with the system image on it, and
+// its data volume filling the rest. The firmware boots it with no other disk
+// attached.
 //
-// With more than one archive, a partition each, for a disk that boots more
+// With more than one system, two partitions for each, for a disk that boots more
 // than one kind of machine: the rest is shared equally, and the kernel finds
 // its own by what's in System/Library/CoreServices/Architecture.
 //
@@ -45,7 +45,7 @@ int fail(CheckedFormatString<Base::TypeIdentity<Args>...> format, Args const&...
 int main(int argc, char** argv)
 {
     if (argc < 5)
-        return fail("usage: mkimage OUTPUT SIZE_MIB ESP_DIRECTORY ARCHIVE[+ARCHIVE] [FILE...]");
+        return fail("usage: mkimage OUTPUT SIZE_MIB ESP_DIRECTORY SYSTEM_IMAGE[+SYSTEM_IMAGE] [FILE...]");
     char const* output = argv[1];
     auto size_mib = StringView(argv[2]).to_number<u64>();
     if (!size_mib.has_value() || size_mib.value() < 512)
@@ -68,7 +68,7 @@ int main(int argc, char** argv)
             return fail("cannot read {}: {}", StringView(argv[4]), reading.error());
     }
     if (archives.is_empty() || archives.size() > 2)
-        return fail("one archive, or two");
+        return fail("one system, or two");
 
     Vector<Tools::FATFile> files;
     u64 esp_bytes = 0;
@@ -91,15 +91,31 @@ int main(int argc, char** argv)
     if (!image)
         return fail("cannot create {}", StringView(output));
     u64 size = size_mib.value() * MiB;
-    u64 data_first = Tools::partition_start_sector + esp_sectors;
-    u64 const data_total = Tools::last_usable_sector(size) - data_first + 1;
-    u64 const data_each = (data_total / archives.size() / 8) * 8;
-    Tools::PartitionSpec partitions[3] = {
-        { Tools::efi_system_partition_type, "EFI System Partition"_sv, Tools::partition_start_sector, esp_sectors },
-        { VultureFS::partition_type, "vultureOS"_sv, data_first, data_each },
-        { VultureFS::partition_type, "vultureOS"_sv, data_first + data_each, data_each },
+    u64 const first_after_esp = Tools::partition_start_sector + esp_sectors;
+    u64 const total_after_esp = Tools::last_usable_sector(size) - first_after_esp + 1;
+    u64 const sectors_each = (total_after_esp / archives.size() / 8) * 8;
+    struct Pair {
+        u64 system_first;
+        u64 system_count;
+        u64 data_first;
+        u64 data_count;
     };
-    ErrorOr<void> result = Tools::write_partition_table(image, size, Span<Tools::PartitionSpec const>(partitions, 1 + archives.size()));
+    Pair pairs[2] {};
+    Tools::PartitionSpec partitions[5] = {
+        { Tools::efi_system_partition_type, "EFI System Partition"_sv, Tools::partition_start_sector, esp_sectors },
+    };
+    for (size_t i = 0; i < archives.size(); ++i) {
+        auto system_sectors = Tools::system_partition_sectors(archives[i].size(), sectors_each);
+        if (system_sectors.is_error()) {
+            fclose(image);
+            return fail("{}", system_sectors.error());
+        }
+        u64 const first = first_after_esp + i * sectors_each;
+        pairs[i] = { first, system_sectors.value(), first + system_sectors.value(), sectors_each - system_sectors.value() };
+        partitions[1 + 2 * i] = { VultureFS::system_partition_type, Tools::system_volume_name, pairs[i].system_first, pairs[i].system_count };
+        partitions[2 + 2 * i] = { VultureFS::data_partition_type, Tools::data_volume_name, pairs[i].data_first, pairs[i].data_count };
+    }
+    ErrorOr<void> result = Tools::write_partition_table(image, size, Span<Tools::PartitionSpec const>(partitions, 1 + 2 * archives.size()));
     for (auto const& file : files) {
         if (!result.is_error() && file.path.view() == "kernel8.img"_sv)
             result = Tools::add_partition_to_mbr(image, Tools::partition_start_sector, esp_sectors);
@@ -111,28 +127,19 @@ int main(int argc, char** argv)
         return fail("{}", result.error());
     }
 
-    Tools::PopulateCounts counts;
+    u64 system_bytes = 0;
     for (size_t i = 0; i < archives.size(); ++i) {
-        Tools::ImageStore store(image, (data_first + i * data_each) * Tools::sector_size, data_each * Tools::sector_size / block_size);
-        u8 uuid[16];
-        Tools::random_bytes(uuid);
-        auto volume = Volume::format(store, "Vulture HD"_sv, uuid, Tools::host_clock);
-        if (volume.is_error()) {
-            fclose(image);
-            return fail("cannot format: {}", volume.error());
-        }
-        result = Tools::make_skeleton(*volume.value(), counts);
+        result = Tools::write_system(image, pairs[i].system_first, pairs[i].system_count, { archives[i].begin(), archives[i].size() });
         if (!result.is_error())
-            result = Tools::add_archive(*volume.value(), { archives[i].begin(), archives[i].size() }, counts);
-        if (!result.is_error())
-            result = volume.value()->checkpoint();
+            result = Tools::format_data(image, pairs[i].data_first, pairs[i].data_count, Tools::data_volume_name);
         if (result.is_error()) {
             fclose(image);
-            return fail("cannot write the volume: {}", result.error());
+            return fail("cannot write the volumes: {}", result.error());
         }
+        system_bytes += archives[i].size();
     }
     fclose(image);
-    Tools::print("mkimage: {}: {} MiB; EFI System Partition: {} files ({} KiB); vultureFS: {} files ({} KiB), {} directories\n",
-        StringView(output), size_mib.value(), files.size(), esp_bytes / 1024, counts.files, counts.bytes / 1024, counts.directories);
+    Tools::print("mkimage: {}: {} MiB; EFI System Partition: {} files ({} KiB); system: {} KiB\n",
+        StringView(output), size_mib.value(), files.size(), esp_bytes / 1024, system_bytes / 1024);
     return 0;
 }

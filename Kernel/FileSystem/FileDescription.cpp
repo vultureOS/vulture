@@ -5,6 +5,8 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/FileSystem/FSEvents.h>
+#include <Kernel/Time/Time.h>
 #include <Kernel/FileSystem/FileDescription.h>
 #include <Kernel/IPC/Port.h>
 #include <Kernel/FileSystem/FileSystem.h>
@@ -115,6 +117,8 @@ FileDescription::~FileDescription()
         Pipe::forget_fifo_if_unused(*m_inode, *m_pipe);
         return;
     }
+    if (m_inode && m_written_unreported && !m_path.is_empty())
+        FSEvents::record(*m_inode, m_path.view(), FSE_ITEM_MODIFIED);
     if (m_inode)
         m_inode->description_closed();
     if (m_pipe)
@@ -271,7 +275,23 @@ ErrorOr<size_t> FileDescription::write(IOBuffer const& buffer, size_t count)
         m_offset = m_inode->metadata().size;
     size_t done = TRY(m_inode->write(m_offset, count, buffer));
     m_offset += done;
+    note_written();
     return done;
+}
+
+void FileDescription::note_written()
+{
+    if (m_path.is_empty() || !m_inode)
+        return;
+    // Once to begin with, then no more than once a second: and when it's closed, so the last word is always heard.
+    u64 const now = Time::now();
+    if (m_last_written_event && now - m_last_written_event < Time::ticks_from_milliseconds(1000)) {
+        m_written_unreported = true;
+        return;
+    }
+    m_last_written_event = now;
+    m_written_unreported = false;
+    FSEvents::record(*m_inode, m_path.view(), FSE_ITEM_MODIFIED);
 }
 
 ErrorOr<size_t> FileDescription::read_at(IOBuffer const& buffer, size_t count, u64 offset)
@@ -294,7 +314,9 @@ ErrorOr<size_t> FileDescription::write_at(IOBuffer const& buffer, size_t count, 
         return Error::from_errno(EBADF);
     if (m_pipe || m_port || m_socket || m_local_socket || m_kqueue || m_inode->metadata().type == InodeType::CharacterDevice)
         return Error::from_errno(ESPIPE);
-    return m_inode->write(offset, count, buffer);
+    size_t const done = TRY(m_inode->write(offset, count, buffer));
+    note_written();
+    return done;
 }
 
 ErrorOr<i64> FileDescription::seek(i64 offset, int origin)

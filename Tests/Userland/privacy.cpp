@@ -27,6 +27,8 @@ namespace {
 
 constexpr char const* private_file = "/Users/privacy-test/Documents/file";
 constexpr char const* copy_path = "/tmp/privacy-test-app";
+// Which is where /tmp really is.
+constexpr char const* copy_real_path = "/private/tmp/privacy-test-app";
 
 // Being the application. Exits with: 0 it could read it, 1 EPERM, 2 anything else.
 int as_application(char const* what)
@@ -163,7 +165,7 @@ int main(int argc, char** argv)
     pid_t application = start(copy_path, "--twice", private_file);
     vulture_privacy_request request {};
     CHECK(next_question(device, request));
-    CHECK(strcmp(request.application, copy_path) == 0);
+    CHECK(strcmp(request.application, copy_real_path) == 0);
     CHECK(request.service == VULTURE_PRIVACY_DOCUMENTS);
     CHECK(request.pid == application);
     answer(device, request, false);
@@ -187,7 +189,7 @@ int main(int argc, char** argv)
     // application, and that's who is asking.
     application = start(copy_path, "--exec-cat", private_file);
     CHECK(next_question(device, request));
-    CHECK(strcmp(request.application, copy_path) == 0);
+    CHECK(strcmp(request.application, copy_real_path) == 0);
     answer(device, request, false);
     CHECK(wait_for(application) == 1);
 

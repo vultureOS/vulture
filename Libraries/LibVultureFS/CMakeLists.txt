@@ -9,4 +9,6 @@ add_library(LibVultureFS STATIC
     Allocator.cpp
     BTree.cpp
     Check.cpp
+    Names.cpp
     Volume.cpp)
+target_link_libraries(LibVultureFS PUBLIC LibCompress LibUnicode)

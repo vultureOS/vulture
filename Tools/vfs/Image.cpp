@@ -231,29 +231,13 @@ ErrorOr<void> add_partition_to_mbr(FILE* file, u64 first_sector, u64 sector_coun
     return {};
 }
 
-ErrorOr<Partition> create_disk_image(FILE* file, u64 size, StringView partition_name)
+ErrorOr<Vector<Partition>> find_partitions(FILE* file, u8 const* type)
 {
-    if (size / sector_size < partition_start_sector + 2048)
-        return Error::from_string_literal("disk image too small");
-    // Whole 4 KiB blocks.
-    u64 count = ((last_usable_sector(size) - partition_start_sector + 1) / 8) * 8;
-    PartitionSpec const partitions[] = { { VultureFS::partition_type, partition_name, partition_start_sector, count } };
-    TRY(write_partition_table(file, size, partitions));
-    return Partition { partition_start_sector, count };
-}
-
-ErrorOr<Partition> find_vulturefs_partition(FILE* file)
-{
-    fseek(file, 0, seek_end);
-    long size = ftell(file);
-    if (size < static_cast<long>(4 * sector_size))
-        return Error::from_string_literal("image too small");
     u8 sectors[2 * sector_size];
     if (fseek(file, 0, seek_set) != 0 || fread(sectors, 1, sizeof(sectors), file) != sizeof(sectors))
         return Error::from_errno(EIO);
-    // A bare volume starts with its first superblock (or a zeroed one).
     if (__builtin_memcmp(sectors + sector_size, "EFI PART", 8) != 0)
-        return Partition { 0, static_cast<u64>(size) / sector_size };
+        return Error::from_string_literal("there's no partition table");
 
     GPTHeader header;
     __builtin_memcpy(&header, sectors + sector_size, sizeof(header));
@@ -263,13 +247,14 @@ ErrorOr<Partition> find_vulturefs_partition(FILE* file)
     TRY(table.try_resize(static_cast<size_t>(header.entry_count) * header.entry_size));
     if (fseek(file, static_cast<long>(header.entries_lba * sector_size), seek_set) != 0 || fread(table.begin(), 1, table.size(), file) != table.size())
         return Error::from_errno(EIO);
+    Vector<Partition> found;
     for (u32 i = 0; i < header.entry_count; ++i) {
         GPTEntry entry;
         __builtin_memcpy(&entry, table.begin() + static_cast<size_t>(i) * header.entry_size, sizeof(entry));
-        if (__builtin_memcmp(entry.type, VultureFS::partition_type, 16) == 0 && entry.last_lba >= entry.first_lba)
-            return Partition { entry.first_lba, entry.last_lba - entry.first_lba + 1 };
+        if (__builtin_memcmp(entry.type, type, 16) == 0 && entry.last_lba >= entry.first_lba)
+            TRY(found.try_append(Partition { entry.first_lba, entry.last_lba - entry.first_lba + 1 }));
     }
-    return Error::from_string_literal("no vultureFS partition on the disk");
+    return found;
 }
 
 }

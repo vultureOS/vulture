@@ -72,6 +72,9 @@ private:
     u8 m_type[16];
 };
 
+// Memory, as a disk that can only be read: the system image the loader brought in.
+[[nodiscard]] ErrorOr<NonnullRefPtr<BlockDevice>> create_memory_block_device(String name, ReadonlyBytes);
+
 // Reads the disk's MBR or GPT and registers its partitions.
 ErrorOr<size_t> scan_partitions(BlockDevice&);
 

@@ -36,6 +36,8 @@ public:
 
     static void mount_root(NonnullRefPtr<FileSystem>);
     static ErrorOr<void> mount(NonnullRefPtr<FileSystem>, StringView path);
+    // `directory`, of a file system that's mounted, is also what `path` is: as a Mac's firmlinks are.
+    static ErrorOr<void> firmlink(StringView path, FileSystem&, NonnullRefPtr<Inode> directory);
     [[nodiscard]] static bool has_root();
 
     // `cwd` is the canonical working directory paths start from.
@@ -53,6 +55,8 @@ public:
     static ErrorOr<void> rmdir(StringView path, StringView cwd);
     static ErrorOr<void> rename(StringView old_path, StringView new_path, StringView cwd);
     static ErrorOr<void> symlink(StringView target, StringView link_path, StringView cwd);
+    // A copy of `source` (which is at `source_path`) that shares its blocks.
+    static ErrorOr<NonnullRefPtr<Inode>> clone(Inode& source, StringView source_path, StringView new_path, StringView cwd, u32 uid, u32 gid);
     static ErrorOr<void> link(StringView existing_path, StringView new_path, StringView cwd);
     static ErrorOr<void> sync_all();
     // Memory's short: what's only being kept to save reading it again goes, up to this many pages from all the filesystems. How many.

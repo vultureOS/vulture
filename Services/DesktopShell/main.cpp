@@ -858,7 +858,7 @@ public:
         auto& settings = stack.add<Tile>("Settings…"_sv, Symbol::Sidebar, false);
         settings.set_fixed_height(tile_height);
         settings.on_action = [this] {
-            (void)Desktop::open_path("/Applications/Settings.app"_sv);
+            (void)Desktop::open_path("/System/Applications/Settings.app"_sv);
             m_shown = false;
             m_window->hide();
         };
@@ -916,13 +916,13 @@ public:
     {
         m_system_menu = adopt_own(*new Menu);
         m_system_menu->add("About This Computer"_sv, [] {
-            auto bundle = Desktop::read_bundle("/Applications/Settings.app"_sv);
+            auto bundle = Desktop::read_bundle("/System/Applications/Settings.app"_sv);
             StringView arguments[1] = { "About"_sv };
             if (!bundle.is_error())
                 (void)Desktop::launch(bundle.value(), Span<StringView const>(arguments, 1));
         });
         m_system_menu->add_separator();
-        m_system_menu->add("Settings…"_sv, [] { (void)Desktop::open_path("/Applications/Settings.app"_sv); });
+        m_system_menu->add("Settings…"_sv, [] { (void)Desktop::open_path("/System/Applications/Settings.app"_sv); });
         m_system_menu->add_separator();
         m_system_menu->add("Restart…"_sv, [] { Desktop::restart(); });
         m_system_menu->add("Shut Down…"_sv, [] { Desktop::shut_down(); });

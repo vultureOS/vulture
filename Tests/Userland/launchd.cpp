@@ -206,7 +206,7 @@ int main()
     expect_lines("interval.out", 1, 3);
     expect_lines("stubborn.out", 1, 1);
     CHECK(!file_exists("disabled.out"));
-    CHECK(strcmp(read_file("environment.out"), "hello /tmp/launchd-test /usr/bin:/bin:/usr/sbin:/sbin\n") == 0);
+    CHECK(strcmp(read_file("environment.out"), "hello /private/tmp/launchd-test /usr/bin:/bin:/usr/sbin:/sbin\n") == 0);
     CHECK(strcmp(read_file("user.out"), "vulture\n/Users/vulture\n") == 0);
 
     // KeepAlive started each run anew: different processes.

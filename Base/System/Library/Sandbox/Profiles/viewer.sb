@@ -3,4 +3,4 @@ include application
 read ${HOME}
 read /Users/Shared
 read /Volumes
-read /tmp
+read /private/tmp

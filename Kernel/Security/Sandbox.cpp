@@ -62,7 +62,13 @@ ErrorOr<NonnullRefPtr<SandboxProfile>> SandboxProfile::parse(StringView text, Re
             problem = Error::from_errno(EINVAL);
             return;
         }
-        auto copy = String::from_view(rule);
+        // What it really is: those are links, and the check is of where a path really goes.
+        auto const is_in = [&](StringView top) { return is_at_or_under(rule, top); };
+        StringBuilder real;
+        if (is_in("/tmp"_sv) || is_in("/etc"_sv) || is_in("/var"_sv))
+            real.append("/private"_sv);
+        real.append(rule);
+        auto copy = real.to_string();
         if (copy.is_error() || rules.try_append(copy.release_value()).is_error())
             problem = Error::from_errno(ENOMEM);
     };

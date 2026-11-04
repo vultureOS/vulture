@@ -13,6 +13,7 @@ set(tests
     commands
     copy-on-write
     crypto
+    data-volume
     debugging
     devices
     dynamic
@@ -59,6 +60,7 @@ set(tests
     toolkit
     tools
     usb-disk
+    volume-boots
     volumes
     windows
     # Not in init's test list: the storage crash and persistence tests run it.

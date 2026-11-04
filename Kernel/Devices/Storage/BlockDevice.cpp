@@ -183,6 +183,43 @@ struct [[gnu::packed]] GPTEntry {
 
 }
 
+namespace {
+
+class MemoryBlockDevice final : public BlockDevice {
+public:
+    MemoryBlockDevice(String name, ReadonlyBytes bytes)
+        : BlockDevice(move(name), bytes.size() / block_size, true)
+        , m_bytes(bytes)
+    {
+    }
+
+    ErrorOr<void> read_blocks(u64 first, size_t count, Bytes buffer) override
+    {
+        if (first + count > block_count())
+            return Error::from_errno(EIO);
+        __builtin_memcpy(buffer.data(), m_bytes.data() + first * block_size, count * block_size);
+        return {};
+    }
+
+    ErrorOr<void> write_blocks(u64, size_t, ReadonlyBytes) override
+    {
+        return Error::from_errno(EROFS);
+    }
+
+private:
+    ReadonlyBytes m_bytes;
+};
+
+}
+
+ErrorOr<NonnullRefPtr<BlockDevice>> create_memory_block_device(String name, ReadonlyBytes bytes)
+{
+    auto* device = new (Base::nothrow) MemoryBlockDevice(move(name), bytes);
+    if (!device)
+        return Error::from_errno(ENOMEM);
+    return adopt_ref(*static_cast<BlockDevice*>(device));
+}
+
 ErrorOr<size_t> scan_partitions(BlockDevice& disk)
 {
     auto* sector = static_cast<u8*>(kmalloc(BlockDevice::block_size));

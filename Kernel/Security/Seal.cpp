@@ -11,71 +11,91 @@
 #include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/Memory/Heap.h>
 #include <Kernel/Security/Seal.h>
-#include <LibBase/Atomic.h>
-#include <LibBase/HashMap.h>
+#include <LibBase/Array.h>
+#include <LibBase/New.h>
 #include <LibBase/Vector.h>
 #include <LibCrypto/Curve25519.h>
 #include <LibCrypto/SHA2.h>
+#include <LibVultureFS/Sealed.h>
 #include <SystemKey.h>
 
 namespace Kernel::Seal {
 
 namespace {
 
-enum class Kind : u8 {
-    Directory,
-    File,
-    Link,
-    Open,
-};
-
-enum class ContentState : u8 {
-    Unchecked,
-    Good,
-    Bad,
-};
-
-struct Entry {
-    Kind kind { Kind::File };
-    u8 hash[32] {};
-    u64 size { 0 };
-    Atomic<u8> state { static_cast<u8>(ContentState::Unchecked) };
-};
-
 constexpr size_t largest_manifest = 16 * MiB;
+constexpr u64 sectors_per_block = VultureFS::block_size / BlockDevice::block_size;
 
 FileSystem* s_file_system { nullptr };
-// Only set once it is whole: a half-made one would hide what hasn't been reached yet.
-HashMap<u64, Entry*>* s_entries { nullptr };
-HashMap<u64, Entry*>* s_building { nullptr };
+bool s_active { false };
 String s_device;
 // Sorted, for looking one up by binary search.
 Vector<Array<u8, 32>>* s_code { nullptr };
 
-[[noreturn]] void broken(StringView what, StringView path = {})
-{
-    FixedStringBuilder<256> reason;
-    format_to(reason, "the system's seal is broken: {}{}{}", what, path.is_empty() ? ""_sv : ": "_sv, path);
-    panic(reason.view());
-}
+// What the volume in a system image is: `hashes` being a hash for each block, or nothing to go by.
+class SealedDevice final : public BlockDevice {
+public:
+    SealedDevice(BlockDevice& device, u64 first_sector, u64 sectors, u8* hashes, String name)
+        : BlockDevice(move(name), sectors, true)
+        , m_device(device)
+        , m_first_sector(first_sector)
+        , m_hashes(hashes)
+    {
+    }
+
+    ~SealedDevice() override
+    {
+        if (m_hashes)
+            kfree(m_hashes);
+    }
+
+    ErrorOr<void> read_blocks(u64 first, size_t count, Bytes buffer) override
+    {
+        // (Only the volume on it reads this, and that goes by whole blocks.)
+        if (first % sectors_per_block != 0 || count % sectors_per_block != 0)
+            return Error::from_errno(EINVAL);
+        TRY(m_device->read_blocks(m_first_sector + first, count, buffer));
+        if (!m_hashes)
+            return {};
+        size_t const blocks = count / sectors_per_block;
+        u64 const first_block = first / sectors_per_block;
+        for (size_t i = 0; i < blocks; ++i) {
+            auto const digest = Crypto::SHA256::hash({ buffer.data() + i * VultureFS::block_size, VultureFS::block_size });
+            if (__builtin_memcmp(digest.data(), m_hashes + (first_block + i) * VultureFS::seal_hash_size, VultureFS::seal_hash_size) != 0) {
+                dmesgln("Seal: block {} of the system isn't what was signed, so nothing may read it", first_block + i);
+                __builtin_memset(buffer.data(), 0, buffer.size());
+                return Error::from_errno(EIO);
+            }
+        }
+        return {};
+    }
+
+    ErrorOr<void> write_blocks(u64, size_t, ReadonlyBytes) override
+    {
+        return Error::from_errno(EROFS);
+    }
+
+private:
+    NonnullRefPtr<BlockDevice> m_device;
+    u64 m_first_sector;
+    u8* m_hashes;
+};
 
 ErrorOr<Vector<u8>> read_all(StringView path, size_t limit)
 {
-    auto description = TRY(VirtualFileSystem::open(path, "/"_sv, O_RDONLY, 0));
-    Vector<u8> bytes;
-    auto const size = TRY(description->stat()).st_size;
-    if (size < 0 || static_cast<u64>(size) > limit)
+    auto file = TRY(VirtualFileSystem::resolve(path, "/"_sv));
+    u64 const size = file.inode->metadata().size;
+    if (size > limit)
         return Error::from_errno(EFBIG);
+    Vector<u8> bytes;
     TRY(bytes.try_resize(static_cast<size_t>(size)));
     size_t done = 0;
-    while (done < bytes.size()) {
-        size_t const got = TRY(description->read(IOBuffer::kernel(bytes.data() + done), bytes.size() - done));
+    while (done < size) {
+        size_t const got = TRY(file.inode->read(done, size - done, IOBuffer::kernel(bytes.data() + done)));
         if (got == 0)
-            break;
+            return Error::from_errno(EIO);
         done += got;
     }
-    if (done != bytes.size())
-        return Error::from_errno(EIO);
     return bytes;
 }
 
@@ -93,145 +113,13 @@ bool parse_hash(StringView text, u8* output)
     if (text.length() != 64)
         return false;
     for (size_t i = 0; i < 32; ++i) {
-        int const high = hex_digit(text[i * 2]);
-        int const low = hex_digit(text[i * 2 + 1]);
+        int const high = hex_digit(text[2 * i]);
+        int const low = hex_digit(text[2 * i + 1]);
         if (high < 0 || low < 0)
             return false;
         output[i] = static_cast<u8>(high << 4 | low);
     }
     return true;
-}
-
-// The next space-separated word of `line`, which loses it and the space.
-StringView take_word(StringView& line)
-{
-    auto const space = line.find(' ');
-    if (!space.has_value()) {
-        auto const word = line;
-        line = {};
-        return word;
-    }
-    auto const word = line.substring_view(0, space.value());
-    line = line.substring_view(space.value() + 1);
-    return word;
-}
-
-bool parse_octal(StringView text, u32& value)
-{
-    value = 0;
-    if (text.is_empty())
-        return false;
-    for (size_t i = 0; i < text.length(); ++i) {
-        if (text[i] < '0' || text[i] > '7')
-            return false;
-        value = value * 8 + static_cast<u32>(text[i] - '0');
-    }
-    return true;
-}
-
-bool parse_decimal(StringView text, u64& value)
-{
-    value = 0;
-    if (text.is_empty())
-        return false;
-    for (size_t i = 0; i < text.length(); ++i) {
-        if (text[i] < '0' || text[i] > '9')
-            return false;
-        value = value * 10 + static_cast<u64>(text[i] - '0');
-    }
-    return true;
-}
-
-void add_line(StringView line)
-{
-    StringView rest = line;
-    auto const kind_word = take_word(rest);
-    Kind kind;
-    u32 mode = 0;
-    u64 size = 0;
-    u8 hash[32] = {};
-    bool is_code = false;
-    if (kind_word == "d"_sv) {
-        kind = Kind::Directory;
-        if (!parse_octal(take_word(rest), mode))
-            broken("a bad line in the manifest"_sv, line);
-    } else if (kind_word == "o"_sv) {
-        kind = Kind::Open;
-    } else if (kind_word == "f"_sv || kind_word == "x"_sv) {
-        kind = Kind::File;
-        is_code = kind_word == "x"_sv;
-        if (!parse_octal(take_word(rest), mode) || !parse_decimal(take_word(rest), size) || !parse_hash(take_word(rest), hash))
-            broken("a bad line in the manifest"_sv, line);
-    } else if (kind_word == "l"_sv) {
-        kind = Kind::Link;
-        if (!parse_hash(take_word(rest), hash))
-            broken("a bad line in the manifest"_sv, line);
-    } else {
-        broken("a bad line in the manifest"_sv, line);
-    }
-
-    // The manifest's paths are from the root, and may have spaces in them: all of what's left.
-    auto const path = rest;
-    if (path.is_empty())
-        broken("a bad line in the manifest"_sv, line);
-    auto resolved = VirtualFileSystem::resolve(path, "/"_sv, false);
-    if (resolved.is_error())
-        broken("something is missing"_sv, path);
-    auto& inode = *resolved.value().inode;
-    if (&inode.file_system() != s_file_system)
-        broken("something is on another volume"_sv, path);
-    auto const metadata = inode.metadata();
-
-    switch (kind) {
-    case Kind::Directory:
-    case Kind::Open:
-        if (metadata.type != InodeType::Directory)
-            broken("something should be a directory"_sv, path);
-        break;
-    case Kind::File:
-        if (metadata.type != InodeType::File)
-            broken("something should be a file"_sv, path);
-        if (metadata.size != size)
-            broken("a file has changed size"_sv, path);
-        break;
-    case Kind::Link: {
-        if (metadata.type != InodeType::SymbolicLink)
-            broken("something should be a symbolic link"_sv, path);
-        char target[VirtualFileSystem::max_path];
-        auto length = inode.read_link({ reinterpret_cast<u8*>(target), sizeof(target) });
-        if (length.is_error())
-            broken("a link can't be read"_sv, path);
-        auto const digest = Crypto::SHA256::hash({ reinterpret_cast<u8 const*>(target), length.value() });
-        if (__builtin_memcmp(digest.data(), hash, 32) != 0)
-            broken("a link goes somewhere else"_sv, path);
-        break;
-    }
-    }
-    if (kind == Kind::Directory || kind == Kind::File) {
-        if ((metadata.permissions & 07777) != mode)
-            broken("something has changed mode"_sv, path);
-        if (metadata.uid != 0 || metadata.gid != 0)
-            broken("something has changed owner"_sv, path);
-    }
-
-    auto* entry = new Entry;
-    entry->kind = kind;
-    entry->size = size;
-    __builtin_memcpy(entry->hash, hash, 32);
-    s_building->set(inode.index(), entry);
-    if (is_code) {
-        Array<u8, 32> code;
-        __builtin_memcpy(code.data(), hash, 32);
-        s_code->append(code);
-    }
-}
-
-Entry* entry_for(Inode const& inode)
-{
-    if (!s_entries || &inode.file_system() != s_file_system)
-        return nullptr;
-    auto* found = s_entries->get(static_cast<u64>(inode.index()));
-    return found ? *found : nullptr;
 }
 
 int compare_hashes(u8 const* a, u8 const* b)
@@ -241,7 +129,60 @@ int compare_hashes(u8 const* a, u8 const* b)
 
 }
 
-void initialize(bool enabled)
+void broken(StringView what)
+{
+    FixedStringBuilder<256> reason;
+    format_to(reason, "the system's seal is broken: {}", what);
+    panic(reason.view());
+}
+
+ErrorOr<NonnullRefPtr<BlockDevice>> open_system_image(BlockDevice& device, bool checking)
+{
+    u8 first_block[VultureFS::block_size];
+    if (device.block_count() < 2 * sectors_per_block)
+        return Error::from_errno(ENOTSUP);
+    TRY(device.read_blocks(0, sectors_per_block, { first_block, sizeof(first_block) }));
+    VultureFS::SealHeader header;
+    __builtin_memcpy(&header, first_block, sizeof(header));
+    if (__builtin_memcmp(header.magic, VultureFS::seal_magic, sizeof(header.magic)) != 0)
+        return Error::from_errno(ENOTSUP);
+    // This comes first: it's what says the rest can be believed.
+    if (checking && !Crypto::ed25519_verify(system_public_key, { first_block, VultureFS::seal_signed_size() }, header.signature))
+        return Error::from_errno(EPERM);
+    u64 const volume_sectors = header.volume_blocks * sectors_per_block;
+    u64 const first_sector = VultureFS::seal_blocks_before_volume(header) * sectors_per_block;
+    if (first_sector + volume_sectors > device.block_count() || header.hash_blocks != VultureFS::seal_hash_blocks(header.volume_blocks))
+        return Error::from_errno(ENOTSUP);
+
+    u8* hashes = nullptr;
+    if (checking) {
+        size_t const hashes_size = header.hash_blocks * VultureFS::block_size;
+        hashes = static_cast<u8*>(kmalloc(hashes_size));
+        if (!hashes)
+            return Error::from_errno(ENOMEM);
+        auto read = device.read_blocks(sectors_per_block, header.hash_blocks * sectors_per_block, { hashes, hashes_size });
+        if (read.is_error()) {
+            kfree(hashes);
+            return read.release_error();
+        }
+        auto const digest = Crypto::SHA256::hash({ hashes, hashes_size });
+        if (__builtin_memcmp(digest.data(), header.hash_of_hashes, sizeof(header.hash_of_hashes)) != 0) {
+            kfree(hashes);
+            return Error::from_errno(EIO);
+        }
+    }
+
+    auto name = TRY(String::from_view(device.name()));
+    auto* sealed = new (Base::nothrow) SealedDevice(device, first_sector, volume_sectors, hashes, move(name));
+    if (!sealed) {
+        if (hashes)
+            kfree(hashes);
+        return Error::from_errno(ENOMEM);
+    }
+    return adopt_ref(*static_cast<BlockDevice*>(sealed));
+}
+
+void initialize(FileSystem& volume, bool enabled)
 {
     if (!enabled) {
         dmesgln("Seal: off, by the boot word noseal");
@@ -249,46 +190,23 @@ void initialize(bool enabled)
     }
     auto manifest = read_all("/System/Library/Seal/Manifest"_sv, largest_manifest);
     if (manifest.is_error())
-        broken("there is no manifest"_sv);
-    auto signature = read_all("/System/Library/Seal/Manifest.sig"_sv, Crypto::ed25519_signature_size);
-    if (signature.is_error() || signature.value().size() != Crypto::ed25519_signature_size)
-        broken("there is no signature"_sv);
-    if (!Crypto::ed25519_verify(system_public_key, manifest.value().span(), signature.value().data()))
-        broken("the manifest isn't signed by this system's key"_sv);
+        broken("there is no list of what may run"_sv);
 
-    auto root = VirtualFileSystem::resolve("/"_sv, "/"_sv);
-    if (root.is_error())
-        broken("there is no root"_sv);
-    s_file_system = &root.value().inode->file_system();
-    s_building = new HashMap<u64, Entry*>;
     s_code = new Vector<Array<u8, 32>>;
-
     StringView const text { reinterpret_cast<char const*>(manifest.value().data()), manifest.value().size() };
-    size_t count = 0;
     bool first = true;
     text.for_each_split_view('\n', SplitBehavior::SkipEmpty, [&](StringView line) {
         if (first) {
-            if (line != "seal 1"_sv)
-                broken("a manifest of a kind this kernel doesn't know"_sv);
+            if (line != "seal 2"_sv)
+                broken("a list of a kind this kernel doesn't know"_sv);
             first = false;
             return;
         }
-        add_line(line);
-        ++count;
+        Array<u8, 32> hash;
+        if (line.length() < 2 + 64 || !line.starts_with("x "_sv) || !parse_hash(line.substring_view(2, 64), hash.data()))
+            broken("a list that doesn't make sense"_sv);
+        MUST(s_code->try_append(hash));
     });
-
-    // These two aren't listed: what they say is what is being checked.
-    StringView const seal_files[] = { "/System/Library/Seal/Manifest"_sv, "/System/Library/Seal/Manifest.sig"_sv };
-    for (auto path : seal_files) {
-        auto resolved = VirtualFileSystem::resolve(path, "/"_sv, false);
-        if (resolved.is_error())
-            broken("something is missing"_sv, path);
-        auto* entry = new Entry;
-        entry->size = resolved.value().inode->metadata().size;
-        entry->state.store(static_cast<u8>(ContentState::Good));
-        s_building->set(resolved.value().inode->index(), entry);
-    }
-    s_entries = s_building;
 
     // For finding code by its hash. (Insertion sort would do, but a program may come in many
     // copies, and there are hundreds.)
@@ -305,74 +223,26 @@ void initialize(bool enabled)
         }
     }
 
-    s_device = MUST(String::from_view(s_file_system->device_name()));
-    dmesgln("Seal: {} entries, {} of them programs, all as signed", count, code.size());
+    s_file_system = &volume;
+    s_device = MUST(String::from_view(volume.device_name()));
+    s_active = true;
+    dmesgln("Seal: all as signed, with {} programs", code.size());
 }
 
 bool is_active()
 {
-    return s_entries != nullptr;
+    return s_active;
 }
 
 bool is_sealed(Inode const& inode)
 {
-    auto const* entry = entry_for(inode);
-    return entry && entry->kind != Kind::Open;
+    return s_active && &inode.file_system() == s_file_system;
 }
 
 ErrorOr<void> check_may_change(Inode const& inode)
 {
     if (is_sealed(inode))
         return Error::from_errno(EROFS);
-    return {};
-}
-
-ErrorOr<void> check_child(Inode const& directory, Inode const& child)
-{
-    auto const* parent = entry_for(directory);
-    if (!parent || parent->kind != Kind::Directory)
-        return {};
-    if (!entry_for(child))
-        return Error::from_errno(ENOENT);
-    return {};
-}
-
-ErrorOr<void> check_contents(Inode& inode)
-{
-    auto* entry = entry_for(inode);
-    if (!entry || entry->kind != Kind::File)
-        return {};
-    auto state = static_cast<ContentState>(entry->state.load());
-    if (state == ContentState::Unchecked) {
-        // Two at once only do the work twice.
-        constexpr size_t chunk_size = 256 * KiB;
-        auto* chunk = static_cast<u8*>(kmalloc(chunk_size));
-        if (!chunk)
-            return Error::from_errno(ENOMEM);
-        Crypto::SHA256 hasher;
-        u64 offset = 0;
-        ErrorOr<void> result = {};
-        while (offset < entry->size) {
-            auto got = inode.read(offset, min<u64>(chunk_size, entry->size - offset), IOBuffer::kernel(chunk));
-            if (got.is_error()) {
-                result = got.release_error();
-                break;
-            }
-            if (got.value() == 0)
-                break;
-            hasher.update({ chunk, got.value() });
-            offset += got.value();
-        }
-        kfree(chunk);
-        TRY(result);
-        auto const digest = hasher.digest();
-        state = offset == entry->size && compare_hashes(digest.data(), entry->hash) == 0 ? ContentState::Good : ContentState::Bad;
-        entry->state.store(static_cast<u8>(state));
-        if (state == ContentState::Bad)
-            dmesgln("Seal: inode {} isn't what the manifest says it is, so nothing may open it", inode.index());
-    }
-    if (state == ContentState::Bad)
-        return Error::from_errno(EIO);
     return {};
 }
 

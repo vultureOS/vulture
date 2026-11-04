@@ -32,7 +32,7 @@ the kernel's side of the handoff. x86_64 and the Raspberry Pi are at the end.
 |---|---|---|
 | `\EFI\BOOT\BOOTAA64.EFI` | VultureBoot | yes |
 | `\System\Library\Kernels\vulture` | The kernel: ELF64, AArch64, `ET_EXEC`, linked for the upper half | yes |
-| `\System\Library\Kernels\vulture.bootarchive` | Boot archive: the root filesystem as a ustar file, mounted read-only at `/` | no (without it, no userland starts) |
+| `\System\Library\Kernels\vulture.bootarchive` | The system image (`LibVultureFS/Sealed.h`), which is the root if no disk has one | no (without it, no userland starts) |
 | `\System\Library\Kernels\boot-args` | Kernel command line as plain text, like macOS's `boot-args` | no |
 
 On a disk for more than one kind of machine, `\EFI\BOOT\BOOTX64.EFI` is there too, and each loader first tries

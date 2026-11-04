@@ -52,6 +52,7 @@
 #define EWOULDBLOCK EAGAIN
 #define ENOMSG 42
 #define EIDRM 43
+#define ENOATTR 61
 #define ENOLINK 67
 #define EPROTO 71
 #define EBADMSG 74

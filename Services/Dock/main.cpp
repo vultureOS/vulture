@@ -57,14 +57,14 @@ struct Tile {
 // What is kept there to begin with: Files always first.
 StringView const s_default_tiles[] = {
     "/System/Library/CoreServices/Files.app"_sv,
-    "/Applications/Launcher.app"_sv,
-    "/Applications/Settings.app"_sv,
-    "/Applications/Terminal.app"_sv,
-    "/Applications/Text Editor.app"_sv,
-    "/Applications/Viewer.app"_sv,
-    "/Applications/Calculator.app"_sv,
-    "/Applications/Monitor.app"_sv,
-    "/Applications/Widget Gallery.app"_sv,
+    "/System/Applications/Launcher.app"_sv,
+    "/System/Applications/Settings.app"_sv,
+    "/System/Applications/Terminal.app"_sv,
+    "/System/Applications/Text Editor.app"_sv,
+    "/System/Applications/Viewer.app"_sv,
+    "/System/Applications/Calculator.app"_sv,
+    "/System/Applications/Monitor.app"_sv,
+    "/System/Applications/Widget Gallery.app"_sv,
 };
 
 class DockView final : public View {

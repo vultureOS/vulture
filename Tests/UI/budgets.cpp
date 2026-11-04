@@ -107,11 +107,11 @@ int main()
     usleep(2'000'000);
     measure_null_syscall();
     fflush(stdout);
-    measure_launch("Text Editor cold launch", "/Applications/Text Editor.app/Contents/MacOS/TextEditor");
+    measure_launch("Text Editor cold launch", "/System/Applications/Text Editor.app/Contents/MacOS/TextEditor");
     usleep(500'000);
-    measure_launch("Calculator cold launch", "/Applications/Calculator.app/Contents/MacOS/Calculator");
+    measure_launch("Calculator cold launch", "/System/Applications/Calculator.app/Contents/MacOS/Calculator");
     usleep(500'000);
-    measure_launch("Text Editor warm launch", "/Applications/Text Editor.app/Contents/MacOS/TextEditor");
+    measure_launch("Text Editor warm launch", "/System/Applications/Text Editor.app/Contents/MacOS/TextEditor");
     usleep(500'000);
 
     // The window server's own numbers, dragging a window across others (Tests/Userland/windows.cpp).

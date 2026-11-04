@@ -60,11 +60,9 @@ ErrorOr<Origin> check_program(Inode& inode, ReadonlyBytes bytes, StringView path
 {
     if (!Seal::is_active())
         return Origin::ThirdParty;
-    // Something sealed has one place it must match: the manifest.
-    if (Seal::is_sealed(inode)) {
-        TRY(Seal::check_contents(inode));
+    // Every block of it is checked as it's read.
+    if (Seal::is_sealed(inode))
         return Origin::System;
-    }
     auto const digest = Crypto::SHA256::hash(bytes);
     if (s_enforced && !is_vouched_for(digest.data())) {
         dmesgln("Code signing: {} isn't signed, so it may not run", path);
@@ -78,7 +76,7 @@ ErrorOr<void> check_mapped_file(Inode& inode)
     if (!Seal::is_active())
         return {};
     if (Seal::is_sealed(inode))
-        return Seal::check_contents(inode);
+        return {};
     if (!s_enforced)
         return {};
     // Pages of a file are shared with whoever writes it, so this must be nobody untrusted.

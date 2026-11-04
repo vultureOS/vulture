@@ -126,7 +126,8 @@ ErrorOr<void> LocalSocket::bind(StringView path, StringView cwd, u32 permissions
     auto resolved = TRY(VirtualFileSystem::resolve(path, cwd, false));
     MutexLocker locker(the_lock());
     m_inode = resolved.inode;
-    m_path = move(resolved.path);
+    // Its name is as it was given, even through a link.
+    m_path = TRY(String::from_view(path));
     TRY(names().try_append({ m_inode.ptr(), this }));
     return {};
 }

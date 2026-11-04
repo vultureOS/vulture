@@ -2,6 +2,6 @@
 include application
 write ${HOME}
 write /Users/Shared
-write /tmp
+write /private/tmp
 read /Volumes
 read /Library

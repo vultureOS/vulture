@@ -67,6 +67,8 @@ public:
     [[nodiscard]] u64 offset() const { return m_offset; }
     // Where it was opened: what's relative to it (openat), and F_GETPATH. Empty if it wasn't by name.
     [[nodiscard]] StringView path() const { return m_path.view(); }
+    // Something was written through this: FSEvents hears of it, though not as often as it happens.
+    void note_written();
     void set_path(String path) { m_path = move(path); }
     // Different for every description there has ever been, unlike an address.
     [[nodiscard]] u64 serial() const { return m_serial; }
@@ -88,6 +90,8 @@ private:
     RefPtr<LocalSocket> m_local_socket;
     RefPtr<KQueue> m_kqueue;
     String m_path;
+    u64 m_last_written_event { 0 };
+    bool m_written_unreported { false };
     u64 m_serial { 0 };
     int m_flags { 0 };
     mutable Mutex m_lock;
