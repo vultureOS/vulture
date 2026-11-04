@@ -37,6 +37,10 @@ constexpr u32 command_resource_flush = 0x0104;
 constexpr u32 command_transfer_to_host_2d = 0x0105;
 constexpr u32 command_resource_attach_backing = 0x0106;
 constexpr u32 command_resource_detach_backing = 0x0107;
+// QEMU's window on a Mac places the cursor's picture by its top left corner, and doesn't look at its hot spot, unlike its other windows and everything else. The pointer's then where the
+// picture's corner is, and not where it looks to be pointing. The boot word cursortopleft says that's what's showing this, and run.sh says it when it is.
+static bool s_display_ignores_cursor_hot_spot { false };
+
 constexpr u32 command_update_cursor = 0x0300;
 constexpr u32 command_move_cursor = 0x0301;
 
@@ -432,13 +436,19 @@ private:
         UpdateCursor update {};
         update.header.type = command_update_cursor;
         update.scanout_id = scanout;
-        update.x = m_cursor_x;
-        update.y = m_cursor_y;
+        m_cursor_hot_x = hot_x;
+        m_cursor_hot_y = hot_y;
+        update.x = cursor_x_for_display();
+        update.y = cursor_y_for_display();
         update.resource_id = m_cursor_resource_id;
-        update.hot_x = hot_x;
-        update.hot_y = hot_y;
+        update.hot_x = s_display_ignores_cursor_hot_spot ? 0 : hot_x;
+        update.hot_y = s_display_ignores_cursor_hot_spot ? 0 : hot_y;
         return cursor_command(update);
     }
+
+    // Where to say the cursor's picture goes. If the display doesn't go by its hot spot, it's told the corner instead: which can be off the screen, and wraps around to what QEMU reads as negative.
+    [[nodiscard]] u32 cursor_x_for_display() const { return s_display_ignores_cursor_hot_spot ? m_cursor_x - m_cursor_hot_x : m_cursor_x; }
+    [[nodiscard]] u32 cursor_y_for_display() const { return s_display_ignores_cursor_hot_spot ? m_cursor_y - m_cursor_hot_y : m_cursor_y; }
 
     ErrorOr<void> move_cursor(u32 x, u32 y)
     {
@@ -448,8 +458,8 @@ private:
         UpdateCursor update {};
         update.header.type = command_move_cursor;
         update.scanout_id = scanout;
-        update.x = x;
-        update.y = y;
+        update.x = cursor_x_for_display();
+        update.y = cursor_y_for_display();
         // It's not only for an update: QEMU takes a move without this to mean there's no cursor to show.
         update.resource_id = m_cursor_resource_id;
         return cursor_command(update);
@@ -488,12 +498,19 @@ private:
     u32 m_cursor_resource_id { 0 };
     PhysicalAddress m_cursor_memory;
     u32 m_cursor_x { 0 };
+    u32 m_cursor_hot_x { 0 };
+    u32 m_cursor_hot_y { 0 };
     u32 m_cursor_y { 0 };
 };
 
 }
 
 void initialize_firmware_display();
+
+void set_display_ignores_cursor_hot_spot(bool ignores)
+{
+    s_display_ignores_cursor_hot_spot = ignores;
+}
 
 void initialize_graphics()
 {

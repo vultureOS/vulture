@@ -118,6 +118,7 @@ Kernel command line words:
 | `debugfault=KIND` | Lets root ask the kernel to touch user memory the wrong way, through the `debug.fault` sysctl: `user-read`, `user-write`, `user-execute` (see `Tests/Userland/kernel-fault.cpp`) |
 | `nokaslr` | Don't move the kernel (`Meta/run.sh --gdb` adds it, so that symbols stay put) |
 | `noseal` | Don't check the system against its seal |
+| `cursortopleft` | The display puts a cursor's picture by its corner and takes no notice of its hot spot, as QEMU's window on a Mac does: the driver moves the picture to make up for it. `Meta/run.sh` says this for that window |
 | `nocodesign` | Run anything, signed or not | Kernel code that does not touch hardware (such as
 `Kernel/BootArguments.cpp`) is compiled into host tests too; see
 `Tests/Kernel`.

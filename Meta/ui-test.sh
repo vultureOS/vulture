@@ -140,8 +140,26 @@ if "${QEMU:-qemu-system-aarch64}" -trace help 2>/dev/null | grep -q '^virtio_gpu
             echo "ui-test: the pointer: of $moves moves, $hidden would hide it; see $trace" >&2
             status=1
         fi
+        # Where 8000 8000 is, on this display: what's told to the display, with its hot spot alongside.
+        if ! grep -a -q 'virtio_gpu_update_cursor.*x 312, y 195, move' "$trace"; then
+            echo "ui-test: the pointer: it wasn't told where the pointer is; see $trace" >&2
+            status=1
+        fi
     else
         echo "ui-test: the pointer: it did not get through; see $out_dir/pointer.log" >&2
+        status=1
+    fi
+    # And for a display that doesn't look at the hot spot, as QEMU's window on a Mac doesn't, the picture's corner goes there instead: the arrow's hot spot is at (6, 6), so its tip is where the pointer is.
+    trace="$out_dir/pointer-corner-trace.log"
+    rm -f "$trace"
+    if VULTURE_GPU_WIDTH=1280 VULTURE_GPU_HEIGHT=800 "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --gui --fresh-disk --boot-args cursortopleft \
+        --chat "$source_dir/Tests/UI/pointer.chat" --timeout 60 -- -trace virtio_gpu_update_cursor -D "$trace" > "$out_dir/pointer-corner.log" 2>&1; then
+        if ! grep -a -q 'virtio_gpu_update_cursor.*x 306, y 189, move' "$trace"; then
+            echo "ui-test: the pointer, by its picture's corner: not where its tip should put it; see $trace" >&2
+            status=1
+        fi
+    else
+        echo "ui-test: the pointer, by its picture's corner: it did not get through; see $out_dir/pointer-corner.log" >&2
         status=1
     fi
 fi

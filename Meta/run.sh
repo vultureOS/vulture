@@ -263,6 +263,14 @@ fi
 if [ "$debug" -eq 1 ]; then
     boot_args="${boot_args:+$boot_args }debug"
 fi
+# QEMU's own window on a Mac goes by the corner of the cursor's picture, and takes no notice of where in it the
+# pointer's meant to be: tell the kernel, or what looks like the tip of the arrow is 6 points from where it clicks.
+if [ "$headless" -eq 0 ] && [ "$(uname -s)" = Darwin ]; then
+    case " ${extra_args[*]-} " in
+        *" -display "*) ;;
+        *) boot_args="${boot_args:+$boot_args }cursortopleft" ;;
+    esac
+fi
 if [ -n "$boot_args" ]; then
     printf '%s\n' "$boot_args" > "$kernels_dir/boot-args"
 else

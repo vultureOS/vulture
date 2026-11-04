@@ -299,6 +299,7 @@ static void start_userland(API::BootInfo const& boot_info, BootArguments const& 
     auto devices = must("devfs"_sv, DevFS::create());
     must("devices"_sv, create_basic_devices());
     must("terminals"_sv, create_terminals());
+    set_display_ignores_cursor_hot_spot(arguments.has_flag("cursortopleft"_sv));
     initialize_graphics();
     initialize_input();
     initialize_audio();
