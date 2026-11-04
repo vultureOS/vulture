@@ -550,16 +550,16 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on. M15 me
 
 | Metric | Target | Measured |
 |---|---|---|
-| Boot, firmware handoff to login window | ≤ 2 s | 0.21 s (M18, with the fonts for every language) |
-| Null syscall | < 150 ns | 71 ns (M18) |
+| Boot, firmware handoff to login window | ≤ 2 s | 0.22 s (M19, with the fonts for every language) |
+| Null syscall | < 150 ns | 72 ns (M19) |
 | Context switch | < 1 µs | 173 ns (M3, yield between two threads on one processor) |
 | IPC round trip | < 3 µs | 0.84 µs (M7, call and answer between two processes; 4.6 µs through a generated proxy to a vlaunchd-started service) |
-| Window drag at 2560×1600 | 60 fps | 58.8 fps (M18); 59.2–59.7 fps (M8, and again at M9; 10 windows, 5 with blur; 16.7 ms beat, 8–11 ms of work per frame; beats with no pointer movement draw nothing) |
-| Input to photon | ≤ 1 frame | Over: 28 ms at the 99th percentile from input to flush, worst 40 ms (M18). QEMU shows no photon, so this is as far as it can be measured. M21 is what's to fix it |
-| Text Editor cold launch | < 300 ms | 21 ms, 12 ms warm (M18) |
+| Window drag at 2560×1600 | 60 fps | 59.1 fps (M19); 59.2–59.7 fps (M8, and again at M9; 10 windows, 5 with blur; 16.7 ms beat, 8–11 ms of work per frame; beats with no pointer movement draw nothing) |
+| Input to photon | ≤ 1 frame | Over: 23.5 ms at the 99th percentile from input to flush, worst 44.7 ms (M19). QEMU shows no photon, so this is as far as it can be measured. M21 is what's to fix it |
+| Text Editor cold launch | < 300 ms | 20 ms, 12 ms warm (M19) |
 | Cmd-Tab appears | ≤ 1 frame | |
 | Search, per keystroke | ≤ 50 ms | |
-| Application launch | < 300 ms | 28 ms (M18, Calculator, cold) |
+| Application launch | < 300 ms | 24 ms (M19, Calculator, cold) |
 | Clone of a 1 GiB file | < 50 ms | Under 1 ms (M19): it takes the same for any size |
 | 1080p30 VP9 | no dropped frames | |
 | A PDF page | < 100 ms | |
