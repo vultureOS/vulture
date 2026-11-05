@@ -126,25 +126,41 @@ void Server::update_cursor()
 
 // --- Frames ---
 
+void Server::note_input()
+{
+    m_input_waiting = true;
+    m_last_input_at = now_microseconds();
+}
+
 void Server::schedule_frame()
 {
-    if (m_frame_scheduled || !m_compositor.has_damage())
+    if (!m_compositor.has_damage())
         return;
-    m_frame_scheduled = true;
-    // Frames keep to a fixed beat, as a display's refresh would: a timer that
-    // fires late (they do, waking an idle processor under a hypervisor) takes
-    // that time from the wait for the next, rather than slowing them all down.
-    u64 now = now_microseconds();
+    // Frames keep to a fixed beat, as a display's refresh would: a timer that fires late (they do, waking an idle processor
+    // under a hypervisor) takes that time from the wait for the next, rather than slowing them all down. Unless someone's
+    // waiting to see what they just did: that goes as soon as it can, at up to twice the rate. There's no refresh here to wait
+    // for, and what's measured against a frame's length is how long they wait.
+    u64 const now = now_microseconds();
     if (m_next_frame_time + frame_interval < now)
         m_next_frame_time = now;
-    u64 delay = m_next_frame_time > now ? (m_next_frame_time - now) / 1000 : 0;
-    m_loop.add_timer(delay, false, [this] { render_frame(); });
+    u64 const due = m_input_waiting ? max(now, m_last_frame_started + frame_interval / 2) : max(now, m_next_frame_time);
+    if (m_frame_scheduled) {
+        if (due >= m_frame_due)
+            return;
+        m_loop.cancel_timer(m_frame_timer);
+    }
+    m_frame_scheduled = true;
+    m_frame_due = due;
+    m_frame_timer = m_loop.add_timer((due - now) / 1000, false, [this] { render_frame(); });
 }
 
 void Server::render_frame()
 {
     m_frame_scheduled = false;
-    m_next_frame_time += frame_interval;
+    m_input_waiting = false;
+    m_last_frame_started = now_microseconds();
+    while (m_next_frame_time <= m_last_frame_started)
+        m_next_frame_time += frame_interval;
     // Title bars out of date are redrawn now, once, however many changes came.
     for (auto* window : m_windows) {
         if (window->visible && window->is_titled() && window->chrome_is_stale)
@@ -559,6 +575,7 @@ i32 Server::set_surface(IPC::Sender const& sender, u32 id, IPC::Port memory, i32
     window->buffers[0] = one.release_value();
     window->buffers[1] = two.release_value();
     window->shown_buffer = 0;
+    m_compositor.surface_replaced(*window);
     return 0;
 }
 
@@ -570,6 +587,10 @@ void Server::present(IPC::Sender const& sender, u32 id, u32 buffer, i32 x, i32 y
     window->shown_buffer = static_cast<int>(buffer);
     window->has_presented = true;
     window->present_pending = true;
+    m_compositor.surface_changed(*window, { x, y, width, height });
+    // What someone just did, as like as not.
+    if (now_microseconds() - m_last_input_at < 2 * frame_interval)
+        m_input_waiting = true;
     if (window->visible) {
         auto frame = m_compositor.device_frame(*window);
         // (The first frame of a surface is all new.)
@@ -601,16 +622,26 @@ void Server::set_materials(IPC::Sender const& sender, u32 id, Vector<i32> region
     schedule_frame();
 }
 
-void Server::inject_pointer(IPC::Sender const& sender, i32 x, i32 y, u32 buttons)
+void Server::inject_pointer(IPC::Sender const& sender, i32 x, i32 y, u32 buttons, u64 sent_at)
 {
     if (sender.uid != 0)
         return;
+    m_event_time = sent_at;
     pointer_changed({ x, y }, buttons);
+    m_event_time = 0;
 }
 
 WindowServerEndpoint::StatisticsAnswer Server::statistics(IPC::Sender const&)
 {
-    return { m_compositor.frames(), m_compositor.compose_microseconds(), m_compositor.flush_microseconds(), m_compositor.pixels() };
+    return { m_compositor.frames(), m_compositor.compose_microseconds(), m_compositor.flush_microseconds(), m_compositor.pixels(), m_compositor.material_microseconds() };
+}
+
+void Server::damage_everything(IPC::Sender const& sender)
+{
+    if (sender.uid != 0)
+        return;
+    m_compositor.invalidate_all();
+    schedule_frame();
 }
 
 WindowServerEndpoint::InputLatencyAnswer Server::input_latency(IPC::Sender const&)
@@ -971,6 +1002,7 @@ void Server::render_chrome(ServerWindow& window)
     }
 
     // A client's own title bar has its own title.
+    window.chrome_is_opaque = false;
     if (unified)
         return;
     // The title, centered (and clear of the lights, however narrow the window).
@@ -979,6 +1011,15 @@ void Server::render_chrome(ServerWindow& window)
     float x = max((static_cast<float>(size.width) - run.width) / 2, lights_end);
     float baseline = (static_cast<float>(size.height) + m_title_font->cap_height()) / 2;
     m_title_font->draw(painter, { x, baseline }, run, window.active ? m_theme.title_text : m_theme.title_text_inactive);
+
+    u32 together = 0xffffffffu;
+    int const corner = window.shape ? window.shape->corner_extent : 0;
+    for (int y = 0; y < bitmap.height(); ++y) {
+        auto const* row = bitmap.scanline(y);
+        for (int column = corner; column < bitmap.width() - corner; ++column)
+            together &= static_cast<u32>(pixel_alpha(row[column]));
+    }
+    window.chrome_is_opaque = (together & 0xff) == 0xff;
 }
 
 // --- Input ---
@@ -993,6 +1034,7 @@ void Server::read_input()
         size_t count = static_cast<size_t>(got) / sizeof(vulture_input_event);
         for (size_t i = 0; i < count; ++i) {
             auto const& event = events[i];
+            m_event_time = event.time;
             switch (event.type) {
             case VULTURE_EV_ABS:
                 if (event.code == VULTURE_ABS_X)
@@ -1072,7 +1114,10 @@ void Server::send_mouse(ServerWindow& window, MouseKind kind, IntPoint point, u3
 
 void Server::pointer_changed(IntPoint point, u32 buttons)
 {
-    m_pointer_moved_at = now_microseconds();
+    // When it happened, if that's known, as it may have waited here for a frame to finish.
+    u64 const now = now_microseconds();
+    m_pointer_moved_at = m_event_time != 0 && m_event_time <= now && now - m_event_time < 1'000'000 ? m_event_time : now;
+    note_input();
     auto points = m_screen.points();
     point.x = clamp(point.x, 0, points.width - 1);
     point.y = clamp(point.y, 0, points.height - 1);

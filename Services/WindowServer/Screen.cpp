@@ -59,7 +59,9 @@ ErrorOr<NonnullOwnPtr<Screen>> Screen::open(char const* device)
 
 void Screen::flush(Gfx::IntRect rect)
 {
-    vulture_gpu_rect area { static_cast<unsigned>(rect.x), static_cast<unsigned>(rect.y), static_cast<unsigned>(rect.width), static_cast<unsigned>(rect.height) };
+    // Whole rows. QEMU copies those in one go, and anything narrower a row at a time, starting from the first page of the
+    // framebuffer for each: most of a full-screen flush's time for a small part of the screen.
+    vulture_gpu_rect area { 0, static_cast<unsigned>(rect.y), static_cast<unsigned>(m_framebuffer->width()), static_cast<unsigned>(rect.height) };
     if (ioctl(m_fd, VULTURE_GPU_FLUSH, &area) < 0)
         fprintf(stderr, "WindowServer: flush: %s\n", strerror(errno));
 }

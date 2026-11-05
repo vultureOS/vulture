@@ -105,7 +105,7 @@ struct Client {
 
     void pointer(int x, int y, u32 buttons = 0)
     {
-        (void)connection->server().inject_pointer(x, y, buttons);
+        (void)connection->server().inject_pointer(x, y, buttons, now_microseconds());
     }
 };
 
@@ -386,14 +386,15 @@ void test_clients(Client& client)
     report("only root captures the screen", WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
-// M8's measure: ten windows with shadows, some with blur behind them, one being
-// dragged across the others. In frames shown per second.
-void test_drag_rate(Client& client)
+// M8's measure: ten windows with shadows, some with blur behind them, one being dragged across the others. In frames
+// shown per second. And M21's: twelve, with all of the screen to be drawn again for every one of them.
+void test_drag_rate(Client& client, int count, bool whole_screen)
 {
     auto size = client.connection->screen_size();
     int s = client.connection->scale();
+    char const* label = whole_screen ? "whole screen " : "";
     Vector<NonnullOwnPtr<Window::Window>> windows;
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < count; ++i) {
         IntRect frame { 40 + (i % 5) * (size.width - 620) / 5, 40 + (i / 5) * (size.height - 420) / 2 + (i % 3) * 30, 560, 380 };
         auto window = MUST(Window::Window::create(*client.connection, "Window"_sv, frame, Window::WindowTitled));
         auto& bitmap = window->back_buffer();
@@ -415,9 +416,10 @@ void test_drag_rate(Client& client)
     client.settle(200);
 
     // Take the top window by its title bar.
-    IntRect start { 40 + 4 * (size.width - 620) / 5, 40 + (size.height - 420) / 2 * 1 + 0, 560, 380 };
+    int const last = count - 1;
+    IntRect start { 40 + (last % 5) * (size.width - 620) / 5, 40 + (last / 5) * (size.height - 420) / 2 + (last % 3) * 30, 560, 380 };
     int grab_x = start.x + 280;
-    int grab_y = start.y + 10 + (9 % 3) * 30;
+    int grab_y = start.y + 10;
     client.pointer(grab_x, grab_y);
     client.pointer(grab_x, grab_y, Window::ButtonLeft);
     client.settle(40);
@@ -433,6 +435,8 @@ void test_drag_rate(Client& client)
         int x = grab_x - static_cast<int>(Base::Math::absolute(Base::Math::sine(phase)) * (size.width - 700));
         int y = grab_y - static_cast<int>((1 - Base::Math::cosine(phase * 1.7)) * 120);
         client.pointer(x, max(y, 12), Window::ButtonLeft);
+        if (whole_screen)
+            (void)client.connection->server().damage_everything();
         client.settle(8);
         elapsed = now_microseconds() - started;
     }
@@ -445,18 +449,20 @@ void test_drag_rate(Client& client)
     u64 compose = frames ? (after.compose_microseconds - before.compose_microseconds) / frames : 0;
     u64 flush = frames ? (after.flush_microseconds - before.flush_microseconds) / frames : 0;
     u64 pixels = frames ? (after.pixels - before.pixels) / frames : 0;
-    printf("rate: %d.%d frames per second at %dx%d; per frame %llu us composing, %llu us flushing, %llu pixels\n", static_cast<int>(rate), static_cast<int>(rate * 10) % 10, size.width * s, size.height * s,
-        static_cast<unsigned long long>(compose), static_cast<unsigned long long>(flush), static_cast<unsigned long long>(pixels));
-    printf("budget: drag frames: %d.%d fps\n", static_cast<int>(rate), static_cast<int>(rate * 10) % 10);
-    printf("budget: input to flush p99: %d.%d ms\n", static_cast<int>(latency.p99_microseconds / 1000), static_cast<int>(latency.p99_microseconds % 1000 / 100));
-    printf("budget: input to flush worst: %d.%d ms\n", static_cast<int>(latency.worst_microseconds / 1000), static_cast<int>(latency.worst_microseconds % 1000 / 100));
-    printf("budget: input timed: %llu moves\n", static_cast<unsigned long long>(latency.count));
+    u64 materials = frames ? (after.material_microseconds - before.material_microseconds) / frames : 0;
+    printf("%srate: %d.%d frames per second at %dx%d; per frame %llu us composing, of which %llu us materials, %llu us flushing, %llu pixels; input to flush p99 %d.%d ms, worst %d.%d ms\n", label, static_cast<int>(rate), static_cast<int>(rate * 10) % 10, size.width * s, size.height * s,
+        static_cast<unsigned long long>(compose), static_cast<unsigned long long>(materials), static_cast<unsigned long long>(flush), static_cast<unsigned long long>(pixels),
+        static_cast<int>(latency.p99_microseconds / 1000), static_cast<int>(latency.p99_microseconds % 1000 / 100), static_cast<int>(latency.worst_microseconds / 1000), static_cast<int>(latency.worst_microseconds % 1000 / 100));
+    printf("budget: %sdrag frames: %d.%d fps\n", label, static_cast<int>(rate), static_cast<int>(rate * 10) % 10);
+    printf("budget: %sinput to flush p99: %d.%d ms\n", label, static_cast<int>(latency.p99_microseconds / 1000), static_cast<int>(latency.p99_microseconds % 1000 / 100));
+    printf("budget: %sinput to flush worst: %d.%d ms\n", label, static_cast<int>(latency.worst_microseconds / 1000), static_cast<int>(latency.worst_microseconds % 1000 / 100));
+    printf("budget: %sinput timed: %llu moves\n", label, static_cast<unsigned long long>(latency.count));
     fflush(stdout);
     // (Which isn't something to ask of a whole machine emulated in software.)
     int emulated = 0;
     size_t emulated_size = sizeof(emulated);
     (void)sysctlbyname("machdep.cpu.emulated", &emulated, &emulated_size, nullptr, 0);
-    report("60 frames per second, dragging", rate >= 58 || emulated);
+    report(whole_screen ? "60 frames per second, all of the screen drawn every time" : "60 frames per second, dragging", rate >= 58 || emulated);
 }
 
 // Another client, soon killed: it says when its window is up.
@@ -482,7 +488,8 @@ int run_client()
     test_pointer(client);
     test_materials(client);
     test_clients(client);
-    test_drag_rate(client);
+    test_drag_rate(client, 10, false);
+    test_drag_rate(client, 12, true);
     printf("done\n");
     fflush(stdout);
     return 0;
@@ -500,7 +507,8 @@ int main(int argc, char** argv)
     if (argc > 1 && strcmp(argv[1], "--budget") == 0) {
         Client client;
         client.connection = MUST(Window::Connection::connect(client.loop));
-        test_drag_rate(client);
+        test_drag_rate(client, 10, false);
+    test_drag_rate(client, 12, true);
         return 0;
     }
 
@@ -548,10 +556,13 @@ int main(int argc, char** argv)
     CHECK(failures == 0);
     if (!finished || failures)
         fprintf(stderr, "windows: the client said:\n%s\nthe server said:\n%s\nvlaunchd's log:\n%s", report_text, read_file("server.err"), read_file("log"));
-    if (char const* rate = strstr(report_text, "rate: ")) {
-        char line[160] = {};
-        sscanf(rate, "%159[^\n]", line);
-        printf("windows: %s\n", line);
+    // Each measure, with what it's of ("whole screen rate: ...").
+    for (char const* rate = strstr(report_text, "rate: "); rate; rate = strstr(rate + 1, "rate: ")) {
+        char const* begin = rate;
+        while (begin > report_text && begin[-1] != '\n')
+            --begin;
+        char const* end = strchr(rate, '\n');
+        printf("windows: %.*s\n", static_cast<int>(end ? end - begin : static_cast<long>(strlen(begin))), begin);
     }
     system("rm -rf /tmp/windows-test");
     return finish();

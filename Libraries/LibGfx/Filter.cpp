@@ -100,14 +100,16 @@ void box_values(u8 const* source, u8* destination, int count, ptrdiff_t source_s
 
 }
 
-ErrorOr<void> gaussian_blur(Bitmap& bitmap, IntRect region, float sigma)
+ErrorOr<void> gaussian_blur(Bitmap& bitmap, IntRect region, float sigma, Bitmap* spare_bitmap)
 {
     region = region.intersected(bitmap.rect());
     if (region.is_empty() || box_width_for(sigma) < 2)
         return {};
     Box boxes[3];
     boxes_for(sigma, boxes);
-    auto scratch = TRY(Bitmap::create(region.size()));
+    RefPtr<Bitmap> scratch = spare_bitmap;
+    if (!scratch || scratch->width() < region.width || scratch->height() < region.height)
+        scratch = TRY(Bitmap::create(region.size()));
     ptrdiff_t pitch = bitmap.pitch();
     // Across, into the scratch space and back, three times; down likewise.
     auto* area = bitmap.scanline(region.y) + region.x;

@@ -64,11 +64,18 @@ struct ServerWindow {
     bool has_presented { false };
     bool present_pending { false };
 
+    // Which squares of the shown surface are wholly opaque, left to right and top to bottom: nothing need be drawn under them.
+    static constexpr int opaque_cell_size = 32;
+    Vector<u8> opaque_cells;
+    int opaque_cell_columns { 0 };
+    int opaque_cell_rows { 0 };
+
     Vector<MaterialRegion> materials;
 
     // The title bar, drawn over the client's pixels.
     RefPtr<Gfx::Bitmap> chrome;
     bool chrome_is_stale { true };
+    bool chrome_is_opaque { false };
     bool lights_hovered { false };
     WindowButton pressed_button { WindowButton::None };
 

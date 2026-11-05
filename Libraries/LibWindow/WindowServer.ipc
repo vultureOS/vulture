@@ -80,9 +80,12 @@ endpoint WindowServer
     set_overview(bool shown) =|
     switch_space(i32 space) =|
 
-    // For tests and tools: only root may. As if the pointer moved here (points).
-    inject_pointer(i32 x, i32 y, u32 buttons) =|
-    statistics() => (u64 frames, u64 compose_microseconds, u64 flush_microseconds, u64 pixels)
+    // For tests and tools: only root may. As if the pointer moved here (points), at this time on the monotonic clock in
+    // microseconds, or 0 for now.
+    inject_pointer(i32 x, i32 y, u32 buttons, u64 sent_at) =|
+    statistics() => (u64 frames, u64 compose_microseconds, u64 flush_microseconds, u64 pixels, u64 material_microseconds)
+    // For tests and tools: only root may. As if everything on the screen had changed.
+    damage_everything() =|
     // From the pointer moving to the window it's dragging being on the screen, since this was last asked: how many were
     // timed, the 99th percentile and the worst, in microseconds. It's as far as this can see: the display's own latency
     // comes after. (Asked by the one measuring: the counts start again.)

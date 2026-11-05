@@ -87,8 +87,9 @@ private:
     void set_overview(IPC::Sender const&, bool shown) override;
     void set_input_region(IPC::Sender const&, u32 window, i32 x, i32 y, i32 width, i32 height) override;
     void switch_space(IPC::Sender const&, i32 space) override;
-    void inject_pointer(IPC::Sender const&, i32 x, i32 y, u32 buttons) override;
+    void inject_pointer(IPC::Sender const&, i32 x, i32 y, u32 buttons, u64 sent_at) override;
     WindowServerEndpoint::StatisticsAnswer statistics(IPC::Sender const&) override;
+    void damage_everything(IPC::Sender const&) override;
     WindowServerEndpoint::CaptureAnswer capture(IPC::Sender const&) override;
     WindowServerEndpoint::InputLatencyAnswer input_latency(IPC::Sender const&) override;
     WindowServerEndpoint::RequestAccessibilityAnswer request_accessibility(IPC::Sender const&) override;
@@ -211,7 +212,14 @@ private:
     Window::CursorShape m_cursor_shape { Window::CursorShape::Arrow };
 
     bool m_frame_scheduled { false };
+    int m_frame_timer { -1 };
+    u64 m_frame_due { 0 };
     u64 m_next_frame_time { 0 };
+    u64 m_last_frame_started { 0 };
+    // Someone's waiting to see what they just did.
+    bool m_input_waiting { false };
+    u64 m_last_input_at { 0 };
+    void note_input();
 
     // The desktop.
     Client* m_active_application { nullptr };
@@ -220,6 +228,7 @@ private:
     // For input_latency: when the pointer last moved, whether that moved a window not yet on the screen, and how long
     // those took, in half-milliseconds, the last for anything longer.
     u64 m_pointer_moved_at { 0 };
+    u64 m_event_time { 0 };
     u64 m_latency_started { 0 };
     static constexpr size_t latency_buckets = 256;
     u64 m_latency_counts[latency_buckets] {};

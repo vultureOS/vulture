@@ -86,7 +86,7 @@ void settle(long milliseconds = 80)
 
 void pointer(int x, int y, u32 buttons = 0)
 {
-    (void)s_app->connection().server().inject_pointer(x, y, buttons);
+    (void)s_app->connection().server().inject_pointer(x, y, buttons, 0);
     settle(40);
 }
 

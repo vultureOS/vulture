@@ -82,6 +82,7 @@ ErrorOr<void> Compositor::initialize()
     auto size = m_screen.pixels();
     m_tiles_across = (size.width + tile_size - 1) / tile_size;
     m_tiles_down = (size.height + tile_size - 1) / tile_size;
+    MUST(m_lowest_shown.try_resize(static_cast<size_t>(m_tiles_across) * static_cast<size_t>(m_tiles_down)));
     TRY(m_dirty.try_resize(static_cast<size_t>(m_tiles_across) * static_cast<size_t>(m_tiles_down)));
     memset(m_dirty.data(), 0, m_dirty.size());
     TRY(render_wallpaper());
@@ -349,9 +350,134 @@ Vector<IntRect> Compositor::dirty_rects() const
     return rects;
 }
 
+bool Compositor::is_drawn(ServerWindow const& window) const
+{
+    return window.visible && !(m_hides_normal_windows && window.level == Window::LevelNormal);
+}
+
+IntRect Compositor::tile_rect(int across, int down) const
+{
+    return IntRect { across * tile_size, down * tile_size, tile_size, tile_size }.intersected(m_screen.framebuffer().rect());
+}
+
+bool Compositor::covers_tile(ServerWindow const& window, IntRect frame, IntRect tile) const
+{
+    if (tile.x < frame.x || tile.y < frame.y || tile.right() > frame.right() || tile.bottom() > frame.bottom())
+        return false;
+    // (A surface may not reach the edge of its window, as it's being resized.)
+    auto const* surface = window.shown_surface();
+    if (surface && (tile.right() - frame.x > surface->width() || tile.bottom() - frame.y > surface->height()))
+        return false;
+    // The rounded corners show what's behind them.
+    if (!window.is_bare() && window.shape) {
+        int const extent = window.shape->corner_extent;
+        bool const near_an_end = tile.y < frame.y + extent || tile.bottom() > frame.bottom() - extent;
+        bool const near_a_side = tile.x < frame.x + extent || tile.right() > frame.right() - extent;
+        if (near_an_end && near_a_side)
+            return false;
+    }
+    int const cell = ServerWindow::opaque_cell_size;
+    int const first_column = (tile.x - frame.x) / cell;
+    int const last_column = (tile.right() - 1 - frame.x) / cell;
+    int const first_row = (tile.y - frame.y) / cell;
+    int const last_row = (tile.bottom() - 1 - frame.y) / cell;
+    int const chrome_height = window.is_titled() && !window.is_unified() && window.chrome_is_opaque && window.chrome ? window.chrome->height() : 0;
+    for (int row = first_row; row <= last_row; ++row) {
+        // The title bar goes over all of what's under it.
+        if ((row + 1) * cell <= chrome_height)
+            continue;
+        if (row >= window.opaque_cell_rows || last_column >= window.opaque_cell_columns || !window.shown_surface())
+            return false;
+        u8 const* cells = window.opaque_cells.data() + static_cast<size_t>(row) * static_cast<size_t>(window.opaque_cell_columns);
+        for (int column = first_column; column <= last_column; ++column) {
+            if (!cells[column])
+                return false;
+        }
+    }
+    return true;
+}
+
+void Compositor::find_what_shows()
+{
+    int const scale = m_screen.scale();
+    size_t const tile_count = m_lowest_shown.size();
+    for (size_t i = 0; i < tile_count; ++i)
+        m_lowest_shown[i] = -1;
+    // From the top: the first to cover a tile is the lowest that shows there.
+    for (size_t index = m_windows.size(); index > 0; --index) {
+        auto const& window = *m_windows[index - 1];
+        if (!is_drawn(window))
+            continue;
+        auto const frame = device_frame(window);
+        auto const on_screen = frame.intersected(m_screen.framebuffer().rect());
+        if (on_screen.is_empty())
+            continue;
+        for (int down = on_screen.y / tile_size; down <= (on_screen.bottom() - 1) / tile_size; ++down) {
+            auto* row = m_lowest_shown.data() + static_cast<size_t>(down) * static_cast<size_t>(m_tiles_across);
+            for (int across = on_screen.x / tile_size; across <= (on_screen.right() - 1) / tile_size; ++across) {
+                if (row[across] < 0 && covers_tile(window, frame, tile_rect(across, down)))
+                    row[across] = static_cast<i16>(index - 1);
+            }
+        }
+    }
+    // A material shows wherever nothing opaque is over it, itself included. Then all that it reads has to be there to
+    // read, under this window, even where more is over that in the end. Which may bring lower materials into view: so from
+    // the top down, and each of them sees what the ones above have asked for.
+    m_shown_materials.clear();
+    for (size_t index = m_windows.size(); index > 0; --index) {
+        auto const& window = *m_windows[index - 1];
+        if (!is_drawn(window) || window.materials.is_empty())
+            continue;
+        int const at = static_cast<int>(index - 1);
+        auto const frame = device_frame(window);
+        for (size_t material_index = 0; material_index < window.materials.size(); ++material_index) {
+            auto const& material = window.materials[material_index];
+            IntRect region { frame.x + material.rect.x * scale, frame.y + material.rect.y * scale, material.rect.width * scale, material.rect.height * scale };
+            region = region.intersected(frame);
+            auto const on_screen = region.intersected(m_screen.framebuffer().rect());
+            if (on_screen.is_empty())
+                continue;
+            IntRect shown;
+            for (int down = on_screen.y / tile_size; down <= (on_screen.bottom() - 1) / tile_size; ++down) {
+                auto const* row = m_lowest_shown.data() + static_cast<size_t>(down) * static_cast<size_t>(m_tiles_across);
+                for (int across = on_screen.x / tile_size; across <= (on_screen.right() - 1) / tile_size; ++across) {
+                    if (row[across] < at)
+                        shown = shown.is_empty() ? tile_rect(across, down) : shown.united(tile_rect(across, down));
+                }
+            }
+            shown = shown.intersected(on_screen);
+            if (shown.is_empty())
+                continue;
+            auto const& style = m_theme.materials[static_cast<int>(material.material)];
+            float const sigma = style.blur * static_cast<float>(scale);
+            int const reach = static_cast<int>(Math::ceil(sigma * 3)) + reduction_for(sigma) * 2;
+            m_shown_materials.append(ShownMaterial { index - 1, material_index, region, shown, reach });
+
+            auto const around = shown.inflated(reach).intersected(m_screen.framebuffer().rect());
+            for (int down = around.y / tile_size; down <= (around.bottom() - 1) / tile_size; ++down) {
+                auto* row = m_lowest_shown.data() + static_cast<size_t>(down) * static_cast<size_t>(m_tiles_across);
+                for (int across = around.x / tile_size; across <= (around.right() - 1) / tile_size; ++across) {
+                    if (row[across] < at)
+                        continue;
+                    // The nearest below this window that covers it, if anything does.
+                    auto const tile = tile_rect(across, down);
+                    int lowest = -1;
+                    for (int below = at - 1; below >= 0; --below) {
+                        auto const& under = *m_windows[static_cast<size_t>(below)];
+                        if (is_drawn(under) && covers_tile(under, device_frame(under), tile)) {
+                            lowest = below;
+                            break;
+                        }
+                    }
+                    row[across] = static_cast<i16>(lowest);
+                }
+            }
+        }
+    }
+}
+
 void Compositor::grow_damage_for_materials()
 {
-    int scale = m_screen.scale();
     // A material reads what is below it, up to its blur's reach away, and the
     // screen only holds that where it is being redrawn this frame (elsewhere it
     // holds the finished picture, this very window and those above it included).
@@ -360,70 +486,127 @@ void Compositor::grow_damage_for_materials()
     // have whole, above it or below: so round again, until nothing more comes of it.
     for (bool grew = true; grew;) {
         grew = false;
-        for (size_t index = m_windows.size(); index > 0; --index) {
-            auto const& window = *m_windows[index - 1];
-            if (!window.visible || window.materials.is_empty())
-                continue;
-            auto frame = device_frame(window);
-            auto rects = dirty_rects();
-            for (auto const& material : window.materials) {
-                IntRect region { frame.x + material.rect.x * scale, frame.y + material.rect.y * scale, material.rect.width * scale, material.rect.height * scale };
-                region = region.intersected(frame);
-                if (region.is_empty())
-                    continue;
-                auto const& style = m_theme.materials[static_cast<int>(material.material)];
-                float sigma = style.blur * static_cast<float>(scale);
-                auto around = region.inflated(static_cast<int>(Math::ceil(sigma * 3)) + reduction_for(sigma) * 2);
-                for (auto const& rect : rects) {
-                    if (around.intersects(rect)) {
-                        if (invalidate_reporting(around))
-                            grew = true;
-                        break;
-                    }
+        for (auto const& material : m_shown_materials) {
+            auto const around = material.shown.inflated(material.reach);
+            for (auto const& rect : dirty_rects()) {
+                if (around.intersects(rect)) {
+                    if (invalidate_reporting(around))
+                        grew = true;
+                    break;
                 }
             }
         }
     }
 }
 
-Vector<IntRect> Compositor::pieces_of(Vector<IntRect> const& rects) const
+Vector<Compositor::Piece> Compositor::pieces_of(Vector<IntRect> const& rects) const
 {
-    Vector<IntRect> pieces;
+    Vector<Piece> pieces;
     for (auto const& rect : rects) {
-        // On a fixed grid of bands, whatever the rectangle.
-        for (int y = rect.y; y < rect.bottom();) {
-            int next = min((y / band_height + 1) * band_height, rect.bottom());
-            pieces.append(IntRect { rect.x, y, rect.width, next - y });
-            y = next;
+        // A row of tiles at a time, cut wherever what shows there changes.
+        for (int down = rect.y / tile_size; down <= (rect.bottom() - 1) / tile_size; ++down) {
+            int const top = max(rect.y, down * tile_size);
+            int const bottom = min(rect.bottom(), (down + 1) * tile_size);
+            auto const* row = m_lowest_shown.data() + static_cast<size_t>(down) * static_cast<size_t>(m_tiles_across);
+            int const last = (rect.right() - 1) / tile_size;
+            for (int across = rect.x / tile_size; across <= last;) {
+                int const lowest = row[across];
+                int next = across + 1;
+                // (Not too wide, as a material only needs some of them first.)
+                while (next <= last && row[next] == lowest && next - across < 16)
+                    ++next;
+                int const left = max(rect.x, across * tile_size);
+                int const right = min(rect.right(), next * tile_size);
+                pieces.append(Piece { IntRect { left, top, right - left, bottom - top }, lowest });
+                across = next;
+            }
         }
     }
     return pieces;
 }
 
-void Compositor::draw_layers(Layer const* layers, size_t count, Vector<IntRect> const& pieces)
+void Compositor::draw_steps(Vector<Step> const& steps, size_t end, Vector<Piece*> const& pieces)
 {
-    if (count == 0 || pieces.is_empty())
+    if (pieces.is_empty())
         return;
-    LayerJob work { layers, count, &pieces, this };
+    StepJob work { &steps, end, &pieces, this };
     m_workers.run(pieces.size(), [](void* context, size_t index) {
-        auto const& job = *static_cast<LayerJob*>(context);
-        auto const& piece = (*job.pieces)[index];
-        for (size_t i = 0; i < job.layer_count; ++i) {
-            auto const& layer = job.layers[i];
-            switch (layer.kind) {
-            case LayerKind::Wallpaper:
-                job.compositor->draw_wallpaper(piece);
+        auto const& job = *static_cast<StepJob*>(context);
+        auto& piece = *(*job.pieces)[index];
+        for (size_t i = piece.next_step; i < job.end; ++i) {
+            auto const& step = (*job.steps)[i];
+            switch (step.kind) {
+            case StepKind::Wallpaper:
+                if (piece.lowest < 0)
+                    job.compositor->draw_wallpaper(piece.rect);
                 break;
-            case LayerKind::Shadow:
-                job.compositor->draw_shadow(*layer.window, piece);
+            case StepKind::Shadow:
+                // Under the window it's of, if that covers this.
+                if (step.index > piece.lowest)
+                    job.compositor->draw_shadow(*step.window, piece.rect);
                 break;
-            case LayerKind::Body:
-                job.compositor->draw_body(*layer.window, piece);
+            case StepKind::Body:
+                if (step.index >= piece.lowest)
+                    job.compositor->draw_body(*step.window, piece.rect, step.index == piece.lowest);
                 break;
             }
         }
+        piece.next_step = job.end;
     },
         &work);
+}
+
+void Compositor::surface_replaced(ServerWindow& window)
+{
+    auto const* first = window.buffers[0].ptr();
+    int const cell = ServerWindow::opaque_cell_size;
+    window.opaque_cell_columns = first ? (first->width() + cell - 1) / cell : 0;
+    window.opaque_cell_rows = first ? (first->height() + cell - 1) / cell : 0;
+    MUST(window.opaque_cells.try_resize(static_cast<size_t>(window.opaque_cell_columns) * static_cast<size_t>(window.opaque_cell_rows)));
+    for (auto& opaque : window.opaque_cells)
+        opaque = 0;
+}
+
+void Compositor::surface_changed(ServerWindow& window, IntRect damage)
+{
+    auto const* surface = window.shown_surface();
+    if (!surface || window.opaque_cells.is_empty())
+        return;
+    damage = damage.intersected(surface->rect());
+    if (damage.is_empty())
+        return;
+    int const cell = ServerWindow::opaque_cell_size;
+    struct Scan {
+        ServerWindow* window;
+        Bitmap const* surface;
+        int first_column;
+        int last_column;
+        int first_row;
+    } scan { &window, surface, damage.x / cell, (damage.right() - 1) / cell, damage.y / cell };
+    int const rows = (damage.bottom() - 1) / cell - scan.first_row + 1;
+    // Most of this is one small part of a window. All of a big one would be seen, but for the other processors.
+    m_workers.run(static_cast<size_t>(rows), [](void* context, size_t index) {
+        auto const& job = *static_cast<Scan*>(context);
+        int const cell = ServerWindow::opaque_cell_size;
+        int const row = job.first_row + static_cast<int>(index);
+        int const top = row * cell;
+        int const bottom = min(top + cell, job.surface->height());
+        u8* cells = job.window->opaque_cells.data() + static_cast<size_t>(row) * static_cast<size_t>(job.window->opaque_cell_columns);
+        for (int column = job.first_column; column <= job.last_column; ++column) {
+            int const left = column * cell;
+            int const count = min(left + cell, job.surface->width()) - left;
+            bool opaque = true;
+            for (int y = top; y < bottom && opaque; ++y) {
+                auto const* pixels = job.surface->scanline(y) + left;
+                u32 together = 0xffffffffu;
+                for (int x = 0; x < count; ++x)
+                    together &= static_cast<u32>(pixel_alpha(pixels[x]));
+                opaque = (together & 0xff) == 0xff;
+            }
+            cells[column] = opaque;
+        }
+    },
+        &scan);
 }
 
 void Compositor::draw_wallpaper(IntRect clip)
@@ -524,7 +707,7 @@ void Compositor::blend_row_in_window(Pixel* destination, Pixel const* source, in
     }
 }
 
-void Compositor::draw_body(ServerWindow const& window, IntRect clip)
+void Compositor::draw_body(ServerWindow const& window, IntRect clip, bool covers_it)
 {
     auto& framebuffer = m_screen.framebuffer();
     auto frame = device_frame(window);
@@ -538,8 +721,7 @@ void Compositor::draw_body(ServerWindow const& window, IntRect clip)
     auto const* chrome = window.is_titled() ? window.chrome.ptr() : nullptr;
     // A row of the background, for where there is no surface (yet).
     Pixel fill[256];
-    for (auto& pixel : fill)
-        pixel = background;
+    bool filled = false;
     for (int y = area.y; y < area.bottom(); ++y) {
         int row_in_frame = y - frame.y;
         auto* destination = framebuffer.scanline(y) + area.x;
@@ -551,6 +733,11 @@ void Compositor::draw_body(ServerWindow const& window, IntRect clip)
         // (A unified title bar, though, is drawn by the client, and goes over it.)
         bool in_chrome = chrome && row_in_frame < chrome->height();
         bool under_chrome = in_chrome && !window.is_unified();
+        // All of it, and no blending to do.
+        if (covers_it && !in_chrome) {
+            memcpy(destination, surface->scanline(row_in_frame) + x_in_frame, static_cast<size_t>(area.width) * sizeof(Pixel));
+            continue;
+        }
         int covered_to = area.width;
         if (under_chrome) {
             covered_to = area.width;
@@ -562,6 +749,11 @@ void Compositor::draw_body(ServerWindow const& window, IntRect clip)
             covered_to = 0;
         }
         for (int done = covered_to; done < area.width;) {
+            if (!filled) {
+                for (auto& pixel : fill)
+                    pixel = background;
+                filled = true;
+            }
             int chunk = min(area.width - done, static_cast<int>(array_size(fill)));
             blend_row_in_window(destination + done, fill, x_in_frame + done, row_in_frame, chunk, frame_size, shape);
             done += chunk;
@@ -576,65 +768,62 @@ void Compositor::draw_body(ServerWindow const& window, IntRect clip)
         draw_nine_slice(shape->outline, frame, m_theme.outline, clip, frame.inflated(-1), shape->corner_extent);
 }
 
-void Compositor::render_material(MaterialStyle const& style, IntRect area, Bitmap& result)
+void Compositor::read_material_rows(MaterialJob const& job, int first, int end)
 {
     auto& framebuffer = m_screen.framebuffer();
-    float sigma = style.blur * static_cast<float>(m_screen.scale());
-    int reduction = reduction_for(sigma);
-    int reach = static_cast<int>(Math::ceil(sigma * 3)) + reduction * 2;
-
-    // What to read, on a grid of the reduction, so the same pixels come out
-    // whichever part is being redrawn: nothing shimmers as things move.
-    auto source = area.inflated(reach).intersected(framebuffer.rect());
-    int grid_left = source.x / reduction * reduction;
-    int grid_top = source.y / reduction * reduction;
-    int small_width = (source.right() - grid_left + reduction - 1) / reduction;
-    int small_height = (source.bottom() - grid_top + reduction - 1) / reduction;
-    auto small_or_error = Bitmap::create({ small_width, small_height });
-    if (small_or_error.is_error())
-        return;
-    auto small = small_or_error.release_value();
-
     // Down: each small pixel the average of what it covers (of every other
     // pixel, at the widest blurs, which leave no trace of the difference).
+    int const reduction = job.reduction;
     int stride = reduction >= 8 ? 2 : 1;
     int per_side = reduction / stride;
     u32 reciprocal = 65536u / static_cast<u32>(per_side * per_side);
-    for (int y = 0; y < small_height; ++y) {
-        auto* out = small->scanline(y);
-        for (int x = 0; x < small_width; ++x) {
+    for (int y = first; y < end; ++y) {
+        auto* out = job.small->scanline(y);
+        for (int x = 0; x < job.small_width; ++x) {
             u32x4 sum {};
             for (int sy = 0; sy < per_side; ++sy) {
-                auto const* row = framebuffer.scanline(min(grid_top + y * reduction + sy * stride, framebuffer.height() - 1));
+                auto const* row = framebuffer.scanline(min(job.grid_top + y * reduction + sy * stride, framebuffer.height() - 1));
                 for (int sx = 0; sx < per_side; ++sx)
-                    sum += widened(row[min(grid_left + x * reduction + sx * stride, framebuffer.width() - 1)]);
+                    sum += widened(row[min(job.grid_left + x * reduction + sx * stride, framebuffer.width() - 1)]);
             }
             out[x] = narrowed((sum * reciprocal + 32768u) >> 16);
         }
     }
-    if (gaussian_blur(*small, small->rect(), sigma / static_cast<float>(reduction)).is_error())
-        return;
-    adjust_saturation(*small, small->rect(), style.saturation);
+}
 
-    // Back up: bilinear (a row between two small rows, then across it), then the
-    // tint. Into the screen comes later, once all of them are done: they read it.
-    Pixel tint = style.tint.to_pixel();
+void Compositor::blur_material(MaterialJob const& job)
+{
+    IntRect const region { 0, 0, job.small_width, job.small_height };
+    if (gaussian_blur(*job.small, region, job.sigma / static_cast<float>(job.reduction), job.spare).is_error())
+        return;
+    adjust_saturation(*job.small, region, job.style->saturation);
+}
+
+void Compositor::place_material_rows(MaterialJob const& job, int first, int end)
+{
+    // Back up: bilinear (a row between two small rows, then across it), then the tint.
+    auto const& area = job.area;
+    int const reduction = job.reduction;
+    int const small_width = job.small_width;
+    int const small_height = job.small_height;
+    Pixel tint = job.style->tint.to_pixel();
     Vector<Pixel> between;
-    MUST(between.try_resize(static_cast<size_t>(small_width)));
+    Vector<Pixel> row_buffer;
+    if (between.try_resize(static_cast<size_t>(small_width)).is_error() || row_buffer.try_resize(static_cast<size_t>(area.width)).is_error())
+        return;
     int half = reduction / 2;
     u32 step = 256u / static_cast<u32>(reduction);
-    for (int y = area.y; y < area.bottom(); ++y) {
-        int position_y = max(y - grid_top - half, 0);
+    for (int y = first; y < end; ++y) {
+        int position_y = max(y - job.grid_top - half, 0);
         int upper = min(position_y / reduction, small_height - 1);
         int lower = min(upper + 1, small_height - 1);
         u32 fraction_y = static_cast<u32>(position_y % reduction) * step;
-        auto const* top = small->scanline(upper);
-        auto const* bottom = small->scanline(lower);
+        auto const* top = job.small->scanline(upper);
+        auto const* bottom = job.small->scanline(lower);
         for (int x = 0; x < small_width; ++x)
             between[static_cast<size_t>(x)] = narrowed((widened(top[x]) * (256 - fraction_y) + widened(bottom[x]) * fraction_y + 128u) >> 8);
 
-        auto* row_buffer = result.scanline(y - area.y);
-        int position_x = max(area.x - grid_left - half, 0);
+        int position_x = max(area.x - job.grid_left - half, 0);
         int offset = position_x % reduction;
         int column = position_x / reduction;
         int written = 0;
@@ -644,63 +833,122 @@ void Compositor::render_material(MaterialStyle const& style, IntRect area, Bitma
             int run = min(reduction - offset, area.width - written);
             for (int i = 0; i < run; ++i) {
                 u32 fraction_x = static_cast<u32>(offset + i) * step;
-                row_buffer[written + i] = narrowed((left * (256 - fraction_x) + right * fraction_x + 128u) >> 8);
+                row_buffer[static_cast<size_t>(written + i)] = narrowed((left * (256 - fraction_x) + right * fraction_x + 128u) >> 8);
             }
             written += run;
             offset = 0;
             ++column;
         }
-        blend_row_solid(row_buffer, tint, area.width);
+        blend_row_solid(row_buffer.data(), tint, area.width);
+        place_material_row(job, y, row_buffer.data());
     }
 }
 
-void Compositor::place_material(ServerWindow const& window, IntRect area, Bitmap const& result, IntRect region, int radius)
+void Compositor::place_material_row(MaterialJob const& job, int y, Pixel const* source)
 {
     auto& framebuffer = m_screen.framebuffer();
+    auto const& area = job.area;
+    auto const& window = *job.window;
+    auto const& region = job.region;
+    int const radius = job.radius;
     auto frame = device_frame(window);
     if (radius <= 0) {
-        for (int y = area.y; y < area.bottom(); ++y)
-            blend_row_in_window(framebuffer.scanline(y) + area.x, result.scanline(y - area.y), area.x - frame.x, y - frame.y, area.width, frame.size(), window.is_bare() ? nullptr : window.shape);
+        blend_row_in_window(framebuffer.scanline(y) + area.x, source, area.x - frame.x, y - frame.y, area.width, frame.size(), window.is_bare() ? nullptr : window.shape);
         return;
     }
     // Its own rounded corners: rows near the top and bottom start and end further in,
     // with the edge's pixel covered as far as the circle goes.
     auto r = static_cast<float>(radius);
-    for (int y = area.y; y < area.bottom(); ++y) {
-        int from_top = y - region.y;
-        int from_bottom = region.bottom() - 1 - y;
-        int nearest = min(from_top, from_bottom);
-        float inset = 0;
-        if (nearest < radius) {
-            float dy = r - (static_cast<float>(nearest) + 0.5f);
-            inset = r - static_cast<float>(Math::square_root(static_cast<double>(r * r - dy * dy)));
-        }
-        int whole = static_cast<int>(inset);
-        auto const* source = result.scanline(y - area.y);
-        auto* row = framebuffer.scanline(y);
-        int start = region.x + whole;
-        int end = region.right() - whole;
-        if (start >= end)
-            continue;
-        auto put = [&](int from, int to, u32 opacity) {
-            from = max(from, area.x);
-            to = min(to, area.right());
-            if (from >= to)
-                return;
-            if (opacity >= 255)
-                blend_row(row + from, source + (from - area.x), to - from);
-            else
-                blend_row_opacity(row + from, source + (from - area.x), opacity, to - from);
-        };
-        if (inset > 0) {
-            auto edge = static_cast<u32>((1 - (inset - static_cast<float>(whole))) * 255);
-            put(start, start + 1, edge);
-            put(end - 1, end, edge);
-            put(start + 1, end - 1, 255);
-        } else {
-            put(start, end, 255);
-        }
+    int from_top = y - region.y;
+    int from_bottom = region.bottom() - 1 - y;
+    int nearest = min(from_top, from_bottom);
+    float inset = 0;
+    if (nearest < radius) {
+        float dy = r - (static_cast<float>(nearest) + 0.5f);
+        inset = r - static_cast<float>(Math::square_root(static_cast<double>(r * r - dy * dy)));
     }
+    int whole = static_cast<int>(inset);
+    auto* row = framebuffer.scanline(y);
+    int start = region.x + whole;
+    int end = region.right() - whole;
+    if (start >= end)
+        return;
+    auto put = [&](int from, int to, u32 opacity) {
+        from = max(from, area.x);
+        to = min(to, area.right());
+        if (from >= to)
+            return;
+        if (opacity >= 255)
+            blend_row(row + from, source + (from - area.x), to - from);
+        else
+            blend_row_opacity(row + from, source + (from - area.x), opacity, to - from);
+    };
+    if (inset > 0) {
+        auto edge = static_cast<u32>((1 - (inset - static_cast<float>(whole))) * 255);
+        put(start, start + 1, edge);
+        put(end - 1, end, edge);
+        put(start + 1, end - 1, 255);
+    } else {
+        put(start, end, 255);
+    }
+}
+
+void Compositor::draw_materials(Vector<MaterialJob>& jobs)
+{
+    auto const& framebuffer = m_screen.framebuffer();
+    // What to read, on a grid of the reduction, so the same pixels come out
+    // whichever part is being redrawn: nothing shimmers as things move.
+    while (m_material_memory.size() < jobs.size())
+        m_material_memory.append({});
+    Vector<MaterialBand> reading;
+    Vector<MaterialBand> placing;
+    for (size_t i = 0; i < jobs.size(); ++i) {
+        auto& job = jobs[i];
+        job.sigma = job.style->blur * static_cast<float>(m_screen.scale());
+        job.reduction = reduction_for(job.sigma);
+        int reach = static_cast<int>(Math::ceil(job.sigma * 3)) + job.reduction * 2;
+        job.source = job.area.inflated(reach).intersected(framebuffer.rect());
+        job.grid_left = job.source.x / job.reduction * job.reduction;
+        job.grid_top = job.source.y / job.reduction * job.reduction;
+        job.small_width = (job.source.right() - job.grid_left + job.reduction - 1) / job.reduction;
+        job.small_height = (job.source.bottom() - job.grid_top + job.reduction - 1) / job.reduction;
+        auto& memory = m_material_memory[i];
+        if (!memory.small || memory.small->width() < job.small_width || memory.small->height() < job.small_height) {
+            // A little more than it needs, for it not to happen every time something grows by a row.
+            IntSize const wanted { job.small_width + 32, job.small_height + 32 };
+            auto small = Bitmap::create(wanted);
+            auto spare = Bitmap::create(wanted);
+            if (small.is_error() || spare.is_error())
+                continue;
+            memory.small = small.release_value();
+            memory.spare = spare.release_value();
+        }
+        job.small = memory.small.ptr();
+        job.spare = memory.spare.ptr();
+        for (int y = 0; y < job.small_height; y += 8)
+            reading.append(MaterialBand { &job, y, min(y + 8, job.small_height) });
+        for (int y = job.area.y; y < job.area.bottom(); y += 16)
+            placing.append(MaterialBand { &job, y, min(y + 16, job.area.bottom()) });
+    }
+    // All from what is below, none reading what another wrote, whichever thread gets there first; and only then into the screen.
+    u64 const started = now_microseconds();
+    m_workers.run(reading.size(), [](void* context, size_t index) {
+        auto const& band = static_cast<MaterialBand const*>(context)[index];
+        band.job->compositor->read_material_rows(*band.job, band.first, band.end);
+    },
+        reading.data());
+    m_workers.run(jobs.size(), [](void* context, size_t index) {
+        auto const& job = static_cast<MaterialJob const*>(context)[index];
+        if (job.small)
+            job.compositor->blur_material(job);
+    },
+        jobs.data());
+    m_material_microseconds += now_microseconds() - started;
+    m_workers.run(placing.size(), [](void* context, size_t index) {
+        auto const& band = static_cast<MaterialBand const*>(context)[index];
+        band.job->compositor->place_material_rows(*band.job, band.first, band.end);
+    },
+        placing.data());
 }
 
 void Compositor::set_overlays(Vector<Overlay> overlays)
@@ -865,89 +1113,85 @@ void Compositor::render()
     if (!m_any_dirty)
         return;
     u64 started = now_microseconds();
+    find_what_shows();
     grow_damage_for_materials();
     auto rects = dirty_rects();
     auto pieces = pieces_of(rects);
+    Vector<Piece*> every_piece;
+    for (auto& piece : pieces)
+        every_piece.append(&piece);
 
-    // Bottom to top, stopping where a material needs what is below it done.
-    Vector<Layer> layers;
-    layers.append(Layer { LayerKind::Wallpaper, nullptr });
-    int scale = m_screen.scale();
-    struct MaterialJob {
-        Compositor* compositor;
-        ServerWindow const* window;
-        MaterialStyle const* style;
-        IntRect area;
-        RefPtr<Bitmap> result;
-        IntRect region;
-        int radius;
-    };
+    // Bottom to top. A material needs what's below it done first, but only where it reads: the rest waits for the end, and
+    // only there do the other processors all get to work on it at once.
+    Vector<Step> steps;
+    steps.append(Step { StepKind::Wallpaper, nullptr, -1 });
+    int const scale = m_screen.scale();
     bool overlays_drawn = false;
     auto draw_overlays_now = [&] {
         overlays_drawn = true;
         if (m_overlays.is_empty() && m_dim.alpha == 0)
             return;
-        draw_layers(layers.data(), layers.size(), pieces);
-        layers.clear();
+        draw_steps(steps, steps.size(), every_piece);
         draw_overlays(rects);
     };
-    for (auto* window : m_windows) {
+    for (size_t index = 0; index < m_windows.size(); ++index) {
+        auto const* window = m_windows[index];
         if (!overlays_drawn && window->level >= Window::LevelDock)
             draw_overlays_now();
-        if (!window->visible || (m_hides_normal_windows && window->level == Window::LevelNormal))
+        if (!is_drawn(*window))
             continue;
-        layers.append(Layer { LayerKind::Shadow, window });
-        if (!window->materials.is_empty()) {
-            draw_layers(layers.data(), layers.size(), pieces);
-            layers.clear();
-            auto frame = device_frame(*window);
-            Vector<MaterialJob> jobs;
-            for (auto const& material : window->materials) {
-                IntRect region { frame.x + material.rect.x * scale, frame.y + material.rect.y * scale, material.rect.width * scale, material.rect.height * scale };
-                region = region.intersected(frame);
-                auto const& style = m_theme.materials[static_cast<int>(material.material)];
-                for (auto const& rect : rects) {
-                    auto area = region.intersected(rect);
-                    if (area.is_empty())
-                        continue;
-                    auto result = Bitmap::create(area.size());
-                    if (!result.is_error())
-                        jobs.append(MaterialJob { this, window, &style, area, result.release_value(), region, material.radius * scale });
+        steps.append(Step { StepKind::Shadow, window, static_cast<int>(index) });
+        Vector<MaterialJob> jobs;
+        for (auto const& shown : m_shown_materials) {
+            if (shown.window_index != index)
+                continue;
+            auto const& material = window->materials[shown.material_index];
+            auto const& style = m_theme.materials[static_cast<int>(material.material)];
+            for (auto const& rect : rects) {
+                auto area = shown.shown.intersected(rect);
+                if (!area.is_empty())
+                    jobs.append(MaterialJob { this, window, &style, area, shown.region, material.radius * scale, {}, 0, 0, 0, 0, 1, 0, nullptr, nullptr });
+            }
+        }
+        if (!jobs.is_empty()) {
+            Vector<Piece*> wanted;
+            for (auto& piece : pieces) {
+                for (auto const& job : jobs) {
+                    auto const& style = *job.style;
+                    float const sigma = style.blur * static_cast<float>(scale);
+                    if (piece.rect.intersects(job.area.inflated(static_cast<int>(Math::ceil(sigma * 3)) + reduction_for(sigma) * 2))) {
+                        wanted.append(&piece);
+                        break;
+                    }
                 }
             }
-            // All from what is below, none reading what another wrote, whichever
-            // thread gets there first; and only then into the screen.
-            m_workers.run(jobs.size(), [](void* context, size_t index) {
-                auto const& job = static_cast<MaterialJob const*>(context)[index];
-                job.compositor->render_material(*job.style, job.area, *job.result);
-            },
-                jobs.data());
-            m_workers.run(jobs.size(), [](void* context, size_t index) {
-                auto const& job = static_cast<MaterialJob const*>(context)[index];
-                job.compositor->place_material(*job.window, job.area, *job.result, job.region, job.radius);
-            },
-                jobs.data());
+            draw_steps(steps, steps.size(), wanted);
+            draw_materials(jobs);
         }
-        layers.append(Layer { LayerKind::Body, window });
+        steps.append(Step { StepKind::Body, window, static_cast<int>(index) });
     }
     if (!overlays_drawn)
         draw_overlays_now();
-    draw_layers(layers.data(), layers.size(), pieces);
+    draw_steps(steps, steps.size(), every_piece);
     u64 composed = now_microseconds();
 
-    // One flush for each part; far apart parts stay apart.
+    // A flush costs far more for being a flush than for how much it has to show: two or three small ones take longer than
+    // one of the whole screen. Only two things a long way apart are worth keeping apart.
     u64 pixel_count = 0;
-    if (rects.size() > 16) {
-        IntRect everything;
-        for (auto const& rect : rects)
-            everything = everything.united(rect);
+    IntRect everything;
+    u64 separately = 0;
+    for (auto const& rect : rects) {
+        everything = everything.is_empty() ? rect : everything.united(rect);
+        separately += static_cast<u64>(rect.width) * static_cast<u64>(rect.height);
+    }
+    u64 const together = static_cast<u64>(everything.width) * static_cast<u64>(everything.height);
+    if (rects.size() > 2 || together <= separately * 8) {
         m_screen.flush(everything);
-        pixel_count = static_cast<u64>(everything.width) * static_cast<u64>(everything.height);
+        pixel_count = together;
     } else {
-        for (auto const& rect : rects) {
+        for (auto const& rect : rects)
             m_screen.flush(rect);
-            pixel_count += static_cast<u64>(rect.width) * static_cast<u64>(rect.height);
-        }
+        pixel_count = separately;
     }
     u64 flushed = now_microseconds();
 

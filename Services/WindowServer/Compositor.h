@@ -66,6 +66,10 @@ public:
     [[nodiscard]] bool has_damage() const { return m_any_dirty; }
     void render();
 
+    // A surface has been replaced, or part of the one that's shown is new: what's opaque of it is worked out here.
+    void surface_replaced(ServerWindow&);
+    void surface_changed(ServerWindow&, Gfx::IntRect damage);
+
     // What is drawn in place of windows, while they move through a shape they cannot
     // have: between the normal windows and those above. All on one thread, by painter.
     struct Overlay {
@@ -105,28 +109,79 @@ public:
     [[nodiscard]] u64 compose_microseconds() const { return m_compose_microseconds; }
     [[nodiscard]] u64 flush_microseconds() const { return m_flush_microseconds; }
     [[nodiscard]] u64 pixels() const { return m_pixels; }
+    [[nodiscard]] u64 material_microseconds() const { return m_material_microseconds; }
 
 private:
     static constexpr int tile_size = 32;
     // The height of a piece of work.
     static constexpr int band_height = 64;
 
-    enum class LayerKind : u8 {
+    enum class StepKind : u8 {
         Wallpaper,
         Shadow,
         Body,
     };
 
-    struct Layer {
-        LayerKind kind;
+    // One thing to draw over all of what's dirty. `index` is the window's place, from the bottom.
+    struct Step {
+        StepKind kind;
         ServerWindow const* window;
+        int index;
     };
 
-    struct LayerJob {
-        Layer const* layers;
-        size_t layer_count;
-        Vector<Gfx::IntRect> const* pieces;
+    // Part of what's dirty, and the lowest window that shows in it: nothing under that is drawn. -1 if the wallpaper does.
+    struct Piece {
+        Gfx::IntRect rect;
+        int lowest;
+        // The steps done so far: a piece is only taken as far as something needs it to be.
+        size_t next_step { 0 };
+    };
+
+    struct StepJob {
+        Vector<Step> const* steps;
+        size_t end;
+        Vector<Piece*> const* pieces;
         Compositor* compositor;
+    };
+
+    // Some of a material on the screen. What it's to read, and the small picture it's read into.
+    struct MaterialJob {
+        Compositor* compositor;
+        ServerWindow const* window;
+        MaterialStyle const* style;
+        Gfx::IntRect area;
+        Gfx::IntRect region;
+        int radius;
+        Gfx::IntRect source;
+        int grid_left;
+        int grid_top;
+        int small_width;
+        int small_height;
+        int reduction;
+        float sigma;
+        Gfx::Bitmap* small;
+        Gfx::Bitmap* spare;
+    };
+
+    struct MaterialBand {
+        MaterialJob const* job;
+        int first;
+        int end;
+    };
+
+    // Kept from one frame to the next: making and letting go of this much memory every frame is what used to take the time.
+    struct MaterialMemory {
+        RefPtr<Gfx::Bitmap> small;
+        RefPtr<Gfx::Bitmap> spare;
+    };
+
+    // A material that can be seen, and how much of it.
+    struct ShownMaterial {
+        size_t window_index;
+        size_t material_index;
+        Gfx::IntRect region;
+        Gfx::IntRect shown;
+        int reach;
     };
 
     ErrorOr<void> render_wallpaper();
@@ -137,20 +192,29 @@ private:
     [[nodiscard]] ShadowStyle const& shadow_style_of(ServerWindow const&) const;
     [[nodiscard]] NineSlice const& shadow_slice_of(ServerWindow const&) const;
 
+    [[nodiscard]] bool is_drawn(ServerWindow const&) const;
+    [[nodiscard]] bool covers_tile(ServerWindow const&, Gfx::IntRect frame, Gfx::IntRect tile) const;
+    [[nodiscard]] Gfx::IntRect tile_rect(int across, int down) const;
+    // For each tile, the lowest window that shows there; and so which materials can be seen, and what they have to read.
+    void find_what_shows();
     void grow_damage_for_materials();
     // Whether that made any part dirty that was not.
     bool invalidate_reporting(Gfx::IntRect);
     [[nodiscard]] Vector<Gfx::IntRect> dirty_rects() const;
-    [[nodiscard]] Vector<Gfx::IntRect> pieces_of(Vector<Gfx::IntRect> const&) const;
-    void draw_layers(Layer const*, size_t count, Vector<Gfx::IntRect> const& pieces);
+    [[nodiscard]] Vector<Piece> pieces_of(Vector<Gfx::IntRect> const&) const;
+    void draw_steps(Vector<Step> const&, size_t end, Vector<Piece*> const& pieces);
+    void draw_materials(Vector<MaterialJob>&);
 
     void draw_wallpaper(Gfx::IntRect clip);
     void draw_shadow(ServerWindow const&, Gfx::IntRect clip);
-    void draw_body(ServerWindow const&, Gfx::IntRect clip);
+    // `covers_it`: every pixel it has here is opaque, and it's on none of its corners.
+    void draw_body(ServerWindow const&, Gfx::IntRect clip, bool covers_it);
     void draw_nine_slice(NineSlice const&, Gfx::IntRect target, Gfx::Color, Gfx::IntRect clip, Gfx::IntRect hole, int hole_corner);
-    // What shows through a material here (it reads the screen), and then putting it there.
-    void render_material(MaterialStyle const&, Gfx::IntRect area, Gfx::Bitmap& result);
-    void place_material(ServerWindow const&, Gfx::IntRect area, Gfx::Bitmap const& result, Gfx::IntRect region, int radius);
+    // What shows through a material here: reading the screen into a small picture, blurring that, and bringing it back up.
+    void read_material_rows(MaterialJob const&, int first, int end);
+    void blur_material(MaterialJob const&);
+    void place_material_rows(MaterialJob const&, int first, int end);
+    void place_material_row(MaterialJob const&, int y, Gfx::Pixel const* source);
 
     // Blends a row of pixels into the screen through the window's rounded
     // corners. x is the first column to draw, in device pixels from the frame's
@@ -173,11 +237,15 @@ private:
     int m_tiles_down { 0 };
     Vector<u8> m_dirty;
     bool m_any_dirty { false };
+    Vector<i16> m_lowest_shown;
+    Vector<ShownMaterial> m_shown_materials;
+    Vector<MaterialMemory> m_material_memory;
 
     u64 m_frames { 0 };
     u64 m_compose_microseconds { 0 };
     u64 m_flush_microseconds { 0 };
     u64 m_pixels { 0 };
+    u64 m_material_microseconds { 0 };
 };
 
 }

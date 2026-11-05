@@ -15,7 +15,8 @@ namespace Gfx {
 // A Gaussian blur of a part of the bitmap (standard deviation `sigma`, in
 // pixels), by three box blurs as SVG specifies them; what is beyond the edges
 // repeats the edge. EINVAL-free: a sigma too small to show does nothing.
-ErrorOr<void> gaussian_blur(Bitmap&, IntRect region, float sigma);
+// `spare`, if given and big enough, saves it finding some: for something done every frame.
+ErrorOr<void> gaussian_blur(Bitmap&, IntRect region, float sigma, Bitmap* spare = nullptr);
 ErrorOr<void> gaussian_blur(AlphaMask&, float sigma);
 
 // As CSS's saturate(): 0 grey, 1 unchanged, above 1 more vivid.
