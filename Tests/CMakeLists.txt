@@ -6,6 +6,7 @@
 
 add_subdirectory(Kernel)
 add_subdirectory(LibAnimation)
+add_subdirectory(LibGesture)
 add_subdirectory(LibArchive)
 add_subdirectory(LibAudio)
 add_subdirectory(LibBase)
