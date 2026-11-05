@@ -12,7 +12,6 @@ namespace WindowServer {
 
 namespace {
 
-constexpr size_t no_work = ~static_cast<size_t>(0) / 2;
 // About 200 microseconds, on what this runs on.
 constexpr int spin_iterations = 20000;
 
@@ -72,10 +71,15 @@ void* WorkerPool::worker_main(void* argument)
 void WorkerPool::take_work()
 {
     for (;;) {
-        size_t index = __atomic_fetch_add(&m_next, 1, __ATOMIC_ACQ_REL);
-        if (index >= __atomic_load_n(&m_count, __ATOMIC_ACQUIRE))
+        // How many there are and which is next, in one word, so that the two are of the same job. Apart, a thread that
+        // had just gone past the end of one job could read the next job's larger count, and think what it had was a piece of
+        // that: which someone else was also given, and so the count of those done went past the end and never came level.
+        u64 const ticket = __atomic_fetch_add(&m_tickets, 1, __ATOMIC_ACQ_REL);
+        u32 const index = static_cast<u32>(ticket);
+        u32 const count = static_cast<u32>(ticket >> 32);
+        if (index >= count)
             return;
-        // Having an index means the job cannot end, nor the next be set up,
+        // Having a piece means the job cannot end, nor the next be set up,
         // until this one is counted as done.
         m_job(m_context, index);
         __atomic_add_fetch(&m_completed, 1, __ATOMIC_ACQ_REL);
@@ -92,12 +96,11 @@ void WorkerPool::run(size_t count, Job job, void* context)
             job(context, i);
         return;
     }
-    __atomic_store_n(&m_next, no_work, __ATOMIC_SEQ_CST);
+    // (There's nothing to be had while it says there are none, however many have tried.)
     m_job = job;
     m_context = context;
-    __atomic_store_n(&m_count, count, __ATOMIC_RELEASE);
     __atomic_store_n(&m_completed, static_cast<size_t>(0), __ATOMIC_RELEASE);
-    __atomic_store_n(&m_next, static_cast<size_t>(0), __ATOMIC_SEQ_CST);
+    __atomic_store_n(&m_tickets, static_cast<u64>(count) << 32, __ATOMIC_SEQ_CST);
     __atomic_add_fetch(&m_generation, 1, __ATOMIC_SEQ_CST);
     if (__atomic_load_n(&m_sleepers, __ATOMIC_SEQ_CST) > 0) {
         pthread_mutex_lock(&m_mutex);
@@ -112,7 +115,7 @@ void WorkerPool::run(size_t count, Job job, void* context)
         if (++spins % 4096 == 0)
             sched_yield();
     }
-    __atomic_store_n(&m_count, static_cast<size_t>(0), __ATOMIC_RELEASE);
+    __atomic_store_n(&m_tickets, static_cast<u64>(0), __ATOMIC_SEQ_CST);
 }
 
 }

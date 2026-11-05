@@ -39,10 +39,8 @@ private:
 
     Job m_job { nullptr };
     void* m_context { nullptr };
-    size_t m_count { 0 };
-    // The next index to hand out. Beyond any count between jobs, so nothing is
-    // taken while the next job is being set up.
-    size_t m_next { ~static_cast<size_t>(0) / 2 };
+    // How many pieces this job has, above, and the next to be taken, below.
+    u64 m_tickets { 0 };
     size_t m_completed { 0 };
 };
 
