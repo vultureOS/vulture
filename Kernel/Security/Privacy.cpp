@@ -193,11 +193,27 @@ void initialize()
 
 ErrorOr<void> check(StringView path)
 {
-    auto* process = Process::current();
-    if (!process || process->responsible_application().is_empty())
-        return {};
     u32 const service = service_of(path);
     if (service == 0)
+        return {};
+    return check_service(service);
+}
+
+bool has_been_allowed(int pid, u32 service)
+{
+    auto process = Process::from_pid(pid);
+    if (!process)
+        return false;
+    // What came with the system isn't asked about.
+    if (process->responsible_application().is_empty())
+        return true;
+    return process->privacy_allowed() & static_cast<u8>(1u << service);
+}
+
+ErrorOr<void> check_service(u32 service)
+{
+    auto* process = Process::current();
+    if (!process || process->responsible_application().is_empty())
         return {};
     u8 const bit = static_cast<u8>(1u << service);
     if (process->privacy_allowed() & bit)
@@ -212,7 +228,7 @@ ErrorOr<void> check(StringView path)
     if (outcome == Outcome::Allowed || outcome == Outcome::Denied)
         process->remember_privacy_answer(bit, outcome == Outcome::Allowed);
     if (outcome != Outcome::Allowed) {
-        dmesgln("Privacy: {}[{}], from {}, denied {}", process->name(), process->pid(), process->responsible_application(), path);
+        dmesgln("Privacy: {}[{}], from {}, denied service {}", process->name(), process->pid(), process->responsible_application(), service);
         return Error::from_errno(EPERM);
     }
     return {};

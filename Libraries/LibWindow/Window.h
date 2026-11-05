@@ -32,16 +32,24 @@ public:
 
     [[nodiscard]] WindowServerProxy& server() { return m_server; }
     [[nodiscard]] Gfx::IntSize screen_size() const { return m_screen_size; }
+    [[nodiscard]] Vector<DisplayRecord> displays();
+    // Asks if it has to, and waits for the answer: it's this program that's made to wait, and never the window server, which
+    // may be what's needed to show the question.
+    [[nodiscard]] bool ask_to_look_at_screen();
+    // A PNG, of all of the desktop, or just this much of it in points.
+    [[nodiscard]] ErrorOr<Vector<u8>> capture_screen(Gfx::IntRect = {});
     [[nodiscard]] int scale() const { return m_scale; }
     [[nodiscard]] StringView appearance() const { return m_appearance.view(); }
 
     Function<void(StringView)> on_appearance_change;
     Function<void(bool)> on_motion_change;
+    Function<void()> on_displays_change;
     Function<void(u32)> on_menu_item_chosen;
     Function<void()> on_quit_requested;
     Function<void(StringView)> on_shell_state;
     Function<void(u16, u32)> on_hotkey;
     Function<void(u32)> on_accessibility_requested;
+    Function<void(i32 width, i32 height, u64 time)> on_recorded_frame;
 
 private:
     friend class Window;
@@ -52,6 +60,7 @@ private:
     void moved(IPC::Sender const&, u32 window, i32 x, i32 y) override;
     void appearance_changed(IPC::Sender const&, String name) override;
     void motion_changed(IPC::Sender const&, bool reduced) override;
+    void displays_changed(IPC::Sender const&, i32 main_width, i32 main_height) override;
     void drag(IPC::Sender const&, u32 window, u8 phase, i32 x, i32 y, String type, Vector<u8> data) override;
     void drag_finished(IPC::Sender const&, u32 window, bool accepted) override;
     void menu_item_chosen(IPC::Sender const&, u32 item) override;
@@ -59,6 +68,7 @@ private:
     void shell_state(IPC::Sender const&, String json) override;
     void hotkey(IPC::Sender const&, u16 code, u32 modifiers) override;
     void accessibility_requested(IPC::Sender const&, u32 generation) override;
+    void recorded_frame(IPC::Sender const&, i32 width, i32 height, u64 time) override;
     void ping(IPC::Sender const&, u32 serial) override;
     void key(IPC::Sender const&, u32 window, bool pressed, u16 code, u32 modifiers, String text) override;
     void resized(IPC::Sender const&, u32 window, i32 width, i32 height) override;

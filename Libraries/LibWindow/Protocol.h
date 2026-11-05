@@ -64,6 +64,18 @@ enum class CursorShape : i32 {
     Count,
 };
 
+// A display, as `displays` says: the main one first, at 0,0, and the others around it. Points.
+struct DisplayRecord {
+    i32 output { 0 };
+    i32 x { 0 };
+    i32 y { 0 };
+    i32 width { 0 };
+    i32 height { 0 };
+    // What it really has: two displays' worth of "looks like" can come to the same points.
+    i32 panel_width { 0 };
+    i32 panel_height { 0 };
+};
+
 // What a layer has. Each is changed by one LayerChange in a commit_layers. Those marked can be animated.
 enum class LayerProperty : u32 {
     Frame,          // Animated. x, y, width, height: points, among what it's in.
@@ -122,6 +134,10 @@ enum class MouseKind : u8 {
     Wheel,
     Entered,
     Left,
+    // As Wheel, but in points rather than notches: fingers.
+    Scroll,
+    // Fingers going apart or together: wheel_x is how much bigger, in thousandths (1000 is the same).
+    Magnify,
 };
 
 enum MouseButtons : u32 {

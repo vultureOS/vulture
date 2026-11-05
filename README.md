@@ -185,13 +185,13 @@ We keep a [scoreboard](Documentation/Parity.md). It lists what macOS does, featu
       Reach the network, over TLS 1.3<br>
       Boot ARM and x86 from a single disk<br>
       Plug in a USB stick, and erase or repair it<br>
-      Keep moving when an app stops answering
+      Keep moving when an app stops answering<br>
+      Use two displays, and swipe between Spaces
     </td>
     <td valign="top">
       Browse the web<br>
       Read a PDF<br>
       Use mail, music or video<br>
-      Use two displays, or swipe between Spaces<br>
       Run real Mac apps, which isn't the goal<br>
       Trust it on real hardware: it's only run in QEMU
     </td>

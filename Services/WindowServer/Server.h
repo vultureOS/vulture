@@ -13,6 +13,7 @@
 #include "Theme.h"
 #include <LibBase/OwnPtr.h>
 #include <LibCore/EventLoop.h>
+#include <LibGesture/Recognizer.h>
 #include <LibIPC/Listener.h>
 #include <LibText/Font.h>
 #include <WindowServerEndpoint.h>
@@ -95,12 +96,23 @@ private:
     i32 set_wallpaper(IPC::Sender const&, String name) override;
     void set_overview(IPC::Sender const&, bool shown) override;
     void set_reduce_motion(IPC::Sender const&, bool reduced) override;
+    void set_natural_scrolling(IPC::Sender const&, bool natural) override;
+    void set_tap_to_click(IPC::Sender const&, bool tap) override;
+    void set_pointer_speed(IPC::Sender const&, i32 percent) override;
+    WindowServerEndpoint::DisplaysAnswer displays(IPC::Sender const&) override;
+    i32 set_display(IPC::Sender const&, i32 output, i32 x, i32 y, i32 width, i32 height) override;
+    i32 set_mirroring(IPC::Sender const&, bool mirrored) override;
+    i32 set_warmth(IPC::Sender const&, i32 percent) override;
     void set_input_region(IPC::Sender const&, u32 window, i32 x, i32 y, i32 width, i32 height) override;
     void switch_space(IPC::Sender const&, i32 space) override;
     void inject_pointer(IPC::Sender const&, i32 x, i32 y, u32 buttons, u64 sent_at) override;
     WindowServerEndpoint::StatisticsAnswer statistics(IPC::Sender const&) override;
     void damage_everything(IPC::Sender const&) override;
     WindowServerEndpoint::CaptureAnswer capture(IPC::Sender const&) override;
+    WindowServerEndpoint::CaptureAreaAnswer capture_area(IPC::Sender const&, i32 x, i32 y, i32 width, i32 height) override;
+    i32 start_recording(IPC::Sender const&, IPC::Port memory, i32 x, i32 y, i32 width, i32 height) override;
+    void recording_ready(IPC::Sender const&) override;
+    void stop_recording(IPC::Sender const&) override;
     WindowServerEndpoint::InputLatencyAnswer input_latency(IPC::Sender const&) override;
     void pong(IPC::Sender const&, u32 serial) override;
     WindowServerEndpoint::CursorShapeAnswer cursor_shape(IPC::Sender const&) override;
@@ -129,6 +141,15 @@ private:
     [[nodiscard]] int title_bar_height(ServerWindow const&) const;
     void update_cursor();
     void move_window_to(ServerWindow&, Gfx::IntRect frame);
+    // Whether this one may see what's on the screen, which is logged if not.
+    [[nodiscard]] bool may_look_at_screen(IPC::Sender const&, char const* doing_what);
+    [[nodiscard]] ErrorOr<Vector<u8>> png_of_area(Gfx::IntRect points);
+    void record_frame();
+    void end_recording();
+    // Everything that follows from the displays having changed.
+    void displays_changed();
+    // What's free of a display for windows, in points.
+    [[nodiscard]] Gfx::IntRect work_area_of(Display const&) const;
     // By hand: when its contents are ready.
     void resize_live(ServerWindow&, Gfx::IntRect frame);
     void finish_live_resize(ServerWindow&);
@@ -167,6 +188,10 @@ private:
     void read_input();
     void pointer_changed(Gfx::IntPoint, u32 buttons);
     void wheel_moved(int x, int y);
+    void handle_gesture(::Gesture::Event const&);
+    void swipe_changed(float across, float speed, bool ended);
+    void touch_event_read(u16 code, int value);
+    void touches_finished();
     void key_changed(u16 code, int value);
     void drag_pointer_changed(Gfx::IntPoint, u32 released);
     void send_drag(ServerWindow&, Window::DragPhase, Gfx::IntPoint, bool with_data);
@@ -210,6 +235,26 @@ private:
     int m_pending_relative_x { 0 };
     int m_pending_relative_y { 0 };
     int m_pending_absolute_y { -1 };
+    int m_pending_head { 0 };
+    ::Gesture::Recognizer m_gestures;
+    // Fingers as they stand, and which have changed since the device last said it was finished saying so.
+    struct Touch {
+        int x { 0 };
+        int y { 0 };
+        bool down { false };
+        bool was_down { false };
+        bool moved { false };
+    };
+    static constexpr int touch_slots = 10;
+    Touch m_touches[touch_slots];
+    int m_touch_slot { 0 };
+    bool m_natural_scrolling { true };
+    bool m_tap_to_click { true };
+    int m_pointer_speed { 100 };
+    // Following the fingers from one Space to another, how far along.
+    bool m_swiping { false };
+    float m_swipe_travel { 0 };
+    float m_slide_start_travel { 0 };
 
     enum class Gesture : u8 {
         None,
@@ -238,6 +283,19 @@ private:
 
     Window::CursorShape m_cursor_shape { Window::CursorShape::Arrow };
     int m_cursor_turn { 0 };
+    // Who's logged in, as far as it goes: whoever's desktop this is.
+    uid_t m_shell_uid { 0 };
+    bool m_has_shell_uid { false };
+    // One at a time, and a frame at a time.
+    struct Recording {
+        Client* client { nullptr };
+        void* memory { nullptr };
+        size_t memory_size { 0 };
+        Gfx::IntRect points;
+        bool ready { true };
+        bool new_since { true };
+    };
+    Recording m_recording;
     int m_cursor_timer { -1 };
     int m_responding_timer { -1 };
     int m_resize_timer { -1 };

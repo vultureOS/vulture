@@ -60,6 +60,9 @@ enum class Symbol : u8 {
     Person,
     Information,
     Accessibility,
+    Display,
+    Mouse,
+    Trackpad,
 };
 
 // A control's face: a shape with shadows outside it, a fill, shading inside it.

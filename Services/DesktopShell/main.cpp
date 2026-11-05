@@ -509,6 +509,9 @@ private:
         case VULTURE_PRIVACY_DOCUMENTS:
             folder = "your Documents folder"_sv;
             break;
+        case VULTURE_PRIVACY_SCREEN:
+            folder = "what's on your screen"_sv;
+            break;
         case VULTURE_PRIVACY_DOWNLOADS:
             folder = "your Downloads folder"_sv;
             break;
@@ -1174,6 +1177,47 @@ int main(int argc, char** argv)
         (void)server.set_appearance(saved.value());
     if (preferences.boolean("reduceMotion"_sv).value_or(false))
         (void)server.set_reduce_motion(true);
+    if (auto saved = preferences.boolean("naturalScrolling"_sv); saved.has_value())
+        (void)server.set_natural_scrolling(saved.value());
+    if (auto saved = preferences.boolean("tapToClick"_sv); saved.has_value())
+        (void)server.set_tap_to_click(saved.value());
+    if (auto saved = preferences.number("pointerSpeed"_sv); saved.has_value())
+        (void)server.set_pointer_speed(static_cast<i32>(saved.value()));
+    if (auto saved = preferences.number("nightShift"_sv); saved.has_value() && saved.value() > 0)
+        (void)server.set_warmth(static_cast<i32>(saved.value()));
+    if (preferences.boolean("mirrorDisplays"_sv).value_or(false))
+        (void)server.set_mirroring(true);
+    // Where each display goes, and how big it's to look: "output x y width height" and so on.
+    if (auto saved = preferences.string("displayLayout"_sv); saved.has_value()) {
+        int numbers[5] = {};
+        int which = 0;
+        bool negative = false;
+        int value = 0;
+        bool in_number = false;
+        auto const finish_number = [&] {
+            if (!in_number)
+                return;
+            numbers[which++] = negative ? -value : value;
+            value = 0;
+            negative = false;
+            in_number = false;
+            if (which == 5) {
+                (void)server.set_display(numbers[0], numbers[1], numbers[2], numbers[3], numbers[4]);
+                which = 0;
+            }
+        };
+        for (auto const character : saved.value()) {
+            if (character == '-') {
+                negative = true;
+            } else if (character >= '0' && character <= '9') {
+                value = value * 10 + (character - '0');
+                in_number = true;
+            } else {
+                finish_number();
+            }
+        }
+        finish_number();
+    }
     if (auto saved = preferences.string("wallpaper"_sv); saved.has_value())
         (void)server.set_wallpaper(saved.value());
     if (auto saved = preferences.string("keyboardLayout"_sv); saved.has_value())
@@ -1196,11 +1240,74 @@ int main(int argc, char** argv)
     window->show();
     (void)server.set_work_area(bar_height, 0, 0, 0);
 
-    application->connection().on_shell_state = [&bar](StringView json) {
+    // One on each of the others too, the same but dimmer, as it's not where the work's going on.
+    struct OtherBar {
+        int output;
+        OwnPtr<UI::Window> window;
+        MenuBarView* view;
+    };
+    Vector<OtherBar> other_bars;
+    String last_state;
+    auto place_bars = [&] {
+        auto const displays = application->connection().displays();
+        // The main one keeps up with its own display.
+        auto const main_size = Platform::the().screen_size();
+        if (window->frame().width != main_size.width) {
+            window->set_frame({ 0, 0, main_size.width, bar_height });
+            MaterialRegion resized { { 0, 0, main_size.width, bar_height }, WS::Material::MenuBar };
+            window->set_materials(Span<MaterialRegion const>(&resized, 1));
+            bar.set_frame({ 0, 0, static_cast<float>(main_size.width), static_cast<float>(bar_height) });
+        }
+        other_bars.remove_all_matching([&](auto const& other) {
+            for (auto const& display : displays) {
+                if (display.output == other.output && !(display.x == 0 && display.y == 0))
+                    return false;
+            }
+            return true;
+        });
+        for (auto const& display : displays) {
+            if (display.x == 0 && display.y == 0)
+                continue;
+            OtherBar* found = nullptr;
+            for (auto& other : other_bars) {
+                if (other.output == display.output)
+                    found = &other;
+            }
+            IntRect const frame { display.x, display.y, display.width, bar_height };
+            if (!found) {
+                auto other_window = adopt_own(*new UI::Window("Menu Bar"_sv, frame, WS::WindowBare | WS::WindowSticky));
+                other_window->set_transparent(true);
+                other_window->backend().set_level(WS::LevelMenuBar);
+                auto& view = other_window->root_view().add<MenuBarView>(search_panel, center, control);
+                view.set_opacity(0.55f);
+                view.tick_clock();
+                other_window->show();
+                other_bars.append(OtherBar { display.output, move(other_window), &view });
+                found = &other_bars.last();
+                auto state = Desktop::parse_shell_state(last_state.view());
+                if (!state.is_error())
+                    found->view->set_state(state.release_value());
+            }
+            found->window->set_frame(frame);
+            MaterialRegion material_there { { 0, 0, display.width, bar_height }, WS::Material::MenuBar };
+            found->window->set_materials(Span<MaterialRegion const>(&material_there, 1));
+            found->view->set_frame({ 0, 0, static_cast<float>(display.width), static_cast<float>(bar_height) });
+        }
+    };
+    application->connection().on_displays_change = [&] { place_bars(); };
+
+    application->connection().on_shell_state = [&](StringView json) {
+        last_state = MUST(String::from_view(json));
         auto state = Desktop::parse_shell_state(json);
         if (!state.is_error())
             bar.set_state(state.release_value());
+        for (auto& other : other_bars) {
+            auto again = Desktop::parse_shell_state(json);
+            if (!again.is_error())
+                other.view->set_state(again.release_value());
+        }
     };
+    place_bars();
     (void)server.subscribe_shell();
     application->connection().on_hotkey = [&search_panel](u16 code, u32) {
         if (code == KeySpace)
@@ -1208,7 +1315,11 @@ int main(int argc, char** argv)
     };
     (void)server.register_hotkey(KeySpace, WS::ModifierCommand);
     if (!s_still)
-        application->event_loop().add_timer(1000, true, [&bar] { bar.tick_clock(); });
+        application->event_loop().add_timer(1000, true, [&] {
+            bar.tick_clock();
+            for (auto& other : other_bars)
+                other.view->tick_clock();
+        });
 
     // Banners.
     auto const& t = tokens();

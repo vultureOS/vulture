@@ -259,7 +259,18 @@
                 },
                 {
                     "feature": "Swipe between Spaces",
-                    "milestone": "M22"
+                    "milestone": "M22",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "output": "m22-gestures: all of it done"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m22-gestures-next-space.png"
+                        }
+                    ]
                 }
             ]
         },
@@ -1418,15 +1429,49 @@
                 },
                 {
                     "feature": "Gestures",
-                    "milestone": "M22"
+                    "milestone": "H2",
+                    "claim": "partial",
+                    "missing": "how they feel, on a real trackpad (H2)",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "output": "m22-gestures: all of it done"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibGesture"
+                        }
+                    ]
                 },
                 {
                     "feature": "Natural scrolling",
-                    "milestone": "M22"
+                    "milestone": "M22",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "output": "m22-gestures: all of it done"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m22-gestures-after-scrolling.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Mouse and Trackpad settings",
-                    "milestone": "M22"
+                    "milestone": "M22",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m22-gestures-settings-mouse.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m22-gestures-settings-trackpad.png"
+                        }
+                    ]
                 }
             ]
         },
@@ -1568,11 +1613,30 @@
                 },
                 {
                     "feature": "Displays",
-                    "milestone": "M22"
+                    "milestone": "M22",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "output": "m22-displays: all of it done"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m22-displays-settings-displays.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Night Shift",
-                    "milestone": "M22"
+                    "milestone": "M24",
+                    "claim": "partial",
+                    "missing": "a schedule: it's on or off",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m22-displays-warm-main.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Sharing",
@@ -3422,15 +3486,58 @@
                 },
                 {
                     "feature": "Two displays",
-                    "milestone": "M22"
+                    "milestone": "M23",
+                    "claim": "partial",
+                    "missing": "both at the same scale; separate Spaces on each (M23)",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "output": "m22-displays: all of it done"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m22-displays-second.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m22-displays-window-across.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m22-displays-mirrored-second.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Scaled display modes",
-                    "milestone": "M22"
+                    "milestone": "M22",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m22-displays-more-space.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Screen recording",
-                    "milestone": "M22"
+                    "milestone": "M35",
+                    "claim": "partial",
+                    "missing": "a file to record into: frames until there's video (M35)",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "windows: ok: with nobody to ask, looking at the screen is refused"
+                        },
+                        {
+                            "suite": "test-userland",
+                            "output": "windows: ok: told yes, it can look"
+                        },
+                        {
+                            "suite": "test-userland",
+                            "output": "windows: ok: screencapture records"
+                        }
+                    ]
                 },
                 {
                     "feature": "A microphone",

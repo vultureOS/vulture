@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/API/POSIX/input.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Arch/InterruptController.h>
 #include <Kernel/Debug/KernelLog.h>
@@ -84,6 +85,11 @@ private:
         for (u8 i = 0; i < size; ++i)
             name[i] = static_cast<char>(m_transport->config_read8(config_offset_data + i));
         dmesgln("Input: {}", StringView(name));
+        StringView const named { name };
+        if (named.ends_with("Tablet"_sv)) {
+            m_is_tablet = true;
+            m_head = s_tablets++;
+        }
     }
 
     ErrorOr<void> post_buffer(u16 slot)
@@ -112,6 +118,9 @@ private:
             for (auto completion = m_queue->take_completion(); completion.has_value(); completion = m_queue->take_completion()) {
                 u16 slot = m_slot_of_head[completion->id % event_slots];
                 auto const& event = events[slot];
+                // A tablet is bound to a display, in the order they came.
+                if (event.type == VULTURE_EV_ABS && m_is_tablet)
+                    post_input_event(VULTURE_EV_HEAD, 0, m_head);
                 post_input_event(event.type, event.code, static_cast<i32>(event.value));
                 (void)post_buffer(slot);
                 any = true;
@@ -125,6 +134,9 @@ private:
     NonnullOwnPtr<VirtIO::Queue> m_queue;
     PhysicalAddress m_memory;
     u16 m_slot_of_head[event_slots] {};
+    bool m_is_tablet { false };
+    i32 m_head { 0 };
+    static inline i32 s_tablets { 0 };
     Atomic<bool> m_pending { false };
     WaitQueue m_wait;
 };

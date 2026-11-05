@@ -567,6 +567,13 @@ int main(int argc, char** argv)
     auto& server = application->connection().server();
     (void)server.set_work_area(static_cast<int>(t.metric("menubar.height"_sv)), 0, shelf_reserved, 0);
 
+    application->connection().on_displays_change = [&] {
+        auto const now = Platform::the().screen_size();
+        window->set_frame({ 0, now.height - height, now.width, height });
+        dock.set_frame({ 0, 0, static_cast<float>(now.width), static_cast<float>(height) });
+        dock.update_shape();
+    };
+
     application->connection().on_shell_state = [&dock](StringView json) {
         auto state = Desktop::parse_shell_state(json);
         if (!state.is_error())

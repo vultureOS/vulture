@@ -381,7 +381,10 @@ void build_privacy(Page& page)
                     u32 const which = static_cast<u32>(entry.get_integer("service"_sv).value_or(0));
                     StringView folder = which == VULTURE_PRIVACY_DESKTOP ? "Desktop"_sv : (which == VULTURE_PRIVACY_DOCUMENTS ? "Documents"_sv : "Downloads"_sv);
                     StringBuilder title;
-                    title.appendff("{}: {} folder", application_name_from_path(application).view(), folder);
+                    if (which == VULTURE_PRIVACY_SCREEN)
+                        title.appendff("{}: Screen Recording", application_name_from_path(application).view());
+                    else
+                        title.appendff("{}: {} folder", application_name_from_path(application).view(), folder);
                     auto& row = privacy.rows().add<Row>(title.view());
                     auto& toggle = row.add<Switch>(entry.get_boolean("allowed"_sv).value_or(false));
                     auto path = MUST(String::from_view(application));
@@ -627,6 +630,266 @@ void build_users(Page& page)
     page.finish();
 }
 
+// How the displays sit next to each other: a little picture of them. Drag one around the main one, and it snaps to its edge.
+class ArrangementView final : public View {
+public:
+    ArrangementView()
+    {
+        refresh();
+    }
+
+    void refresh()
+    {
+        m_displays = Application::the().connection().displays();
+        set_needs_display();
+    }
+
+    [[nodiscard]] FloatSize intrinsic_size() const override { return { -1, 180 }; }
+
+    void draw(Graphics& graphics) override
+    {
+        auto const& t = tokens();
+        for (size_t i = 0; i < m_displays.size(); ++i) {
+            auto const rect = place_of(i);
+            graphics.fill_rounded(rect, 4, i == 0 ? t.color("accent"_sv) : t.color("disks.free"_sv));
+            if (i == 0)
+                graphics.fill({ rect.x, rect.y, rect.width, 6 }, Color { 255, 255, 255, 200 });
+            StringBuilder label;
+            label.appendff("{}", i + 1);
+            graphics.draw_text_centered(label.view(), t.named_font("headline"_sv), rect, i == 0 ? Color { 255, 255, 255, 255 } : t.color("label"_sv));
+        }
+    }
+
+    bool mouse_down(MouseEvent const& event) override
+    {
+        for (size_t i = m_displays.size(); i > 0; --i) {
+            if (i - 1 != 0 && place_of(i - 1).contains(event.position)) {
+                m_dragging = static_cast<int>(i - 1);
+                m_drag_from = event.position;
+                m_drag_offset = {};
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void mouse_dragged(MouseEvent const& event) override
+    {
+        if (m_dragging < 0)
+            return;
+        m_drag_offset = { event.position.x - m_drag_from.x, event.position.y - m_drag_from.y };
+        set_needs_display();
+    }
+
+    void mouse_up(MouseEvent const&) override
+    {
+        if (m_dragging < 0)
+            return;
+        auto const moved = place_of(static_cast<size_t>(m_dragging));
+        auto const main = place_of(0);
+        auto const& display = m_displays[static_cast<size_t>(m_dragging)];
+        auto const& first = m_displays[0];
+        // Whichever side of the main one it's nearest, up against it.
+        float const across = moved.x + moved.width / 2 - (main.x + main.width / 2);
+        float const down = moved.y + moved.height / 2 - (main.y + main.height / 2);
+        int x = display.x;
+        int y = display.y;
+        if (Base::Math::absolute(across) >= Base::Math::absolute(down)) {
+            x = across >= 0 ? first.width : -display.width;
+            y = 0;
+        } else {
+            y = down >= 0 ? first.height : -display.height;
+            x = 0;
+        }
+        int const output = display.output;
+        int const width = display.width;
+        int const height = display.height;
+        m_dragging = -1;
+        (void)Application::the().connection().server().set_display(output, x, y, width, height);
+        save_layout();
+    }
+
+    static void save_layout()
+    {
+        StringBuilder layout;
+        for (auto const& display : Application::the().connection().displays())
+            layout.appendff("{} {} {} {} {};", display.output, display.x, display.y, display.width, display.height);
+        Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
+        preferences.set("displayLayout"_sv, MUST(JSON::Value::string(layout.view())));
+        preferences.save();
+    }
+
+private:
+    [[nodiscard]] FloatRect place_of(size_t index) const
+    {
+        // All of them fitted in, in the middle.
+        int left = 0, top = 0, right = 0, bottom = 0;
+        for (auto const& display : m_displays) {
+            left = min(left, display.x);
+            top = min(top, display.y);
+            right = max(right, display.x + display.width);
+            bottom = max(bottom, display.y + display.height);
+        }
+        float const fit = min((width() - 40) / static_cast<float>(max(right - left, 1)), (height() - 30) / static_cast<float>(max(bottom - top, 1)));
+        float const start_x = (width() - static_cast<float>(right - left) * fit) / 2;
+        float const start_y = (height() - static_cast<float>(bottom - top) * fit) / 2;
+        auto const& display = m_displays[index];
+        FloatRect rect { start_x + static_cast<float>(display.x - left) * fit + 1, start_y + static_cast<float>(display.y - top) * fit + 1, static_cast<float>(display.width) * fit - 2, static_cast<float>(display.height) * fit - 2 };
+        if (static_cast<int>(index) == m_dragging) {
+            rect.x += m_drag_offset.x;
+            rect.y += m_drag_offset.y;
+        }
+        return rect;
+    }
+
+    Vector<WS::DisplayRecord> m_displays;
+    int m_dragging { -1 };
+    FloatPoint m_drag_from;
+    FloatPoint m_drag_offset;
+};
+
+void build_displays(Page& page)
+{
+    auto& connection = Application::the().connection();
+    auto displays = connection.displays();
+    auto answer = connection.server().displays();
+    bool const mirrored = !answer.is_error() && answer.value().mirrored;
+    int const outputs = answer.is_error() ? 1 : answer.value().outputs;
+    Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
+    ArrangementView* picture = nullptr;
+    if (outputs > 1) {
+        auto& arrangement = page.add_group("Arrangement"_sv);
+        picture = &arrangement.rows().add<ArrangementView>();
+        auto& mirror_row = arrangement.rows().add<Row>("Mirror displays"_sv);
+        auto& mirror = mirror_row.add<Switch>(mirrored);
+        mirror.set_accessibility_label("Mirror displays"_sv);
+        mirror.on_action = [&mirror, picture] {
+            (void)Application::the().connection().server().set_mirroring(mirror.is_on());
+            Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+            saved.set("mirrorDisplays"_sv, JSON::Value(mirror.is_on()));
+            saved.save();
+            picture->refresh();
+        };
+    }
+    // What each can look like: its usual size, and more or less on the same panel. Four, as a Mac gives.
+    auto const& main = displays[0];
+    int const natural_width = main.panel_width >= 2000 ? main.panel_width / 2 : main.panel_width;
+    int const natural_height = main.panel_width >= 2000 ? main.panel_height / 2 : main.panel_height;
+    auto& size_group = page.add_group("Resolution"_sv);
+    auto& size_row = size_group.rows().add<Row>("Looks like"_sv);
+    auto& sizes = size_row.add<PopUpButton>();
+    sizes.set_accessibility_label("Looks like"_sv);
+    struct Choice {
+        int width;
+        int height;
+    };
+    static Vector<Choice> s_choices;
+    s_choices.clear();
+    int chosen = 0;
+    int const percents[] = { 80, 100, 112, 131 };
+    for (int percent : percents) {
+        Choice const choice { natural_width * percent / 100, natural_height * percent / 100 };
+        StringBuilder label;
+        label.appendff("{} \xC3\x97 {}", choice.width, choice.height);
+        if (percent == 100)
+            label.append(" (Default)"_sv);
+        sizes.add_item(label.view());
+        if (choice.width == main.width && choice.height == main.height)
+            chosen = static_cast<int>(s_choices.size());
+        s_choices.append(choice);
+    }
+    sizes.set_selected_index(chosen);
+    sizes.on_change = [](int index) {
+        auto& the_connection = Application::the().connection();
+        auto const now = the_connection.displays();
+        auto const& choice = s_choices[static_cast<size_t>(index)];
+        // Those to the right of it move along with its edge.
+        int const change = choice.width - now[0].width;
+        (void)the_connection.server().set_display(now[0].output, 0, 0, choice.width, choice.height);
+        for (size_t i = 1; i < now.size(); ++i) {
+            if (now[i].x > 0)
+                (void)the_connection.server().set_display(now[i].output, now[i].x + change, now[i].y, now[i].width, now[i].height);
+        }
+        ArrangementView::save_layout();
+    };
+
+    auto& night = page.add_group("Night Shift"_sv);
+    int const saved_warmth = static_cast<int>(preferences.number("nightShift"_sv).value_or(0));
+    auto& night_row = night.rows().add<Row>("Night Shift"_sv);
+    auto& night_switch = night_row.add<Switch>(saved_warmth > 0);
+    night_switch.set_accessibility_label("Night Shift"_sv);
+    auto& warmth_row = night.rows().add<Row>("Color temperature"_sv);
+    auto& warmth = warmth_row.add<Slider>(10.0f, 100.0f, saved_warmth > 0 ? static_cast<float>(saved_warmth) : 60.0f);
+    warmth.set_fixed_width(200);
+    warmth.set_accessibility_label("Color temperature"_sv);
+    auto apply = [&night_switch, &warmth] {
+        int const percent = night_switch.is_on() ? static_cast<int>(warmth.value()) : 0;
+        (void)Application::the().connection().server().set_warmth(percent);
+        Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+        saved.set("nightShift"_sv, JSON::Value(static_cast<double>(percent)));
+        saved.save();
+    };
+    night_switch.on_action = apply;
+    warmth.on_action = apply;
+    page.finish();
+}
+
+void build_mouse(Page& page)
+{
+    Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
+    auto& group = page.add_group();
+    auto& speed_row = group.rows().add<Row>("Tracking speed"_sv);
+    auto& speed = speed_row.add<Slider>(25.0f, 400.0f, static_cast<float>(preferences.number("pointerSpeed"_sv).value_or(100)));
+    speed.set_fixed_width(200);
+    speed.set_accessibility_label("Tracking speed"_sv);
+    speed.on_action = [&speed] {
+        (void)Application::the().connection().server().set_pointer_speed(static_cast<i32>(speed.value()));
+        Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+        saved.set("pointerSpeed"_sv, JSON::Value(static_cast<double>(speed.value())));
+        saved.save();
+    };
+    auto& natural_row = group.rows().add<Row>("Natural scrolling"_sv);
+    auto& natural = natural_row.add<Switch>(preferences.boolean("naturalScrolling"_sv).value_or(true));
+    natural.set_accessibility_label("Natural scrolling"_sv);
+    natural.on_action = [&natural] {
+        (void)Application::the().connection().server().set_natural_scrolling(natural.is_on());
+        Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+        saved.set("naturalScrolling"_sv, JSON::Value(natural.is_on()));
+        saved.save();
+    };
+    page.finish();
+}
+
+void build_trackpad(Page& page)
+{
+    Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
+    auto& group = page.add_group();
+    auto& tap_row = group.rows().add<Row>("Tap to click"_sv);
+    auto& tap = tap_row.add<Switch>(preferences.boolean("tapToClick"_sv).value_or(true));
+    tap.set_accessibility_label("Tap to click"_sv);
+    tap.on_action = [&tap] {
+        (void)Application::the().connection().server().set_tap_to_click(tap.is_on());
+        Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+        saved.set("tapToClick"_sv, JSON::Value(tap.is_on()));
+        saved.save();
+    };
+    auto& natural_row = group.rows().add<Row>("Natural scrolling"_sv);
+    auto& natural = natural_row.add<Switch>(preferences.boolean("naturalScrolling"_sv).value_or(true));
+    natural.set_accessibility_label("Natural scrolling"_sv);
+    natural.on_action = [&natural] {
+        (void)Application::the().connection().server().set_natural_scrolling(natural.is_on());
+        Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+        saved.set("naturalScrolling"_sv, JSON::Value(natural.is_on()));
+        saved.save();
+    };
+    auto& gestures = page.add_group("Gestures"_sv);
+    (void)gestures.rows().add<Row>("Scroll"_sv, "Two fingers"_sv);
+    (void)gestures.rows().add<Row>("Secondary click"_sv, "Tap with two fingers"_sv);
+    (void)gestures.rows().add<Row>("Swipe between Spaces"_sv, "Three fingers, left or right"_sv);
+    (void)gestures.rows().add<Row>("Overview"_sv, "Three fingers up"_sv);
+    page.finish();
+}
+
 void build_accessibility(Page& page)
 {
     auto& group = page.add_group();
@@ -765,9 +1028,12 @@ public:
         add_pane("Accessibility"_sv, Symbol::Accessibility, build_accessibility);
         add_pane("Wallpaper"_sv, Symbol::Photo, build_wallpaper);
         add_pane("Desktop & Dock"_sv, Symbol::Sidebar, build_dock);
+        add_pane("Displays"_sv, Symbol::Display, build_displays);
         add_pane("Network"_sv, Symbol::Globe, build_network);
         add_pane("Sound"_sv, Symbol::Speaker, build_sound);
         add_pane("Keyboard"_sv, Symbol::Keyboard, build_keyboard);
+        add_pane("Mouse"_sv, Symbol::Mouse, build_mouse);
+        add_pane("Trackpad"_sv, Symbol::Trackpad, build_trackpad);
         add_pane("Language & Region"_sv, Symbol::Globe, build_language_region);
         add_pane("Notifications"_sv, Symbol::Bell, build_notifications);
         add_pane("Privacy & Security"_sv, Symbol::Lock, build_privacy);

@@ -330,6 +330,16 @@ macOS-style at the top, real Unix underneath:
   whatever it reads is redrawn with it. The server draws title bars and traffic
   lights over the client's pixels, moves and resizes windows, and sends pointer and
   keyboard events on. Every look comes from a theme file.
+- **Displays (M22).** One `/dev/gpuN` for each output of a virtio-gpu. The main display is at 0,0, as on a Mac, and the others around it, so
+  the desktop can have negative coordinates; `Screen::origin` is what's added to get to the picture the compositor draws in. With one
+  display showing just what's drawn, that picture is its framebuffer. With more, or a "looks like" mode, or Night Shift, it's memory of its
+  own, and a flush copies each display's part across, scaling and tinting on the way. All of them share one scale. Each has a menu bar
+  (DesktopShell makes them), and the Dock stays on the main one. The pointer goes by `VULTURE_EV_HEAD`, as QEMU has a tablet for each display.
+- **Gestures (M22).** `LibGesture` is what fingers mean, with no idea of anything else, and is tested on the host. The window server feeds it
+  from a touch device (`VULTURE_ABS_MT_*`) and does what it says: scrolling, Spaces under the fingers, Overview.
+- **Looking at the screen (M22).** `capture`, `capture_area` and `start_recording` are refused, and logged, unless the kernel says the sender
+  has been told yes (`security.privacy.screen`): root and what came with the system don't have to ask, if it's the logged in person's. A
+  program asks for itself (`security.privacy.ask-screen`), so that it's the one to wait, through the same privacyd as for private folders.
 - **Layers (M21).** Over each window's surface is a tree of layers (`Layer.h`): transforms,
   opacity, rounded corners, clipping, scrolled bounds, a material or a blur. A client changes
   them in a transaction (`commit_layers`), whose changes are all on the screen in the same

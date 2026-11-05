@@ -137,9 +137,11 @@ struct UpdateCursor {
 
 constexpr u32 cursor_bytes = VULTURE_GPU_CURSOR_SIZE * VULTURE_GPU_CURSOR_SIZE * 4;
 constexpr unsigned cursor_order = 3; // 32 KiB: more than 64 x 64 x 4.
-constexpr u32 scanout = 0;
+constexpr u32 most_scanouts = 16;
+constexpr u32 config_offset_scanouts = 8;
 
-class VirtIOGPU final : public Device {
+// The device, with its queues and what they're waiting for: one of these, however many displays it has.
+class VirtIOGPU final : public RefCounted<VirtIOGPU> {
 public:
     static ErrorOr<NonnullRefPtr<VirtIOGPU>> create(PCI::Device const& pci)
     {
@@ -157,76 +159,19 @@ public:
             return Error::from_errno(ENODEV);
         register_interrupt_handler(interrupt.value(), [](void* context) { static_cast<VirtIOGPU*>(context)->handle_interrupt(); }, device);
         Arch::enable_interrupt(interrupt.value());
+        reference->m_scanout_count = clamp(reference->m_transport->config_read32(config_offset_scanouts), 1u, most_scanouts);
         reference->m_transport->finish_initialization();
         TRY(reference->query_display());
         return reference;
     }
 
-    ErrorOr<size_t> read(u64, size_t, IOBuffer const&) override { return Error::from_errno(EINVAL); }
-    ErrorOr<size_t> write(u64, size_t, IOBuffer const&) override { return Error::from_errno(EINVAL); }
-    [[nodiscard]] bool can_be_mapped() const override { return true; }
-
-    ErrorOr<PhysicalAddress> mapped_page(u64 index) override
-    {
-        MutexLocker locker(m_lock);
-        if (index >= m_pages.size())
-            return Error::from_errno(ENXIO);
-        physical_memory().ref_user_page(m_pages[index]);
-        return m_pages[index];
-    }
-
-    ErrorOr<FlatPtr> ioctl(FileDescription&, unsigned request, FlatPtr argument) override
-    {
-        switch (request) {
-        case VULTURE_GPU_GET_DISPLAY: {
-            vulture_gpu_mode mode {};
-            mode.width = m_display_width;
-            mode.height = m_display_height;
-            mode.pitch = m_display_width * 4;
-            mode.size = static_cast<unsigned long>(mode.pitch) * mode.height;
-            TRY(copy_to_user(argument, mode));
-            return 0;
-        }
-        case VULTURE_GPU_SET_MODE: {
-            auto mode = TRY(copy_from_user<vulture_gpu_mode>(argument));
-            TRY(set_mode(mode.width, mode.height));
-            mode.pitch = mode.width * 4;
-            mode.size = static_cast<unsigned long>(mode.pitch) * mode.height;
-            TRY(copy_to_user(argument, mode));
-            return 0;
-        }
-        case VULTURE_GPU_FLUSH:
-            TRY(flush(TRY(copy_from_user<vulture_gpu_rect>(argument))));
-            return 0;
-        case VULTURE_GPU_SET_CURSOR: {
-            auto cursor = TRY(copy_from_user<vulture_gpu_cursor>(argument));
-            if (cursor.hot_x >= VULTURE_GPU_CURSOR_SIZE || cursor.hot_y >= VULTURE_GPU_CURSOR_SIZE)
-                return Error::from_errno(EINVAL);
-            TRY(set_cursor(reinterpret_cast<FlatPtr>(cursor.pixels), cursor.hot_x, cursor.hot_y));
-            return 0;
-        }
-        case VULTURE_GPU_MOVE_CURSOR: {
-            auto position = TRY(copy_from_user<vulture_gpu_position>(argument));
-            TRY(move_cursor(position.x, position.y));
-            return 0;
-        }
-        default:
-            return Error::from_errno(ENOTTY);
-        }
-    }
-
-    [[nodiscard]] u32 display_width() const { return m_display_width; }
-    [[nodiscard]] u32 display_height() const { return m_display_height; }
-
-private:
-    VirtIOGPU(NonnullOwnPtr<VirtIO::Device> transport, NonnullOwnPtr<VirtIO::Queue> control_queue, NonnullOwnPtr<VirtIO::Queue> cursor_queue, PhysicalAddress control)
-        : Device(InodeType::CharacterDevice, 0600, device_number(29, 0))
-        , m_transport(move(transport))
-        , m_control_queue(move(control_queue))
-        , m_cursor_queue(move(cursor_queue))
-        , m_control(control)
-    {
-    }
+    [[nodiscard]] Mutex& lock() { return m_lock; }
+    [[nodiscard]] VirtIO::Queue& control_queue() { return *m_control_queue; }
+    [[nodiscard]] u32 scanout_count() const { return m_scanout_count; }
+    [[nodiscard]] u32 display_width(u32 scanout) const { return m_display_width[scanout]; }
+    [[nodiscard]] u32 display_height(u32 scanout) const { return m_display_height[scanout]; }
+    [[nodiscard]] u32 next_resource_id() { return m_next_resource_id++; }
+    [[nodiscard]] PhysicalAddress control_memory() const { return m_control; }
 
     // Sends a request (in the control page, unless it brought its own memory)
     // and waits for the response, which is put after it there.
@@ -269,23 +214,6 @@ private:
         return {};
     }
 
-    ErrorOr<void> query_display()
-    {
-        MutexLocker locker(m_lock);
-        Header request {};
-        request.type = command_get_display_info;
-        __builtin_memcpy(physical_to_virtual(m_control), &request, sizeof(request));
-        TRY(command(*m_control_queue, m_control, sizeof(request), sizeof(DisplayInfo), response_ok_display_info));
-        auto const& info = *reinterpret_cast<DisplayInfo const*>(physical_to_virtual(m_control.offset(page_size / 2)));
-        m_display_width = info.modes[scanout].rectangle.width;
-        m_display_height = info.modes[scanout].rectangle.height;
-        if (m_display_width == 0 || m_display_height == 0) {
-            m_display_width = 1280;
-            m_display_height = 800;
-        }
-        return {};
-    }
-
     ErrorOr<void> attach_backing(u32 resource_id, Span<PhysicalAddress const> pages, size_t page_length)
     {
         // Runs of adjacent pages make one entry each. Up to one per page.
@@ -314,155 +242,33 @@ private:
         return result;
     }
 
-    ErrorOr<void> set_mode(u32 width, u32 height)
+private:
+    VirtIOGPU(NonnullOwnPtr<VirtIO::Device> transport, NonnullOwnPtr<VirtIO::Queue> control_queue, NonnullOwnPtr<VirtIO::Queue> cursor_queue, PhysicalAddress control)
+        : m_transport(move(transport))
+        , m_control_queue(move(control_queue))
+        , m_cursor_queue(move(cursor_queue))
+        , m_control(control)
     {
-        if (width == 0 || height == 0 || width > 16384 || height > 16384)
-            return Error::from_errno(EINVAL);
+    }
+
+    ErrorOr<void> query_display()
+    {
         MutexLocker locker(m_lock);
-        size_t page_count = (static_cast<size_t>(width) * height * 4 + page_size - 1) / page_size;
-        Vector<PhysicalAddress> pages;
-        TRY(pages.try_ensure_capacity(page_count));
-        auto release_pages = [&] {
-            for (auto page : pages)
-                physical_memory().unref_user_page(page);
-        };
-        for (size_t i = 0; i < page_count; ++i) {
-            auto page = physical_memory().allocate_user_page();
-            if (page.is_error()) {
-                release_pages();
-                return page.release_error();
+        Header request {};
+        request.type = command_get_display_info;
+        __builtin_memcpy(physical_to_virtual(m_control), &request, sizeof(request));
+        TRY(command(*m_control_queue, m_control, sizeof(request), sizeof(DisplayInfo), response_ok_display_info));
+        auto const& info = *reinterpret_cast<DisplayInfo const*>(physical_to_virtual(m_control.offset(page_size / 2)));
+        for (u32 scanout = 0; scanout < m_scanout_count; ++scanout) {
+            m_display_width[scanout] = info.modes[scanout].rectangle.width;
+            m_display_height[scanout] = info.modes[scanout].rectangle.height;
+            // One with nothing to say for itself is the size of the first, as QEMU only says for those with a window of their own.
+            if (m_display_width[scanout] == 0 || m_display_height[scanout] == 0) {
+                m_display_width[scanout] = scanout == 0 ? 1280 : m_display_width[0];
+                m_display_height[scanout] = scanout == 0 ? 800 : m_display_height[0];
             }
-            pages.append(page.value());
         }
-        u32 resource_id = m_next_resource_id++;
-        ResourceCreate2D create {};
-        create.header.type = command_resource_create_2d;
-        create.resource_id = resource_id;
-        create.format = format_b8g8r8x8;
-        create.width = width;
-        create.height = height;
-        if (auto result = simple_command(create); result.is_error()) {
-            release_pages();
-            return result.release_error();
-        }
-        if (auto result = attach_backing(resource_id, pages.span(), page_size); result.is_error()) {
-            release_pages();
-            return result.release_error();
-        }
-        SetScanout set {};
-        set.header.type = command_set_scanout;
-        set.rectangle = { 0, 0, width, height };
-        set.scanout_id = scanout;
-        set.resource_id = resource_id;
-        if (auto result = simple_command(set); result.is_error()) {
-            release_pages();
-            return result.release_error();
-        }
-        // The old one goes; its pages live as long as anyone maps them.
-        if (m_resource_id) {
-            ResourceId old {};
-            old.header.type = command_resource_detach_backing;
-            old.resource_id = m_resource_id;
-            (void)simple_command(old);
-            old.header.type = command_resource_unref;
-            (void)simple_command(old);
-            for (auto page : m_pages)
-                physical_memory().unref_user_page(page);
-        }
-        m_pages = move(pages);
-        m_resource_id = resource_id;
-        m_width = width;
-        m_height = height;
         return {};
-    }
-
-    ErrorOr<void> flush(vulture_gpu_rect rect)
-    {
-        MutexLocker locker(m_lock);
-        if (!m_resource_id)
-            return Error::from_errno(EINVAL);
-        if (rect.x >= m_width || rect.y >= m_height || rect.width == 0 || rect.height == 0)
-            return {};
-        rect.width = min(rect.width, m_width - rect.x);
-        rect.height = min(rect.height, m_height - rect.y);
-        Rectangle area { rect.x, rect.y, rect.width, rect.height };
-        TransferToHost2D transfer {};
-        transfer.header.type = command_transfer_to_host_2d;
-        transfer.rectangle = area;
-        transfer.offset = static_cast<u64>(rect.y) * m_width * 4 + static_cast<u64>(rect.x) * 4;
-        transfer.resource_id = m_resource_id;
-        TRY(simple_command(transfer));
-        ResourceFlush flush {};
-        flush.header.type = command_resource_flush;
-        flush.rectangle = area;
-        flush.resource_id = m_resource_id;
-        return simple_command(flush);
-    }
-
-    ErrorOr<void> set_cursor(FlatPtr pixels, u32 hot_x, u32 hot_y)
-    {
-        MutexLocker locker(m_lock);
-        if (!m_cursor_resource_id) {
-            m_cursor_memory = TRY(physical_memory().allocate_pages(cursor_order, PageUse::General));
-            u32 resource_id = m_next_resource_id++;
-            ResourceCreate2D create {};
-            create.header.type = command_resource_create_2d;
-            create.resource_id = resource_id;
-            create.format = format_b8g8r8a8;
-            create.width = VULTURE_GPU_CURSOR_SIZE;
-            create.height = VULTURE_GPU_CURSOR_SIZE;
-            TRY(simple_command(create));
-            PhysicalAddress const backing[1] = { m_cursor_memory };
-            TRY(attach_backing(resource_id, { backing, 1 }, cursor_bytes));
-            m_cursor_resource_id = resource_id;
-        }
-        // Into kernel memory first: no user copy with the device waiting.
-        TRY(copy_from_user(physical_to_virtual(m_cursor_memory), pixels, cursor_bytes));
-        // We draw with premultiplied alpha. Displays show this resource as plain alpha, which would darken soft edges.
-        auto* cursor_pixels = physical_to_virtual<u32>(m_cursor_memory);
-        for (u32 i = 0; i < VULTURE_GPU_CURSOR_SIZE * VULTURE_GPU_CURSOR_SIZE; ++i) {
-            u32 const pixel = cursor_pixels[i];
-            u32 const alpha = pixel >> 24;
-            if (alpha == 0 || alpha == 255)
-                continue;
-            auto undo = [&](u32 channel) { return min<u32>((channel * 255 + alpha / 2) / alpha, 255); };
-            cursor_pixels[i] = (alpha << 24) | (undo((pixel >> 16) & 0xff) << 16) | (undo((pixel >> 8) & 0xff) << 8) | undo(pixel & 0xff);
-        }
-        TransferToHost2D transfer {};
-        transfer.header.type = command_transfer_to_host_2d;
-        transfer.rectangle = { 0, 0, VULTURE_GPU_CURSOR_SIZE, VULTURE_GPU_CURSOR_SIZE };
-        transfer.resource_id = m_cursor_resource_id;
-        TRY(simple_command(transfer));
-        UpdateCursor update {};
-        update.header.type = command_update_cursor;
-        update.scanout_id = scanout;
-        m_cursor_hot_x = hot_x;
-        m_cursor_hot_y = hot_y;
-        update.x = cursor_x_for_display();
-        update.y = cursor_y_for_display();
-        update.resource_id = m_cursor_resource_id;
-        update.hot_x = s_display_ignores_cursor_hot_spot ? 0 : hot_x;
-        update.hot_y = s_display_ignores_cursor_hot_spot ? 0 : hot_y;
-        return cursor_command(update);
-    }
-
-    // Where to say the cursor's picture goes. If the display doesn't go by its hot spot, it's told the corner instead: which can be off the screen, and wraps around to what QEMU reads as negative.
-    [[nodiscard]] u32 cursor_x_for_display() const { return s_display_ignores_cursor_hot_spot ? m_cursor_x - m_cursor_hot_x : m_cursor_x; }
-    [[nodiscard]] u32 cursor_y_for_display() const { return s_display_ignores_cursor_hot_spot ? m_cursor_y - m_cursor_hot_y : m_cursor_y; }
-
-    ErrorOr<void> move_cursor(u32 x, u32 y)
-    {
-        MutexLocker locker(m_lock);
-        m_cursor_x = x;
-        m_cursor_y = y;
-        UpdateCursor update {};
-        update.header.type = command_move_cursor;
-        update.scanout_id = scanout;
-        update.x = cursor_x_for_display();
-        update.y = cursor_y_for_display();
-        // It's not only for an update: QEMU takes a move without this to mean there's no cursor to show.
-        update.resource_id = m_cursor_resource_id;
-        return cursor_command(update);
     }
 
     void handle_interrupt()
@@ -487,10 +293,250 @@ private:
     Mutex m_lock;
     Atomic<bool> m_done { false };
     WaitQueue m_completed;
-
-    u32 m_display_width { 0 };
-    u32 m_display_height { 0 };
+    u32 m_scanout_count { 1 };
+    u32 m_display_width[most_scanouts] {};
+    u32 m_display_height[most_scanouts] {};
     u32 m_next_resource_id { 1 };
+};
+
+// One display, and what it's showing: /dev/gpu0 and so on.
+class VirtIOGPUOutput final : public Device {
+public:
+    static ErrorOr<NonnullRefPtr<VirtIOGPUOutput>> create(NonnullRefPtr<VirtIOGPU> gpu, u32 scanout)
+    {
+        auto* output = new (Base::nothrow) VirtIOGPUOutput(move(gpu), scanout);
+        if (!output)
+            return Error::from_errno(ENOMEM);
+        return adopt_ref(*output);
+    }
+
+    ErrorOr<size_t> read(u64, size_t, IOBuffer const&) override { return Error::from_errno(EINVAL); }
+    ErrorOr<size_t> write(u64, size_t, IOBuffer const&) override { return Error::from_errno(EINVAL); }
+    [[nodiscard]] bool can_be_mapped() const override { return true; }
+
+    ErrorOr<PhysicalAddress> mapped_page(u64 index) override
+    {
+        MutexLocker locker(m_gpu->lock());
+        if (index >= m_pages.size())
+            return Error::from_errno(ENXIO);
+        physical_memory().ref_user_page(m_pages[index]);
+        return m_pages[index];
+    }
+
+    ErrorOr<FlatPtr> ioctl(FileDescription&, unsigned request, FlatPtr argument) override
+    {
+        switch (request) {
+        case VULTURE_GPU_GET_DISPLAY: {
+            vulture_gpu_mode mode {};
+            mode.width = m_gpu->display_width(m_scanout);
+            mode.height = m_gpu->display_height(m_scanout);
+            mode.pitch = mode.width * 4;
+            mode.size = static_cast<unsigned long>(mode.pitch) * mode.height;
+            TRY(copy_to_user(argument, mode));
+            return 0;
+        }
+        case VULTURE_GPU_SET_MODE: {
+            auto mode = TRY(copy_from_user<vulture_gpu_mode>(argument));
+            TRY(set_mode(mode.width, mode.height));
+            mode.pitch = mode.width * 4;
+            mode.size = static_cast<unsigned long>(mode.pitch) * mode.height;
+            TRY(copy_to_user(argument, mode));
+            return 0;
+        }
+        case VULTURE_GPU_FLUSH:
+            TRY(flush(TRY(copy_from_user<vulture_gpu_rect>(argument))));
+            return 0;
+        case VULTURE_GPU_SET_CURSOR: {
+            auto cursor = TRY(copy_from_user<vulture_gpu_cursor>(argument));
+            if (cursor.hot_x >= VULTURE_GPU_CURSOR_SIZE || cursor.hot_y >= VULTURE_GPU_CURSOR_SIZE)
+                return Error::from_errno(EINVAL);
+            TRY(set_cursor(reinterpret_cast<FlatPtr>(cursor.pixels), cursor.hot_x, cursor.hot_y));
+            return 0;
+        }
+        case VULTURE_GPU_MOVE_CURSOR: {
+            auto position = TRY(copy_from_user<vulture_gpu_position>(argument));
+            TRY(move_cursor(position.x, position.y));
+            return 0;
+        }
+        case VULTURE_GPU_HIDE_CURSOR:
+            TRY(hide_cursor());
+            return 0;
+        default:
+            return Error::from_errno(ENOTTY);
+        }
+    }
+
+private:
+    VirtIOGPUOutput(NonnullRefPtr<VirtIOGPU> gpu, u32 scanout)
+        : Device(InodeType::CharacterDevice, 0600, device_number(29, scanout))
+        , m_gpu(move(gpu))
+        , m_scanout(scanout)
+    {
+    }
+
+    ErrorOr<void> set_mode(u32 width, u32 height)
+    {
+        if (width == 0 || height == 0 || width > 16384 || height > 16384)
+            return Error::from_errno(EINVAL);
+        MutexLocker locker(m_gpu->lock());
+        size_t page_count = (static_cast<size_t>(width) * height * 4 + page_size - 1) / page_size;
+        Vector<PhysicalAddress> pages;
+        TRY(pages.try_ensure_capacity(page_count));
+        auto release_pages = [&] {
+            for (auto page : pages)
+                physical_memory().unref_user_page(page);
+        };
+        for (size_t i = 0; i < page_count; ++i) {
+            auto page = physical_memory().allocate_user_page();
+            if (page.is_error()) {
+                release_pages();
+                return page.release_error();
+            }
+            pages.append(page.value());
+        }
+        u32 resource_id = m_gpu->next_resource_id();
+        ResourceCreate2D create {};
+        create.header.type = command_resource_create_2d;
+        create.resource_id = resource_id;
+        create.format = format_b8g8r8x8;
+        create.width = width;
+        create.height = height;
+        if (auto result = m_gpu->simple_command(create); result.is_error()) {
+            release_pages();
+            return result.release_error();
+        }
+        if (auto result = m_gpu->attach_backing(resource_id, pages.span(), page_size); result.is_error()) {
+            release_pages();
+            return result.release_error();
+        }
+        SetScanout set {};
+        set.header.type = command_set_scanout;
+        set.rectangle = { 0, 0, width, height };
+        set.scanout_id = m_scanout;
+        set.resource_id = resource_id;
+        if (auto result = m_gpu->simple_command(set); result.is_error()) {
+            release_pages();
+            return result.release_error();
+        }
+        // The old one goes; its pages live as long as anyone maps them.
+        if (m_resource_id) {
+            ResourceId old {};
+            old.header.type = command_resource_detach_backing;
+            old.resource_id = m_resource_id;
+            (void)m_gpu->simple_command(old);
+            old.header.type = command_resource_unref;
+            (void)m_gpu->simple_command(old);
+            for (auto page : m_pages)
+                physical_memory().unref_user_page(page);
+        }
+        m_pages = move(pages);
+        m_resource_id = resource_id;
+        m_width = width;
+        m_height = height;
+        return {};
+    }
+
+    ErrorOr<void> flush(vulture_gpu_rect rect)
+    {
+        MutexLocker locker(m_gpu->lock());
+        if (!m_resource_id)
+            return Error::from_errno(EINVAL);
+        if (rect.x >= m_width || rect.y >= m_height || rect.width == 0 || rect.height == 0)
+            return {};
+        rect.width = min(rect.width, m_width - rect.x);
+        rect.height = min(rect.height, m_height - rect.y);
+        Rectangle area { rect.x, rect.y, rect.width, rect.height };
+        TransferToHost2D transfer {};
+        transfer.header.type = command_transfer_to_host_2d;
+        transfer.rectangle = area;
+        transfer.offset = static_cast<u64>(rect.y) * m_width * 4 + static_cast<u64>(rect.x) * 4;
+        transfer.resource_id = m_resource_id;
+        TRY(m_gpu->simple_command(transfer));
+        ResourceFlush flush {};
+        flush.header.type = command_resource_flush;
+        flush.rectangle = area;
+        flush.resource_id = m_resource_id;
+        return m_gpu->simple_command(flush);
+    }
+
+    ErrorOr<void> set_cursor(FlatPtr pixels, u32 hot_x, u32 hot_y)
+    {
+        MutexLocker locker(m_gpu->lock());
+        if (!m_cursor_resource_id) {
+            m_cursor_memory = TRY(physical_memory().allocate_pages(cursor_order, PageUse::General));
+            u32 resource_id = m_gpu->next_resource_id();
+            ResourceCreate2D create {};
+            create.header.type = command_resource_create_2d;
+            create.resource_id = resource_id;
+            create.format = format_b8g8r8a8;
+            create.width = VULTURE_GPU_CURSOR_SIZE;
+            create.height = VULTURE_GPU_CURSOR_SIZE;
+            TRY(m_gpu->simple_command(create));
+            PhysicalAddress const backing[1] = { m_cursor_memory };
+            TRY(m_gpu->attach_backing(resource_id, { backing, 1 }, cursor_bytes));
+            m_cursor_resource_id = resource_id;
+        }
+        // Into kernel memory first: no user copy with the device waiting.
+        TRY(copy_from_user(physical_to_virtual(m_cursor_memory), pixels, cursor_bytes));
+        // We draw with premultiplied alpha. Displays show this resource as plain alpha, which would darken soft edges.
+        auto* cursor_pixels = physical_to_virtual<u32>(m_cursor_memory);
+        for (u32 i = 0; i < VULTURE_GPU_CURSOR_SIZE * VULTURE_GPU_CURSOR_SIZE; ++i) {
+            u32 const pixel = cursor_pixels[i];
+            u32 const alpha = pixel >> 24;
+            if (alpha == 0 || alpha == 255)
+                continue;
+            auto undo = [&](u32 channel) { return min<u32>((channel * 255 + alpha / 2) / alpha, 255); };
+            cursor_pixels[i] = (alpha << 24) | (undo((pixel >> 16) & 0xff) << 16) | (undo((pixel >> 8) & 0xff) << 8) | undo(pixel & 0xff);
+        }
+        TransferToHost2D transfer {};
+        transfer.header.type = command_transfer_to_host_2d;
+        transfer.rectangle = { 0, 0, VULTURE_GPU_CURSOR_SIZE, VULTURE_GPU_CURSOR_SIZE };
+        transfer.resource_id = m_cursor_resource_id;
+        TRY(m_gpu->simple_command(transfer));
+        UpdateCursor update {};
+        update.header.type = command_update_cursor;
+        update.scanout_id = m_scanout;
+        m_cursor_hot_x = hot_x;
+        m_cursor_hot_y = hot_y;
+        update.x = cursor_x_for_display();
+        update.y = cursor_y_for_display();
+        update.resource_id = m_cursor_resource_id;
+        update.hot_x = s_display_ignores_cursor_hot_spot ? 0 : hot_x;
+        update.hot_y = s_display_ignores_cursor_hot_spot ? 0 : hot_y;
+        return m_gpu->cursor_command(update);
+    }
+
+    // Where to say the cursor's picture goes. If the display doesn't go by its hot spot, it's told the corner instead: which can be off the screen, and wraps around to what QEMU reads as negative.
+    [[nodiscard]] u32 cursor_x_for_display() const { return s_display_ignores_cursor_hot_spot ? m_cursor_x - m_cursor_hot_x : m_cursor_x; }
+    [[nodiscard]] u32 cursor_y_for_display() const { return s_display_ignores_cursor_hot_spot ? m_cursor_y - m_cursor_hot_y : m_cursor_y; }
+
+    ErrorOr<void> move_cursor(u32 x, u32 y)
+    {
+        MutexLocker locker(m_gpu->lock());
+        m_cursor_x = x;
+        m_cursor_y = y;
+        UpdateCursor update {};
+        update.header.type = command_move_cursor;
+        update.scanout_id = m_scanout;
+        update.x = cursor_x_for_display();
+        update.y = cursor_y_for_display();
+        // It's not only for an update: QEMU takes a move without this to mean there's no cursor to show.
+        update.resource_id = m_cursor_resource_id;
+        return m_gpu->cursor_command(update);
+    }
+
+    // It's on another display now.
+    ErrorOr<void> hide_cursor()
+    {
+        MutexLocker locker(m_gpu->lock());
+        UpdateCursor update {};
+        update.header.type = command_update_cursor;
+        update.scanout_id = m_scanout;
+        return m_gpu->cursor_command(update);
+    }
+
+    NonnullRefPtr<VirtIOGPU> m_gpu;
+    u32 m_scanout { 0 };
     u32 m_resource_id { 0 };
     u32 m_width { 0 };
     u32 m_height { 0 };
@@ -523,11 +569,16 @@ void initialize_graphics()
             dmesgln("Graphics: virtio-gpu at {:02x}:{:02x}.{}: {}", pci.bus(), pci.slot(), pci.function(), device.error());
             continue;
         }
-        StringBuilder name;
-        name.appendff("gpu{}", number++);
-        dmesgln("Graphics: {}: virtio-gpu, display {}x{}", name.view(), device.value()->display_width(), device.value()->display_height());
-        if (auto added = DevFS::the().add_device(name.view(), NonnullRefPtr<Inode>(*device.value())); added.is_error())
-            dmesgln("Graphics: {}: {}", name.view(), added.error());
+        for (u32 scanout = 0; scanout < device.value()->scanout_count(); ++scanout) {
+            auto output = VirtIOGPUOutput::create(device.value(), scanout);
+            if (output.is_error())
+                continue;
+            StringBuilder name;
+            name.appendff("gpu{}", number++);
+            dmesgln("Graphics: {}: virtio-gpu, display {}x{}", name.view(), device.value()->display_width(scanout), device.value()->display_height(scanout));
+            if (auto added = DevFS::the().add_device(name.view(), NonnullRefPtr<Inode>(*output.value())); added.is_error())
+                dmesgln("Graphics: {}: {}", name.view(), added.error());
+        }
     }
     // Without a driver for what's there, there's what the firmware left on.
     if (number == 0)

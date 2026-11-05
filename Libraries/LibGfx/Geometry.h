@@ -51,6 +51,7 @@ struct Rect {
     [[nodiscard]] constexpr T top() const { return y; }
     // Just past the last column and row.
     [[nodiscard]] constexpr T right() const { return x + width; }
+    [[nodiscard]] constexpr Point<T> center() const { return { x + width / 2, y + height / 2 }; }
     [[nodiscard]] constexpr T bottom() const { return y + height; }
     [[nodiscard]] constexpr Point<T> origin() const { return { x, y }; }
     [[nodiscard]] constexpr Size<T> size() const { return { width, height }; }

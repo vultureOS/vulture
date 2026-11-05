@@ -595,6 +595,46 @@ void Graphics::draw_symbol(Symbol symbol, FloatRect const& rect, Color color, fl
         m_painter.fill_path(figure, color);
         return;
     }
+    case Symbol::Display: {
+        // A screen on a stand.
+        Path shape;
+        auto const screen = at(1, 2.2f);
+        shape.add_rounded_rect({ screen.x, screen.y, 14 * unit, 9.2f * unit }, 1.4f * unit);
+        auto const glass = at(2.2f, 3.4f);
+        shape.add_rounded_rect({ glass.x, glass.y, 11.6f * unit, 6.8f * unit }, 0.5f * unit);
+        m_painter.fill_path(shape, color, FillRule::EvenOdd);
+        Path stand;
+        auto const neck = at(7, 11.4f);
+        stand.add_rect({ neck.x, neck.y, 2 * unit, 1.8f * unit });
+        auto const foot = at(4.8f, 13);
+        stand.add_rounded_rect({ foot.x, foot.y, 6.4f * unit, 1.2f * unit }, 0.6f * unit);
+        m_painter.fill_path(stand, color);
+        return;
+    }
+    case Symbol::Mouse: {
+        // A body, with a line for the wheel.
+        Path shape;
+        auto const body = at(4, 1.2f);
+        shape.add_rounded_rect({ body.x, body.y, 8 * unit, 13.6f * unit }, 4 * unit);
+        auto const inner = at(5.2f, 2.4f);
+        shape.add_rounded_rect({ inner.x, inner.y, 5.6f * unit, 11.2f * unit }, 2.8f * unit);
+        auto const wheel = at(7.4f, 4);
+        shape.add_rounded_rect({ wheel.x, wheel.y, 1.2f * unit, 3 * unit }, 0.6f * unit);
+        m_painter.fill_path(shape, color, FillRule::EvenOdd);
+        return;
+    }
+    case Symbol::Trackpad: {
+        // A rounded pad, and where a press goes.
+        Path shape;
+        auto const pad = at(1.2f, 2.4f);
+        shape.add_rounded_rect({ pad.x, pad.y, 13.6f * unit, 11.2f * unit }, 2 * unit);
+        auto const inner = at(2.4f, 3.6f);
+        shape.add_rounded_rect({ inner.x, inner.y, 11.2f * unit, 8.8f * unit }, 1.1f * unit);
+        auto const line = at(2.4f, 9.6f);
+        shape.add_rect({ line.x, line.y, 11.2f * unit, 0.9f * unit });
+        m_painter.fill_path(shape, color, FillRule::EvenOdd);
+        return;
+    }
     case Symbol::Mount: {
         // A drive with an arrow going into it.
         Path shape;

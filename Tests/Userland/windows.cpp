@@ -9,7 +9,10 @@
 #include <LibGfx/Painter.h>
 #include <LibIPC/Bootstrap.h>
 #include <LibImage/Image.h>
+#include <Kernel/API/POSIX/privacy.h>
+#include <LibCrypto/SHA2.h>
 #include <LibWindow/Window.h>
+#include <poll.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
@@ -706,6 +709,127 @@ void test_frozen_program(Client& client)
     report("every frame of it within a pixel of the model", count > 0 && worst <= 1);
 }
 
+// A program that didn't come with the system, for these purposes: the same one, with a byte more, and a hash the kernel's been told is fine.
+bool make_installed_copy(char const* to)
+{
+    int in = open("/usr/tests/windows", O_RDONLY);
+    int out = open(to, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+    if (in < 0 || out < 0)
+        return false;
+    Crypto::SHA256 hasher;
+    static u8 buffer[64 * 1024];
+    for (;;) {
+        ssize_t got = read(in, buffer, sizeof(buffer));
+        if (got <= 0)
+            break;
+        hasher.update({ buffer, static_cast<size_t>(got) });
+        if (write(out, buffer, static_cast<size_t>(got)) != got)
+            return false;
+    }
+    u8 const extra = 0x5a;
+    hasher.update({ &extra, 1 });
+    if (write(out, &extra, 1) != 1)
+        return false;
+    close(in);
+    close(out);
+    auto const hash = hasher.digest();
+    return sysctlbyname("security.code.trust", nullptr, nullptr, hash.data(), hash.size()) == 0;
+}
+
+// As that. Exits with 0 for a picture, 1 for being refused, 2 for anything else.
+int run_looking_client()
+{
+    if (setgid(20) < 0 || setuid(501) < 0)
+        return 2;
+    Client other;
+    auto connection = Window::Connection::connect(other.loop);
+    if (connection.is_error())
+        return 2;
+    other.connection = connection.release_value();
+    // Who's logged in, as far as this server's concerned: this one's the first to say.
+    (void)other.connection->server().subscribe_shell();
+    auto picture = other.connection->capture_screen();
+    if (!picture.is_error())
+        return 0;
+    return picture.error().is_errno() && picture.error().code() == EPERM ? 1 : 2;
+}
+
+void test_consent(Client& client)
+{
+    // Whoever's logged in, as far as the server knows.
+    constexpr char const* copy = "/tmp/windows-test/looker";
+    report("an installed program to try it with", make_installed_copy(copy));
+    auto run = [&] {
+        fflush(stdout);
+        pid_t const child = fork();
+        if (child == 0) {
+            execl(copy, copy, "--looking-client", nullptr);
+            _exit(99);
+        }
+        return child;
+    };
+    // With nobody to ask, it's no.
+    int status = 0;
+    pid_t child = run();
+    for (int waited = 0; waited < 400 && waitpid(child, &status, WNOHANG) == 0; ++waited)
+        client.settle(25);
+    report("with nobody to ask, looking at the screen is refused", WIFEXITED(status) && WEXITSTATUS(status) == 1);
+
+    // With someone to ask, as privacyd would.
+    int const device = open("/dev/privacy", O_RDWR | O_CLOEXEC);
+    report("something to answer as", device >= 0);
+    if (device < 0)
+        return;
+    auto answered_with = [&](bool allowed) {
+        pid_t const asker = run();
+        vulture_privacy_request request {};
+        pollfd poller { device, POLLIN, 0 };
+        bool asked = false;
+        for (int waited = 0; waited < 200 && !asked; ++waited) {
+            client.settle(25);
+            if (poll(&poller, 1, 0) == 1)
+                asked = read(device, &request, sizeof(request)) == sizeof(request);
+        }
+        if (asked) {
+            vulture_privacy_answer const reply { request.id, allowed ? 1u : 0u };
+            (void)write(device, &reply, sizeof(reply));
+        }
+        for (int waited = 0; waited < 400 && waitpid(asker, &status, WNOHANG) == 0; ++waited)
+            client.settle(25);
+        return asked && request.service == VULTURE_PRIVACY_SCREEN;
+    };
+    report("it's asked about the screen", answered_with(false));
+    report("told no, it's refused", WIFEXITED(status) && WEXITSTATUS(status) == 1);
+    bool const asked = answered_with(true);
+    report("told yes, it can look", asked && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    close(device);
+
+    // Root can still do what tests need, and asks nobody.
+    report("and root doesn't have to ask", !client.connection->capture_screen().is_error());
+}
+
+void test_screencapture(Client& client)
+{
+    constexpr char const* file = "/tmp/windows-test/shot.png";
+    int const s = client.connection->scale();
+    report("screencapture takes part of the screen", system("/usr/sbin/screencapture -x -R 100,100,50,40 /tmp/windows-test/shot.png") == 0);
+    int const fd = open(file, O_RDONLY);
+    static u8 bytes[256 * 1024];
+    ssize_t const got = fd >= 0 ? read(fd, bytes, sizeof(bytes)) : -1;
+    if (fd >= 0)
+        close(fd);
+    auto const picture = got > 0 ? Image::decode_png({ bytes, static_cast<size_t>(got) }) : ErrorOr<NonnullRefPtr<Bitmap>>(Error::from_errno(EIO));
+    report("of the size it was asked for", !picture.is_error() && picture.value()->width() == 50 * s && picture.value()->height() == 40 * s);
+    report("and a display that isn't there is an error", system("/usr/sbin/screencapture -D 9 /tmp/windows-test/none.png 2>/dev/null") != 0);
+    // A recording: frames as they come, once each.
+    client.settle(100);
+    report("screencapture records", system("/usr/sbin/screencapture -V 1 -R 0,0,100,100 /tmp/windows-test/frames > /tmp/windows-test/frames.out") == 0);
+    int frames = 0;
+    sscanf(read_file("frames.out"), "%d", &frames);
+    printf("frames: %d in a second\n", frames);
+    report("and there's a frame to look at", access("/tmp/windows-test/frames-0001.ppm", R_OK) == 0 && frames >= 1);
+}
+
 void test_reduced_motion(Client& client)
 {
     int const s = client.connection->scale();
@@ -762,6 +886,8 @@ int run_client()
     test_layers(client);
     test_frozen_program(client);
     test_reduced_motion(client);
+    test_consent(client);
+    test_screencapture(client);
     test_drag_rate(client, 10, false);
     test_drag_rate(client, 12, true);
     printf("done\n");
@@ -777,6 +903,8 @@ int main(int argc, char** argv)
         return run_client();
     if (argc > 2 && strcmp(argv[1], "--doomed-client") == 0)
         return run_doomed_client(atoi(argv[2]));
+    if (argc > 1 && strcmp(argv[1], "--looking-client") == 0)
+        return run_looking_client();
     if (argc > 2 && strcmp(argv[1], "--frozen-client") == 0)
         return run_frozen_client(atoi(argv[2]));
     // Only the drag, on the window server that's there: see Meta/budgets.sh.

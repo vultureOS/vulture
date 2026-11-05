@@ -78,6 +78,19 @@ Compositor::Compositor(Screen& screen, Theme const& theme, Vector<ServerWindow*>
 {
 }
 
+ErrorOr<void> Compositor::screen_changed()
+{
+    auto size = m_screen.pixels();
+    m_tiles_across = (size.width + tile_size - 1) / tile_size;
+    m_tiles_down = (size.height + tile_size - 1) / tile_size;
+    size_t const tiles = static_cast<size_t>(m_tiles_across) * static_cast<size_t>(m_tiles_down);
+    TRY(m_dirty.try_resize(tiles));
+    TRY(m_lowest_shown.try_resize(tiles));
+    TRY(render_wallpaper());
+    invalidate_all();
+    return {};
+}
+
 ErrorOr<void> Compositor::initialize()
 {
     auto size = m_screen.pixels();
@@ -100,11 +113,14 @@ ErrorOr<void> Compositor::initialize()
 
 ErrorOr<void> Compositor::render_wallpaper()
 {
-    auto size = m_screen.pixels();
-    auto wallpaper = TRY(Bitmap::create(size));
+    auto wallpaper = TRY(Bitmap::create(m_screen.pixels()));
     // An original wallpaper, from the theme's colors: a diagonal gradient under
-    // soft rolling shapes.
+    // soft rolling shapes. All of it on each display.
+    int const scale = m_screen.scale();
+    for (auto const& display : m_screen.displays()) {
+    IntSize const size { display.points.width * scale, display.points.height * scale };
     Painter painter(*wallpaper);
+    painter.translate(static_cast<float>((display.points.x + m_screen.origin().x) * scale), static_cast<float>((display.points.y + m_screen.origin().y) * scale));
     auto const& colors = m_wallpaper_colors.is_empty() ? m_theme.wallpaper : m_wallpaper_colors;
     Vector<GradientStop> stops;
     for (size_t i = 0; i < colors.size(); ++i)
@@ -130,6 +146,7 @@ ErrorOr<void> Compositor::render_wallpaper()
         shape.line_to({ 0, h });
         shape.close();
         painter.fill_path(shape, hill.color);
+    }
     }
     m_wallpaper = move(wallpaper);
     return {};
@@ -247,7 +264,8 @@ NineSlice const& Compositor::shadow_slice_of(ServerWindow const& window) const
 IntRect Compositor::device_frame(ServerWindow const& window) const
 {
     int scale = m_screen.scale();
-    return { window.frame.x * scale + window.slide_x, window.frame.y * scale, window.frame.width * scale, window.frame.height * scale };
+    auto const origin = m_screen.origin();
+    return { (window.frame.x + origin.x) * scale + window.slide_x, (window.frame.y + origin.y) * scale, window.frame.width * scale, window.frame.height * scale };
 }
 
 IntRect Compositor::window_bounds(ServerWindow const& window) const
@@ -1354,6 +1372,8 @@ void Compositor::draw_overlays(Vector<IntRect> const& rects)
 {
     auto& framebuffer = m_screen.framebuffer();
     float scale = static_cast<float>(m_screen.scale());
+    float const origin_x = static_cast<float>(m_screen.origin().x);
+    float const origin_y = static_cast<float>(m_screen.origin().y);
     for (auto const& rect : rects) {
         Painter painter(framebuffer);
         painter.clip_rect(rect.to<float>());
@@ -1362,7 +1382,7 @@ void Compositor::draw_overlays(Vector<IntRect> const& rects)
         for (auto const& overlay : m_overlays) {
             switch (overlay.kind) {
             case Overlay::Kind::Tile: {
-                FloatRect shape { overlay.rect.x * scale, overlay.rect.y * scale, overlay.rect.width * scale, overlay.rect.height * scale };
+                FloatRect shape { (overlay.rect.x + origin_x) * scale, (overlay.rect.y + origin_y) * scale, overlay.rect.width * scale, overlay.rect.height * scale };
                 painter.fill_rounded_rect(shape, overlay.radius * scale, overlay.color);
                 if (!overlay.label.is_empty() && m_overlay_font) {
                     float text_width = m_overlay_font->width_of(overlay.label.view());
@@ -1374,7 +1394,7 @@ void Compositor::draw_overlays(Vector<IntRect> const& rects)
             }
             case Overlay::Kind::Logo: {
                 // Wings, swept up into a V: original, and simple enough for any size.
-                FloatRect shape { overlay.rect.x * scale, overlay.rect.y * scale, overlay.rect.width * scale, overlay.rect.height * scale };
+                FloatRect shape { (overlay.rect.x + origin_x) * scale, (overlay.rect.y + origin_y) * scale, overlay.rect.width * scale, overlay.rect.height * scale };
                 auto at = [&](float x, float y) { return FloatPoint { shape.x + x * shape.width, shape.y + y * shape.height }; };
                 Path path;
                 path.move_to(at(0.02f, 0.14f));
@@ -1393,7 +1413,7 @@ void Compositor::draw_overlays(Vector<IntRect> const& rects)
             case Overlay::Kind::Thumbnail: {
                 if (!overlay.picture)
                     break;
-                FloatRect shape { overlay.rect.x * scale, overlay.rect.y * scale, overlay.rect.width * scale, overlay.rect.height * scale };
+                FloatRect shape { (overlay.rect.x + origin_x) * scale, (overlay.rect.y + origin_y) * scale, overlay.rect.width * scale, overlay.rect.height * scale };
                 if (overlay.shadow) {
                     for (int i = 0; i < 6; ++i) {
                         auto grown = static_cast<float>(6 - i) * 3;
@@ -1408,8 +1428,8 @@ void Compositor::draw_overlays(Vector<IntRect> const& rects)
                     break;
                 // Rows between a top and bottom that race down to the target: the bottom
                 // first; each narrowed the more the nearer it has come.
-                FloatRect from { overlay.rect.x * scale, overlay.rect.y * scale, overlay.rect.width * scale, overlay.rect.height * scale };
-                FloatPoint to { overlay.target.x * scale, overlay.target.y * scale };
+                FloatRect from { (overlay.rect.x + origin_x) * scale, (overlay.rect.y + origin_y) * scale, overlay.rect.width * scale, overlay.rect.height * scale };
+                FloatPoint to { (overlay.target.x + origin_x) * scale, (overlay.target.y + origin_y) * scale };
                 float t = clamp(overlay.progress, 0.0f, 1.0f);
                 float bottom_t = min(t * 1.6f, 1.0f);
                 float top_t = t * t;
@@ -1580,11 +1600,11 @@ void Compositor::render()
     }
     u64 const together = static_cast<u64>(everything.width) * static_cast<u64>(everything.height);
     if (rects.size() > 2 || together <= separately * 8) {
-        m_screen.flush(everything);
+        m_screen.flush(everything, m_workers);
         pixel_count = together;
     } else {
         for (auto const& rect : rects)
-            m_screen.flush(rect);
+            m_screen.flush(rect, m_workers);
         pixel_count = separately;
     }
     u64 flushed = now_microseconds();

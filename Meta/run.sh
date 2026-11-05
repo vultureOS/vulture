@@ -84,7 +84,8 @@
 #                       and "unplug ID" add and remove a device, "qmp JSON" tells QEMU
 #                       anything else (a failure fails the chat), "qmp-result TEXT" says
 #                       TEXT must be in its answer, "touch begin|update|end SLOT X Y" is
-#                       a finger on a touch device, "display HEAD" says which head
+#                       a finger on a touch device, "fingers begin|update|end SLOT X Y SLOT X Y ..."
+#                       is several of them in the same moment, "display HEAD" says which head
 #                       later screenshots are of, "host COMMAND" runs a command on this
 #                       machine (a failure fails the chat), "host-start NAME COMMAND"
 #                       leaves one running, as a server for the guest to talk to, until
@@ -418,6 +419,10 @@ if [ "$real_devices" -eq 1 ]; then
     network_device=e1000e
 else
     input_devices=(-device virtio-keyboard-pci -device virtio-tablet-pci)
+    # One pointer for each display: QEMU's tablet has no way to say which it's on.
+    for ((head = 1; head < ${VULTURE_GPU_OUTPUTS:-1}; head++)); do
+        input_devices+=(-device "virtio-tablet-pci,display=gpu0,head=$head")
+    done
     network_device=virtio-net-pci
 fi
 
@@ -521,7 +526,7 @@ if [ -n "$chat_file" ]; then
             "" | "#"*) ;;
             "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "nudge "* | "button "* | "screenshot "* | \
                 "click "* | "ax-expect "* | "ax-gone "* | "timeout "* | "forbid "* | "reboot" | "plug "* | "hold "* | "unplug "* | "qmp "* | "qmp-result "* | \
-                "touch "* | "display "* | "host "* | "host-start "* | "host-stop "*) chat_steps+=("$line") ;;
+                "touch "* | "fingers "* | "display "* | "host "* | "host-start "* | "host-stop "*) chat_steps+=("$line") ;;
             *) echo "run.sh: $chat_file: not a step: $line" >&2; exit 2 ;;
         esac
     done < "$chat_file"
@@ -573,7 +578,10 @@ hold_key() {
 }
 
 send_input_events() {
-    printf '{"execute":"qmp_capabilities"}\n{"execute":"input-send-event","arguments":{"events":[%s]}}\n' "$1" |
+    # On the display that's being looked at, if it's been said.
+    local where=""
+    [ -n "$chat_head" ] && where="\"device\":\"gpu0\",\"head\":$chat_head,"
+    printf '{"execute":"qmp_capabilities"}\n{"execute":"input-send-event","arguments":{%s"events":[%s]}}\n' "$where" "$1" |
         nc -U -w 1 "$qmp_socket" > /dev/null || echo "run.sh: QMP failed" >&2
 }
 
@@ -728,10 +736,39 @@ touch_event() {
         printf '{"type":"mtt","data":{"type":"%s","slot":%s,"tracking-id":%s,"axis":"%s","value":%s}}' "$1" "$slot" "$id" "$2" "$3"
     }
     if [ "$kind" = end ]; then
+        # A finger that's gone says so with -1, as QEMU's own windows do, whatever it was called till now.
+        id=-1
         events="$(one_event end x "$x")"
     else
         events="$(one_event "$kind" x "$x"),$(one_event data x "$x"),$(one_event data y "$y")"
     fi
+    qmp_command "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[$events]}}"
+}
+
+# Several fingers in the one moment, as a touch device reports them: "begin|update|end SLOT X Y SLOT X Y ...".
+fingers_event() {
+    local kind="$1" events="" id
+    shift
+    case "$kind" in
+        begin | update | end) ;;
+        *)
+            chat_failure="fingers can begin, update or end, not $kind"
+            return 1
+            ;;
+    esac
+    while [ $# -ge 3 ]; do
+        id=$((1000 + $1))
+        [ "$kind" = end ] && id=-1
+        [ -n "$events" ] && events="$events,"
+        one() { printf '{"type":"mtt","data":{"type":"%s","slot":%s,"tracking-id":%s,"axis":"%s","value":%s}}' "$1" "$slot" "$id" "$2" "$3"; }
+        slot="$1"
+        if [ "$kind" = end ]; then
+            events="$events$(one end x "$2")"
+        else
+            events="$events$(one "$kind" x "$2"),$(one data x "$2"),$(one data y "$3")"
+        fi
+        shift 3
+    done
     qmp_command "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[$events]}}"
 }
 
@@ -977,6 +1014,11 @@ advance_chat() {
             "touch "*)
                 # shellcheck disable=SC2086
                 touch_event ${step#touch } || return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "fingers "*)
+                # shellcheck disable=SC2086
+                fingers_event ${step#fingers } || return 0
                 chat_index=$((chat_index + 1))
                 ;;
             "display "*)

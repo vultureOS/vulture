@@ -57,6 +57,9 @@ pause 1
 click row "Accessibility"
 expect settings: Accessibility
 ax-expect switch "Reduce motion" = off
+click row "Displays"
+expect settings: Displays
+ax-expect popup "Looks like" ~ Default
 click row "Language & Region"
 expect settings: Language & Region
 ax-expect text "1,234.56"

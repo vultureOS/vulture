@@ -1,0 +1,110 @@
+# M22: fingers. Two scroll, three go between Spaces, and three up is Overview.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 2
+# ---- A second Space, to go to.
+key ctrl-up
+pause 1
+pointer 18227 2949
+pause 0.2
+button left down
+pause 0.2
+button left up
+pause 0.6
+key esc
+pause 1
+ax-expect window "vulture"
+# ---- Three fingers, right to left: the next one.
+fingers begin 0 24000 16000 1 25000 16000 2 26000 16000
+pause 0.05
+fingers update 0 21000 16000 1 22000 16000 2 23000 16000
+pause 0.05
+fingers update 0 15000 16000 1 16000 16000 2 17000 16000
+pause 0.05
+fingers update 0 8000 16000 1 9000 16000 2 10000 16000
+pause 0.05
+fingers end 0 8000 16000 1 9000 16000 2 10000 16000
+pause 1.5
+ax-gone window "vulture"
+screenshot next-space.png
+# ---- And back again.
+fingers begin 0 8000 16000 1 9000 16000 2 10000 16000
+pause 0.05
+fingers update 0 15000 16000 1 16000 16000 2 17000 16000
+pause 0.05
+fingers update 0 24000 16000 1 25000 16000 2 26000 16000
+pause 0.05
+fingers end 0 24000 16000 1 25000 16000 2 26000 16000
+pause 1.5
+ax-expect window "vulture"
+# ---- A little way, slowly, and let go: it goes back.
+fingers begin 0 24000 16000 1 25000 16000 2 26000 16000
+pause 0.3
+fingers update 0 23000 16000 1 24000 16000 2 25000 16000
+pause 0.3
+fingers update 0 22500 16000 1 23500 16000 2 24500 16000
+pause 0.3
+fingers end 0 22500 16000 1 23500 16000 2 24500 16000
+pause 1.5
+ax-expect window "vulture"
+# ---- Three up: Overview. Three down: back.
+fingers begin 0 14000 20000 1 16000 20000 2 18000 20000
+pause 0.05
+fingers update 0 14000 16000 1 16000 16000 2 18000 16000
+pause 0.05
+fingers end 0 14000 16000 1 16000 16000 2 18000 16000
+pause 1
+screenshot overview.png
+fingers begin 0 14000 12000 1 16000 12000 2 18000 12000
+pause 0.05
+fingers update 0 14000 16000 1 16000 16000 2 18000 16000
+pause 0.05
+fingers end 0 14000 16000 1 16000 16000 2 18000 16000
+pause 1
+# ---- A tap of one finger presses.
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "About"
+expect settings: About
+fingers begin 0 6656 5816
+pause 0.05
+fingers end 0 6656 5816
+expect settings: Appearance
+# ---- The panes.
+click row "Mouse"
+expect settings: Mouse
+ax-expect switch "Natural scrolling" = on
+pointer 16000 3000
+pause 1
+screenshot settings-mouse.png
+click row "Trackpad"
+expect settings: Trackpad
+ax-expect switch "Tap to click" = on
+pointer 16000 3000
+pause 1
+screenshot settings-trackpad.png
+key meta_l-q
+pause 1
+# ---- Two fingers scroll what's under the pointer, and what's under them goes the way they go.
+click button "Widget Gallery"
+pause 2
+click row "Collections"
+pause 1
+pointer 18000 13000
+pause 0.5
+screenshot before-scrolling.png
+fingers begin 0 15000 24000 1 18000 24000
+pause 0.05
+fingers update 0 15000 21000 1 18000 21000
+pause 0.05
+fingers update 0 15000 18000 1 18000 18000
+pause 0.05
+fingers update 0 15000 15000 1 18000 15000
+pause 0.05
+fingers end 0 15000 15000 1 18000 15000
+pause 1
+screenshot after-scrolling.png
+key meta_l-q

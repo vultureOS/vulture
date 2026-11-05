@@ -43,5 +43,7 @@ struct vulture_gpu_position {
 #define VULTURE_GPU_FLUSH 0x4703
 #define VULTURE_GPU_SET_CURSOR 0x4704
 #define VULTURE_GPU_MOVE_CURSOR 0x4705
+// It's on another display now.
+#define VULTURE_GPU_HIDE_CURSOR 0x4706
 
 #define VULTURE_GPU_CURSOR_SIZE 64

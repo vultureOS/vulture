@@ -26,4 +26,10 @@ void initialize();
 // Is the current process allowed `path`, canonical, as far as this goes?
 [[nodiscard]] ErrorOr<void> check(StringView path);
 
+// Something that isn't a path. It waits like any other for the answer, so it's for the process that wants it to ask, and not for a
+// service that may be what's needed for showing the question.
+[[nodiscard]] ErrorOr<void> check_service(u32 service);
+// Has this process been told yes, or doesn't it need to be? For the services that enforce it. Asks nobody.
+[[nodiscard]] bool has_been_allowed(int pid, u32 service);
+
 }

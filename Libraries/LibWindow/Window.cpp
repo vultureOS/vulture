@@ -6,6 +6,7 @@
 
 #include <LibIPC/Bootstrap.h>
 #include <LibWindow/Window.h>
+#include <sys/sysctl.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
@@ -160,6 +161,56 @@ void Connection::motion_changed(IPC::Sender const&, bool reduced)
 {
     if (on_motion_change)
         on_motion_change(reduced);
+}
+
+bool Connection::ask_to_look_at_screen()
+{
+    int allowed = 0;
+    size_t length = sizeof(allowed);
+    return sysctlbyname("security.privacy.ask-screen", &allowed, &length, nullptr, 0) == 0 && allowed;
+}
+
+ErrorOr<Vector<u8>> Connection::capture_screen(Gfx::IntRect area)
+{
+    (void)ask_to_look_at_screen();
+    if (area.width == 0) {
+        auto answer = TRY(m_server.capture());
+        if (answer.error)
+            return Error::from_errno(answer.error);
+        return move(answer.png);
+    }
+    auto answer = TRY(m_server.capture_area(area.x, area.y, area.width, area.height));
+    if (answer.error)
+        return Error::from_errno(answer.error);
+    return move(answer.png);
+}
+
+Vector<DisplayRecord> Connection::displays()
+{
+    Vector<DisplayRecord> records;
+    auto answer = m_server.displays();
+    if (answer.is_error())
+        return records;
+    auto const& bytes = answer.value().records;
+    for (size_t at = 0; at + sizeof(DisplayRecord) <= bytes.size(); at += sizeof(DisplayRecord)) {
+        DisplayRecord record;
+        memcpy(&record, bytes.data() + at, sizeof(record));
+        records.append(record);
+    }
+    return records;
+}
+
+void Connection::displays_changed(IPC::Sender const&, i32 main_width, i32 main_height)
+{
+    m_screen_size = { main_width, main_height };
+    if (on_displays_change)
+        on_displays_change();
+}
+
+void Connection::recorded_frame(IPC::Sender const&, i32 width, i32 height, u64 time)
+{
+    if (on_recorded_frame)
+        on_recorded_frame(width, height, time);
 }
 
 void Connection::ping(IPC::Sender const&, u32 serial)

@@ -12,6 +12,7 @@
 #define VULTURE_PRIVACY_DESKTOP 1u
 #define VULTURE_PRIVACY_DOCUMENTS 2u
 #define VULTURE_PRIVACY_DOWNLOADS 3u
+#define VULTURE_PRIVACY_SCREEN 4u
 
 struct vulture_privacy_request {
     unsigned int id;

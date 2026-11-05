@@ -21,6 +21,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 
 namespace {
@@ -72,7 +73,7 @@ Server::Server(Core::EventLoop& loop, Screen& screen, Theme& theme, Compositor& 
 {
     m_title_font = adopt_own(*new Text::Font(m_title_face, theme.title_font_size, static_cast<float>(screen.scale()), m_atlas));
     m_compositor.set_overlay_font(m_title_font.ptr());
-    auto points = screen.points();
+    auto points = screen.main_display().points.size();
     m_pointer = { points.width / 2, points.height / 2 };
 }
 
@@ -92,7 +93,7 @@ void Server::set_up_cursor()
 {
     auto cursor = make_cursor(m_cursor_shape, m_screen.scale(), m_cursor_turn);
     m_screen.set_cursor(*cursor.image, cursor.hot_spot);
-    m_screen.move_cursor({ m_pointer.x * m_screen.scale(), m_pointer.y * m_screen.scale() });
+    m_screen.move_cursor({ (m_pointer.x + m_screen.origin().x) * m_screen.scale(), (m_pointer.y + m_screen.origin().y) * m_screen.scale() });
 }
 
 void Server::update_cursor()
@@ -276,6 +277,8 @@ void Server::render_frame()
         send_to(*window->client, encoder);
     }
     log_layers(frame_time);
+    if (m_recording.client)
+        record_frame();
     schedule_frame();
 }
 
@@ -311,7 +314,7 @@ ServerWindow* Server::window_of(IPC::Sender const& sender, u32 id)
 WindowServerEndpoint::ConnectAnswer Server::connect(IPC::Sender const& sender, IPC::Port events)
 {
     WindowServerEndpoint::ConnectAnswer answer {};
-    auto points = m_screen.points();
+    auto const points = m_screen.main_display().points;
     answer.width = points.width;
     answer.height = points.height;
     answer.scale = m_screen.scale();
@@ -346,6 +349,8 @@ WindowServerEndpoint::ConnectAnswer Server::connect(IPC::Sender const& sender, I
 
 void Server::remove_client(Client& client)
 {
+    if (m_recording.client == &client)
+        end_recording();
     os_log_info(server_log(), "A client is gone: %s", client.application_name.is_empty() ? "(not an application)" : client.application_name.characters());
     for (size_t i = m_windows.size(); i > 0; --i) {
         if (m_windows[i - 1]->client == &client)
@@ -562,6 +567,106 @@ i32 Server::set_keyboard_layout(IPC::Sender const&, String identifier)
     if (layout.is_error())
         return ENOENT;
     m_keyboard_layout = layout.release_value();
+    return 0;
+}
+
+WindowServerEndpoint::DisplaysAnswer Server::displays(IPC::Sender const&)
+{
+    WindowServerEndpoint::DisplaysAnswer answer {};
+    auto const& displays = m_screen.displays();
+    MUST(answer.records.try_resize(displays.size() * sizeof(Window::DisplayRecord)));
+    for (size_t i = 0; i < displays.size(); ++i) {
+        auto const& display = displays[i];
+        Window::DisplayRecord const record { display.output, display.points.x, display.points.y, display.points.width, display.points.height, display.panel.width, display.panel.height };
+        __builtin_memcpy(answer.records.data() + i * sizeof(record), &record, sizeof(record));
+    }
+    answer.mirrored = m_screen.is_mirrored();
+    answer.outputs = static_cast<i32>(m_screen.output_count());
+    return answer;
+}
+
+IntRect Server::work_area_of(Display const& display) const
+{
+    if (&display == &m_screen.main_display())
+        return { display.points.x + m_work_left, display.points.y + m_work_top, display.points.width - m_work_left - m_work_right, display.points.height - m_work_top - m_work_bottom };
+    // Each has a menu bar. Only the main one has the Dock.
+    return { display.points.x, display.points.y + m_work_top, display.points.width, display.points.height - m_work_top };
+}
+
+void Server::displays_changed()
+{
+    MUST(m_compositor.screen_changed());
+    // What's now off every display comes back on to the nearest.
+    for (auto* window : m_windows) {
+        if (window->level != Window::LevelNormal)
+            continue;
+        auto const center = window->frame.center();
+        auto const& display = m_screen.display_at(center);
+        if (!display.points.contains(center)) {
+            auto moved = window->frame;
+            auto const area = work_area_of(display);
+            moved.x = clamp(moved.x, area.x, max(area.x, area.right() - moved.width));
+            moved.y = clamp(moved.y, area.y, max(area.y, area.bottom() - moved.height));
+            move_window_to(*window, moved);
+            send_moved(*window);
+        }
+    }
+    auto const main = m_screen.main_display().points;
+    for (auto& client : m_clients) {
+        IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::DisplaysChanged));
+        encoder.encode(static_cast<i32>(main.width));
+        encoder.encode(static_cast<i32>(main.height));
+        send_to(*client, encoder);
+    }
+    m_pointer = m_screen.nearest_point_on_a_display(m_pointer);
+    set_up_cursor();
+    shell_state_changed();
+    schedule_frame();
+}
+
+i32 Server::set_display(IPC::Sender const&, i32 output, i32 x, i32 y, i32 width, i32 height)
+{
+    Screen::Placement placements[8];
+    size_t count = 0;
+    // The others stay where they were, for now: all of them have to be said.
+    for (auto const& display : m_screen.displays()) {
+        if (count == 8)
+            break;
+        placements[count++] = Screen::Placement { display.output, display.points.origin(), display.points.size() };
+    }
+    bool found = false;
+    for (size_t i = 0; i < count; ++i) {
+        if (placements[i].output == output) {
+            placements[i].origin = { x, y };
+            placements[i].points = { width, height };
+            found = true;
+        }
+    }
+    if (!found)
+        return ENOENT;
+    if (auto arranged = m_screen.arrange({ placements, count }, m_screen.is_mirrored()); arranged.is_error())
+        return arranged.error().code();
+    displays_changed();
+    return 0;
+}
+
+i32 Server::set_mirroring(IPC::Sender const&, bool mirrored)
+{
+    if (mirrored == m_screen.is_mirrored())
+        return 0;
+    if (auto arranged = m_screen.arrange({}, mirrored); arranged.is_error())
+        return arranged.error().code();
+    displays_changed();
+    return 0;
+}
+
+i32 Server::set_warmth(IPC::Sender const&, i32 percent)
+{
+    if (auto changed = m_screen.set_warmth(static_cast<float>(clamp(percent, 0, 100)) / 100); changed.is_error())
+        return changed.error().code();
+    // What's on the screen is shown through it, and may have moved to memory of its own.
+    MUST(m_compositor.screen_changed());
+    schedule_frame();
     return 0;
 }
 
@@ -1256,10 +1361,41 @@ WindowServerEndpoint::InputLatencyAnswer Server::input_latency(IPC::Sender const
     return answer;
 }
 
+bool Server::may_look_at_screen(IPC::Sender const& sender, char const* doing_what)
+{
+    if (sender.uid == 0)
+        return true;
+    // The kernel knows what it's running. What came with the system has no need to ask, as long as it's the logged in person's;
+    // anything else needs to have been told yes.
+    int allowed = 0;
+    size_t length = sizeof(allowed);
+    int pid = sender.pid;
+    bool const known = sysctlbyname("security.privacy.screen", &allowed, &length, &pid, sizeof(pid)) == 0;
+    if (known && allowed && m_has_shell_uid && sender.uid == m_shell_uid)
+        return true;
+    os_log(server_log(), "Process %d, of user %d, was refused %s: nobody has said it may", sender.pid, sender.uid, doing_what);
+    printf("WindowServer: process %d was refused %s\n", sender.pid, doing_what);
+    fflush(stdout);
+    return false;
+}
+
+ErrorOr<Vector<u8>> Server::png_of_area(IntRect points)
+{
+    int const scale = m_screen.scale();
+    auto const origin = m_screen.origin();
+    IntRect const pixels = IntRect { (points.x + origin.x) * scale, (points.y + origin.y) * scale, points.width * scale, points.height * scale }.intersected(m_screen.framebuffer().rect());
+    if (pixels.is_empty())
+        return Error::from_errno(EINVAL);
+    auto part = TRY(Bitmap::create(pixels.size()));
+    for (int y = 0; y < pixels.height; ++y)
+        __builtin_memcpy(part->scanline(y), m_screen.framebuffer().scanline(pixels.y + y) + pixels.x, static_cast<size_t>(pixels.width) * sizeof(Pixel));
+    return Image::encode_png(*part);
+}
+
 WindowServerEndpoint::CaptureAnswer Server::capture(IPC::Sender const& sender)
 {
     WindowServerEndpoint::CaptureAnswer answer {};
-    if (sender.uid != 0) {
+    if (!may_look_at_screen(sender, "a picture of the screen")) {
         answer.error = EPERM;
         return answer;
     }
@@ -1270,6 +1406,92 @@ WindowServerEndpoint::CaptureAnswer Server::capture(IPC::Sender const& sender)
     }
     answer.png = encoded.release_value();
     return answer;
+}
+
+WindowServerEndpoint::CaptureAreaAnswer Server::capture_area(IPC::Sender const& sender, i32 x, i32 y, i32 width, i32 height)
+{
+    WindowServerEndpoint::CaptureAreaAnswer answer {};
+    if (!may_look_at_screen(sender, "a picture of the screen")) {
+        answer.error = EPERM;
+        return answer;
+    }
+    auto encoded = png_of_area({ x, y, width, height });
+    if (encoded.is_error()) {
+        answer.error = encoded.error().is_errno() ? encoded.error().code() : ENOMEM;
+        return answer;
+    }
+    answer.png = encoded.release_value();
+    return answer;
+}
+
+i32 Server::start_recording(IPC::Sender const& sender, IPC::Port memory, i32 x, i32 y, i32 width, i32 height)
+{
+    if (!may_look_at_screen(sender, "a recording of the screen"))
+        return EPERM;
+    if (m_recording.client)
+        return EBUSY;
+    auto* client = client_of(sender);
+    if (!client || !memory.is_valid() || width <= 0 || height <= 0)
+        return EINVAL;
+    int const scale = m_screen.scale();
+    size_t const size = static_cast<size_t>(width * scale) * static_cast<size_t>(height * scale) * sizeof(Pixel);
+    struct stat information {};
+    if (fstat(memory.fd(), &information) < 0 || static_cast<size_t>(information.st_size) < size)
+        return EINVAL;
+    void* mapped = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, memory.fd(), 0);
+    if (mapped == MAP_FAILED)
+        return errno;
+    m_recording = { client, mapped, size, { x, y, width, height }, true, true };
+    m_compositor.invalidate_all();
+    schedule_frame();
+    os_log_info(server_log(), "Process %d is recording the screen", sender.pid);
+    return 0;
+}
+
+void Server::recording_ready(IPC::Sender const& sender)
+{
+    if (m_recording.client && m_recording.client == client_of(sender)) {
+        m_recording.ready = true;
+        if (m_recording.new_since)
+            record_frame();
+    }
+}
+
+void Server::end_recording()
+{
+    if (m_recording.memory)
+        munmap(m_recording.memory, m_recording.memory_size);
+    m_recording = {};
+}
+
+void Server::stop_recording(IPC::Sender const& sender)
+{
+    if (m_recording.client && m_recording.client == client_of(sender))
+        end_recording();
+}
+
+void Server::record_frame()
+{
+    if (!m_recording.client)
+        return;
+    m_recording.new_since = true;
+    if (!m_recording.ready)
+        return;
+    int const scale = m_screen.scale();
+    auto const origin = m_screen.origin();
+    auto const& picture = m_screen.framebuffer();
+    IntRect const wanted { (m_recording.points.x + origin.x) * scale, (m_recording.points.y + origin.y) * scale, m_recording.points.width * scale, m_recording.points.height * scale };
+    auto const area = wanted.intersected(picture.rect());
+    auto* out = static_cast<Pixel*>(m_recording.memory);
+    for (int y = 0; y < area.height; ++y)
+        __builtin_memcpy(out + static_cast<size_t>(y) * static_cast<size_t>(wanted.width), picture.scanline(area.y + y) + area.x, static_cast<size_t>(area.width) * sizeof(Pixel));
+    m_recording.ready = false;
+    m_recording.new_since = false;
+    IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::RecordedFrame));
+    encoder.encode(static_cast<i32>(wanted.width));
+    encoder.encode(static_cast<i32>(wanted.height));
+    encoder.encode(static_cast<u64>(now_microseconds()));
+    send_to(*m_recording.client, encoder);
 }
 
 WindowServerEndpoint::RequestAccessibilityAnswer Server::request_accessibility(IPC::Sender const& sender)
@@ -1340,8 +1562,8 @@ WindowServerEndpoint::AccessibilityAnswer Server::accessibility(IPC::Sender cons
         MUST(windows.append(move(one)));
     }
     auto state = JSON::Value::object();
-    MUST(state.set("width"_sv, JSON::Value(m_screen.points().width)));
-    MUST(state.set("height"_sv, JSON::Value(m_screen.points().height)));
+    MUST(state.set("width"_sv, JSON::Value(m_screen.main_display().points.width)));
+    MUST(state.set("height"_sv, JSON::Value(m_screen.main_display().points.height)));
     MUST(state.set("windows"_sv, move(windows)));
     MUST(state.set("answers"_sv, move(answers)));
     auto json = state.serialize();
@@ -1710,7 +1932,11 @@ void Server::read_input()
             auto const& event = events[i];
             m_event_time = event.time;
             switch (event.type) {
+            case VULTURE_EV_HEAD:
+                m_pending_head = event.value;
+                break;
             case VULTURE_EV_ABS:
+                touch_event_read(event.code, event.value);
                 if (event.code == VULTURE_ABS_X)
                     m_pending_absolute_x = event.value;
                 else if (event.code == VULTURE_ABS_Y)
@@ -1727,6 +1953,9 @@ void Server::read_input()
                     m_pending_relative_y += event.value;
                 break;
             case VULTURE_EV_KEY: {
+                // What's touching is said by the fingers themselves.
+                if (event.code == VULTURE_BTN_TOUCH)
+                    break;
                 u32 button = 0;
                 if (event.code == VULTURE_BTN_LEFT)
                     button = Window::ButtonLeft;
@@ -1743,21 +1972,22 @@ void Server::read_input()
                 break;
             }
             case VULTURE_EV_SYN: {
+                touches_finished();
                 if (m_pending_absolute_x >= 0 || m_pending_absolute_y >= 0) {
-                    auto points = m_screen.points();
+                    auto const display = m_screen.display_of_head(m_pending_head).points;
                     IntPoint target = m_pointer;
                     if (m_pending_absolute_x >= 0)
-                        target.x = static_cast<int>(static_cast<i64>(m_pending_absolute_x) * points.width / (VULTURE_INPUT_ABSOLUTE_MAXIMUM + 1));
+                        target.x = display.x + static_cast<int>(static_cast<i64>(m_pending_absolute_x) * display.width / (VULTURE_INPUT_ABSOLUTE_MAXIMUM + 1));
                     if (m_pending_absolute_y >= 0)
-                        target.y = static_cast<int>(static_cast<i64>(m_pending_absolute_y) * points.height / (VULTURE_INPUT_ABSOLUTE_MAXIMUM + 1));
+                        target.y = display.y + static_cast<int>(static_cast<i64>(m_pending_absolute_y) * display.height / (VULTURE_INPUT_ABSOLUTE_MAXIMUM + 1));
                     m_pending_absolute_x = m_pending_absolute_y = -1;
                     pointer_changed(target, m_buttons);
                 }
                 // A mouse, which only says how far it went. A point on the screen is the most that can
                 // be asked of it: a device pixel, at any scale, is less than one of those anyway.
                 if (m_pending_relative_x != 0 || m_pending_relative_y != 0) {
-                    auto points = m_screen.points();
-                    IntPoint target { clamp(m_pointer.x + m_pending_relative_x, 0, points.width - 1), clamp(m_pointer.y + m_pending_relative_y, 0, points.height - 1) };
+                    // Over to the next display, if there's one there; along the edge if not.
+                    IntPoint target = m_screen.nearest_point_on_a_display({ m_pointer.x + m_pending_relative_x * m_pointer_speed / 100, m_pointer.y + m_pending_relative_y * m_pointer_speed / 100 });
                     m_pending_relative_x = m_pending_relative_y = 0;
                     pointer_changed(target, m_buttons);
                 }
@@ -1793,16 +2023,14 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
     u64 const now = now_microseconds();
     m_pointer_moved_at = m_event_time != 0 && m_event_time <= now && now - m_event_time < 1'000'000 ? m_event_time : now;
     note_input();
-    auto points = m_screen.points();
-    point.x = clamp(point.x, 0, points.width - 1);
-    point.y = clamp(point.y, 0, points.height - 1);
+    point = m_screen.nearest_point_on_a_display(point);
     bool moved = point != m_pointer;
     u32 pressed = buttons & ~m_buttons;
     u32 released = m_buttons & ~buttons;
     m_pointer = point;
     m_buttons = buttons;
     if (moved)
-        m_screen.move_cursor({ point.x * m_screen.scale(), point.y * m_screen.scale() });
+        m_screen.move_cursor({ (point.x + m_screen.origin().x) * m_screen.scale(), (point.y + m_screen.origin().y) * m_screen.scale() });
 
     if (m_drag) {
         drag_pointer_changed(point, released);
@@ -2013,8 +2241,125 @@ void Server::drag_pointer_changed(IntPoint point, u32 released)
 void Server::wheel_moved(int x, int y)
 {
     auto* window = m_grab ? m_grab : window_at(m_pointer);
-    if (window)
-        send_mouse(*window, MouseKind::Wheel, m_pointer, m_buttons, x, y);
+    if (window) {
+        int const direction = m_natural_scrolling ? 1 : -1;
+        send_mouse(*window, MouseKind::Wheel, m_pointer, m_buttons, x * direction, y * direction);
+    }
+}
+
+void Server::touch_event_read(u16 code, int value)
+{
+    switch (code) {
+    case VULTURE_ABS_MT_SLOT:
+        m_touch_slot = clamp(value, 0, touch_slots - 1);
+        break;
+    case VULTURE_ABS_MT_TRACKING_ID:
+        m_touches[m_touch_slot].down = value >= 0;
+        break;
+    case VULTURE_ABS_MT_POSITION_X:
+        m_touches[m_touch_slot].x = value;
+        m_touches[m_touch_slot].moved = true;
+        break;
+    case VULTURE_ABS_MT_POSITION_Y:
+        m_touches[m_touch_slot].y = value;
+        m_touches[m_touch_slot].moved = true;
+        break;
+    default:
+        break;
+    }
+}
+
+void Server::touches_finished()
+{
+    auto const display = m_screen.main_display().points;
+    double const now = static_cast<double>(now_microseconds()) / 1'000'000.0;
+    auto point_of = [&](Touch const& touch) {
+        return FloatPoint {
+            static_cast<float>(display.x) + static_cast<float>(touch.x) * static_cast<float>(display.width) / static_cast<float>(VULTURE_INPUT_ABSOLUTE_MAXIMUM + 1),
+            static_cast<float>(display.y) + static_cast<float>(touch.y) * static_cast<float>(display.height) / static_cast<float>(VULTURE_INPUT_ABSOLUTE_MAXIMUM + 1),
+        };
+    };
+    if (!m_gestures.on_event)
+        m_gestures.on_event = [this](::Gesture::Event const& event) { handle_gesture(event); };
+    for (int slot = 0; slot < touch_slots; ++slot) {
+        auto& touch = m_touches[slot];
+        auto const point = point_of(touch);
+        if (touch.down && !touch.was_down)
+            m_gestures.finger_down(slot, point.x, point.y, now);
+        else if (!touch.down && touch.was_down)
+            m_gestures.finger_up(slot, now);
+        else if (touch.down && touch.moved)
+            m_gestures.finger_moved(slot, point.x, point.y, now);
+        touch.was_down = touch.down;
+        touch.moved = false;
+    }
+}
+
+void Server::handle_gesture(::Gesture::Event const& event)
+{
+    using Kind = ::Gesture::Kind;
+    IntPoint const at { static_cast<int>(event.x), static_cast<int>(event.y) };
+    auto* window = m_grab ? m_grab : window_at(m_pointer);
+    switch (event.kind) {
+    case Kind::PointerMoved:
+        pointer_changed(at, m_buttons);
+        break;
+    case Kind::Tap:
+        if (!m_tap_to_click) {
+            pointer_changed(at, m_buttons);
+            break;
+        }
+        pointer_changed(at, m_buttons | Window::ButtonLeft);
+        pointer_changed(at, m_buttons & ~Window::ButtonLeft);
+        break;
+    case Kind::SecondaryTap:
+        pointer_changed(at, m_buttons | Window::ButtonRight);
+        pointer_changed(at, m_buttons & ~Window::ButtonRight);
+        break;
+    case Kind::Scrolled:
+        // Natural: what's under the fingers goes with them, so going up is further down it.
+        if (window) {
+            float const direction = m_natural_scrolling ? -1 : 1;
+            send_mouse(*window, MouseKind::Scroll, m_pointer, m_buttons, static_cast<int>(event.x * direction), static_cast<int>(event.y * direction));
+        }
+        break;
+    case Kind::Pinched:
+        if (window)
+            send_mouse(*window, MouseKind::Magnify, m_pointer, m_buttons, static_cast<int>(event.scale * 1000), 0);
+        break;
+    case Kind::SwipeChanged:
+        swipe_changed(event.x, event.y, false);
+        break;
+    case Kind::SwipeEnded:
+        swipe_changed(event.x, event.y, true);
+        break;
+    case Kind::ThreeFingersUp:
+        if (!m_overview)
+            enter_overview();
+        break;
+    case Kind::ThreeFingersDown:
+        if (m_overview)
+            leave_overview(nullptr);
+        break;
+    case Kind::ScrollEnded:
+        break;
+    }
+    schedule_frame();
+}
+
+void Server::set_natural_scrolling(IPC::Sender const&, bool natural)
+{
+    m_natural_scrolling = natural;
+}
+
+void Server::set_tap_to_click(IPC::Sender const&, bool tap)
+{
+    m_tap_to_click = tap;
+}
+
+void Server::set_pointer_speed(IPC::Sender const&, i32 percent)
+{
+    m_pointer_speed = clamp(percent, 25, 400);
 }
 
 void Server::key_changed(u16 code, int value)

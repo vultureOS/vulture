@@ -50,6 +50,8 @@ public:
     Compositor(Screen&, Theme const&, Vector<ServerWindow*> const& windows_bottom_to_top);
 
     [[nodiscard]] ErrorOr<void> initialize();
+    // The displays are somewhere else now.
+    [[nodiscard]] ErrorOr<void> screen_changed();
     // The theme object changed: everything drawn from it is made anew, and shown.
     [[nodiscard]] ErrorOr<void> theme_changed();
 

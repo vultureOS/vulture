@@ -1107,8 +1107,11 @@ void Window::handle_mouse(WS::MouseKind kind, FloatPoint position, u32 buttons, 
         update_cursor();
         return;
     }
+    case WS::MouseKind::Magnify:
+        return;
+    case WS::MouseKind::Scroll:
     case WS::MouseKind::Wheel: {
-        auto const step = Appearance::the().metric("scroll.pointsPerNotch"_sv);
+        auto const step = kind == WS::MouseKind::Scroll ? 1.0f : Appearance::the().metric("scroll.pointsPerNotch"_sv);
         auto* hit = m_root->hit_test(position);
         for (auto* view = hit; view; view = view->parent()) {
             ScrollEvent event;

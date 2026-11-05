@@ -1,0 +1,82 @@
+# M22: a second display. It has a menu bar of its own, windows go across to it, and it can be arranged, mirrored and tinted.
+# displays: 2
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 2
+screenshot main.png
+display 1
+screenshot second.png
+display 0
+# ---- The pane says so.
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "Displays"
+expect settings: Displays
+ax-expect switch "Mirror displays" = off
+ax-expect switch "Night Shift" = off
+ax-expect popup "Looks like" = 1280 × 800 (Default)
+pointer 16000 3000
+pause 1
+screenshot settings-displays.png
+# ---- A window taken across by its title bar, and put down on the other side of the edge.
+pointer 16000 4260
+pause 0.3
+button left down
+pause 0.2
+display 1
+pointer 16000 4260
+pause 0.5
+button left up
+pause 1
+screenshot window-across.png
+display 0
+pause 0.5
+screenshot window-gone.png
+pointer 16000 3000
+key meta_l-q
+pause 1
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "Displays"
+expect settings: Displays
+# ---- Night Shift: warmer, on both.
+click switch "Night Shift"
+ax-expect switch "Night Shift" = on
+pointer 16000 3000
+pause 1
+screenshot warm-main.png
+display 1
+screenshot warm-second.png
+display 0
+click switch "Night Shift"
+ax-expect switch "Night Shift" = off
+# ---- Looking bigger, on the same panel, which is scaled to fit.
+click popup "Looks like"
+pause 0.5
+click menuitem "1433 × 896"
+pause 2
+ax-expect popup "Looks like" ~ 1433
+pointer 16000 3000
+pause 1
+screenshot more-space.png
+click popup "Looks like"
+pause 0.5
+click menuitem "1280 × 800 (Default)"
+pause 2
+# ---- Both showing the same thing.
+click switch "Mirror displays"
+ax-expect switch "Mirror displays" = on
+pointer 16000 3000
+pause 1
+screenshot mirrored-main.png
+display 1
+screenshot mirrored-second.png
+display 0
+click switch "Mirror displays"
+ax-expect switch "Mirror displays" = off
+pause 1
+key meta_l-q

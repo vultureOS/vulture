@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/API/POSIX/privacy.h>
+#include <Kernel/Security/Privacy.h>
 #include <Kernel/Memory/Compressor.h>
 #include <Kernel/Security/CodeSigning.h>
 #include <Kernel/Security/Seal.h>
@@ -355,6 +357,20 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
         if (!found)
             return Error::from_errno(ESRCH);
         set_number(third_party);
+    } else if (name == "security.privacy.ask-screen"_sv) {
+        // Whether the caller may look at the screen, having asked if it's never been said. It waits for someone to answer.
+        auto allowed = Privacy::check_service(VULTURE_PRIVACY_SCREEN);
+        if (allowed.is_error() && allowed.error().code() == EINTR)
+            return allowed.release_error();
+        set_number(static_cast<i32>(allowed.is_error() ? 0 : 1));
+    } else if (name == "security.privacy.screen"_sv) {
+        // Whether this one's allowed, written as a pid. Only for the window server: it asks nobody.
+        if (!m_credentials.is_superuser())
+            return Error::from_errno(EPERM);
+        if (new_length != sizeof(int))
+            return Error::from_errno(EINVAL);
+        int const pid = TRY(copy_from_user<int>(new_buffer));
+        set_number(static_cast<i32>(Privacy::has_been_allowed(pid, VULTURE_PRIVACY_SCREEN) ? 1 : 0));
     } else if (name == "security.seal.active"_sv) {
         set_number(Seal::is_active() ? 1 : 0);
     } else if (name == "security.code.enforced"_sv) {

@@ -22,11 +22,17 @@ struct vulture_input_event {
 #define VULTURE_EV_KEY 0x01 // value: 1 pressed, 0 released, 2 repeating.
 #define VULTURE_EV_REL 0x02
 #define VULTURE_EV_ABS 0x03
+#define VULTURE_EV_HEAD 0x7f // From here on, the position is on this display: value. A pointer device for each, in a virtual machine.
 
 // Pointers report positions from 0 to this, across the whole screen.
 #define VULTURE_INPUT_ABSOLUTE_MAXIMUM 32767
 #define VULTURE_ABS_X 0x00
 #define VULTURE_ABS_Y 0x01
+#define VULTURE_ABS_MT_SLOT 0x2f // Which finger the next are about.
+#define VULTURE_ABS_MT_POSITION_X 0x35
+#define VULTURE_ABS_MT_POSITION_Y 0x36
+#define VULTURE_ABS_MT_TRACKING_ID 0x39 // -1: it's gone.
+#define VULTURE_BTN_TOUCH 0x14a
 #define VULTURE_REL_X 0x00
 #define VULTURE_REL_Y 0x01
 #define VULTURE_REL_HWHEEL 0x06

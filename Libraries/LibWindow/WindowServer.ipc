@@ -85,6 +85,20 @@ endpoint WindowServer
     // Where pointer events land, in points from its top-left: elsewhere they go to what
     // is below. An odd-shaped window's, as the Dock's.
     set_input_region(u32 window, i32 x, i32 y, i32 width, i32 height) =|
+    // All of the displays, as an array of DisplayRecord (see <LibWindow/Protocol.h>).
+    displays() => (ByteBuffer records, bool mirrored, i32 outputs)
+    // Where a display goes, in points from the main one, and how big it's to look. Everyone hears `displays_changed`.
+    set_display(i32 output, i32 x, i32 y, i32 width, i32 height) => (i32 error)
+    // All of them showing the main one.
+    set_mirroring(bool mirrored) => (i32 error)
+    // Night Shift: how warm, from 0 (not at all) to 100.
+    set_warmth(i32 percent) => (i32 error)
+    // Whether content follows the fingers, as on a phone, or the other way, as with a scroller.
+    set_natural_scrolling(bool natural) =|
+    // A touch of a trackpad counts as a click.
+    set_tap_to_click(bool tap) =|
+    // How far a mouse moves the pointer: 100 is one to one, from 25 to 400.
+    set_pointer_speed(i32 percent) =|
     // Things that would move, don't, for everyone: they change at once, or fade.
     set_reduce_motion(bool reduced) =|
     // By name: see /System/Library/Themes/Wallpapers.json.
@@ -108,8 +122,15 @@ endpoint WindowServer
     // timed, the 99th percentile and the worst, in microseconds. It's as far as this can see: the display's own latency
     // comes after. (Asked by the one measuring: the counts start again.)
     input_latency() => (u64 count, u64 p99_microseconds, u64 worst_microseconds)
-    // The screen as it is now, as a PNG.
+    // The screen as it is now, as a PNG. All of the desktop; or just this much of it, in points, if the width isn't 0. Only for one that's
+    // been allowed to, as `Connection::capture_screen` sees to: others get EPERM, and a line in the log.
     capture() => (i32 error, ByteBuffer png)
+    capture_area(i32 x, i32 y, i32 width, i32 height) => (i32 error, ByteBuffer png)
+    // Frames of the screen, in this memory, for as long as it goes on: `recorded_frame` says when there's another, and it has to say
+    // `recording_ready` before it's given the next. Only for one that's been allowed to.
+    start_recording(Port memory, i32 x, i32 y, i32 width, i32 height) => (i32 error)
+    recording_ready() =|
+    stop_recording() =|
     // What is on the screen, in words. Only root may ask. Every application with a window hears of it, and answers
     // with publish_accessibility as it gets to it; one that's stuck never does. `accessibility` says what has come in so
     // far: the screen and its windows, front to back, as JSON, with each answer that came.
@@ -134,6 +155,8 @@ endpoint WindowClient
     layer_animation_finished(u32 window, u32 layer, u32 tag) =|
     appearance_changed(String name) =|
     motion_changed(bool reduced) =|
+    // Asked for by nobody in particular: see `displays`. The main one's size is what `connect` said it was, if it's changed.
+    displays_changed(i32 main_width, i32 main_height) =|
     // phase: see <LibWindow/Protocol.h>. The data comes only with Dropped.
     drag(u32 window, u8 phase, i32 x, i32 y, String type, ByteBuffer data) =|
     // To the window it started from.
@@ -146,6 +169,8 @@ endpoint WindowClient
     hotkey(u16 code, u32 modifiers) =|
     // For publish_accessibility.
     accessibility_requested(u32 generation) =|
+    // In the memory it gave start_recording: `width` by `height`, in pixels, on the monotonic clock at this time in microseconds.
+    recorded_frame(i32 width, i32 height, u64 time) =|
     // Input has been sent to this program: is it there? It's the event loop that answers, so one that's stuck doesn't.
     ping(u32 serial) =|
 }

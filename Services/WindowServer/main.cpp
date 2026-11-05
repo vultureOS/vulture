@@ -79,7 +79,7 @@ int main(int argc, char** argv)
         fprintf(stderr, "WindowServer: %s: %s\n", theme_path, strerror(theme.error().is_errno() ? theme.error().code() : EINVAL));
         return 1;
     }
-    auto screen = Screen::open("/dev/gpu0");
+    auto screen = Screen::open();
     if (screen.is_error()) {
         fprintf(stderr, "WindowServer: /dev/gpu0: %s\n", strerror(screen.error().code()));
         return 1;

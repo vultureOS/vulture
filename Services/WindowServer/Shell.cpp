@@ -120,6 +120,11 @@ void Server::set_menus(IPC::Sender const& sender, String menus)
 
 void Server::subscribe_shell(IPC::Sender const& sender)
 {
+    // The desktop's owner: the first who isn't root is whoever's logged in.
+    if (!m_has_shell_uid && sender.uid != 0) {
+        m_shell_uid = sender.uid;
+        m_has_shell_uid = true;
+    }
     auto* client = client_of(sender);
     if (!client)
         return;
@@ -430,7 +435,7 @@ void Server::minimize_window(ServerWindow& window)
         genie.window = &window;
         genie.picture = picture.release_value();
         genie.from = window.frame.to<float>();
-        auto points = m_screen.points();
+        auto points = m_screen.main_display().points.size();
         genie.to = m_minimize_target == IntPoint { 0, 0 } ? FloatPoint { static_cast<float>(points.width) / 2, static_cast<float>(points.height) } : m_minimize_target.to<float>();
         genie.started = now_seconds();
         m_genies.append(move(genie));
@@ -452,7 +457,7 @@ void Server::restore_window(ServerWindow& window)
         genie.window = &window;
         genie.picture = picture.release_value();
         genie.from = window.frame.to<float>();
-        auto points = m_screen.points();
+        auto points = m_screen.main_display().points.size();
         genie.to = m_minimize_target == IntPoint { 0, 0 } ? FloatPoint { static_cast<float>(points.width) / 2, static_cast<float>(points.height) } : m_minimize_target.to<float>();
         genie.started = now_seconds();
         genie.restoring = true;
@@ -468,8 +473,8 @@ void Server::restore_window(ServerWindow& window)
 
 void Server::zoom_window(ServerWindow& window)
 {
-    auto points = m_screen.points();
-    IntRect full { m_work_left, m_work_top, points.width - m_work_left - m_work_right, points.height - m_work_top - m_work_bottom };
+    // All of whichever display it's mostly on.
+    IntRect const full = work_area_of(m_screen.display_at(window.frame.center()));
     // Back to what it was, if it is already zoomed.
     if (window.frame == full && !window.zoom_restore.is_empty()) {
         move_window_to(window, window.zoom_restore);
@@ -582,6 +587,7 @@ void Server::go_to_space(int space, bool animated)
     animated = animated && !m_reduce_motion;
     m_sliding = animated;
     m_slide_started = now_seconds();
+    m_slide_start_travel = 0;
     if (animated)
         start_animating();
     update_all_visibility();
@@ -595,12 +601,50 @@ void Server::go_to_space(int space, bool animated)
     schedule_frame();
 }
 
+void Server::swipe_changed(float across, float speed, bool ended)
+{
+    float const width = static_cast<float>(m_screen.main_display().points.width);
+    // Fingers going left bring on what's to the right.
+    float const towards_next = -across / width;
+    if (!m_swiping && !ended) {
+        if (m_overview || m_sliding || towards_next == 0)
+            return;
+        int const target = m_space + (towards_next > 0 ? 1 : -1);
+        // Nothing that way: it stays where it is.
+        if (target < 0 || target >= m_space_count)
+            return;
+        m_slide_from = m_space;
+        m_space = target;
+        m_sliding = true;
+        m_swiping = true;
+        update_all_visibility();
+        start_animating();
+    }
+    if (!m_swiping)
+        return;
+    bool const towards_higher = m_space > m_slide_from;
+    float const travel = clamp(towards_higher ? towards_next : -towards_next, 0.0f, 1.0f);
+    m_swipe_travel = travel;
+    if (!ended)
+        return;
+    m_swiping = false;
+    if (!::Gesture::swipe_carries_on(travel, towards_higher ? -speed : speed)) {
+        int const was_going_to = m_space;
+        m_space = m_slide_from;
+        m_slide_from = was_going_to;
+        m_swipe_travel = 1 - travel;
+    }
+    m_slide_start_travel = m_swipe_travel;
+    m_slide_started = now_seconds();
+    shell_state_changed();
+}
+
 // ---- Overview
 
 void Server::layout_overview()
 {
     // The windows of this space in a grid, in the work area, under the bar of spaces.
-    auto points = m_screen.points();
+    auto points = m_screen.main_display().points.size();
     float top = static_cast<float>(m_work_top) + m_theme.overview_bar;
     float bottom = static_cast<float>(points.height - m_work_bottom);
     float left = static_cast<float>(m_work_left);
@@ -682,7 +726,7 @@ void Server::update_overview_overlays()
     Vector<Compositor::Overlay> overlays;
 
     // Desktops along the top.
-    auto points = m_screen.points();
+    auto points = m_screen.main_display().points.size();
     float tile_width = m_theme.overview_tile_width;
     float tile_height = m_theme.overview_tile_height;
     float gap = m_theme.overview_padding;
@@ -735,7 +779,7 @@ bool Server::overview_pointer(IntPoint point, u32 pressed)
 {
     if (m_overview_leaving)
         return true;
-    auto points = m_screen.points();
+    auto points = m_screen.main_display().points.size();
     // What it is over: a space along the top, or a window.
     float tile_width = m_theme.overview_tile_width;
     float tile_height = m_theme.overview_tile_height;
@@ -798,10 +842,11 @@ void Server::animation_tick()
             // Its window's whole travel, both ways.
             IntRect reach = genie.from.enclosing_int_rect();
             int scale = m_screen.scale();
-            auto points = m_screen.points();
-            IntRect area { reach.x * scale, reach.y * scale, reach.width * scale, (points.height - reach.y) * scale };
-            area.x = min(area.x, static_cast<int>(genie.to.x) * scale - 16);
-            area.width = max(reach.right() * scale, static_cast<int>(genie.to.x) * scale + 16) - area.x;
+            auto const points = m_screen.main_display().points.size();
+            auto const origin = m_screen.origin();
+            IntRect area { (reach.x + origin.x) * scale, (reach.y + origin.y) * scale, reach.width * scale, (points.height - reach.y) * scale };
+            area.x = min(area.x, (static_cast<int>(genie.to.x) + origin.x) * scale - 16);
+            area.width = max((reach.right() + origin.x) * scale, (static_cast<int>(genie.to.x) + origin.x) * scale + 16) - area.x;
             m_compositor.invalidate(area);
             if (t >= 1) {
                 if (genie.restoring && genie.window) {
@@ -833,7 +878,7 @@ void Server::animation_tick()
         auto t = static_cast<float>((now - m_slide_started) / static_cast<double>(m_theme.space_slide_seconds));
         int width = m_screen.pixels().width;
         int direction = m_space > m_slide_from ? 1 : -1;
-        if (t >= 1) {
+        if (!m_swiping && t >= 1) {
             m_sliding = false;
             for (auto* window : m_windows)
                 window->slide_x = 0;
@@ -843,7 +888,8 @@ void Server::animation_tick()
             if (!m_active)
                 activate_frontmost();
         } else {
-            float travel = ease_out(t);
+            // With the fingers on it, it's where they are. Let go, it goes on from there.
+            float travel = m_swiping ? m_swipe_travel : m_slide_start_travel + (1 - m_slide_start_travel) * ease_out(t);
             for (auto* window : m_windows) {
                 if (window->is_on_every_space())
                     continue;
@@ -922,7 +968,7 @@ void Server::update_boot_overlays()
             return;
         }
     }
-    auto points = m_screen.points();
+    auto points = m_screen.main_display().points.size();
     float width = m_theme.boot_bar_width;
     float height = m_theme.boot_bar_height;
     float x = (static_cast<float>(points.width) - width) / 2;
