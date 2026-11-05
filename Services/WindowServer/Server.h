@@ -30,6 +30,11 @@ struct Client {
     bool hidden { false };
     // Hears of everything (the Dock, the menu bar).
     bool is_shell { false };
+    // Whether it's there: what it's last been asked, when, and if it has gone too long without saying.
+    u32 ping_serial { 0 };
+    u64 ping_sent_at { 0 };
+    u64 answered_at { 0 };
+    bool not_responding { false };
     // Its last answer to request_accessibility, and to which.
     u32 accessibility_generation { 0 };
     String accessibility;
@@ -70,6 +75,10 @@ private:
     i32 set_surface(IPC::Sender const&, u32 window, IPC::Port memory, i32 width, i32 height) override;
     void present(IPC::Sender const&, u32 window, u32 buffer, i32 x, i32 y, i32 width, i32 height) override;
     void set_materials(IPC::Sender const&, u32 window, Vector<i32> regions) override;
+    WindowServerEndpoint::CreateLayerAnswer create_layer(IPC::Sender const&, u32 window, u32 parent) override;
+    i32 set_layer_surface(IPC::Sender const&, u32 window, u32 layer, IPC::Port memory, i32 width, i32 height) override;
+    void commit_layers(IPC::Sender const&, u32 window, u32 serial, Vector<u8> changes) override;
+    WindowServerEndpoint::LayerFrameLogAnswer layer_frame_log(IPC::Sender const&, u32 window, u32 layer) override;
     void set_application(IPC::Sender const&, String name, String identifier) override;
     void set_menus(IPC::Sender const&, String menus) override;
     void subscribe_shell(IPC::Sender const&) override;
@@ -92,6 +101,8 @@ private:
     void damage_everything(IPC::Sender const&) override;
     WindowServerEndpoint::CaptureAnswer capture(IPC::Sender const&) override;
     WindowServerEndpoint::InputLatencyAnswer input_latency(IPC::Sender const&) override;
+    void pong(IPC::Sender const&, u32 serial) override;
+    WindowServerEndpoint::CursorShapeAnswer cursor_shape(IPC::Sender const&) override;
     WindowServerEndpoint::RequestAccessibilityAnswer request_accessibility(IPC::Sender const&) override;
     void publish_accessibility(IPC::Sender const&, u32 generation, String json) override;
     WindowServerEndpoint::AccessibilityAnswer accessibility(IPC::Sender const&, u32 generation) override;
@@ -102,6 +113,9 @@ private:
     void remove_window(ServerWindow&);
     void release_surface(ServerWindow&);
     void send_to(Client&, IPC::Encoder&);
+    // It's been sent input: is it there to get it?
+    void ask_if_responding(Client&);
+    void check_who_is_responding();
 
     // The window manager.
     void activate(ServerWindow*);
@@ -154,6 +168,13 @@ private:
 
     void schedule_frame();
     void render_frame();
+
+    // Layers.
+    void apply_layer_change(ServerWindow&, Window::LayerChange const&, double now);
+    void destroy_layer(ServerWindow&, Layer&);
+    // Each to where it should be by this time. Whether anything's still on its way.
+    [[nodiscard]] bool advance_layers(double now);
+    void log_layers(double now);
 
     Core::EventLoop& m_loop;
     Screen& m_screen;
@@ -210,6 +231,9 @@ private:
     OwnPtr<Drag> m_drag;
 
     Window::CursorShape m_cursor_shape { Window::CursorShape::Arrow };
+    int m_cursor_turn { 0 };
+    int m_cursor_timer { -1 };
+    int m_responding_timer { -1 };
 
     bool m_frame_scheduled { false };
     int m_frame_timer { -1 };
@@ -218,6 +242,8 @@ private:
     u64 m_last_frame_started { 0 };
     // Someone's waiting to see what they just did.
     bool m_input_waiting { false };
+    // A layer's on its way somewhere, so there are frames to come.
+    bool m_layers_animating { false };
     u64 m_last_input_at { 0 };
     void note_input();
 

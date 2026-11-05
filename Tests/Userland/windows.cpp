@@ -465,6 +465,233 @@ void test_drag_rate(Client& client, int count, bool whole_screen)
     report(whole_screen ? "60 frames per second, all of the screen drawn every time" : "60 frames per second, dragging", rate >= 58 || emulated);
 }
 
+NonnullOwnPtr<Window::Layer> filled_layer(Client& client, Window::Window& window, Window::Layer const* parent, IntSize points, Color color)
+{
+    int const s = client.connection->scale();
+    auto layer = MUST(Window::Layer::create(window, parent));
+    MUST(layer->set_surface({ points.width * s, points.height * s }));
+    layer->back_buffer().clear(color);
+    return layer;
+}
+
+void test_layers(Client& client)
+{
+    using Window::LayerProperty;
+    int const s = client.connection->scale();
+    Color const white = Color::from_rgb(0xffffff);
+    Color const red = Color::from_rgb(0xff0000);
+    Color const blue = Color::from_rgb(0x0000ff);
+    IntRect const frame { 100, 100, 500, 400 };
+    auto window = filled_window(client, "Layers"_sv, frame, Window::WindowTitled, white);
+    auto at = [&](NonnullRefPtr<Bitmap> const& shot, int x, int y) { return shot->color_at((frame.x + x) * s, (frame.y + y) * s); };
+
+    auto layer = filled_layer(client, *window, nullptr, { 100, 100 }, red);
+    {
+        Window::LayerTransaction change(*window);
+        change.set_frame(*layer, { 100, 100, 100, 100 });
+        change.present(*layer, layer->back_buffer().rect());
+        u32 const serial = change.commit();
+        u32 heard = 0;
+        window->on_layers_presented = [&](u32 number) { heard = number; };
+        window->wait_until_presented(client.loop);
+        report("a commit is answered when it's on the screen", heard == serial);
+    }
+    auto shot = client.screen();
+    report("a layer shows over its window", near(at(shot, 150, 150), red) && near(at(shot, 90, 150), white));
+
+    auto commit = [&](Function<void(Window::LayerTransaction&)> what) {
+        Window::LayerTransaction change(*window);
+        what(change);
+        (void)change.commit();
+        return client.screen();
+    };
+
+    shot = commit([&](auto& change) { change.set(*layer, LayerProperty::Opacity, 0.5f); });
+    report("it fades without being drawn again", near(at(shot, 150, 150), Color::from_rgb(0xff8080), 3));
+    shot = commit([&](auto& change) {
+        change.set(*layer, LayerProperty::Opacity, 1);
+        change.set(*layer, LayerProperty::Translation, 150, 0);
+    });
+    report("it moves without being drawn again", near(at(shot, 300, 150), red) && near(at(shot, 150, 150), white));
+    shot = commit([&](auto& change) { change.set(*layer, LayerProperty::Hidden, 1); });
+    report("hidden, it's gone", near(at(shot, 300, 150), white));
+
+    shot = commit([&](auto& change) {
+        change.set(*layer, LayerProperty::Hidden, 0);
+        change.set(*layer, LayerProperty::Translation, 0, 0);
+        change.set(*layer, LayerProperty::Scale, 2, 2);
+    });
+    report("it scales about its middle", near(at(shot, 60, 150), red) && near(at(shot, 240, 150), red) && near(at(shot, 30, 150), white));
+    shot = commit([&](auto& change) {
+        change.set(*layer, LayerProperty::Scale, 1, 1);
+        change.set(*layer, LayerProperty::Rotation, 3.14159265f / 4);
+    });
+    report("it turns about its middle", near(at(shot, 150, 150), red) && near(at(shot, 105, 105), white) && near(at(shot, 150, 215), red));
+    shot = commit([&](auto& change) {
+        change.set(*layer, LayerProperty::Rotation, 0);
+        change.set(*layer, LayerProperty::CornerRadius, 50);
+    });
+    report("its corners round off", near(at(shot, 150, 150), red) && near(at(shot, 103, 103), white));
+
+    // What's in it: it goes with it, stops at its edge if it says so, and fades with it as one.
+    auto inner = filled_layer(client, *window, layer.ptr(), { 60, 60 }, blue);
+    auto other = filled_layer(client, *window, layer.ptr(), { 60, 60 }, blue);
+    shot = commit([&](auto& change) {
+        change.set(*layer, LayerProperty::CornerRadius, 0);
+        change.set_frame(*inner, { 20, 20, 60, 60 });
+        change.present(*inner, inner->back_buffer().rect());
+        change.set_frame(*other, { 80, 20, 60, 60 });
+        change.present(*other, other->back_buffer().rect());
+    });
+    report("what's in a layer goes over it", near(at(shot, 150, 150), blue));
+    report("and past its edge, without being told", near(at(shot, 230, 150), blue));
+    shot = commit([&](auto& change) { change.set(*layer, LayerProperty::Clips, 1); });
+    report("and stops there, if it is", near(at(shot, 230, 150), white) && near(at(shot, 190, 150), blue));
+    shot = commit([&](auto& change) { change.set(*layer, LayerProperty::BoundsOrigin, 0, 30); });
+    report("what's in it scrolls", near(at(shot, 140, 135), blue) && near(at(shot, 140, 175), white));
+    shot = commit([&](auto& change) {
+        change.set(*layer, LayerProperty::BoundsOrigin, 0, 0);
+        change.set_frame(*other, { 40, 20, 60, 60 });
+        change.set(*layer, LayerProperty::Opacity, 0.5f);
+    });
+    report("it fades as one, not a part at a time", near(at(shot, 130, 150), at(shot, 150, 150), 2) && !near(at(shot, 150, 150), blue, 40));
+    shot = commit([&](auto& change) {
+        change.set(*layer, LayerProperty::Opacity, 1);
+        change.destroy(*inner);
+        change.destroy(*other);
+    });
+    report("gone, and what was in it too", near(at(shot, 150, 150), red));
+
+    // Of a color, with no pixels; and a blur of what's behind.
+    auto plain = MUST(Window::Layer::create(*window));
+    shot = commit([&](auto& change) {
+        change.set_frame(*plain, { 300, 200, 100, 100 });
+        change.set(*plain, LayerProperty::Background, 0, 0, 1, 1);
+    });
+    report("a layer of a color", near(at(shot, 350, 250), blue));
+    shot = commit([&](auto& change) {
+        change.set(*plain, LayerProperty::Background, 0, 0, 0, 0);
+        change.set(*plain, LayerProperty::Material, static_cast<float>(Window::Material::Sidebar));
+    });
+    auto const material = at(shot, 350, 250);
+    report("a material behind it", !near(material, blue, 20) && !near(material, Color { 0, 0, 0, 255 }, 20));
+
+    // Told how, and left to it.
+    bool finished = false;
+    window->on_layer_animation_finished = [&](u32, u32 tag) { finished = tag == 77; };
+    float const from[] = { 1 };
+    float const to[] = { 0 };
+    Window::LayerTransaction change(*window);
+    change.animate(*layer, LayerProperty::Opacity, { from, 1 }, { to, 1 }, Animation::Timing::ease_out(0.2f), 77);
+    (void)change.commit();
+    client.settle(400);
+    report("an animation says when it's finished", finished);
+    report("and ends where it said", near(client.screen()->color_at((frame.x + 150) * s, (frame.y + 150) * s), white));
+    window->on_layer_animation_finished = nullptr;
+    window->on_layers_presented = nullptr;
+}
+
+// A layer on a spring, and then nothing: it stops itself, and the server's left to it.
+int run_frozen_client(int ready)
+{
+    using Window::LayerProperty;
+    Client other;
+    other.connection = MUST(Window::Connection::connect(other.loop));
+    (void)other.connection->server().set_application("Frozen"_sv, "com.vulture.test.frozen"_sv);
+    auto window = filled_window(other, "Frozen"_sv, { 600, 300, 400, 300 }, Window::WindowTitled, Color::from_rgb(0xffffff));
+    auto layer = filled_layer(other, *window, nullptr, { 50, 50 }, Color::from_rgb(0xff0000));
+    Window::LayerTransaction change(*window);
+    change.set_frame(*layer, { 20, 60, 50, 50 });
+    change.present(*layer, layer->back_buffer().rect());
+    change.set(*layer, LayerProperty::Logged, 1);
+    float const from[] = { 0, 0 };
+    float const to[] = { 300, 0 };
+    change.animate(*layer, LayerProperty::Translation, { from, 2 }, { to, 2 }, Animation::Timing::spring_with(1.2f, 0.3f));
+    (void)change.commit();
+    u32 const ids[2] = { window->id(), layer->id() };
+    (void)write(ready, ids, sizeof(ids));
+    raise(SIGSTOP);
+    for (;;)
+        other.settle(1000);
+}
+
+void test_frozen_program(Client& client)
+{
+    int fds[2];
+    (void)pipe(fds);
+    char path[32];
+    snprintf(path, sizeof(path), "%d", fds[1]);
+    pid_t child = fork();
+    if (child == 0) {
+        close(fds[0]);
+        execl("/usr/tests/windows", "windows", "--frozen-client", path, nullptr);
+        _exit(127);
+    }
+    close(fds[1]);
+    u32 ids[2] = {};
+    bool const told = read(fds[0], ids, sizeof(ids)) == static_cast<ssize_t>(sizeof(ids));
+    close(fds[0]);
+    int status = 0;
+    bool const stopped = told && waitpid(child, &status, WUNTRACED) == child && WIFSTOPPED(status);
+    report("a program can be stopped with its animation running", stopped);
+    client.settle(1100);
+    auto answer = MUST(client.connection->server().layer_frame_log(ids[0], ids[1]));
+
+    // It hasn't been asked for anything yet, so nothing's known to be wrong. Move over it, and it has.
+    String state;
+    client.connection->on_shell_state = [&](StringView json) { state = MUST(String::from_view(json)); };
+    (void)client.connection->server().subscribe_shell();
+    client.pointer(800, 500);
+    client.settle(200);
+    report("asked for nothing, nothing's wrong", MUST(client.connection->server().cursor_shape()).shape != static_cast<i32>(Window::CursorShape::Wait));
+    client.settle(2300);
+    auto const waiting = MUST(client.connection->server().cursor_shape());
+    report("two seconds on, the cursor over it spins", waiting.shape == static_cast<i32>(Window::CursorShape::Wait));
+    client.settle(300);
+    auto const later = MUST(client.connection->server().cursor_shape());
+    report("and goes round", later.turn != waiting.turn);
+    report("and it's said to be not responding", strstr(state.characters(), "\"notResponding\":true") != nullptr);
+    // Elsewhere, the pointer's as it was.
+    client.pointer(100, 100);
+    client.settle(100);
+    report("away from it, the cursor's as it was", MUST(client.connection->server().cursor_shape()).shape != static_cast<i32>(Window::CursorShape::Wait));
+    client.pointer(800, 500);
+    client.settle(100);
+    kill(child, SIGCONT);
+    client.settle(500);
+    report("when it answers, it stops", MUST(client.connection->server().cursor_shape()).shape != static_cast<i32>(Window::CursorShape::Wait) && strstr(state.characters(), "\"notResponding\":true") == nullptr);
+    client.pointer(0, 0);
+    client.connection->on_shell_state = nullptr;
+
+    kill(child, SIGKILL);
+    waitpid(child, &status, 0);
+    struct Entry {
+        double seconds;
+        float values[4];
+    };
+    size_t const count = answer.log.size() / sizeof(Entry);
+    auto const model = Animation::Timing::spring_with(1.2f, 0.3f);
+    float worst = 0;
+    double last = -1;
+    double longest_gap = 0;
+    for (size_t i = 0; i < count; ++i) {
+        Entry entry;
+        memcpy(&entry, answer.log.data() + i * sizeof(Entry), sizeof(Entry));
+        float const expected = 300 * model.value_at(static_cast<float>(entry.seconds));
+        worst = max(worst, Base::Math::absolute(entry.values[0] - expected));
+        if (last >= 0)
+            longest_gap = max(longest_gap, entry.seconds - last);
+        last = entry.seconds;
+    }
+    printf("frozen: %zu frames over %d ms, worst %d.%02d points from the model, longest gap %d ms\n", count, static_cast<int>(last * 1000), static_cast<int>(worst), static_cast<int>(worst * 100) % 100, static_cast<int>(longest_gap * 1000));
+    fflush(stdout);
+    int emulated = 0;
+    size_t emulated_size = sizeof(emulated);
+    (void)sysctlbyname("machdep.cpu.emulated", &emulated, &emulated_size, nullptr, 0);
+    report("the spring goes on, with its program stopped", last > 0.9 && (emulated || count >= 50));
+    report("every frame of it within a pixel of the model", count > 0 && worst <= 1);
+}
+
 // Another client, soon killed: it says when its window is up.
 int run_doomed_client(int ready)
 {
@@ -488,6 +715,8 @@ int run_client()
     test_pointer(client);
     test_materials(client);
     test_clients(client);
+    test_layers(client);
+    test_frozen_program(client);
     test_drag_rate(client, 10, false);
     test_drag_rate(client, 12, true);
     printf("done\n");
@@ -503,6 +732,8 @@ int main(int argc, char** argv)
         return run_client();
     if (argc > 2 && strcmp(argv[1], "--doomed-client") == 0)
         return run_doomed_client(atoi(argv[2]));
+    if (argc > 2 && strcmp(argv[1], "--frozen-client") == 0)
+        return run_frozen_client(atoi(argv[2]));
     // Only the drag, on the window server that's there: see Meta/budgets.sh.
     if (argc > 1 && strcmp(argv[1], "--budget") == 0) {
         Client client;
@@ -556,6 +787,10 @@ int main(int argc, char** argv)
     CHECK(failures == 0);
     if (!finished || failures)
         fprintf(stderr, "windows: the client said:\n%s\nthe server said:\n%s\nvlaunchd's log:\n%s", report_text, read_file("server.err"), read_file("log"));
+    if (char const* frozen = strstr(report_text, "frozen: ")) {
+        char const* end = strchr(frozen, '\n');
+        printf("windows: %.*s\n", static_cast<int>(end ? end - frozen : static_cast<long>(strlen(frozen))), frozen);
+    }
     // Each measure, with what it's of ("whole screen rate: ...").
     for (char const* rate = strstr(report_text, "rate: "); rate; rate = strstr(rate + 1, "rate: ")) {
         char const* begin = rate;

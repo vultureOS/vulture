@@ -10,6 +10,7 @@
 #include "ServerWindow.h"
 #include "Theme.h"
 #include "WorkerPool.h"
+#include <LibBase/Optional.h>
 #include <LibBase/OwnPtr.h>
 #include <LibBase/String.h>
 #include <LibBase/Vector.h>
@@ -69,6 +70,9 @@ public:
     // A surface has been replaced, or part of the one that's shown is new: what's opaque of it is worked out here.
     void surface_replaced(ServerWindow&);
     void surface_changed(ServerWindow&, Gfx::IntRect damage);
+    // All that this layer may draw on: it has changed, or is about to.
+    void invalidate_layer(ServerWindow const&, Layer const&);
+    [[nodiscard]] Gfx::IntRect device_rect_of_layer_surface(ServerWindow const&, Layer const&, Gfx::IntRect pixels) const;
 
     // What is drawn in place of windows, while they move through a shape they cannot
     // have: between the normal windows and those above. All on one thread, by painter.
@@ -120,6 +124,7 @@ private:
         Wallpaper,
         Shadow,
         Body,
+        Layer,
     };
 
     // One thing to draw over all of what's dirty. `index` is the window's place, from the bottom.
@@ -127,6 +132,36 @@ private:
         StepKind kind;
         ServerWindow const* window;
         int index;
+        // What of the layers, for that kind.
+        size_t draw { 0 };
+    };
+
+    // A layer comes down to these: what to put where, worked out for each frame.
+    struct LayerDraw {
+        enum class Kind : u8 {
+            Image,
+            Color,
+            Material,
+        };
+        Kind kind { Kind::Color };
+        int window_index { -1 };
+        // The window's shape, and where its corners are, for a layer that goes as far as those.
+        WindowShape const* shape { nullptr };
+        Gfx::IntRect window_frame;
+        Gfx::Bitmap const* image { nullptr };
+        // A picture made for this frame, of something that can't be drawn straight on to the screen.
+        RefPtr<Gfx::Bitmap> picture;
+        Gfx::Pixel color { 0 };
+        MaterialStyle const* material { nullptr };
+        // Whole pixels, one to one: most of them. Otherwise it goes by the map.
+        bool integral { true };
+        Gfx::IntRect rect;
+        Gfx::AffineTransform device_to_image;
+        Gfx::IntRect bounds; // Where it can draw at all.
+        u32 opacity { 255 };
+        // Device pixels, of `rounded`, which is the layer's whole frame.
+        float radius { 0 };
+        Gfx::IntRect rounded;
     };
 
     // Part of what's dirty, and the lowest window that shows in it: nothing under that is drawn. -1 if the wallpaper does.
@@ -182,6 +217,8 @@ private:
         Gfx::IntRect region;
         Gfx::IntRect shown;
         int reach;
+        // Behind a layer, if it isn't one of the window's own. Then the window's own pixels are under it.
+        Optional<size_t> draw;
     };
 
     ErrorOr<void> render_wallpaper();
@@ -192,6 +229,12 @@ private:
     [[nodiscard]] ShadowStyle const& shadow_style_of(ServerWindow const&) const;
     [[nodiscard]] NineSlice const& shadow_slice_of(ServerWindow const&) const;
 
+    void collect_layer(Layer const&, Gfx::AffineTransform const& parent, Gfx::IntRect clip, int window_index, ServerWindow const&, Gfx::IntPoint frame_origin, Vector<LayerDraw>&);
+    void collect_layer_contents(Layer const&, Gfx::AffineTransform const& to_device, Gfx::IntRect clip, u32 opacity, float radius, Gfx::IntRect rounded, int window_index, ServerWindow const&, Gfx::IntPoint frame_origin, Vector<LayerDraw>&);
+    void draw_layer_piece(LayerDraw const&, Gfx::Bitmap& target, Gfx::IntRect clip) const;
+    void prepare_layer_draws();
+    [[nodiscard]] Gfx::AffineTransform layer_to_device(ServerWindow const&, Layer const&) const;
+    [[nodiscard]] Gfx::IntRect layer_bounds(ServerWindow const&, Layer const&, Gfx::AffineTransform const& parent) const;
     [[nodiscard]] bool is_drawn(ServerWindow const&) const;
     [[nodiscard]] bool covers_tile(ServerWindow const&, Gfx::IntRect frame, Gfx::IntRect tile) const;
     [[nodiscard]] Gfx::IntRect tile_rect(int across, int down) const;
@@ -240,6 +283,7 @@ private:
     Vector<i16> m_lowest_shown;
     Vector<ShownMaterial> m_shown_materials;
     Vector<MaterialMemory> m_material_memory;
+    Vector<LayerDraw> m_layer_draws;
 
     u64 m_frames { 0 };
     u64 m_compose_microseconds { 0 };

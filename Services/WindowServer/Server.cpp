@@ -55,6 +55,8 @@ u64 now_microseconds()
 }
 
 constexpr u64 frame_interval = 16667;
+// How long a program has to answer, with input waiting for it, before it's said not to be responding.
+constexpr u64 not_responding_after = 2'000'000;
 
 
 }
@@ -88,7 +90,7 @@ void Server::watch_input(int fd)
 
 void Server::set_up_cursor()
 {
-    auto cursor = make_cursor(m_cursor_shape, m_screen.scale());
+    auto cursor = make_cursor(m_cursor_shape, m_screen.scale(), m_cursor_turn);
     m_screen.set_cursor(*cursor.image, cursor.hot_spot);
     m_screen.move_cursor({ m_pointer.x * m_screen.scale(), m_pointer.y * m_screen.scale() });
 }
@@ -109,6 +111,9 @@ void Server::update_cursor()
     } else if (auto* window = window_at(m_pointer)) {
         edges = resize_edges_at(*window, m_pointer);
         wanted = window->cursor;
+        // Whatever it asked for, from when it still could. (The window can still be moved and resized: that's here.)
+        if (window->client && window->client->not_responding && !edges)
+            wanted = CursorShape::Wait;
     }
     if (edges) {
         bool horizontal = edges & (edge_left | edge_right);
@@ -122,6 +127,76 @@ void Server::update_cursor()
         return;
     m_cursor_shape = wanted;
     set_up_cursor();
+    // It goes round for as long as it's there, whatever else is going on.
+    if (wanted == CursorShape::Wait && m_cursor_timer < 0) {
+        m_cursor_timer = m_loop.add_timer(1000 / wait_cursor_steps, true, [this] {
+            m_cursor_turn = (m_cursor_turn + 1) % wait_cursor_steps;
+            set_up_cursor();
+        });
+    } else if (wanted != CursorShape::Wait && m_cursor_timer >= 0) {
+        m_loop.cancel_timer(m_cursor_timer);
+        m_cursor_timer = -1;
+        m_cursor_turn = 0;
+    }
+}
+
+void Server::ask_if_responding(Client& client)
+{
+    u64 const now = now_microseconds();
+    // One question at a time; and for something answered just now, no need to ask again for each move of the pointer.
+    if (client.ping_sent_at != 0 || now - client.answered_at < 500'000)
+        return;
+    client.ping_sent_at = now;
+    IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Ping));
+    encoder.encode(++client.ping_serial);
+    send_to(client, encoder);
+    if (m_responding_timer < 0)
+        m_responding_timer = m_loop.add_timer(250, true, [this] { check_who_is_responding(); });
+}
+
+void Server::check_who_is_responding()
+{
+    u64 const now = now_microseconds();
+    bool waiting = false;
+    bool changed = false;
+    for (auto& client : m_clients) {
+        if (client->ping_sent_at == 0)
+            continue;
+        waiting = true;
+        if (!client->not_responding && now - client->ping_sent_at >= not_responding_after) {
+            client->not_responding = true;
+            changed = true;
+            os_log_info(server_log(), "Process %d isn't responding", client->pid);
+        }
+    }
+    if (changed) {
+        update_cursor();
+        shell_state_changed();
+    }
+    if (!waiting) {
+        m_loop.cancel_timer(m_responding_timer);
+        m_responding_timer = -1;
+    }
+}
+
+void Server::pong(IPC::Sender const& sender, u32 serial)
+{
+    auto* client = client_of(sender);
+    if (!client || serial != client->ping_serial)
+        return;
+    client->ping_sent_at = 0;
+    client->answered_at = now_microseconds();
+    if (client->not_responding) {
+        client->not_responding = false;
+        os_log_info(server_log(), "Process %d is responding again", client->pid);
+        update_cursor();
+        shell_state_changed();
+    }
+}
+
+WindowServerEndpoint::CursorShapeAnswer Server::cursor_shape(IPC::Sender const&)
+{
+    return { static_cast<i32>(m_cursor_shape), m_cursor_turn };
 }
 
 // --- Frames ---
@@ -134,7 +209,7 @@ void Server::note_input()
 
 void Server::schedule_frame()
 {
-    if (!m_compositor.has_damage())
+    if (!m_compositor.has_damage() && !m_layers_animating)
         return;
     // Frames keep to a fixed beat, as a display's refresh would: a timer that fires late (they do, waking an idle processor
     // under a hypervisor) takes that time from the wait for the next, rather than slowing them all down. Unless someone's
@@ -161,6 +236,9 @@ void Server::render_frame()
     m_last_frame_started = now_microseconds();
     while (m_next_frame_time <= m_last_frame_started)
         m_next_frame_time += frame_interval;
+    double const frame_time = static_cast<double>(m_last_frame_started) / 1'000'000.0;
+    if (m_layers_animating)
+        m_layers_animating = advance_layers(frame_time);
     // Title bars out of date are redrawn now, once, however many changes came.
     for (auto* window : m_windows) {
         if (window->visible && window->is_titled() && window->chrome_is_stale)
@@ -182,6 +260,16 @@ void Server::render_frame()
         encoder.encode(window->id);
         send_to(*window->client, encoder);
     }
+    for (auto* window : m_windows) {
+        if (!window->layers_present_pending || !window->client)
+            continue;
+        window->layers_present_pending = false;
+        IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::LayersPresented));
+        encoder.encode(window->id);
+        encoder.encode(window->layers_present_serial);
+        send_to(*window->client, encoder);
+    }
+    log_layers(frame_time);
     schedule_frame();
 }
 
@@ -601,6 +689,444 @@ void Server::present(IPC::Sender const& sender, u32 id, u32 buffer, i32 x, i32 y
     if (!m_compositor.has_damage())
         m_compositor.invalidate({ 0, 0, 1, 1 });
     schedule_frame();
+}
+
+// ---- Layers
+
+void Layer::release_surface()
+{
+    buffers[0] = nullptr;
+    buffers[1] = nullptr;
+    if (memory)
+        munmap(memory, memory_size);
+    memory = nullptr;
+    memory_size = 0;
+    has_presented = false;
+}
+
+namespace {
+
+// How many values a property has, where they are, and how to set them.
+int component_count(Window::LayerProperty property)
+{
+    using Window::LayerProperty;
+    switch (property) {
+    case LayerProperty::Frame:
+        return 4;
+    case LayerProperty::Translation:
+    case LayerProperty::Scale:
+    case LayerProperty::BoundsOrigin:
+        return 2;
+    case LayerProperty::Rotation:
+    case LayerProperty::Opacity:
+    case LayerProperty::CornerRadius:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+void read_property(LayerState const& state, Window::LayerProperty property, float* out)
+{
+    using Window::LayerProperty;
+    switch (property) {
+    case LayerProperty::Frame:
+        out[0] = state.frame.x;
+        out[1] = state.frame.y;
+        out[2] = state.frame.width;
+        out[3] = state.frame.height;
+        break;
+    case LayerProperty::Translation:
+        out[0] = state.translation.x;
+        out[1] = state.translation.y;
+        break;
+    case LayerProperty::Scale:
+        out[0] = state.scale.x;
+        out[1] = state.scale.y;
+        break;
+    case LayerProperty::BoundsOrigin:
+        out[0] = state.bounds_origin.x;
+        out[1] = state.bounds_origin.y;
+        break;
+    case LayerProperty::Rotation:
+        out[0] = state.rotation;
+        break;
+    case LayerProperty::Opacity:
+        out[0] = state.opacity;
+        break;
+    case LayerProperty::CornerRadius:
+        out[0] = state.corner_radius;
+        break;
+    default:
+        break;
+    }
+}
+
+void write_property(LayerState& state, Window::LayerProperty property, float const* in)
+{
+    using Window::LayerProperty;
+    switch (property) {
+    case LayerProperty::Frame:
+        state.frame = { in[0], in[1], in[2], in[3] };
+        break;
+    case LayerProperty::Translation:
+        state.translation = { in[0], in[1] };
+        break;
+    case LayerProperty::Scale:
+        state.scale = { in[0], in[1] };
+        break;
+    case LayerProperty::BoundsOrigin:
+        state.bounds_origin = { in[0], in[1] };
+        break;
+    case LayerProperty::Rotation:
+        state.rotation = in[0];
+        break;
+    case LayerProperty::Opacity:
+        state.opacity = in[0];
+        break;
+    case LayerProperty::CornerRadius:
+        state.corner_radius = in[0];
+        break;
+    default:
+        break;
+    }
+}
+
+}
+
+WindowServerEndpoint::CreateLayerAnswer Server::create_layer(IPC::Sender const& sender, u32 id, u32 parent_id)
+{
+    WindowServerEndpoint::CreateLayerAnswer answer {};
+    auto* window = window_of(sender, id);
+    if (!window) {
+        answer.error = ENOENT;
+        return answer;
+    }
+    Layer* parent = nullptr;
+    if (parent_id != 0) {
+        parent = window->layer_with_id(parent_id);
+        if (!parent) {
+            answer.error = ENOENT;
+            return answer;
+        }
+    }
+    if (window->layers.size() >= 4096) {
+        answer.error = ENOSPC;
+        return answer;
+    }
+    auto layer = adopt_own(*new Layer);
+    layer->id = window->next_layer_id++;
+    layer->parent = parent;
+    auto* raw = layer.ptr();
+    window->layers.append(move(layer));
+    if (parent)
+        parent->children.append(raw);
+    else
+        window->top_layers.append(raw);
+    answer.layer = raw->id;
+    return answer;
+}
+
+i32 Server::set_layer_surface(IPC::Sender const& sender, u32 id, u32 layer_id, IPC::Port memory, i32 width, i32 height)
+{
+    auto* window = window_of(sender, id);
+    auto* layer = window ? window->layer_with_id(layer_id) : nullptr;
+    if (!layer)
+        return ENOENT;
+    if (!memory.is_valid() || width <= 0 || height <= 0 || width > 32768 || height > 32768)
+        return EINVAL;
+    size_t const buffer_size = static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(Pixel);
+    size_t const total = buffer_size * 2;
+    // A file that small would fault here, not in the client.
+    struct stat information {};
+    if (fstat(memory.fd(), &information) < 0 || static_cast<size_t>(information.st_size) < total)
+        return EINVAL;
+    void* mapped = mmap(nullptr, total, PROT_READ, MAP_SHARED, memory.fd(), 0);
+    if (mapped == MAP_FAILED)
+        return errno;
+    auto* first = static_cast<Pixel*>(mapped);
+    auto one = Bitmap::wrap(first, { width, height }, width);
+    auto two = Bitmap::wrap(first + static_cast<size_t>(width) * static_cast<size_t>(height), { width, height }, width);
+    if (one.is_error() || two.is_error()) {
+        munmap(mapped, total);
+        return ENOMEM;
+    }
+    m_compositor.invalidate_layer(*window, *layer);
+    layer->release_surface();
+    layer->memory = mapped;
+    layer->memory_size = total;
+    layer->buffers[0] = one.release_value();
+    layer->buffers[1] = two.release_value();
+    layer->shown_buffer = 0;
+    schedule_frame();
+    return 0;
+}
+
+void Server::destroy_layer(ServerWindow& window, Layer& layer)
+{
+    m_compositor.invalidate_layer(window, layer);
+    // The innermost first, as each takes itself out of the list it's in.
+    while (!layer.children.is_empty())
+        destroy_layer(window, *layer.children.last());
+    if (layer.parent)
+        layer.parent->children.remove_all_matching([&](auto* other) { return other == &layer; });
+    else
+        window.top_layers.remove_all_matching([&](auto* other) { return other == &layer; });
+    window.layers.remove_all_matching([&](auto const& other) { return other.ptr() == &layer; });
+}
+
+void Server::apply_layer_change(ServerWindow& window, Window::LayerChange const& change, double now)
+{
+    using Window::LayerProperty;
+    if (change.property >= LayerProperty::Count)
+        return;
+    if (change.property == LayerProperty::PresentWindow) {
+        if (!window.buffers[0])
+            return;
+        window.shown_buffer = change.values[0] != 0 ? 1 : 0;
+        window.has_presented = true;
+        IntRect const damage { static_cast<int>(change.values[1]), static_cast<int>(change.values[2]), static_cast<int>(change.values[3]), static_cast<int>(change.values[4]) };
+        m_compositor.surface_changed(window, damage);
+        if (window.visible) {
+            auto const frame = m_compositor.device_frame(window);
+            m_compositor.invalidate(IntRect { frame.x + damage.x, frame.y + damage.y, damage.width, damage.height }.intersected(frame));
+        }
+        return;
+    }
+    auto* layer = window.layer_with_id(change.layer);
+    if (!layer)
+        return;
+    auto const& v = change.values;
+    m_compositor.invalidate_layer(window, *layer);
+    switch (change.property) {
+    case LayerProperty::Frame:
+    case LayerProperty::Translation:
+    case LayerProperty::Scale:
+    case LayerProperty::Rotation:
+    case LayerProperty::Opacity:
+    case LayerProperty::CornerRadius:
+    case LayerProperty::BoundsOrigin:
+        // Set outright, it's no longer on its way anywhere.
+        layer->animations.remove_all_matching([&](auto const& animation) { return animation.property == change.property; });
+        write_property(layer->model, change.property, v);
+        write_property(layer->shown, change.property, v);
+        break;
+    case LayerProperty::ContentsOrigin:
+        layer->contents_origin = { v[0], v[1] };
+        break;
+    case LayerProperty::Background:
+        layer->background = Color { static_cast<u8>(clamp(v[0], 0.0f, 1.0f) * 255 + 0.5f), static_cast<u8>(clamp(v[1], 0.0f, 1.0f) * 255 + 0.5f), static_cast<u8>(clamp(v[2], 0.0f, 1.0f) * 255 + 0.5f), static_cast<u8>(clamp(v[3], 0.0f, 1.0f) * 255 + 0.5f) };
+        break;
+    case LayerProperty::Hidden:
+        layer->hidden = v[0] != 0;
+        break;
+    case LayerProperty::Clips:
+        layer->clips = v[0] != 0;
+        break;
+    case LayerProperty::ClipRect:
+        layer->has_clip_rect = v[2] >= 0;
+        layer->clip_rect = { v[0], v[1], v[2], v[3] };
+        break;
+    case LayerProperty::Material: {
+        int const material = static_cast<int>(v[0]);
+        layer->material = material >= 0 && material < static_cast<int>(Window::Material::Count) ? material : -1;
+        break;
+    }
+    case LayerProperty::Blur:
+        layer->blur = max(v[0], 0.0f);
+        break;
+    case LayerProperty::Logged:
+        layer->logged = v[0] != 0;
+        layer->log.clear();
+        break;
+    case LayerProperty::Present: {
+        if (!layer->buffers[0])
+            break;
+        layer->shown_buffer = v[0] != 0 ? 1 : 0;
+        layer->has_presented = true;
+        break;
+    }
+    case LayerProperty::Order: {
+        auto& list = layer->parent ? layer->parent->children : window.top_layers;
+        list.remove_all_matching([&](auto* other) { return other == layer; });
+        size_t const place = min(static_cast<size_t>(max(v[0], 0.0f)), list.size());
+        MUST(list.try_insert(place, layer));
+        break;
+    }
+    case LayerProperty::Animate: {
+        auto const property = static_cast<LayerProperty>(change.detail & 0xff);
+        int const components = component_count(property);
+        if (components == 0)
+            break;
+        LayerAnimation animation;
+        animation.property = property;
+        for (int i = 0; i < 4; ++i) {
+            animation.from[i] = v[i];
+            animation.to[i] = v[4 + i];
+        }
+        animation.timing.duration = v[8];
+        switch (static_cast<Window::LayerCurve>((change.detail >> 8) & 0xff)) {
+        case Window::LayerCurve::Linear:
+            animation.timing.kind = Animation::Timing::Kind::Linear;
+            break;
+        case Window::LayerCurve::Bezier:
+            animation.timing.kind = Animation::Timing::Kind::Bezier;
+            animation.timing.bezier = Animation::CubicBezier(v[9], v[10], v[11], v[12]);
+            break;
+        case Window::LayerCurve::Spring:
+            animation.timing.kind = Animation::Timing::Kind::Spring;
+            animation.timing.spring = Animation::Spring::with_frequency(v[9], v[10], v[11]);
+            break;
+        }
+        animation.started = now;
+        animation.repeats = change.detail & (1u << 16);
+        animation.steps = static_cast<int>(change.detail >> 24);
+        animation.tag = change.tag;
+        // Only one at a time of any one thing.
+        layer->animations.remove_all_matching([&](auto const& other) { return other.property == property; });
+        // It ends where it says, and it's there as far as anything's concerned, from now on.
+        write_property(layer->model, property, animation.to);
+        write_property(layer->shown, property, animation.from);
+        layer->animations.append(move(animation));
+        m_layers_animating = true;
+        break;
+    }
+    case LayerProperty::StopAnimation: {
+        auto const property = static_cast<LayerProperty>(change.detail & 0xff);
+        float where[4] {};
+        read_property(layer->shown, property, where);
+        write_property(layer->model, property, where);
+        layer->animations.remove_all_matching([&](auto const& animation) { return animation.property == property; });
+        break;
+    }
+    case LayerProperty::Destroy:
+        destroy_layer(window, *layer);
+        return;
+    default:
+        break;
+    }
+    m_compositor.invalidate_layer(window, *layer);
+    if (change.property == LayerProperty::Present) {
+        IntRect const damage { static_cast<int>(v[1]), static_cast<int>(v[2]), static_cast<int>(v[3]), static_cast<int>(v[4]) };
+        if (window.visible)
+            m_compositor.invalidate(m_compositor.device_rect_of_layer_surface(window, *layer, damage));
+    }
+}
+
+void Server::commit_layers(IPC::Sender const& sender, u32 id, u32 serial, Vector<u8> changes)
+{
+    auto* window = window_of(sender, id);
+    if (!window || changes.size() % sizeof(Window::LayerChange) != 0)
+        return;
+    double const now = static_cast<double>(now_microseconds()) / 1'000'000.0;
+    for (size_t at = 0; at < changes.size(); at += sizeof(Window::LayerChange)) {
+        Window::LayerChange change;
+        __builtin_memcpy(&change, changes.data() + at, sizeof(change));
+        apply_layer_change(*window, change, now);
+    }
+    window->layers_present_pending = true;
+    window->layers_present_serial = serial;
+    // Something to answer for, even with nothing to draw.
+    if (!m_compositor.has_damage())
+        m_compositor.invalidate({ 0, 0, 1, 1 });
+    if (now_microseconds() - m_last_input_at < 2 * frame_interval)
+        m_input_waiting = true;
+    schedule_frame();
+}
+
+bool Server::advance_layers(double now)
+{
+    using Window::LayerProperty;
+    bool still_going = false;
+    struct Finished {
+        ServerWindow* window;
+        u32 layer;
+        u32 tag;
+    };
+    Vector<Finished> finished;
+    for (auto* window : m_windows) {
+        for (auto& layer : window->layers) {
+            if (layer->animations.is_empty())
+                continue;
+            m_compositor.invalidate_layer(*window, *layer);
+            for (size_t i = 0; i < layer->animations.size();) {
+                auto& animation = layer->animations[i];
+                auto elapsed = static_cast<float>(now - animation.started);
+                float const duration = animation.timing.duration;
+                bool const done = !animation.repeats && elapsed >= duration;
+                if (animation.repeats && duration > 0) {
+                    while (elapsed >= duration)
+                        elapsed -= duration;
+                }
+                float progress = done ? 1 : animation.timing.value_at(elapsed);
+                if (animation.steps > 0)
+                    progress = static_cast<float>(static_cast<int>(progress * static_cast<float>(animation.steps))) / static_cast<float>(animation.steps);
+                float values[4];
+                for (int c = 0; c < 4; ++c)
+                    values[c] = animation.from[c] + (animation.to[c] - animation.from[c]) * progress;
+                write_property(layer->shown, animation.property, done ? animation.to : values);
+                if (done) {
+                    if (animation.tag)
+                        finished.append(Finished { window, layer->id, animation.tag });
+                    layer->animations.remove(i);
+                } else {
+                    still_going = true;
+                    ++i;
+                }
+            }
+            m_compositor.invalidate_layer(*window, *layer);
+        }
+    }
+    for (auto const& ended : finished) {
+        if (!ended.window->client)
+            continue;
+        IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::LayerAnimationFinished));
+        encoder.encode(ended.window->id);
+        encoder.encode(ended.layer);
+        encoder.encode(ended.tag);
+        send_to(*ended.window->client, encoder);
+    }
+    return still_going;
+}
+
+void Server::log_layers(double now)
+{
+    for (auto* window : m_windows) {
+        for (auto& layer : window->layers) {
+            if (!layer->logged || layer->animations.is_empty() || layer->log.size() >= 8192)
+                continue;
+            auto const& animation = layer->animations[0];
+            LayerLogEntry entry;
+            entry.seconds = now - animation.started;
+            read_property(layer->shown, animation.property, entry.values);
+            layer->log.append(entry);
+        }
+    }
+}
+
+WindowServerEndpoint::LayerFrameLogAnswer Server::layer_frame_log(IPC::Sender const& sender, u32 id, u32 layer_id)
+{
+    WindowServerEndpoint::LayerFrameLogAnswer answer {};
+    if (sender.uid != 0) {
+        answer.error = EPERM;
+        return answer;
+    }
+    for (auto* window : m_windows) {
+        if (window->id != id)
+            continue;
+        auto* layer = window->layer_with_id(layer_id);
+        if (!layer) {
+            answer.error = ENOENT;
+            return answer;
+        }
+        MUST(answer.log.try_resize(layer->log.size() * sizeof(LayerLogEntry)));
+        if (!layer->log.is_empty())
+            __builtin_memcpy(answer.log.data(), layer->log.data(), answer.log.size());
+        layer->log.clear();
+        return answer;
+    }
+    answer.error = ENOENT;
+    return answer;
 }
 
 void Server::set_materials(IPC::Sender const& sender, u32 id, Vector<i32> regions)
@@ -1110,6 +1636,7 @@ void Server::send_mouse(ServerWindow& window, MouseKind kind, IntPoint point, u3
     encoder.encode(static_cast<i32>(wheel_x));
     encoder.encode(static_cast<i32>(wheel_y));
     send_to(*window.client, encoder);
+    ask_if_responding(*window.client);
 }
 
 void Server::pointer_changed(IntPoint point, u32 buttons)
@@ -1431,6 +1958,7 @@ void Server::deliver_key(u16 code, int value)
     encoder.encode(value == 2 ? (m_modifiers | Window::ModifierRepeat) : m_modifiers);
     encoder.encode(text.view());
     send_to(*target->client, encoder);
+    ask_if_responding(*target->client);
 }
 
 }

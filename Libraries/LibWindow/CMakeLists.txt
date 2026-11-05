@@ -8,4 +8,4 @@
 add_library(LibWindow STATIC
     Window.cpp)
 vulture_compile_ipc(LibWindow WindowServer.ipc)
-target_link_libraries(LibWindow PUBLIC LibIPC LibCore LibGfx)
+target_link_libraries(LibWindow PUBLIC LibIPC LibCore LibGfx LibAnimation)

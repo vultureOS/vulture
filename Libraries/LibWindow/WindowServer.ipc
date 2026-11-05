@@ -37,6 +37,17 @@ endpoint WindowServer
     // is on screen the client hears `presented`, and may use the other.
     present(u32 window, u32 buffer, i32 x, i32 y, i32 width, i32 height) =|
 
+    // A layer: something over the window's own surface, or in another layer (`parent`, or 0), that the server moves and fades
+    // and animates by itself. It has a surface as the window does, if it wants pixels.
+    create_layer(u32 window, u32 parent) => (i32 error, u32 layer)
+    set_layer_surface(u32 window, u32 layer, Port memory, i32 width, i32 height) => (i32 error)
+    // Changes to this window's layers, as an array of LayerChange (see <LibWindow/Protocol.h>), all of which are on the screen in
+    // the same frame. Once that's happened, it hears `layers_presented` with this serial.
+    commit_layers(u32 window, u32 serial, ByteBuffer changes) =|
+    // For tests and tools: only root may. What each frame has shown of a layer with Logged set, as an array of a double (seconds
+    // since the animation started) and four floats. The log starts again.
+    layer_frame_log(u32 window, u32 layer) => (i32 error, ByteBuffer log)
+
     // Parts of the window with a material behind them (where its pixels are
     // not opaque, the blurred backdrop shows): x, y, width, height (points, from
     // the window's top-left), material and corner radius (points), for each.
@@ -84,6 +95,10 @@ endpoint WindowServer
     // microseconds, or 0 for now.
     inject_pointer(i32 x, i32 y, u32 buttons, u64 sent_at) =|
     statistics() => (u64 frames, u64 compose_microseconds, u64 flush_microseconds, u64 pixels, u64 material_microseconds)
+    // The answer to `ping`.
+    pong(u32 serial) =|
+    // The pointer's shape now, and how far round it is, if it goes round.
+    cursor_shape() => (i32 shape, i32 turn)
     // For tests and tools: only root may. As if everything on the screen had changed.
     damage_everything() =|
     // From the pointer moving to the window it's dragging being on the screen, since this was last asked: how many were
@@ -112,6 +127,8 @@ endpoint WindowClient
     close_requested(u32 window) =|
     activated(u32 window, bool active) =|
     presented(u32 window) =|
+    layers_presented(u32 window, u32 serial) =|
+    layer_animation_finished(u32 window, u32 layer, u32 tag) =|
     appearance_changed(String name) =|
     // phase: see <LibWindow/Protocol.h>. The data comes only with Dropped.
     drag(u32 window, u8 phase, i32 x, i32 y, String type, ByteBuffer data) =|
@@ -125,4 +142,6 @@ endpoint WindowClient
     hotkey(u16 code, u32 modifiers) =|
     // For publish_accessibility.
     accessibility_requested(u32 generation) =|
+    // Input has been sent to this program: is it there? It's the event loop that answers, so one that's stuck doesn't.
+    ping(u32 serial) =|
 }

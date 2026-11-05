@@ -344,6 +344,7 @@ void Server::send_shell_state()
         MUST(application.set("name"_sv, MUST(JSON::Value::string(client->application_name.view()))));
         MUST(application.set("identifier"_sv, MUST(JSON::Value::string(client->application_identifier.view()))));
         MUST(application.set("hidden"_sv, JSON::Value(client->hidden)));
+        MUST(application.set("notResponding"_sv, JSON::Value(client->not_responding)));
         auto windows = JSON::Value::array();
         for (auto const* window : m_windows) {
             if (window->client != client.ptr() || !window->is_document_window() || !window->shown_by_client)

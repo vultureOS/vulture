@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "Layer.h"
+#include <LibBase/OwnPtr.h>
 #include <LibBase/RefPtr.h>
 #include <LibBase/String.h>
 #include <LibBase/Vector.h>
@@ -71,6 +73,22 @@ struct ServerWindow {
     int opaque_cell_rows { 0 };
 
     Vector<MaterialRegion> materials;
+
+    // What's over its surface: all of them, and those directly on the window, bottom to top.
+    Vector<NonnullOwnPtr<Layer>> layers;
+    Vector<Layer*> top_layers;
+    u32 next_layer_id { 1 };
+    bool layers_present_pending { false };
+    u32 layers_present_serial { 0 };
+
+    [[nodiscard]] Layer* layer_with_id(u32 layer_id)
+    {
+        for (auto& layer : layers) {
+            if (layer->id == layer_id)
+                return layer.ptr();
+        }
+        return nullptr;
+    }
 
     // The title bar, drawn over the client's pixels.
     RefPtr<Gfx::Bitmap> chrome;

@@ -24,6 +24,11 @@ public:
     // For progress x (0 to 1) along time.
     [[nodiscard]] float value_at(float x) const;
 
+    [[nodiscard]] constexpr float x1() const { return m_x1; }
+    [[nodiscard]] constexpr float y1() const { return m_y1; }
+    [[nodiscard]] constexpr float x2() const { return m_x2; }
+    [[nodiscard]] constexpr float y2() const { return m_y2; }
+
 private:
     float m_x1, m_y1, m_x2, m_y2;
 };
@@ -42,6 +47,12 @@ public:
     [[nodiscard]] float velocity_at(float seconds) const;
     // When it stays within `tolerance` of 1 from then on.
     [[nodiscard]] float settling_time(float tolerance = 0.001f) const;
+
+    [[nodiscard]] float natural_frequency() const { return m_natural; }
+    [[nodiscard]] float damping_ratio() const { return m_ratio; }
+    [[nodiscard]] float initial_velocity() const { return m_velocity; }
+    // As those three say it, for one that has been sent somewhere.
+    [[nodiscard]] static Spring with_frequency(float natural_frequency, float damping_ratio, float initial_velocity);
 
 private:
     float m_natural;     // Undamped angular frequency.

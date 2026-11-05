@@ -19,6 +19,9 @@ struct CursorImage {
     Gfx::IntPoint hot_spot;
 };
 
-[[nodiscard]] CursorImage make_cursor(Window::CursorShape, int scale);
+// How far round the one that goes round is goes in this many steps.
+constexpr int wait_cursor_steps = 24;
+
+[[nodiscard]] CursorImage make_cursor(Window::CursorShape, int scale, int turn = 0);
 
 }

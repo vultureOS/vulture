@@ -59,7 +59,53 @@ enum class CursorShape : i32 {
     OpenHand,
     ClosedHand,
     Crosshair,
+    // Over a program that isn't answering. It's the server's to choose: asking for it does nothing.
+    Wait,
     Count,
+};
+
+// What a layer has. Each is changed by one LayerChange in a commit_layers. Those marked can be animated.
+enum class LayerProperty : u32 {
+    Frame,          // Animated. x, y, width, height: points, among what it's in.
+    Translation,    // Animated. x, y: points, on top of that.
+    Scale,          // Animated. x, y: about its middle.
+    Rotation,       // Animated. Radians, about its middle.
+    Opacity,        // Animated. 0 to 1, of all of it, with what's in it.
+    CornerRadius,   // Animated. Points.
+    BoundsOrigin,   // Animated. x, y: points: what's at its top left, as something scrolled.
+    ContentsOrigin, // x, y: points: where its surface's top left goes, among what it holds.
+    Background,     // Red, green, blue, alpha: 0 to 1, not premultiplied.
+    Hidden,         // 0 or 1.
+    Clips,          // 0 or 1: what's in it stops at its edges.
+    ClipRect,       // x, y, width, height: points, among what it's in; none if the width is negative.
+    Material,       // A Material, behind it; -1 for none.
+    Blur,           // Points: of what it shows.
+    Logged,         // 0 or 1: see layer_frame_log.
+    Present,        // Buffer, then x, y, width, height: this buffer of its surface is now the one shown, and that part changed.
+    PresentWindow,  // The same, of the window's own surface. (`layer` is 0.)
+    Order,          // Its place among those it's with, from the bottom.
+    Animate,        // See below.
+    StopAnimation,  // `detail` is the property: it stays where it has got to.
+    Destroy,        // It's gone, with all that's in it.
+    Count,
+};
+
+enum class LayerCurve : u8 {
+    Linear,
+    Bezier,
+    Spring,
+};
+
+// One change. For an Animate, `detail` says what to animate in its low byte, the LayerCurve in the next, in bit 16 whether it
+// goes round for ever, and in the top byte how many steps it goes in (0 for smoothly). `values` are 4 where it starts, 4 where it
+// ends, the duration in seconds, and the curve's: x1, y1, x2, y2 for a bezier, or natural frequency, damping ratio and starting
+// velocity for a spring. It hears `layer_animation_finished` with `tag`, if that's not 0.
+struct LayerChange {
+    u32 layer { 0 };
+    LayerProperty property { LayerProperty::Frame };
+    u32 detail { 0 };
+    u32 tag { 0 };
+    float values[13] {};
 };
 
 enum class DragPhase : u8 {

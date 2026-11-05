@@ -86,6 +86,11 @@ Spring Spring::with_response(float response_seconds, float bounce, float initial
 
 // x(t) is how far from rest it is, starting at -1 with velocity m_velocity; the
 // result is 1 + x(t).
+Spring Spring::with_frequency(float natural_frequency, float damping_ratio, float initial_velocity)
+{
+    return Spring(1, natural_frequency * natural_frequency, 2 * damping_ratio * natural_frequency, initial_velocity);
+}
+
 float Spring::value_at(float seconds) const
 {
     if (!(seconds > 0))

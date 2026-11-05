@@ -5,6 +5,7 @@
  */
 
 #include "Compositor.h"
+#include "Layer.h"
 #include <LibBase/Math.h>
 #include <LibGfx/Blend.h>
 #include <LibGfx/Filter.h>
@@ -424,54 +425,61 @@ void Compositor::find_what_shows()
     // read, under this window, even where more is over that in the end. Which may bring lower materials into view: so from
     // the top down, and each of them sees what the ones above have asked for.
     m_shown_materials.clear();
+    auto look_at_material = [&](size_t index, size_t material_index, IntRect region, MaterialStyle const& style, int highest_under_it, Optional<size_t> draw) {
+        auto const on_screen = region.intersected(m_screen.framebuffer().rect());
+        if (on_screen.is_empty())
+            return;
+        IntRect shown;
+        for (int down = on_screen.y / tile_size; down <= (on_screen.bottom() - 1) / tile_size; ++down) {
+            auto const* row = m_lowest_shown.data() + static_cast<size_t>(down) * static_cast<size_t>(m_tiles_across);
+            for (int across = on_screen.x / tile_size; across <= (on_screen.right() - 1) / tile_size; ++across) {
+                if (row[across] <= highest_under_it)
+                    shown = shown.is_empty() ? tile_rect(across, down) : shown.united(tile_rect(across, down));
+            }
+        }
+        shown = shown.intersected(on_screen);
+        if (shown.is_empty())
+            return;
+        float const sigma = style.blur * static_cast<float>(scale);
+        int const reach = static_cast<int>(Math::ceil(sigma * 3)) + reduction_for(sigma) * 2;
+        m_shown_materials.append(ShownMaterial { index, material_index, region, shown, reach, draw });
+
+        auto const around = shown.inflated(reach).intersected(m_screen.framebuffer().rect());
+        for (int down = around.y / tile_size; down <= (around.bottom() - 1) / tile_size; ++down) {
+            auto* row = m_lowest_shown.data() + static_cast<size_t>(down) * static_cast<size_t>(m_tiles_across);
+            for (int across = around.x / tile_size; across <= (around.right() - 1) / tile_size; ++across) {
+                if (row[across] <= highest_under_it)
+                    continue;
+                // The nearest that covers it, of what's under this, if anything does.
+                auto const tile = tile_rect(across, down);
+                int lowest = -1;
+                for (int below = highest_under_it; below >= 0; --below) {
+                    auto const& under = *m_windows[static_cast<size_t>(below)];
+                    if (is_drawn(under) && covers_tile(under, device_frame(under), tile)) {
+                        lowest = below;
+                        break;
+                    }
+                }
+                row[across] = static_cast<i16>(lowest);
+            }
+        }
+    };
     for (size_t index = m_windows.size(); index > 0; --index) {
         auto const& window = *m_windows[index - 1];
-        if (!is_drawn(window) || window.materials.is_empty())
+        if (!is_drawn(window))
             continue;
         int const at = static_cast<int>(index - 1);
+        // Those behind its layers are over the window. From the top.
+        for (size_t draw = m_layer_draws.size(); draw > 0; --draw) {
+            auto const& layer_draw = m_layer_draws[draw - 1];
+            if (layer_draw.window_index == at && layer_draw.kind == LayerDraw::Kind::Material)
+                look_at_material(index - 1, 0, layer_draw.bounds, *layer_draw.material, at, draw - 1);
+        }
         auto const frame = device_frame(window);
         for (size_t material_index = 0; material_index < window.materials.size(); ++material_index) {
             auto const& material = window.materials[material_index];
             IntRect region { frame.x + material.rect.x * scale, frame.y + material.rect.y * scale, material.rect.width * scale, material.rect.height * scale };
-            region = region.intersected(frame);
-            auto const on_screen = region.intersected(m_screen.framebuffer().rect());
-            if (on_screen.is_empty())
-                continue;
-            IntRect shown;
-            for (int down = on_screen.y / tile_size; down <= (on_screen.bottom() - 1) / tile_size; ++down) {
-                auto const* row = m_lowest_shown.data() + static_cast<size_t>(down) * static_cast<size_t>(m_tiles_across);
-                for (int across = on_screen.x / tile_size; across <= (on_screen.right() - 1) / tile_size; ++across) {
-                    if (row[across] < at)
-                        shown = shown.is_empty() ? tile_rect(across, down) : shown.united(tile_rect(across, down));
-                }
-            }
-            shown = shown.intersected(on_screen);
-            if (shown.is_empty())
-                continue;
-            auto const& style = m_theme.materials[static_cast<int>(material.material)];
-            float const sigma = style.blur * static_cast<float>(scale);
-            int const reach = static_cast<int>(Math::ceil(sigma * 3)) + reduction_for(sigma) * 2;
-            m_shown_materials.append(ShownMaterial { index - 1, material_index, region, shown, reach });
-
-            auto const around = shown.inflated(reach).intersected(m_screen.framebuffer().rect());
-            for (int down = around.y / tile_size; down <= (around.bottom() - 1) / tile_size; ++down) {
-                auto* row = m_lowest_shown.data() + static_cast<size_t>(down) * static_cast<size_t>(m_tiles_across);
-                for (int across = around.x / tile_size; across <= (around.right() - 1) / tile_size; ++across) {
-                    if (row[across] < at)
-                        continue;
-                    // The nearest below this window that covers it, if anything does.
-                    auto const tile = tile_rect(across, down);
-                    int lowest = -1;
-                    for (int below = at - 1; below >= 0; --below) {
-                        auto const& under = *m_windows[static_cast<size_t>(below)];
-                        if (is_drawn(under) && covers_tile(under, device_frame(under), tile)) {
-                            lowest = below;
-                            break;
-                        }
-                    }
-                    row[across] = static_cast<i16>(lowest);
-                }
-            }
+            look_at_material(index - 1, material_index, region.intersected(frame), m_theme.materials[static_cast<int>(material.material)], at - 1, {});
         }
     }
 }
@@ -549,11 +557,352 @@ void Compositor::draw_steps(Vector<Step> const& steps, size_t end, Vector<Piece*
                 if (step.index >= piece.lowest)
                     job.compositor->draw_body(*step.window, piece.rect, step.index == piece.lowest);
                 break;
+            case StepKind::Layer:
+                if (step.index >= piece.lowest)
+                    job.compositor->draw_layer_piece(job.compositor->m_layer_draws[step.draw], job.compositor->m_screen.framebuffer(), piece.rect);
+                break;
             }
         }
         piece.next_step = job.end;
     },
         &work);
+}
+
+namespace {
+
+// Where this layer's own coordinates go, among what it's in.
+AffineTransform local_transform_of(Layer const& layer)
+{
+    auto const& state = layer.shown;
+    auto transform = AffineTransform::translation(state.frame.x + state.translation.x, state.frame.y + state.translation.y);
+    if (state.scale.x != 1 || state.scale.y != 1 || state.rotation != 0) {
+        float const middle_x = state.frame.width / 2;
+        float const middle_y = state.frame.height / 2;
+        transform = transform.multiplied(AffineTransform::translation(middle_x, middle_y));
+        if (state.rotation != 0)
+            transform = transform.multiplied(AffineTransform::rotation(state.rotation));
+        transform = transform.multiplied(AffineTransform::scaling(state.scale.x, state.scale.y));
+        transform = transform.multiplied(AffineTransform::translation(-middle_x, -middle_y));
+    }
+    return transform;
+}
+
+[[nodiscard]] bool is_whole(float value)
+{
+    return Math::absolute(value - static_cast<float>(Math::round(static_cast<double>(value)))) < 0.001f;
+}
+
+[[nodiscard]] bool only_moves_by_whole_pixels(AffineTransform const& transform)
+{
+    return Math::absolute(transform.a() - 1) < 0.0001f && Math::absolute(transform.d() - 1) < 0.0001f && Math::absolute(transform.b()) < 0.0001f && Math::absolute(transform.c()) < 0.0001f && is_whole(transform.e()) && is_whole(transform.f());
+}
+
+[[nodiscard]] IntRect rounded_rect(FloatRect const& rect)
+{
+    int const left = static_cast<int>(Math::round(static_cast<double>(rect.x)));
+    int const top = static_cast<int>(Math::round(static_cast<double>(rect.y)));
+    int const right = static_cast<int>(Math::round(static_cast<double>(rect.right())));
+    int const bottom = static_cast<int>(Math::round(static_cast<double>(rect.bottom())));
+    return { left, top, right - left, bottom - top };
+}
+
+// How much of a pixel is inside a rounded rectangle, 0 to 255.
+[[nodiscard]] u32 coverage_in_rounded(float x, float y, float width, float height, float radius)
+{
+    float const from_left = x;
+    float const from_right = width - x;
+    float const from_top = y;
+    float const from_bottom = height - y;
+    float const across = from_left < radius ? radius - from_left : (from_right < radius ? radius - from_right : 0);
+    float const down = from_top < radius ? radius - from_top : (from_bottom < radius ? radius - from_bottom : 0);
+    if (across <= 0 || down <= 0)
+        return 255;
+    float const distance = static_cast<float>(Math::square_root(static_cast<double>(across * across + down * down)));
+    return static_cast<u32>(clamp(radius - distance + 0.5f, 0.0f, 1.0f) * 255);
+}
+
+[[nodiscard]] u32 window_corner_coverage(WindowShape const* shape, int x, int y, IntSize frame)
+{
+    if (!shape || !shape->corner)
+        return 255;
+    int const extent = shape->corner_extent;
+    bool const near_end = y < extent || y >= frame.height - extent;
+    bool const near_side = x < extent || x >= frame.width - extent;
+    if (!near_end || !near_side)
+        return 255;
+    int const mask_y = y < extent ? y : frame.height - 1 - y;
+    int const mask_x = x < extent ? x : frame.width - 1 - x;
+    return shape->corner->scanline(mask_y)[mask_x];
+}
+
+}
+
+AffineTransform Compositor::layer_to_device(ServerWindow const& window, Layer const& layer) const
+{
+    // Up to the window, the nearest last.
+    Vector<Layer const*> chain;
+    for (auto const* at = &layer; at; at = at->parent)
+        chain.append(at);
+    auto const frame = device_frame(window);
+    float const scale = static_cast<float>(m_screen.scale());
+    auto transform = AffineTransform::translation(static_cast<float>(frame.x), static_cast<float>(frame.y)).multiplied(AffineTransform::scaling(scale, scale));
+    for (size_t i = chain.size(); i > 0; --i) {
+        auto const& step = *chain[i - 1];
+        transform = transform.multiplied(local_transform_of(step));
+        if (i > 1)
+            transform = transform.multiplied(AffineTransform::translation(-step.shown.bounds_origin.x, -step.shown.bounds_origin.y));
+    }
+    return transform;
+}
+
+IntRect Compositor::layer_bounds(ServerWindow const& window, Layer const& layer, AffineTransform const& to_device) const
+{
+    float const scale = static_cast<float>(m_screen.scale());
+    FloatRect area { 0, 0, layer.shown.frame.width, layer.shown.frame.height };
+    if (auto const* surface = layer.shown_surface(); surface && !layer.clips) {
+        FloatRect const image { layer.contents_origin.x - layer.shown.bounds_origin.x, layer.contents_origin.y - layer.shown.bounds_origin.y, static_cast<float>(surface->width()) / scale, static_cast<float>(surface->height()) / scale };
+        area = area.united(image);
+    }
+    auto bounds = to_device.map(area).enclosing_int_rect().inflated(1);
+    if (layer.blur > 0)
+        bounds = bounds.inflated(static_cast<int>(Math::ceil(static_cast<double>(layer.blur * scale * 3))));
+    if (!layer.clips) {
+        auto const inner = to_device.multiplied(AffineTransform::translation(-layer.shown.bounds_origin.x, -layer.shown.bounds_origin.y));
+        for (auto const* child : layer.children)
+            bounds = bounds.united(layer_bounds(window, *child, inner.multiplied(local_transform_of(*child))));
+    }
+    return bounds;
+}
+
+void Compositor::invalidate_layer(ServerWindow const& window, Layer const& layer)
+{
+    if (is_drawn(window))
+        invalidate(layer_bounds(window, layer, layer_to_device(window, layer)));
+}
+
+IntRect Compositor::device_rect_of_layer_surface(ServerWindow const& window, Layer const& layer, IntRect pixels) const
+{
+    float const scale = static_cast<float>(m_screen.scale());
+    FloatRect const area { layer.contents_origin.x - layer.shown.bounds_origin.x + static_cast<float>(pixels.x) / scale, layer.contents_origin.y - layer.shown.bounds_origin.y + static_cast<float>(pixels.y) / scale, static_cast<float>(pixels.width) / scale, static_cast<float>(pixels.height) / scale };
+    return layer_to_device(window, layer).map(area).enclosing_int_rect().inflated(1);
+}
+
+void Compositor::collect_layer_contents(Layer const& layer, AffineTransform const& to_device, IntRect clip, u32 opacity, float radius, IntRect rounded, int window_index, ServerWindow const& window, IntPoint frame_origin, Vector<LayerDraw>& out)
+{
+    float const scale = static_cast<float>(m_screen.scale());
+    auto const* shape = window.is_bare() ? nullptr : window.shape;
+    IntRect const window_frame { frame_origin.x, frame_origin.y, device_frame(window).width, device_frame(window).height };
+    auto add = [&](LayerDraw draw) {
+        draw.window_index = window_index;
+        draw.shape = shape;
+        draw.window_frame = window_frame;
+        draw.opacity = opacity;
+        draw.radius = radius;
+        draw.rounded = rounded;
+        out.append(move(draw));
+    };
+    FloatRect const whole { 0, 0, layer.shown.frame.width, layer.shown.frame.height };
+
+    if (layer.material >= 0) {
+        LayerDraw draw;
+        draw.kind = LayerDraw::Kind::Material;
+        draw.material = &m_theme.materials[layer.material];
+        draw.rect = rounded_rect(to_device.map(whole));
+        draw.bounds = draw.rect.intersected(clip);
+        if (!draw.bounds.is_empty())
+            add(move(draw));
+    }
+    if (layer.background.alpha != 0) {
+        LayerDraw draw;
+        draw.kind = LayerDraw::Kind::Color;
+        draw.color = layer.background.to_pixel();
+        draw.rect = rounded_rect(to_device.map(whole));
+        draw.bounds = draw.rect.intersected(clip);
+        if (!draw.bounds.is_empty())
+            add(move(draw));
+    }
+    if (auto const* surface = layer.shown_surface()) {
+        LayerDraw draw;
+        draw.kind = LayerDraw::Kind::Image;
+        draw.image = surface;
+        float const left = layer.contents_origin.x - layer.shown.bounds_origin.x;
+        float const top = layer.contents_origin.y - layer.shown.bounds_origin.y;
+        auto const image_to_device = to_device.multiplied(AffineTransform::translation(left, top)).multiplied(AffineTransform::scaling(1 / scale, 1 / scale));
+        draw.integral = only_moves_by_whole_pixels(image_to_device);
+        if (draw.integral) {
+            draw.rect = { static_cast<int>(Math::round(static_cast<double>(image_to_device.e()))), static_cast<int>(Math::round(static_cast<double>(image_to_device.f()))), surface->width(), surface->height() };
+            draw.bounds = draw.rect.intersected(clip);
+        } else {
+            draw.device_to_image = image_to_device.inverse();
+            draw.bounds = image_to_device.map(surface->rect().to<float>()).enclosing_int_rect().inflated(1).intersected(clip);
+        }
+        if (!draw.bounds.is_empty())
+            add(move(draw));
+    }
+    auto const inner = to_device.multiplied(AffineTransform::translation(-layer.shown.bounds_origin.x, -layer.shown.bounds_origin.y));
+    for (auto const* child : layer.children)
+        collect_layer(*child, inner, clip, window_index, window, frame_origin, out);
+}
+
+void Compositor::collect_layer(Layer const& layer, AffineTransform const& parent, IntRect clip, int window_index, ServerWindow const& window, IntPoint frame_origin, Vector<LayerDraw>& out)
+{
+    if (layer.hidden || layer.shown.opacity <= 0)
+        return;
+    if (layer.has_clip_rect)
+        clip = clip.intersected(parent.map(layer.clip_rect).enclosing_int_rect());
+    auto const to_device = parent.multiplied(local_transform_of(layer));
+    float const scale = static_cast<float>(m_screen.scale());
+    FloatRect const whole { 0, 0, layer.shown.frame.width, layer.shown.frame.height };
+    auto const device_whole = to_device.map(whole);
+    if (layer.clips)
+        clip = clip.intersected(device_whole.enclosing_int_rect());
+    if (clip.is_empty())
+        return;
+    auto const opacity = static_cast<u32>(clamp(layer.shown.opacity, 0.0f, 1.0f) * 255 + 0.5f);
+    bool const moves_whole = only_moves_by_whole_pixels(to_device.multiplied(AffineTransform::scaling(1 / scale, 1 / scale)));
+    float const radius = layer.shown.corner_radius * scale;
+    bool const has_more = !layer.children.is_empty();
+    // What can't be drawn straight on to the screen, a piece at a time, is drawn first into a picture of its own: what's in it fades
+    // or turns as one, or is rounded off as one, or blurred.
+    bool const as_a_picture = layer.blur > 0 || (has_more && (opacity < 255 || !moves_whole || (radius > 0 && layer.clips))) || (!moves_whole && layer.background.alpha != 0);
+    if (!as_a_picture) {
+        collect_layer_contents(layer, to_device, clip, opacity, moves_whole ? radius : radius, rounded_rect(device_whole), window_index, window, frame_origin, out);
+        return;
+    }
+    auto const size = IntSize { static_cast<int>(Math::ceil(static_cast<double>(layer.shown.frame.width * scale))), static_cast<int>(Math::ceil(static_cast<double>(layer.shown.frame.height * scale))) };
+    if (size.is_empty())
+        return;
+    auto picture_or_error = Bitmap::create(size);
+    if (picture_or_error.is_error())
+        return;
+    auto picture = picture_or_error.release_value();
+    Vector<LayerDraw> inside;
+    auto const in_picture = AffineTransform::scaling(scale, scale);
+    collect_layer_contents(layer, in_picture, picture->rect(), 255, 0, {}, window_index, window, { -1000000, -1000000 }, inside);
+    for (auto& draw : inside) {
+        draw.shape = nullptr;
+        if (draw.kind != LayerDraw::Kind::Material)
+            draw_layer_piece(draw, *picture, picture->rect());
+    }
+    if (layer.blur > 0)
+        (void)gaussian_blur(*picture, picture->rect(), layer.blur * scale);
+
+    LayerDraw draw;
+    draw.kind = LayerDraw::Kind::Image;
+    draw.window_index = window_index;
+    draw.shape = window.is_bare() ? nullptr : window.shape;
+    draw.window_frame = { frame_origin.x, frame_origin.y, device_frame(window).width, device_frame(window).height };
+    draw.image = picture.ptr();
+    draw.picture = picture;
+    draw.opacity = opacity;
+    auto const image_to_device = to_device.multiplied(AffineTransform::scaling(1 / scale, 1 / scale));
+    draw.integral = only_moves_by_whole_pixels(image_to_device);
+    if (draw.integral) {
+        draw.rect = { static_cast<int>(Math::round(static_cast<double>(image_to_device.e()))), static_cast<int>(Math::round(static_cast<double>(image_to_device.f()))), size.width, size.height };
+        draw.bounds = draw.rect.intersected(clip);
+        draw.radius = radius;
+        draw.rounded = draw.rect;
+    } else {
+        draw.device_to_image = image_to_device.inverse();
+        draw.bounds = image_to_device.map(picture->rect().to<float>()).enclosing_int_rect().inflated(1).intersected(clip);
+        draw.radius = radius;
+    }
+    if (!draw.bounds.is_empty())
+        out.append(move(draw));
+}
+
+void Compositor::prepare_layer_draws()
+{
+    m_layer_draws.clear();
+    float const scale = static_cast<float>(m_screen.scale());
+    for (size_t index = 0; index < m_windows.size(); ++index) {
+        auto const& window = *m_windows[index];
+        if (!is_drawn(window) || window.top_layers.is_empty())
+            continue;
+        auto const frame = device_frame(window);
+        auto const to_device = AffineTransform::translation(static_cast<float>(frame.x), static_cast<float>(frame.y)).multiplied(AffineTransform::scaling(scale, scale));
+        auto const clip = frame.intersected(m_screen.framebuffer().rect());
+        for (auto const* layer : window.top_layers)
+            collect_layer(*layer, to_device, clip, static_cast<int>(index), window, frame.origin(), m_layer_draws);
+    }
+}
+
+void Compositor::draw_layer_piece(LayerDraw const& draw, Bitmap& target, IntRect clip) const
+{
+    auto area = draw.bounds.intersected(clip);
+    if (area.is_empty() || draw.kind == LayerDraw::Kind::Material)
+        return;
+    IntSize const frame_size = draw.window_frame.size();
+    if (!draw.integral) {
+        // By the map, a pixel at a time: for what's on its way somewhere. A sample outside the picture is clear, which gives the
+        // edges a soft side.
+        auto const& image = *draw.image;
+        int const width = image.width();
+        int const height = image.height();
+        for (int y = area.y; y < area.bottom(); ++y) {
+            auto* row = target.scanline(y);
+            for (int x = area.x; x < area.right(); ++x) {
+                auto const at = draw.device_to_image.map(FloatPoint { static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f });
+                float const u = at.x - 0.5f;
+                float const v = at.y - 0.5f;
+                int const left = static_cast<int>(Math::floor(static_cast<double>(u)));
+                int const top = static_cast<int>(Math::floor(static_cast<double>(v)));
+                if (left < -1 || top < -1 || left >= width || top >= height)
+                    continue;
+                auto const fraction_x = static_cast<u32>((u - static_cast<float>(left)) * 256);
+                auto const fraction_y = static_cast<u32>((v - static_cast<float>(top)) * 256);
+                auto sample = [&](int sample_x, int sample_y) -> u32x4 {
+                    if (sample_x < 0 || sample_y < 0 || sample_x >= width || sample_y >= height)
+                        return u32x4 {};
+                    return widened(image.scanline(sample_y)[sample_x]);
+                };
+                u32x4 const upper = sample(left, top) * (256 - fraction_x) + sample(left + 1, top) * fraction_x;
+                u32x4 const lower = sample(left, top + 1) * (256 - fraction_x) + sample(left + 1, top + 1) * fraction_x;
+                Pixel source = narrowed((upper * (256 - fraction_y) + lower * fraction_y + 32768u) >> 16);
+                u32 coverage = draw.opacity;
+                if (draw.radius > 0)
+                    coverage = coverage * coverage_in_rounded(at.x, at.y, static_cast<float>(width), static_cast<float>(height), draw.radius) / 255;
+                if (coverage < 255)
+                    source = scale_pixel(source, static_cast<u8>(coverage));
+                if (source)
+                    row[x] = blend_over(source, row[x]);
+            }
+        }
+        return;
+    }
+    bool const plain = draw.opacity >= 255 && draw.radius <= 0;
+    u8 coverage[512];
+    for (int y = area.y; y < area.bottom(); ++y) {
+        auto* row = target.scanline(y);
+        for (int done = 0; done < area.width;) {
+            int const count = min(area.width - done, static_cast<int>(array_size(coverage)));
+            int const x = area.x + done;
+            int const x_in_frame = x - draw.window_frame.x;
+            int const y_in_frame = y - draw.window_frame.y;
+            Pixel const* source = draw.image ? draw.image->scanline(y - draw.rect.y) + (x - draw.rect.x) : nullptr;
+            bool const near_corner = draw.shape && (y_in_frame < draw.shape->corner_extent || y_in_frame >= frame_size.height - draw.shape->corner_extent) && (x_in_frame < draw.shape->corner_extent || x_in_frame + count > frame_size.width - draw.shape->corner_extent);
+            if (plain && !near_corner) {
+                if (source)
+                    blend_row(row + x, source, count);
+                else
+                    blend_row_solid(row + x, draw.color, count);
+            } else {
+                for (int i = 0; i < count; ++i) {
+                    u32 value = draw.opacity;
+                    if (draw.radius > 0)
+                        value = value * coverage_in_rounded(static_cast<float>(x + i - draw.rounded.x) + 0.5f, static_cast<float>(y - draw.rounded.y) + 0.5f, static_cast<float>(draw.rounded.width), static_cast<float>(draw.rounded.height), draw.radius) / 255;
+                    if (near_corner)
+                        value = value * window_corner_coverage(draw.shape, x_in_frame + i, y_in_frame, frame_size) / 255;
+                    coverage[i] = static_cast<u8>(value);
+                }
+                if (source)
+                    blend_row_coverage(row + x, source, coverage, count);
+                else
+                    blend_row_solid_coverage(row + x, draw.color, coverage, count);
+            }
+            done += count;
+        }
+    }
 }
 
 void Compositor::surface_replaced(ServerWindow& window)
@@ -990,6 +1339,14 @@ ErrorOr<NonnullRefPtr<Bitmap>> Compositor::snapshot(ServerWindow const& window) 
         if (in_chrome)
             blend_row_in_window(row, chrome->scanline(y), 0, y, min(chrome->width(), frame.width), frame.size(), shape);
     }
+    if (!window.top_layers.is_empty()) {
+        float const scale = static_cast<float>(m_screen.scale());
+        Vector<LayerDraw> draws;
+        for (auto const* layer : window.top_layers)
+            const_cast<Compositor*>(this)->collect_layer(*layer, AffineTransform::scaling(scale, scale), picture->rect(), 0, window, { 0, 0 }, draws);
+        for (auto const& draw : draws)
+            draw_layer_piece(draw, *picture, picture->rect());
+    }
     return picture;
 }
 
@@ -1113,6 +1470,7 @@ void Compositor::render()
     if (!m_any_dirty)
         return;
     u64 started = now_microseconds();
+    prepare_layer_draws();
     find_what_shows();
     grow_damage_for_materials();
     auto rects = dirty_rects();
@@ -1143,7 +1501,7 @@ void Compositor::render()
         steps.append(Step { StepKind::Shadow, window, static_cast<int>(index) });
         Vector<MaterialJob> jobs;
         for (auto const& shown : m_shown_materials) {
-            if (shown.window_index != index)
+            if (shown.window_index != index || shown.draw.has_value())
                 continue;
             auto const& material = window->materials[shown.material_index];
             auto const& style = m_theme.materials[static_cast<int>(material.material)];
@@ -1169,6 +1527,42 @@ void Compositor::render()
             draw_materials(jobs);
         }
         steps.append(Step { StepKind::Body, window, static_cast<int>(index) });
+        // What's over it: each in turn, those with a material behind them stopping for it, as a window's do.
+        for (size_t draw_index = 0; draw_index < m_layer_draws.size(); ++draw_index) {
+            auto const& draw = m_layer_draws[draw_index];
+            if (draw.window_index != static_cast<int>(index))
+                continue;
+            if (draw.kind != LayerDraw::Kind::Material) {
+                Step step { StepKind::Layer, window, static_cast<int>(index) };
+                step.draw = draw_index;
+                steps.append(step);
+                continue;
+            }
+            Vector<MaterialJob> layer_jobs;
+            for (auto const& shown : m_shown_materials) {
+                if (!shown.draw.has_value() || shown.draw.value() != draw_index)
+                    continue;
+                for (auto const& rect : rects) {
+                    auto area = shown.shown.intersected(rect);
+                    if (!area.is_empty())
+                        layer_jobs.append(MaterialJob { this, window, draw.material, area, shown.region, 0, {}, 0, 0, 0, 0, 1, 0, nullptr, nullptr });
+                }
+            }
+            if (layer_jobs.is_empty())
+                continue;
+            Vector<Piece*> wanted;
+            for (auto& piece : pieces) {
+                for (auto const& job : layer_jobs) {
+                    float const sigma = job.style->blur * static_cast<float>(scale);
+                    if (piece.rect.intersects(job.area.inflated(static_cast<int>(Math::ceil(sigma * 3)) + reduction_for(sigma) * 2))) {
+                        wanted.append(&piece);
+                        break;
+                    }
+                }
+            }
+            draw_steps(steps, steps.size(), wanted);
+            draw_materials(layer_jobs);
+        }
     }
     if (!overlays_drawn)
         draw_overlays_now();

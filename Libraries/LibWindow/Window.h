@@ -12,6 +12,7 @@
 #include <LibBase/Span.h>
 #include <LibBase/String.h>
 #include <LibBase/Vector.h>
+#include <LibAnimation/Curve.h>
 #include <LibCore/EventLoop.h>
 #include <LibGfx/Bitmap.h>
 #include <LibIPC/Listener.h>
@@ -56,11 +57,14 @@ private:
     void shell_state(IPC::Sender const&, String json) override;
     void hotkey(IPC::Sender const&, u16 code, u32 modifiers) override;
     void accessibility_requested(IPC::Sender const&, u32 generation) override;
+    void ping(IPC::Sender const&, u32 serial) override;
     void key(IPC::Sender const&, u32 window, bool pressed, u16 code, u32 modifiers, String text) override;
     void resized(IPC::Sender const&, u32 window, i32 width, i32 height) override;
     void close_requested(IPC::Sender const&, u32 window) override;
     void activated(IPC::Sender const&, u32 window, bool active) override;
     void presented(IPC::Sender const&, u32 window) override;
+    void layers_presented(IPC::Sender const&, u32 window, u32 serial) override;
+    void layer_animation_finished(IPC::Sender const&, u32 window, u32 layer, u32 tag) override;
 
     [[nodiscard]] Window* window_with_id(u32);
 
@@ -95,6 +99,65 @@ struct DragEvent {
     ReadonlyBytes data;
 };
 
+class Layer;
+
+// Changes to a window's layers, all of which are on the screen in the same frame. They go when it's committed.
+class LayerTransaction final {
+public:
+    explicit LayerTransaction(Window& window)
+        : m_window(window)
+    {
+    }
+
+    void set(Layer const&, LayerProperty, float a = 0, float b = 0, float c = 0, float d = 0);
+    void set_frame(Layer const& layer, Gfx::FloatRect const& frame) { set(layer, LayerProperty::Frame, frame.x, frame.y, frame.width, frame.height); }
+    void animate(Layer const&, LayerProperty, Span<float const> from, Span<float const> to, Animation::Timing const&, u32 tag = 0, bool repeats = false, int steps = 0);
+    void stop_animation(Layer const&, LayerProperty);
+    void destroy(Layer const&);
+    // This layer's back buffer is now the one shown, and this much of it changed.
+    void present(Layer&, Gfx::IntRect damage);
+    // So is the window's.
+    void present_window(Gfx::IntRect damage);
+
+    [[nodiscard]] bool is_empty() const { return m_changes.is_empty(); }
+    // Sends them. Says what it'll hear back when they're on the screen.
+    u32 commit();
+
+private:
+    Window& m_window;
+    Vector<LayerChange> m_changes;
+};
+
+// Something over a window's own surface, or in another layer, that the server moves and fades and animates by itself.
+class Layer final {
+public:
+    [[nodiscard]] static ErrorOr<NonnullOwnPtr<Layer>> create(Window&, Layer const* parent = nullptr);
+    ~Layer();
+
+    [[nodiscard]] u32 id() const { return m_id; }
+    // Pixels, two of them as the window has. Something has to be drawn before it shows.
+    [[nodiscard]] ErrorOr<void> set_surface(Gfx::IntSize pixels);
+    [[nodiscard]] bool has_surface() const { return m_buffers[0].ptr() != nullptr; }
+    [[nodiscard]] Gfx::Bitmap& back_buffer() { return *m_buffers[1 - m_front]; }
+    [[nodiscard]] Gfx::Bitmap const& shown_buffer() const { return *m_buffers[m_front]; }
+
+private:
+    friend class LayerTransaction;
+
+    Layer(Window& window, u32 id)
+        : m_window(window)
+        , m_id(id)
+    {
+    }
+
+    Window& m_window;
+    u32 m_id { 0 };
+    void* m_memory { nullptr };
+    size_t m_memory_size { 0 };
+    RefPtr<Gfx::Bitmap> m_buffers[2];
+    int m_front { 0 };
+};
+
 class Window final {
 public:
     [[nodiscard]] static ErrorOr<NonnullOwnPtr<Window>> create(Connection&, StringView title, Gfx::IntRect frame, u32 flags);
@@ -112,6 +175,8 @@ public:
     // Shows it, this part having changed (in pixels; whole, without one).
     void present();
     void present(Gfx::IntRect damage);
+    // The same, in with other changes.
+    void present_in(LayerTransaction&, Gfx::IntRect damage);
     // Until what was presented is on screen, so the other buffer is free.
     // (Runs the event loop meanwhile.)
     void wait_until_presented(Core::EventLoop&);
@@ -149,9 +214,13 @@ public:
     Function<void(bool)> on_activation;
     // What was last presented is on screen: the other buffer is free to draw on.
     Function<void()> on_presented;
+    // The commit with this serial is on the screen.
+    Function<void(u32)> on_layers_presented;
+    Function<void(u32 layer, u32 tag)> on_layer_animation_finished;
 
 private:
     friend class Connection;
+    friend class LayerTransaction;
 
     Window(Connection&, u32 id, Gfx::IntRect);
     ErrorOr<void> make_surface(Gfx::IntSize points);
@@ -167,6 +236,7 @@ private:
     RefPtr<Gfx::Bitmap> m_buffers[2];
     int m_front { 0 };
     bool m_waiting_for_present { false };
+    u32 m_layer_serial { 0 };
 };
 
 }

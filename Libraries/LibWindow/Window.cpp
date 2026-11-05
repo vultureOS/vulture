@@ -156,6 +156,28 @@ void Connection::presented(IPC::Sender const&, u32 id)
     }
 }
 
+void Connection::ping(IPC::Sender const&, u32 serial)
+{
+    (void)m_server.pong(serial);
+}
+
+void Connection::layers_presented(IPC::Sender const&, u32 id, u32 serial)
+{
+    if (auto* window = window_with_id(id)) {
+        window->m_waiting_for_present = false;
+        if (window->on_layers_presented)
+            window->on_layers_presented(serial);
+    }
+}
+
+void Connection::layer_animation_finished(IPC::Sender const&, u32 id, u32 layer, u32 tag)
+{
+    if (auto* window = window_with_id(id)) {
+        if (window->on_layer_animation_finished)
+            window->on_layer_animation_finished(layer, tag);
+    }
+}
+
 Window::Window(Connection& connection, u32 id, Gfx::IntRect frame)
     : m_connection(connection)
     , m_id(id)
@@ -241,6 +263,172 @@ void Window::present(Gfx::IntRect damage)
     for (int y = area.y; y < area.bottom(); ++y)
         memcpy(next.scanline(y) + area.x, shown.scanline(y) + area.x, static_cast<size_t>(area.width) * sizeof(Gfx::Pixel));
     m_front = back;
+}
+
+void Window::present_in(LayerTransaction& transaction, Gfx::IntRect damage)
+{
+    transaction.present_window(damage);
+}
+
+void LayerTransaction::set(Layer const& layer, LayerProperty property, float a, float b, float c, float d)
+{
+    LayerChange change;
+    change.layer = layer.id();
+    change.property = property;
+    change.values[0] = a;
+    change.values[1] = b;
+    change.values[2] = c;
+    change.values[3] = d;
+    m_changes.append(change);
+}
+
+void LayerTransaction::animate(Layer const& layer, LayerProperty property, Span<float const> from, Span<float const> to, Animation::Timing const& timing, u32 tag, bool repeats, int steps)
+{
+    LayerChange change;
+    change.layer = layer.id();
+    change.property = LayerProperty::Animate;
+    change.tag = tag;
+    LayerCurve curve = LayerCurve::Linear;
+    if (timing.kind == Animation::Timing::Kind::Bezier)
+        curve = LayerCurve::Bezier;
+    else if (timing.kind == Animation::Timing::Kind::Spring)
+        curve = LayerCurve::Spring;
+    change.detail = static_cast<u32>(property) | (static_cast<u32>(curve) << 8) | (repeats ? 1u << 16 : 0) | (static_cast<u32>(steps) << 24);
+    for (size_t i = 0; i < 4; ++i) {
+        change.values[i] = i < from.size() ? from[i] : 0;
+        change.values[4 + i] = i < to.size() ? to[i] : 0;
+    }
+    change.values[8] = timing.duration;
+    if (curve == LayerCurve::Bezier) {
+        change.values[9] = timing.bezier.x1();
+        change.values[10] = timing.bezier.y1();
+        change.values[11] = timing.bezier.x2();
+        change.values[12] = timing.bezier.y2();
+    } else if (curve == LayerCurve::Spring) {
+        change.values[9] = timing.spring.natural_frequency();
+        change.values[10] = timing.spring.damping_ratio();
+        change.values[11] = timing.spring.initial_velocity();
+    }
+    m_changes.append(change);
+}
+
+void LayerTransaction::stop_animation(Layer const& layer, LayerProperty property)
+{
+    LayerChange change;
+    change.layer = layer.id();
+    change.property = LayerProperty::StopAnimation;
+    change.detail = static_cast<u32>(property);
+    m_changes.append(change);
+}
+
+void LayerTransaction::destroy(Layer const& layer)
+{
+    LayerChange change;
+    change.layer = layer.id();
+    change.property = LayerProperty::Destroy;
+    m_changes.append(change);
+}
+
+void LayerTransaction::present(Layer& layer, Gfx::IntRect damage)
+{
+    if (!layer.m_buffers[0])
+        return;
+    int const back = 1 - layer.m_front;
+    LayerChange change;
+    change.layer = layer.id();
+    change.property = LayerProperty::Present;
+    change.values[0] = static_cast<float>(back);
+    change.values[1] = static_cast<float>(damage.x);
+    change.values[2] = static_cast<float>(damage.y);
+    change.values[3] = static_cast<float>(damage.width);
+    change.values[4] = static_cast<float>(damage.height);
+    m_changes.append(change);
+    // The other buffer gets what this one has, so drawing goes on from it.
+    auto const& shown = *layer.m_buffers[back];
+    auto& next = *layer.m_buffers[layer.m_front];
+    auto const area = damage.intersected(shown.rect());
+    for (int y = area.y; y < area.bottom(); ++y)
+        memcpy(next.scanline(y) + area.x, shown.scanline(y) + area.x, static_cast<size_t>(area.width) * sizeof(Gfx::Pixel));
+    layer.m_front = back;
+}
+
+void LayerTransaction::present_window(Gfx::IntRect damage)
+{
+    if (!m_window.m_buffers[0])
+        return;
+    int const back = 1 - m_window.m_front;
+    LayerChange change;
+    change.property = LayerProperty::PresentWindow;
+    change.values[0] = static_cast<float>(back);
+    change.values[1] = static_cast<float>(damage.x);
+    change.values[2] = static_cast<float>(damage.y);
+    change.values[3] = static_cast<float>(damage.width);
+    change.values[4] = static_cast<float>(damage.height);
+    m_changes.append(change);
+    auto const& shown = *m_window.m_buffers[back];
+    auto& next = *m_window.m_buffers[m_window.m_front];
+    auto const area = damage.intersected(shown.rect());
+    for (int y = area.y; y < area.bottom(); ++y)
+        memcpy(next.scanline(y) + area.x, shown.scanline(y) + area.x, static_cast<size_t>(area.width) * sizeof(Gfx::Pixel));
+    m_window.m_front = back;
+}
+
+u32 LayerTransaction::commit()
+{
+    u32 const serial = ++m_window.m_layer_serial;
+    m_window.m_waiting_for_present = true;
+    Vector<u8> bytes;
+    MUST(bytes.try_resize(m_changes.size() * sizeof(LayerChange)));
+    if (!m_changes.is_empty())
+        memcpy(bytes.data(), m_changes.data(), bytes.size());
+    (void)m_window.connection().server().commit_layers(m_window.id(), serial, bytes.span());
+    m_changes.clear();
+    return serial;
+}
+
+ErrorOr<NonnullOwnPtr<Layer>> Layer::create(Window& window, Layer const* parent)
+{
+    auto answer = TRY(window.connection().server().create_layer(window.id(), parent ? parent->id() : 0));
+    if (answer.error)
+        return Error::from_errno(answer.error);
+    return adopt_own(*new Layer(window, answer.layer));
+}
+
+Layer::~Layer()
+{
+    m_buffers[0] = nullptr;
+    m_buffers[1] = nullptr;
+    if (m_memory)
+        munmap(m_memory, m_memory_size);
+}
+
+ErrorOr<void> Layer::set_surface(Gfx::IntSize pixels)
+{
+    m_buffers[0] = nullptr;
+    m_buffers[1] = nullptr;
+    if (m_memory)
+        munmap(m_memory, m_memory_size);
+    m_memory = nullptr;
+    m_memory_size = 0;
+    size_t const buffer_size = static_cast<size_t>(pixels.width) * static_cast<size_t>(pixels.height) * sizeof(Gfx::Pixel);
+    size_t const total = buffer_size * 2;
+    int const fd = vulture_shared_memory_create(total, O_CLOEXEC);
+    if (fd < 0)
+        return Error::from_errno(errno);
+    IPC::Port memory(fd);
+    void* mapped = mmap(nullptr, total, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (mapped == MAP_FAILED)
+        return Error::from_errno(errno);
+    auto* first = static_cast<Gfx::Pixel*>(mapped);
+    m_memory = mapped;
+    m_memory_size = total;
+    m_buffers[0] = TRY(Gfx::Bitmap::wrap(first, pixels, pixels.width));
+    m_buffers[1] = TRY(Gfx::Bitmap::wrap(first + static_cast<size_t>(pixels.width) * static_cast<size_t>(pixels.height), pixels, pixels.width));
+    m_front = 0;
+    i32 const error = TRY(m_window.connection().server().set_layer_surface(m_window.id(), m_id, move(memory), pixels.width, pixels.height));
+    if (error)
+        return Error::from_errno(error);
+    return {};
 }
 
 void Window::wait_until_presented(Core::EventLoop& loop)

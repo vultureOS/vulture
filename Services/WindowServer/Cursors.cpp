@@ -5,6 +5,7 @@
  */
 
 #include "Cursors.h"
+#include <LibBase/Math.h>
 #include <LibGfx/Filter.h>
 #include <LibGfx/Painter.h>
 
@@ -180,7 +181,7 @@ NonnullRefPtr<Bitmap> with_shadow(Bitmap const& shape, int scale)
 
 }
 
-CursorImage make_cursor(CursorShape shape, int scale)
+CursorImage make_cursor(CursorShape shape, int scale, int turn)
 {
     auto layer = MUST(Bitmap::create({ VULTURE_CURSOR_IMAGE_SIZE, VULTURE_CURSOR_IMAGE_SIZE }));
     Painter painter(*layer);
@@ -195,6 +196,28 @@ CursorImage make_cursor(CursorShape shape, int scale)
         painter.translate(6, 6);
         draw_arrow(painter);
         break;
+    case CursorShape::Wait: {
+        // Our own: eight slices of a disc, cooler to warmer, going round, in a dark ring so it shows on anything.
+        painter.translate(16, 16);
+        Color const colors[8] = {
+            Color::from_rgb(0x2f6fed), Color::from_rgb(0x12a8c8), Color::from_rgb(0x18b56a), Color::from_rgb(0x9ccc2e),
+            Color::from_rgb(0xf5c518), Color::from_rgb(0xf0822d), Color::from_rgb(0xe5484d), Color::from_rgb(0x8e4ec6),
+        };
+        float constexpr radius = 8.5f;
+        float const start = 2 * static_cast<float>(Base::Math::pi) * static_cast<float>(turn) / static_cast<float>(wait_cursor_steps);
+        float const slice = 2 * static_cast<float>(Base::Math::pi) / 8;
+        Path rim;
+        rim.add_circle({ 0, 0 }, radius + 1);
+        painter.fill_path(rim, Color { 0, 0, 0, 170 });
+        for (int i = 0; i < 8; ++i) {
+            Path wedge;
+            wedge.move_to({ 0, 0 });
+            wedge.arc_to({ 0, 0 }, radius, start + slice * static_cast<float>(i), start + slice * static_cast<float>(i + 1));
+            wedge.close();
+            painter.fill_path(wedge, colors[i]);
+        }
+        break;
+    }
     case CursorShape::IBeam: {
         painter.translate(16, 16);
         Path beam;
