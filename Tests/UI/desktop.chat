@@ -48,11 +48,7 @@ pause 0.2
 button left up
 pause 1
 screenshot settings-dark.png
-pointer 6656 6963
-pause 0.3
-button left down
-pause 0.2
-button left up
+click row "Wallpaper"
 expect settings: Wallpaper
 pause 0.5
 pointer 18200 9502
@@ -69,11 +65,7 @@ button left down
 pause 0.2
 button left up
 pause 0.5
-pointer 6656 5816
-pause 0.3
-button left down
-pause 0.2
-button left up
+click row "Appearance"
 expect settings: Appearance
 pause 0.5
 pointer 25100 7536

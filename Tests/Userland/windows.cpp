@@ -60,7 +60,7 @@ void write_file(char const* name, char const* text)
 
 char const* read_file(char const* name)
 {
-    static char text[16384];
+    static char text[65536];
     char path[256];
     snprintf(path, sizeof(path), "%s/%s", s_directory, name);
     text[0] = '\0';
@@ -598,7 +598,7 @@ int run_frozen_client(int ready)
     Client other;
     other.connection = MUST(Window::Connection::connect(other.loop));
     (void)other.connection->server().set_application("Frozen"_sv, "com.vulture.test.frozen"_sv);
-    auto window = filled_window(other, "Frozen"_sv, { 600, 300, 400, 300 }, Window::WindowTitled, Color::from_rgb(0xffffff));
+    auto window = filled_window(other, "Frozen"_sv, { 600, 300, 400, 300 }, Window::WindowTitled | Window::WindowResizable, Color::from_rgb(0xffffff));
     auto layer = filled_layer(other, *window, nullptr, { 50, 50 }, Color::from_rgb(0xff0000));
     Window::LayerTransaction change(*window);
     change.set_frame(*layer, { 20, 60, 50, 50 });
@@ -655,6 +655,20 @@ void test_frozen_program(Client& client)
     client.pointer(100, 100);
     client.settle(100);
     report("away from it, the cursor's as it was", MUST(client.connection->server().cursor_shape()).shape != static_cast<i32>(Window::CursorShape::Wait));
+    // Its windows can still be moved about and resized: that's all done here. It takes a moment to give up waiting for it.
+    auto const shot_before = client.screen();
+    int const s = client.connection->scale();
+    report("its window isn't there yet", near(shot_before->color_at(1040 * s, 630 * s), shot_before->color_at(1100 * s, 700 * s), 40));
+    client.pointer(999, 599);
+    client.settle(40);
+    client.pointer(999, 599, Window::ButtonLeft);
+    client.settle(40);
+    client.pointer(1060, 650, Window::ButtonLeft);
+    client.settle(300);
+    client.pointer(1060, 650);
+    client.settle(100);
+    auto const shot_after = client.screen();
+    report("its window can still be resized", !near(shot_after->color_at(1040 * s, 630 * s), shot_before->color_at(1040 * s, 630 * s), 2));
     client.pointer(800, 500);
     client.settle(100);
     kill(child, SIGCONT);
@@ -692,6 +706,36 @@ void test_frozen_program(Client& client)
     report("every frame of it within a pixel of the model", count > 0 && worst <= 1);
 }
 
+void test_reduced_motion(Client& client)
+{
+    int const s = client.connection->scale();
+    auto const before = client.screen();
+    auto window = filled_window(client, "Motion"_sv, { 200, 200, 300, 200 }, Window::WindowTitled, Color::from_rgb(0x00a000));
+    client.settle(100);
+    bool told = false;
+    bool reduced = false;
+    client.connection->on_motion_change = [&](bool value) {
+        told = true;
+        reduced = value;
+    };
+    (void)client.connection->server().set_reduce_motion(true);
+    client.settle(100);
+    report("everyone hears that motion's reduced", told && reduced);
+    auto const frames_before = MUST(client.connection->server().statistics()).frames;
+    window->minimize();
+    // The very next frame, whenever that is, with no window going anywhere on its way down to the Dock.
+    while (MUST(client.connection->server().statistics()).frames == frames_before)
+        client.settle(1);
+    auto const answer = MUST(client.connection->server().capture());
+    auto const shot = MUST(Image::decode_png(answer.png.span()));
+    report("minimizing happens at once", near(shot->color_at(350 * s, 300 * s), before->color_at(350 * s, 300 * s), 8) && near(shot->color_at(350 * s, 450 * s), before->color_at(350 * s, 450 * s), 8));
+    (void)client.connection->server().set_reduce_motion(false);
+    client.settle(100);
+    report("and when it isn't", told && !reduced);
+    client.connection->on_motion_change = nullptr;
+    window->activate();
+}
+
 // Another client, soon killed: it says when its window is up.
 int run_doomed_client(int ready)
 {
@@ -717,6 +761,7 @@ int run_client()
     test_clients(client);
     test_layers(client);
     test_frozen_program(client);
+    test_reduced_motion(client);
     test_drag_rate(client, 10, false);
     test_drag_rate(client, 12, true);
     printf("done\n");
@@ -790,6 +835,11 @@ int main(int argc, char** argv)
     if (char const* frozen = strstr(report_text, "frozen: ")) {
         char const* end = strchr(frozen, '\n');
         printf("windows: %.*s\n", static_cast<int>(end ? end - frozen : static_cast<long>(strlen(frozen))), frozen);
+    }
+    // What's been shown to work, for the ledger to go by.
+    for (char const* line = strstr(report_text, "ok: "); line; line = strstr(line + 1, "ok: ")) {
+        char const* end = strchr(line, '\n');
+        printf("windows: %.*s\n", static_cast<int>(end ? end - line : static_cast<long>(strlen(line))), line);
     }
     // Each measure, with what it's of ("whole screen rate: ...").
     for (char const* rate = strstr(report_text, "rate: "); rate; rate = strstr(rate + 1, "rate: ")) {

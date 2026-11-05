@@ -65,6 +65,18 @@ struct ServerWindow {
     int shown_buffer { 0 };
     bool has_presented { false };
     bool present_pending { false };
+    // A new surface, not shown until it has something on it: the old one goes on being shown till then.
+    void* waiting_memory { nullptr };
+    size_t waiting_memory_size { 0 };
+    RefPtr<Gfx::Bitmap> waiting_buffers[2];
+    // Being resized by hand. The frame stays as it is until the program has something of the new size to show, and then they both
+    // change in the same frame, so that its edges are never seen ahead of its contents. Unless it's too long about it.
+    bool resize_waiting { false };
+    Gfx::IntRect resize_to;
+    u64 resize_asked_at { 0 };
+    bool resize_again { false };
+    Gfx::IntRect resize_next;
+    bool resize_gave_up { false };
 
     // Which squares of the shown surface are wholly opaque, left to right and top to bottom: nothing need be drawn under them.
     static constexpr int opaque_cell_size = 32;

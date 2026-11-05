@@ -1172,6 +1172,8 @@ int main(int argc, char** argv)
     Desktop::Preferences preferences("com.vulture.desktop"_sv);
     if (auto saved = preferences.string("appearance"_sv); saved.has_value())
         (void)server.set_appearance(saved.value());
+    if (preferences.boolean("reduceMotion"_sv).value_or(false))
+        (void)server.set_reduce_motion(true);
     if (auto saved = preferences.string("wallpaper"_sv); saved.has_value())
         (void)server.set_wallpaper(saved.value());
     if (auto saved = preferences.string("keyboardLayout"_sv); saved.has_value())

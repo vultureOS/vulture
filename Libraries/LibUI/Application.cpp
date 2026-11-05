@@ -197,6 +197,10 @@ ErrorOr<NonnullOwnPtr<Application>> Application::create(StringView name, StringV
         set_motion_enabled(false);
         set_held_still(true);
     }
+    application->m_connection->on_motion_change = [](bool reduced) {
+        if (!held_still())
+            set_motion_enabled(!reduced);
+    };
     return application;
 }
 

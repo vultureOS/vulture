@@ -100,7 +100,7 @@ Sizes are rough estimates of new lines, scaled from the reference figures above.
 | | M18 | [Shaping and input](#m18-shaping-and-input) | Done | Read and type any language, with emoji, in any control | 30k |
 | | M19 | [vultureFS 2](#m19-vulturefs-2) | Done | Use a 1 TiB disk, duplicate files instantly, roll back a snapshot | 20k |
 | | M20 | [External media](#m20-external-media) | Done | Plug in a USB stick; erase and repair disks; open disk images | 8k |
-| | M21 | [Layers](#m21-layers) | | See animations stay smooth even when an app hangs, with the spinning cursor | 18k |
+| | M21 | [Layers](#m21-layers) | Done | See animations stay smooth even when an app hangs, with the spinning cursor | 18k |
 | | M22 | [Displays and gestures](#m22-displays-and-gestures) | | Use two displays, swipe between Spaces, record the screen | 8k |
 | **2 Mac feel** | M23 | [Windows and Spaces](#m23-windows-and-spaces) | | Tile, go full screen, use App Exposé and Stage | 10k |
 | | M24 | [The desktop](#m24-the-desktop) | | Use the full Dock, menu bar, Control Center, widgets and screenshots | 12k |
@@ -554,9 +554,9 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on. M15 me
 | Null syscall | < 150 ns | 72 ns (M19) |
 | Context switch | < 1 µs | 173 ns (M3, yield between two threads on one processor) |
 | IPC round trip | < 3 µs | 0.84 µs (M7, call and answer between two processes; 4.6 µs through a generated proxy to a vlaunchd-started service) |
-| Window drag at 2560×1600 | 60 fps | 59.1 fps (M19); 59.2–59.7 fps (M8, and again at M9; 10 windows, 5 with blur; 16.7 ms beat, 8–11 ms of work per frame; beats with no pointer movement draw nothing) |
-| Input to photon | ≤ 1 frame | Over: 23.5 ms at the 99th percentile from input to flush, worst 44.7 ms (M19). QEMU shows no photon, so this is as far as it can be measured. M21 is what's to fix it |
-| Text Editor cold launch | < 300 ms | 20 ms, 12 ms warm (M19) |
+| Window drag at 2560×1600 | 60 fps | 111 fps (M21: 10 windows, 5 with blur; about 4 ms of composing and 0.7 ms of flushing per frame; 120 fps is the most it asks for). With all of the screen drawn for every frame, 12 windows and blur: 119 fps |
+| Input to photon | ≤ 1 frame | 12.5 ms at the 99th percentile from the event to the flush, worst 14.2 ms; 9.5 ms with all of the screen drawn for every frame (M21, on a machine with little else going on: about 20 ms with a game running on it). It was 23.5 ms at M19, measured from when the event was read rather than when it happened. QEMU shows no photon, so this is as far as it can be measured |
+| Text Editor cold launch | < 300 ms | 36 ms, 25 ms warm (M21) |
 | Cmd-Tab appears | ≤ 1 frame | |
 | Search, per keystroke | ≤ 50 ms | |
 | Application launch | < 300 ms | 24 ms (M19, Calculator, cold) |
@@ -599,6 +599,22 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **Testing inside a copy of the system.** With a `dd` of its own at last, a test that changes to a copy of the system and runs `dd` ran that one, for the wrong processor, if `PATH` had a relative entry in it. The seal tests then found nothing to catch, and said so as if the kernel had let a tampered file by.
 - **Tests that click by position go stale.** One new row in Settings moved everything under it, and each walkthrough that clicked one of those by coordinates went wrong, as M15 said it would. They go by name now.
 - **What a Mac does that's wrong.** Nine of POSIX's checks and seven of the commands are different on purpose. Each is written down in `Tests/Parity`, with why.
+
+### M21
+
+- **A race that had been there since M8.** The window server crashed or hung in most runs of a new test, and in nothing that came before it. A compositor thread that had just gone past the end of one job could read the next job's larger count, and take the index it held for a piece of that. Someone else had the same piece, so it ran twice, and the count of those done went past the end and never came level. It took a frame with many jobs of different sizes to show it: making frames faster made it happen. The count and the next index now share a word.
+- **Most of a frame was waiting.** Twelve windows with blur took 9 ms of composing, of which only about 1.3 ms would be needed if all eight processors were kept busy. Each blur got its memory afresh every frame, and at that size it's a mapping of its own: page faults, and all the other processors being told to forget it, which under a hypervisor is slow. Each blur stopped everything until what's under it was done, everywhere and not just where it reads. And one thread did each of them. Keeping the memory, taking only what each one reads, and sharing the slow parts took the same frame to under 5 ms.
+- **Nothing was ever covered.** Every window was drawn in full, under whatever was over it, and every blur was worked out, whether it could be seen or not. What's opaque of a window is now worked out as its pixels arrive, a square at a time, so nothing's drawn under that. A blur still needs what's under it to be there to read, even under something else: which is why that has to be worked out from the top down.
+- **The clock started late.** Input to flush was timed from when the server got round to reading the event, which could be a whole frame after it happened. So it flattered itself by up to a frame. It's timed from the event now. The number got worse, and then much better.
+- **A flush costs for being a flush.** All of the screen took 0.7 ms, and part of it 3.1 ms. QEMU copies whole rows in one go, and anything narrower a row at a time, starting from the first page of the framebuffer for each. So a flush takes whole rows, and rarely more than one of them is needed.
+- **Being held still isn't having motion reduced.** They were one setting. For a golden screenshot, a scroller that's been shown stays shown, so nothing depends on when it's looked at. With Reduce Motion it would have stayed up for good. Testing a real scroll in a test with motion off is what showed it.
+- **The first test of a fixed pause.** With a game running on the same Mac, a walkthrough quit a program, waited its one second, and clicked on the Dock as the Dock was moving along to fill the gap. It waits for the program to be gone now.
+- **Numbers depend on the machine.** F1 22 under CrossOver was running on this Mac for some of these runs, taking 3.5 of its 10 cores. Composing went from under 4 ms to 7.5 ms, and input to flush at the 99th percentile from about 10 ms to 20 ms, as one stalled virtual processor holds up a frame. The budget's for a machine doing nothing else; on one doing a lot else, it's over.
+- **Limit: Genie and Overview aren't layers yet.** They already run in the server, so they don't care about a stuck program, and M23 rebuilds Overview anyway.
+- **Limit: a stuck program doesn't scroll.** The server moves what it's told. What's kept ready is for not having to draw, not for going on without the program.
+- **Limit: there's no refresh to keep to.** Frames someone's waiting for go at up to twice the rate, as QEMU has no display to wait for. A real one will want to be tied to its refresh, which is H1's.
+- **Limit: resizing makes a new surface for each size.** It's fast enough, at about 50 fps for a big window, as most of the cost is drawing it anyway. Keeping a bit more than it needs would make it faster.
+- **Limit: Reduce Motion changes things at once,** where a Mac fades them.
 
 ### M20
 

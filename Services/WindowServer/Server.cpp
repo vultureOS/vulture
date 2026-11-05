@@ -244,6 +244,12 @@ void Server::render_frame()
         if (window->visible && window->is_titled() && window->chrome_is_stale)
             render_chrome(*window);
     }
+    if (m_gesture == Gesture::Resizing && m_gesture_window && m_compositor.has_damage()) {
+        auto const* surface = m_gesture_window->shown_surface();
+        int const scale = m_screen.scale();
+        if (surface && (surface->width() != m_gesture_window->frame.width * scale || surface->height() != m_gesture_window->frame.height * scale))
+            ++m_resize_mismatches;
+    }
     m_compositor.render();
     if (m_latency_started != 0) {
         u64 const took = now_microseconds() - m_latency_started;
@@ -329,6 +335,12 @@ WindowServerEndpoint::ConnectAnswer Server::connect(IPC::Sender const& sender, I
     int fd = client->events.fd();
     client->watch = m_loop.watch(fd, Core::EventLoop::Interest::Read, [this, client] { remove_client(*client); });
     m_clients.append(adopt_own(*client));
+    // (Most have nothing to be told, so they're only told if there's something.)
+    if (m_reduce_motion) {
+        IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::MotionChanged));
+        encoder.encode(true);
+        send_to(*m_clients.last(), encoder);
+    }
     return answer;
 }
 
@@ -363,6 +375,11 @@ void Server::remove_window(ServerWindow& window)
 {
     m_compositor.invalidate_window(window);
     release_surface(window);
+    if (window.waiting_memory)
+        munmap(window.waiting_memory, window.waiting_memory_size);
+    window.waiting_memory = nullptr;
+    window.waiting_buffers[0] = nullptr;
+    window.waiting_buffers[1] = nullptr;
     if (m_active == &window)
         m_active = nullptr;
     if (m_hovered == &window)
@@ -548,6 +565,18 @@ i32 Server::set_keyboard_layout(IPC::Sender const&, String identifier)
     return 0;
 }
 
+void Server::set_reduce_motion(IPC::Sender const&, bool reduced)
+{
+    if (reduced == m_reduce_motion)
+        return;
+    m_reduce_motion = reduced;
+    for (auto& client : m_clients) {
+        IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::MotionChanged));
+        encoder.encode(reduced);
+        send_to(*client, encoder);
+    }
+}
+
 i32 Server::set_appearance(IPC::Sender const&, String name)
 {
     char const* path = nullptr;
@@ -652,14 +681,30 @@ i32 Server::set_surface(IPC::Sender const& sender, u32 id, IPC::Port memory, i32
     void* mapped = mmap(nullptr, total, PROT_READ, MAP_SHARED, memory.fd(), 0);
     if (mapped == MAP_FAILED)
         return errno;
-    release_surface(*window);
-    window->memory = mapped;
-    window->memory_size = total;
     auto* first = static_cast<Pixel*>(mapped);
     auto one = Bitmap::wrap(first, { width, height }, width);
     auto two = Bitmap::wrap(first + static_cast<size_t>(width) * static_cast<size_t>(height), { width, height }, width);
-    if (one.is_error() || two.is_error())
+    if (one.is_error() || two.is_error()) {
+        munmap(mapped, total);
         return ENOMEM;
+    }
+    // The first one, or one that hasn't been shown: straight in. Otherwise it waits, with what's on the screen staying there, until
+    // it has something on it, which is what stops a resized window showing nothing for a frame.
+    if (window->waiting_memory)
+        munmap(window->waiting_memory, window->waiting_memory_size);
+    window->waiting_memory = nullptr;
+    window->waiting_buffers[0] = nullptr;
+    window->waiting_buffers[1] = nullptr;
+    if (window->has_presented) {
+        window->waiting_memory = mapped;
+        window->waiting_memory_size = total;
+        window->waiting_buffers[0] = one.release_value();
+        window->waiting_buffers[1] = two.release_value();
+        return 0;
+    }
+    release_surface(*window);
+    window->memory = mapped;
+    window->memory_size = total;
     window->buffers[0] = one.release_value();
     window->buffers[1] = two.release_value();
     window->shown_buffer = 0;
@@ -667,10 +712,28 @@ i32 Server::set_surface(IPC::Sender const& sender, u32 id, IPC::Port memory, i32
     return 0;
 }
 
+void Server::show_waiting_surface(ServerWindow& window)
+{
+    if (!window.waiting_memory)
+        return;
+    release_surface(window);
+    window.memory = window.waiting_memory;
+    window.memory_size = window.waiting_memory_size;
+    window.buffers[0] = move(window.waiting_buffers[0]);
+    window.buffers[1] = move(window.waiting_buffers[1]);
+    window.waiting_memory = nullptr;
+    window.waiting_memory_size = 0;
+    window.shown_buffer = 0;
+    m_compositor.surface_replaced(window);
+}
+
 void Server::present(IPC::Sender const& sender, u32 id, u32 buffer, i32 x, i32 y, i32 width, i32 height)
 {
     auto* window = window_of(sender, id);
-    if (!window || buffer > 1 || !window->buffers[0])
+    if (!window || buffer > 1)
+        return;
+    show_waiting_surface(*window);
+    if (!window->buffers[0])
         return;
     window->shown_buffer = static_cast<int>(buffer);
     window->has_presented = true;
@@ -688,6 +751,7 @@ void Server::present(IPC::Sender const& sender, u32 id, u32 buffer, i32 x, i32 y
     // Something to answer for, even with nothing to draw (a hidden window).
     if (!m_compositor.has_damage())
         m_compositor.invalidate({ 0, 0, 1, 1 });
+    finish_live_resize(*window);
     schedule_frame();
 }
 
@@ -881,6 +945,7 @@ void Server::apply_layer_change(ServerWindow& window, Window::LayerChange const&
     if (change.property >= LayerProperty::Count)
         return;
     if (change.property == LayerProperty::PresentWindow) {
+        show_waiting_surface(window);
         if (!window.buffers[0])
             return;
         window.shown_buffer = change.values[0] != 0 ? 1 : 0;
@@ -891,6 +956,7 @@ void Server::apply_layer_change(ServerWindow& window, Window::LayerChange const&
             auto const frame = m_compositor.device_frame(window);
             m_compositor.invalidate(IntRect { frame.x + damage.x, frame.y + damage.y, damage.width, damage.height }.intersected(frame));
         }
+        finish_live_resize(window);
         return;
     }
     auto* layer = window.layer_with_id(change.layer);
@@ -1159,7 +1225,7 @@ void Server::inject_pointer(IPC::Sender const& sender, i32 x, i32 y, u32 buttons
 
 WindowServerEndpoint::StatisticsAnswer Server::statistics(IPC::Sender const&)
 {
-    return { m_compositor.frames(), m_compositor.compose_microseconds(), m_compositor.flush_microseconds(), m_compositor.pixels(), m_compositor.material_microseconds() };
+    return { m_compositor.frames(), m_compositor.compose_microseconds(), m_compositor.flush_microseconds(), m_compositor.pixels(), m_compositor.material_microseconds(), m_resize_mismatches };
 }
 
 void Server::damage_everything(IPC::Sender const& sender)
@@ -1373,6 +1439,88 @@ void Server::send_resized(ServerWindow& window)
 int Server::title_bar_height(ServerWindow const& window) const
 {
     return window.title_bar_override > 0 ? window.title_bar_override : m_theme.title_bar_height;
+}
+
+void Server::resize_live(ServerWindow& window, IntRect frame)
+{
+    if (window.resize_waiting) {
+        window.resize_again = frame != window.resize_to;
+        window.resize_next = frame;
+        return;
+    }
+    if (frame == window.frame)
+        return;
+    bool const same_size = frame.size() == window.frame.size();
+    // Nobody to wait for; or nothing new for it to draw, or it's taking no notice.
+    if (same_size || !window.client || !window.has_presented || window.client->not_responding || window.resize_gave_up) {
+        bool const moved = frame.origin() != window.frame.origin();
+        move_window_to(window, frame);
+        if (moved)
+            send_moved(window);
+        if (!same_size)
+            send_resized(window);
+        return;
+    }
+    window.resize_waiting = true;
+    window.resize_to = frame;
+    window.resize_asked_at = now_microseconds();
+    IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Resized));
+    encoder.encode(window.id);
+    encoder.encode(static_cast<i32>(frame.width));
+    encoder.encode(static_cast<i32>(frame.height));
+    send_to(*window.client, encoder);
+    if (m_resize_timer < 0)
+        m_resize_timer = m_loop.add_timer(16, true, [this] { check_live_resizes(); });
+}
+
+void Server::finish_live_resize(ServerWindow& window)
+{
+    window.resize_gave_up = false;
+    if (!window.resize_waiting)
+        return;
+    auto const* surface = window.shown_surface();
+    int const scale = m_screen.scale();
+    // Something of the size it was asked for: there may be others on their way from before.
+    if (!surface || surface->width() != window.resize_to.width * scale || surface->height() != window.resize_to.height * scale)
+        return;
+    window.resize_waiting = false;
+    bool const moved = window.resize_to.origin() != window.frame.origin();
+    move_window_to(window, window.resize_to);
+    if (moved)
+        send_moved(window);
+    if (window.resize_again) {
+        window.resize_again = false;
+        resize_live(window, window.resize_next);
+    }
+}
+
+void Server::check_live_resizes()
+{
+    u64 const now = now_microseconds();
+    bool waiting = false;
+    for (auto* window : m_windows) {
+        if (!window->resize_waiting)
+            continue;
+        // A slow program gets a few frames. Past that, the window follows the hand, with what it had.
+        if (now - window->resize_asked_at < 100'000) {
+            waiting = true;
+            continue;
+        }
+        window->resize_waiting = false;
+        window->resize_gave_up = true;
+        bool const moved = window->resize_to.origin() != window->frame.origin();
+        move_window_to(*window, window->resize_to);
+        if (moved)
+            send_moved(*window);
+        if (window->resize_again) {
+            window->resize_again = false;
+            resize_live(*window, window->resize_next);
+        }
+    }
+    if (!waiting && m_resize_timer >= 0) {
+        m_loop.cancel_timer(m_resize_timer);
+        m_resize_timer = -1;
+    }
 }
 
 void Server::move_window_to(ServerWindow& window, IntRect frame)
@@ -1709,11 +1857,7 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
             } else if (m_gesture_edges & edge_bottom) {
                 frame.height = max(frame.height + dy, minimum_height);
             }
-            bool origin_changed = frame.x != m_gesture_window->frame.x || frame.y != m_gesture_window->frame.y;
-            move_window_to(*m_gesture_window, frame);
-            if (origin_changed)
-                send_moved(*m_gesture_window);
-            send_resized(*m_gesture_window);
+            resize_live(*m_gesture_window, frame);
         }
         break;
     case Gesture::ContentPress:

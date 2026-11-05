@@ -54,6 +54,9 @@ pause 1
 type \r
 expect settings: Appearance
 pause 1
+click row "Accessibility"
+expect settings: Accessibility
+ax-expect switch "Reduce motion" = off
 click row "Language & Region"
 expect settings: Language & Region
 ax-expect text "1,234.56"

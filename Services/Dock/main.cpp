@@ -105,6 +105,7 @@ public:
             running.pid = application.pid;
             running.identifier = MUST(String::from_view(application.identifier.view()));
             running.name = MUST(String::from_view(application.name.view()));
+            running.not_responding = application.not_responding;
             for (auto const& entry : application.windows) {
                 if (entry.minimized) {
                     MinimizedEntry minimized;
@@ -266,7 +267,16 @@ private:
         i32 pid;
         String identifier;
         String name;
+        bool not_responding { false };
     };
+    [[nodiscard]] static String title_of(RunningApplication const& running)
+    {
+        if (!running.not_responding)
+            return MUST(String::from_view(running.name.view()));
+        StringBuilder title;
+        title.appendff("{} (Not Responding)", running.name.view());
+        return MUST(title.to_string());
+    }
     struct MinimizedEntry {
         u32 id;
         String title;
@@ -300,8 +310,11 @@ private:
         for (auto const& pinned : m_pinned) {
             auto tile = copied(pinned);
             for (auto const& running : m_state_applications) {
-                if (running.identifier.view() == tile.identifier.view())
-                    tile.pid = running.pid;
+                if (running.identifier.view() != tile.identifier.view())
+                    continue;
+                tile.pid = running.pid;
+                if (running.not_responding)
+                    tile.title = title_of(running);
             }
             tile.bouncing_since = tile.pid ? -1 : bouncing_since(tile.identifier.view());
             m_tiles.append(move(tile));
@@ -316,7 +329,7 @@ private:
             if (pinned)
                 continue;
             Tile tile;
-            tile.title = MUST(String::from_view(running.name.view()));
+            tile.title = title_of(running);
             auto bundle = Desktop::application_with_identifier(running.identifier.view());
             tile.icon = MUST(String::from_view(bundle.has_value() ? bundle.value().icon.view() : "GenericApplication"_sv));
             tile.identifier = MUST(String::from_view(running.identifier.view()));

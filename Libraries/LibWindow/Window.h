@@ -36,6 +36,7 @@ public:
     [[nodiscard]] StringView appearance() const { return m_appearance.view(); }
 
     Function<void(StringView)> on_appearance_change;
+    Function<void(bool)> on_motion_change;
     Function<void(u32)> on_menu_item_chosen;
     Function<void()> on_quit_requested;
     Function<void(StringView)> on_shell_state;
@@ -50,6 +51,7 @@ private:
     void mouse(IPC::Sender const&, u32 window, u8 kind, i32 x, i32 y, u32 buttons, u32 modifiers, i32 wheel_x, i32 wheel_y) override;
     void moved(IPC::Sender const&, u32 window, i32 x, i32 y) override;
     void appearance_changed(IPC::Sender const&, String name) override;
+    void motion_changed(IPC::Sender const&, bool reduced) override;
     void drag(IPC::Sender const&, u32 window, u8 phase, i32 x, i32 y, String type, Vector<u8> data) override;
     void drag_finished(IPC::Sender const&, u32 window, bool accepted) override;
     void menu_item_chosen(IPC::Sender const&, u32 item) override;

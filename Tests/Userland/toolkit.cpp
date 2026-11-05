@@ -376,6 +376,31 @@ bool same_pixels(NonnullRefPtr<Bitmap> const& one, NonnullRefPtr<Bitmap> const& 
     return true;
 }
 
+// By hand, its edges are never seen ahead of what's in it.
+void test_live_resize()
+{
+    pointer(2, 2);
+    IntRect const frame { 100, 100, 400, 300 };
+    auto window = make_window("Resize"_sv, frame);
+    auto& box = window->root_view().add<ColorBox>();
+    box.set_frame({ 0, 0, 400, 300 });
+    window->on_resize = [&](FloatSize size) { box.set_frame({ 0, 0, size.width, size.height }); };
+    settle(200);
+    auto const before = MUST(s_app->connection().server().statistics());
+    pointer(499, 399);
+    pointer(499, 399, WS::ButtonLeft);
+    for (int step = 1; step <= 30; ++step)
+        pointer(499 + step * 8, 399 + step * 5, WS::ButtonLeft);
+    pointer(739, 549);
+    settle(200);
+    auto const after = MUST(s_app->connection().server().statistics());
+    report("resized by hand, it's at the size it was taken to", window->size().width == 640 && window->size().height == 450);
+    printf("(%llu frames with the wrong size of contents)\n", static_cast<unsigned long long>(after.resize_mismatches - before.resize_mismatches));
+    report("and not a frame showed it at any other size than its contents", after.resize_mismatches == before.resize_mismatches);
+    report("what's in it fills it", screen_color(frame.x + 630, frame.y + 440) == Color::from_rgb(0xc03060));
+    window->on_resize = nullptr;
+}
+
 void test_layers()
 {
     int const scale = s_app->connection().scale();
@@ -586,6 +611,7 @@ int run_client()
     test_appearance();
     test_sheet();
     test_layers();
+    test_live_resize();
     report("no token was missing", Appearance::missing_tokens() == 0);
     printf("done\n");
     fflush(stdout);
@@ -642,6 +668,11 @@ int main(int argc, char** argv)
     CHECK(failures == 0);
     if (!finished || failures)
         fprintf(stderr, "toolkit: the client said:\n%s\nthe server said:\n%s\nvlaunchd's log:\n%s", report_text, read_file("server.err"), read_file("log"));
+    // What's been shown to work, for the ledger to go by.
+    for (char const* line = strstr(report_text, "ok: "); line; line = strstr(line + 1, "ok: ")) {
+        char const* end = strchr(line, '\n');
+        printf("toolkit: %.*s\n", static_cast<int>(end ? end - line : static_cast<long>(strlen(line))), line);
+    }
     system("rm -rf /tmp/toolkit-test");
     return finish();
 }

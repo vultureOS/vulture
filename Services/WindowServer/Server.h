@@ -94,6 +94,7 @@ private:
     void register_hotkey(IPC::Sender const&, u16 code, u32 modifiers) override;
     i32 set_wallpaper(IPC::Sender const&, String name) override;
     void set_overview(IPC::Sender const&, bool shown) override;
+    void set_reduce_motion(IPC::Sender const&, bool reduced) override;
     void set_input_region(IPC::Sender const&, u32 window, i32 x, i32 y, i32 width, i32 height) override;
     void switch_space(IPC::Sender const&, i32 space) override;
     void inject_pointer(IPC::Sender const&, i32 x, i32 y, u32 buttons, u64 sent_at) override;
@@ -128,6 +129,11 @@ private:
     [[nodiscard]] int title_bar_height(ServerWindow const&) const;
     void update_cursor();
     void move_window_to(ServerWindow&, Gfx::IntRect frame);
+    // By hand: when its contents are ready.
+    void resize_live(ServerWindow&, Gfx::IntRect frame);
+    void finish_live_resize(ServerWindow&);
+    void check_live_resizes();
+    void show_waiting_surface(ServerWindow&);
     [[nodiscard]] ServerWindow* window_at(Gfx::IntPoint);
     [[nodiscard]] WindowButton button_at(ServerWindow const&, Gfx::IntPoint point) const;
     [[nodiscard]] int resize_edges_at(ServerWindow const&, Gfx::IntPoint point) const;
@@ -234,6 +240,9 @@ private:
     int m_cursor_turn { 0 };
     int m_cursor_timer { -1 };
     int m_responding_timer { -1 };
+    int m_resize_timer { -1 };
+    u64 m_resize_mismatches { 0 };
+    bool m_reduce_motion { false };
 
     bool m_frame_scheduled { false };
     int m_frame_timer { -1 };

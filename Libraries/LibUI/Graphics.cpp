@@ -489,6 +489,112 @@ void Graphics::draw_symbol(Symbol symbol, FloatRect const& rect, Color color, fl
         m_painter.fill_path(shape, color);
         return;
     }
+    case Symbol::Contrast: {
+        // A disc, half of it light.
+        Path shape;
+        shape.add_circle(at(8, 8), 6.6f * unit);
+        shape.add_circle(at(8, 8), 5.4f * unit);
+        shape.move_to(at(8, 2.6f));
+        shape.arc_to(at(8, 8), 5.4f * unit, -1.5707963f, 1.5707963f);
+        shape.close();
+        m_painter.fill_path(shape, color, FillRule::EvenOdd);
+        return;
+    }
+    case Symbol::Photo: {
+        // A frame with hills in it, and a sun.
+        Path shape;
+        auto const corner = at(1.4f, 2.6f);
+        shape.add_rounded_rect({ corner.x, corner.y, 13.2f * unit, 10.8f * unit }, 2 * unit);
+        auto const inner = at(2.6f, 3.8f);
+        shape.add_rounded_rect({ inner.x, inner.y, 10.8f * unit, 8.4f * unit }, 1 * unit);
+        m_painter.fill_path(shape, color, FillRule::EvenOdd);
+        Path hills;
+        hills.move_to(at(3.4f, 11.4f));
+        hills.line_to(at(6.6f, 7.2f));
+        hills.line_to(at(8.8f, 9.6f));
+        hills.line_to(at(10.2f, 8.2f));
+        hills.line_to(at(12.6f, 11.4f));
+        hills.close();
+        hills.add_circle(at(11, 5.8f), 1.1f * unit);
+        m_painter.fill_path(hills, color);
+        return;
+    }
+    case Symbol::Keyboard: {
+        // Keys in a case.
+        Path shape;
+        auto const corner = at(0.8f, 3.6f);
+        shape.add_rounded_rect({ corner.x, corner.y, 14.4f * unit, 8.8f * unit }, 1.8f * unit);
+        for (int row = 0; row < 2; ++row) {
+            for (int column = 0; column < 5; ++column) {
+                auto const key = at(2.2f + static_cast<float>(column) * 2.4f, 5 + static_cast<float>(row) * 2.2f);
+                shape.add_rounded_rect({ key.x, key.y, 1.6f * unit, 1.4f * unit }, 0.3f * unit);
+            }
+        }
+        auto const space = at(4.6f, 9.4f);
+        shape.add_rounded_rect({ space.x, space.y, 6.8f * unit, 1.4f * unit }, 0.3f * unit);
+        m_painter.fill_path(shape, color, FillRule::EvenOdd);
+        return;
+    }
+    case Symbol::Bell: {
+        Path shape;
+        shape.move_to(at(8, 1.4f));
+        shape.cubic_to(at(5.2f, 1.4f), at(4, 3.6f), at(4, 6));
+        shape.line_to(at(4, 9));
+        shape.line_to(at(2.4f, 11.6f));
+        shape.line_to(at(13.6f, 11.6f));
+        shape.line_to(at(12, 9));
+        shape.line_to(at(12, 6));
+        shape.cubic_to(at(12, 3.6f), at(10.8f, 1.4f), at(8, 1.4f));
+        shape.close();
+        shape.add_circle(at(8, 13.2f), 1.5f * unit);
+        m_painter.fill_path(shape, color);
+        return;
+    }
+    case Symbol::Person: {
+        Path shape;
+        shape.add_circle(at(8, 4.8f), 3.2f * unit);
+        shape.move_to(at(2, 14.4f));
+        shape.cubic_to(at(2, 10.8f), at(4.8f, 9.2f), at(8, 9.2f));
+        shape.cubic_to(at(11.2f, 9.2f), at(14, 10.8f), at(14, 14.4f));
+        shape.close();
+        m_painter.fill_path(shape, color);
+        return;
+    }
+    case Symbol::Information: {
+        // An i, cut out of a disc.
+        Path shape;
+        shape.add_circle(at(8, 8), 6.8f * unit);
+        shape.add_circle(at(8, 4.7f), 1.05f * unit);
+        auto const stem = at(7, 6.8f);
+        shape.add_rounded_rect({ stem.x, stem.y, 2 * unit, 5.4f * unit }, 0.4f * unit);
+        m_painter.fill_path(shape, color, FillRule::EvenOdd);
+        return;
+    }
+    case Symbol::Accessibility: {
+        // Someone with their arms out, in a ring.
+        Path ring;
+        ring.add_circle(at(8, 8), 6.9f * unit);
+        ring.add_circle(at(8, 8), 5.7f * unit);
+        m_painter.fill_path(ring, color, FillRule::EvenOdd);
+        Path figure;
+        figure.add_circle(at(8, 4.6f), 1.15f * unit);
+        figure.move_to(at(4, 6));
+        figure.line_to(at(12, 6));
+        figure.line_to(at(12, 7));
+        figure.line_to(at(9.2f, 7.4f));
+        figure.line_to(at(9.2f, 9));
+        figure.line_to(at(10.4f, 12.2f));
+        figure.line_to(at(9.4f, 12.6f));
+        figure.line_to(at(8, 9.6f));
+        figure.line_to(at(6.6f, 12.6f));
+        figure.line_to(at(5.6f, 12.2f));
+        figure.line_to(at(6.8f, 9));
+        figure.line_to(at(6.8f, 7.4f));
+        figure.line_to(at(4, 7));
+        figure.close();
+        m_painter.fill_path(figure, color);
+        return;
+    }
     case Symbol::Mount: {
         // A drive with an arrow going into it.
         Path shape;

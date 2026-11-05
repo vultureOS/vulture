@@ -53,6 +53,13 @@ enum class Symbol : u8 {
     Erase,
     Mount,
     Partition,
+    Contrast,
+    Photo,
+    Keyboard,
+    Bell,
+    Person,
+    Information,
+    Accessibility,
 };
 
 // A control's face: a shape with shadows outside it, a fill, shading inside it.

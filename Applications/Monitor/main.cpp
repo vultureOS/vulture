@@ -11,6 +11,7 @@
 #include <LibUI/Containers.h>
 #include <LibUI/Panels.h>
 #include <LibUI/TableView.h>
+#include <LibDesktop/Desktop.h>
 #include <LibUI/TextField.h>
 #include <pwd.h>
 #include <signal.h>
@@ -134,8 +135,16 @@ public:
     {
         auto const& process = m_rows[m_shown[row]];
         switch (column) {
-        case ColumnName:
+        case ColumnName: {
+            for (auto const pid : m_not_responding) {
+                if (pid != process.pid)
+                    continue;
+                StringBuilder name;
+                name.appendff("{} (Not Responding)", process.name.view());
+                return MUST(name.to_string());
+            }
             return MUST(String::from_view(process.name.view()));
+        }
         case ColumnCPU:
             return format_percent(process.cpu);
         case ColumnCPUTime:
@@ -179,6 +188,10 @@ public:
 
     [[nodiscard]] int pid_of(size_t row) const { return m_rows[m_shown[row]].pid; }
     [[nodiscard]] StringView name_of(size_t row) const { return m_rows[m_shown[row]].name.view(); }
+    void set_not_responding(Vector<i32> pids)
+    {
+        m_not_responding = move(pids);
+    }
     [[nodiscard]] Optional<size_t> row_of_pid(int pid) const
     {
         for (size_t i = 0; i < m_shown.size(); ++i) {
@@ -315,6 +328,7 @@ private:
         }
     }
 
+    Vector<i32> m_not_responding;
     Vector<Row> m_rows;
     Vector<size_t> m_shown;
     HashMap<int, u64> m_previous_times;
@@ -453,6 +467,20 @@ public:
         window.show();
         (void)window.make_first_responder(&table);
         refresh();
+        // What the window server says of those it's been waiting for.
+        Application::the().connection().on_shell_state = [this](StringView json) {
+            auto state = Desktop::parse_shell_state(json);
+            if (state.is_error())
+                return;
+            Vector<i32> pids;
+            for (auto const& application : state.value().applications) {
+                if (application.not_responding)
+                    pids.append(application.pid);
+            }
+            m_model.set_not_responding(move(pids));
+            refresh();
+        };
+        (void)Application::the().connection().server().subscribe_shell();
         m_timer = Application::the().add_timer(static_cast<u64>(t.metric("monitor.refreshMilliseconds"_sv)), true, [this] { refresh(); });
     }
 

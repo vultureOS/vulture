@@ -339,6 +339,7 @@ ErrorOr<ShellState> parse_shell_state(StringView text)
             application.name = copy(one.get_string("name"_sv).value_or(StringView {}));
             application.identifier = copy(one.get_string("identifier"_sv).value_or(StringView {}));
             application.hidden = one.get_boolean("hidden"_sv).value_or(false);
+            application.not_responding = one.get_boolean("notResponding"_sv).value_or(false);
             if (auto const* windows = one.get_array("windows"_sv)) {
                 for (size_t j = 0; j < windows->size(); ++j) {
                     auto const& window = windows->at(j);

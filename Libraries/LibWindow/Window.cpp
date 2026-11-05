@@ -156,6 +156,12 @@ void Connection::presented(IPC::Sender const&, u32 id)
     }
 }
 
+void Connection::motion_changed(IPC::Sender const&, bool reduced)
+{
+    if (on_motion_change)
+        on_motion_change(reduced);
+}
+
 void Connection::ping(IPC::Sender const&, u32 serial)
 {
     (void)m_server.pong(serial);

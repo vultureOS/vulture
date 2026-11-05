@@ -85,6 +85,8 @@ endpoint WindowServer
     // Where pointer events land, in points from its top-left: elsewhere they go to what
     // is below. An odd-shaped window's, as the Dock's.
     set_input_region(u32 window, i32 x, i32 y, i32 width, i32 height) =|
+    // Things that would move, don't, for everyone: they change at once, or fade.
+    set_reduce_motion(bool reduced) =|
     // By name: see /System/Library/Themes/Wallpapers.json.
     set_wallpaper(String name) => (i32 error)
     // Desktops, and all windows spread out over them.
@@ -94,7 +96,8 @@ endpoint WindowServer
     // For tests and tools: only root may. As if the pointer moved here (points), at this time on the monotonic clock in
     // microseconds, or 0 for now.
     inject_pointer(i32 x, i32 y, u32 buttons, u64 sent_at) =|
-    statistics() => (u64 frames, u64 compose_microseconds, u64 flush_microseconds, u64 pixels, u64 material_microseconds)
+    // `resize_mismatches`: frames shown with a window being resized by hand at a size its contents weren't.
+    statistics() => (u64 frames, u64 compose_microseconds, u64 flush_microseconds, u64 pixels, u64 material_microseconds, u64 resize_mismatches)
     // The answer to `ping`.
     pong(u32 serial) =|
     // The pointer's shape now, and how far round it is, if it goes round.
@@ -130,6 +133,7 @@ endpoint WindowClient
     layers_presented(u32 window, u32 serial) =|
     layer_animation_finished(u32 window, u32 layer, u32 tag) =|
     appearance_changed(String name) =|
+    motion_changed(bool reduced) =|
     // phase: see <LibWindow/Protocol.h>. The data comes only with Dropped.
     drag(u32 window, u8 phase, i32 x, i32 y, String type, ByteBuffer data) =|
     // To the window it started from.

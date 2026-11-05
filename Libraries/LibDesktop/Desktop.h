@@ -66,6 +66,7 @@ struct ApplicationEntry {
     String name;
     String identifier;
     bool hidden { false };
+    bool not_responding { false };
     Vector<WindowEntry> windows;
 };
 

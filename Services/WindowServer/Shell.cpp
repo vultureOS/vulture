@@ -425,7 +425,7 @@ void Server::minimize_window(ServerWindow& window)
     auto picture = m_compositor.snapshot(window);
     window.minimized = true;
     update_visibility(window);
-    if (!picture.is_error()) {
+    if (!picture.is_error() && !m_reduce_motion) {
         Genie genie;
         genie.window = &window;
         genie.picture = picture.release_value();
@@ -447,7 +447,7 @@ void Server::restore_window(ServerWindow& window)
     if (window.chrome_is_stale && window.is_titled())
         render_chrome(window);
     auto picture = m_compositor.snapshot(window);
-    if (!picture.is_error()) {
+    if (!picture.is_error() && !m_reduce_motion) {
         Genie genie;
         genie.window = &window;
         genie.picture = picture.release_value();
@@ -579,6 +579,7 @@ void Server::go_to_space(int space, bool animated)
         return;
     m_slide_from = m_space;
     m_space = space;
+    animated = animated && !m_reduce_motion;
     m_sliding = animated;
     m_slide_started = now_seconds();
     if (animated)
@@ -671,7 +672,8 @@ void Server::leave_overview(ServerWindow* to_activate)
 
 void Server::update_overview_overlays()
 {
-    float duration = m_theme.overview_seconds;
+    // (With motion reduced: there at once.)
+    float duration = m_reduce_motion ? 0.001f : m_theme.overview_seconds;
     auto t = static_cast<float>((now_seconds() - m_overview_started) / static_cast<double>(duration));
     t = clamp(t, 0.0f, 1.0f);
     float amount = ease_out(t);
@@ -856,7 +858,7 @@ void Server::animation_tick()
 
     // Overview.
     if (m_overview) {
-        bool finished = now - m_overview_started >= static_cast<double>(m_theme.overview_seconds);
+        bool finished = m_reduce_motion || now - m_overview_started >= static_cast<double>(m_theme.overview_seconds);
         update_overview_overlays();
         if (finished && m_overview_leaving) {
             m_overview = false;

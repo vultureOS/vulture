@@ -1,0 +1,30 @@
+# M21: where motion's reduced from. The layers themselves are for tests that can stop a program: see Tests/Userland/windows.cpp.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 1
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "Accessibility"
+expect settings: Accessibility
+ax-expect switch "Reduce motion" = off
+pointer 16000 3000
+pause 1
+screenshot settings-accessibility.png
+click switch "Reduce motion"
+ax-expect switch "Reduce motion" = on
+pause 0.5
+# It stays that way: quit, come back, and it's still on.
+key meta_l-q
+pause 1
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "Accessibility"
+expect settings: Accessibility
+ax-expect switch "Reduce motion" = on
+click switch "Reduce motion"
+ax-expect switch "Reduce motion" = off
+key meta_l-q

@@ -319,15 +319,34 @@ macOS-style at the top, real Unix underneath:
   surfaces are these, sent through a port.
 - **PranaWindowServer (M8).** A vlaunchd job for the graphical session (the boot flag
   `gui`). Clients draw in two buffers they share with it and present one; `LibWindow`
-  is their side. The compositor draws directly in the framebuffer, on a fixed 60 Hz
-  beat: the screen is 32-pixel tiles, dirty or not, and each layer (wallpaper, then each
-  window's shadow and body) is drawn over the dirty ones, in bands, on up to 8 threads.
+  is their side. The compositor draws directly in the framebuffer, on a 60 Hz beat that
+  input can go ahead of, at up to twice the rate: the screen is 32-pixel tiles, dirty or
+  not, and each thing to draw (wallpaper, then each window's shadow and body, then its
+  layers) is drawn over the dirty ones, on up to 8 threads. What's opaque of each window
+  is worked out, a square at a time, as its pixels arrive, and nothing's drawn under that.
   Shadows are nine-sliced blurred masks; corners are continuous, from one mask mirrored.
   A material (vibrancy) is a blur of what is below, at up to 1/8 size, then saturation
   and a tint, so what is below must be finished first: it splits the frame, and
   whatever it reads is redrawn with it. The server draws title bars and traffic
   lights over the client's pixels, moves and resizes windows, and sends pointer and
   keyboard events on. Every look comes from a theme file.
+- **Layers (M21).** Over each window's surface is a tree of layers (`Layer.h`): transforms,
+  opacity, rounded corners, clipping, scrolled bounds, a material or a blur. A client changes
+  them in a transaction (`commit_layers`), whose changes are all on the screen in the same
+  frame, along with its window's own pixels if it says so. Animations run in the server, so
+  they carry on while the program that started them is busy or stopped: `layer_frame_log`
+  says what each frame showed, for a test to hold against the model. In pranaUI,
+  `View::set_wants_layer` gives a view a surface of its own, and what's drawn after it and
+  over it gets one too; where there's no server, it's just drawn with the rest and looks the
+  same. Sheets and spinners use them. A `ScrollView` goes on to a layer while it's being
+  scrolled, with half as much again kept ready each way, and comes off once it stops. Genie and
+  Overview aren't layers yet: M23 rebuilds Overview.
+- **Not responding (M21).** A program is pinged when input is sent to it, and its event loop
+  answers. After two seconds with no answer, the cursor over its windows spins, and the shell
+  state says so, for the Dock and Monitor. The server still moves and resizes its windows.
+- **Live resize (M21).** Dragging a window's edge doesn't change its frame until the program
+  has presented something of the new size, then both change in the same frame; after 100 ms
+  it stops waiting. A new surface isn't shown until it has something on it.
 - **Applications (M11).** Ordinary pranaUI programs in `.app` bundles, each with its
   logic in a piece a host test can reach (`Tests/Applications`, `Tests/LibVT`). Terminal is
   LibVT (a VT-style screen model, with no idea what draws it) on a pseudo-terminal. Monitor,

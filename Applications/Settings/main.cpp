@@ -627,6 +627,23 @@ void build_users(Page& page)
     page.finish();
 }
 
+void build_accessibility(Page& page)
+{
+    auto& group = page.add_group();
+    auto& row = group.rows().add<Row>("Reduce motion"_sv);
+    Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
+    auto& toggle = row.add<Switch>(preferences.boolean("reduceMotion"_sv).value_or(false));
+    toggle.set_accessibility_label("Reduce motion"_sv);
+    toggle.on_action = [&toggle] {
+        bool const on = toggle.is_on();
+        (void)Application::the().connection().server().set_reduce_motion(on);
+        Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+        saved.set("reduceMotion"_sv, JSON::Value(on));
+        saved.save();
+    };
+    page.finish();
+}
+
 void build_notifications(Page& page)
 {
     auto& group = page.add_group();
@@ -744,19 +761,20 @@ public:
         MaterialRegion region { { 0, 0, static_cast<int>(sidebar_width), 600 }, WS::Material::Sidebar };
         m_window->set_materials(Span<MaterialRegion const>(&region, 1));
 
-        add_pane("Appearance"_sv, Symbol::ClearCircle, build_appearance);
-        add_pane("Wallpaper"_sv, Symbol::File, build_wallpaper);
+        add_pane("Appearance"_sv, Symbol::Contrast, build_appearance);
+        add_pane("Accessibility"_sv, Symbol::Accessibility, build_accessibility);
+        add_pane("Wallpaper"_sv, Symbol::Photo, build_wallpaper);
         add_pane("Desktop & Dock"_sv, Symbol::Sidebar, build_dock);
         add_pane("Network"_sv, Symbol::Globe, build_network);
         add_pane("Sound"_sv, Symbol::Speaker, build_sound);
-        add_pane("Keyboard"_sv, Symbol::Plus, build_keyboard);
+        add_pane("Keyboard"_sv, Symbol::Keyboard, build_keyboard);
         add_pane("Language & Region"_sv, Symbol::Globe, build_language_region);
-        add_pane("Notifications"_sv, Symbol::Question, build_notifications);
+        add_pane("Notifications"_sv, Symbol::Bell, build_notifications);
         add_pane("Privacy & Security"_sv, Symbol::Lock, build_privacy);
-        add_pane("Users"_sv, Symbol::Checkmark, build_users);
+        add_pane("Users"_sv, Symbol::Person, build_users);
         add_pane("Storage"_sv, Symbol::Drive, build_storage);
         add_pane("Startup Disk"_sv, Symbol::Drive, build_startup_disk);
-        add_pane("About"_sv, Symbol::Folder, build_about);
+        add_pane("About"_sv, Symbol::Information, build_about);
         m_sidebar->on_select = [this](size_t row) { show_page(row); };
         size_t first = 0;
         for (size_t i = 0; i < m_names.size(); ++i) {

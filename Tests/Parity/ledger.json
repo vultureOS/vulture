@@ -135,15 +135,65 @@
                 },
                 {
                     "feature": "An application that's stopped answering gets the spinning pointer",
-                    "milestone": "M21"
+                    "milestone": "M21",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "ok: two seconds on, the cursor over it spins"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "cursors.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Not Responding, in Force Quit",
-                    "milestone": "M21"
+                    "milestone": "M24",
+                    "claim": "partial",
+                    "missing": "Force Quit itself (M24). It's said in the Dock and in Monitor until then",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "ok: and it's said to be not responding"
+                        }
+                    ]
                 },
                 {
                     "feature": "Windows animate while their application is busy",
-                    "milestone": "M21"
+                    "milestone": "M21",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "ok: the spring goes on, with its program stopped"
+                        },
+                        {
+                            "suite": "test-userland",
+                            "output": "ok: every frame of it within a pixel of the model"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Resizing a window keeps what's in it with its edges",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "ok: and not a frame showed it at any other size than its contents"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Scrolling on the compositor",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "ok: scrolling a little draws nothing again"
+                        }
+                    ]
                 },
                 {
                     "feature": "Windows come back when an application or the session does",
@@ -828,8 +878,8 @@
                 {
                     "feature": "The pointer",
                     "claim": "partial",
-                    "missing": "the wait cursor (M21). Catalina's style, by choice",
-                    "milestone": "M21",
+                    "missing": "Catalina's style, by choice",
+                    "milestone": "M28",
                     "proof": [
                         {
                             "suite": "test-ui",
@@ -3192,7 +3242,23 @@
                 },
                 {
                     "feature": "Reduce Motion",
-                    "milestone": "M21"
+                    "milestone": "M21",
+                    "claim": "partial",
+                    "missing": "things change at once, where a Mac fades them",
+                    "proof": [
+                        {
+                            "suite": "test-userland",
+                            "output": "ok: minimizing happens at once"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m21-layers-settings-accessibility.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "output": "m21-layers: all of it done"
+                        }
+                    ]
                 },
                 {
                     "feature": "Screen Reader",

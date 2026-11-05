@@ -65,6 +65,8 @@ row "Text Editor warm launch" "under 300 ms" 300 "$(value_of "Text Editor warm l
 row "window drag at 2560x1600" "at least 58 fps" 100000 "$(value_of "drag frames")"
 row "input to flush, 99th percentile" "at most 16.7 ms" 16.7 "$(value_of "input to flush p99")"
 row "input to flush, worst" "for information" 100000 "$(value_of "input to flush worst")"
+row "whole screen, 12 windows and blur" "at least 58 fps" 100000 "$(value_of "whole screen drag frames")"
+row "input to flush, whole screen, 99th percentile" "at most 16.7 ms" 16.7 "$(value_of "whole screen input to flush p99")"
 
 if [ "$status" -eq 0 ]; then
     echo "budgets: PASS"
