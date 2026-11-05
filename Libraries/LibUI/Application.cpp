@@ -47,11 +47,30 @@ void report_launch_once()
     fflush(stdout);
 }
 
+class ServerLayerBackend final : public LayerBackend {
+public:
+    explicit ServerLayerBackend(NonnullOwnPtr<::Window::Layer> layer)
+        : m_layer(move(layer))
+    {
+    }
+
+    ErrorOr<void> set_surface(IntSize pixels) override { return m_layer->set_surface(pixels); }
+    Bitmap& back_buffer() override { return m_layer->back_buffer(); }
+    Bitmap const& shown_buffer() const override { return m_layer->shown_buffer(); }
+
+    [[nodiscard]] ::Window::Layer& layer() { return *m_layer; }
+    [[nodiscard]] ::Window::Layer const& layer() const { return *m_layer; }
+
+private:
+    NonnullOwnPtr<::Window::Layer> m_layer;
+};
+
 class ServerBackend final : public WindowBackend {
 public:
     ServerBackend(UI::Window& owner, NonnullOwnPtr<::Window::Window> window)
         : m_owner(owner)
         , m_window(move(window))
+        , m_transaction(*m_window)
     {
         m_window->on_mouse = [this](::Window::MouseEvent const& event) {
             m_owner.handle_mouse(event.kind, event.position.to<float>(), event.buttons, event.modifiers, event.wheel_x, event.wheel_y);
@@ -74,6 +93,11 @@ public:
             report_launch_once();
             m_owner.handle_presented();
         };
+        m_window->on_layers_presented = [this](u32) {
+            report_launch_once();
+            m_owner.handle_presented();
+        };
+        m_window->on_layer_animation_finished = [this](u32, u32 tag) { m_owner.handle_layer_animation_finished(tag); };
         m_window->on_drag = [this](::Window::DragEvent const& event) {
             m_owner.handle_drag(event.phase, event.position.to<float>(), event.type, event.data);
         };
@@ -111,11 +135,32 @@ public:
         m_window->set_materials(converted.span());
     }
 
+    bool supports_layers() const override { return true; }
+    ErrorOr<NonnullOwnPtr<LayerBackend>> create_layer(LayerBackend const* parent) override
+    {
+        auto layer = TRY(::Window::Layer::create(*m_window, parent ? &static_cast<ServerLayerBackend const*>(parent)->layer() : nullptr));
+        return adopt_own(*static_cast<LayerBackend*>(new ServerLayerBackend(move(layer))));
+    }
+    void layer_set(LayerBackend const& layer, WS::LayerProperty property, float a, float b, float c, float d) override
+    {
+        m_transaction.set(static_cast<ServerLayerBackend const&>(layer).layer(), property, a, b, c, d);
+    }
+    void layer_animate(LayerBackend const& layer, WS::LayerProperty property, Span<float const> from, Span<float const> to, Animation::Timing const& timing, u32 tag, bool repeats, int steps) override
+    {
+        m_transaction.animate(static_cast<ServerLayerBackend const&>(layer).layer(), property, from, to, timing, tag, repeats, steps);
+    }
+    void layer_destroy(LayerBackend const& layer) override { m_transaction.destroy(static_cast<ServerLayerBackend const&>(layer).layer()); }
+    void layer_present(LayerBackend& layer, IntRect damage) override { m_transaction.present(static_cast<ServerLayerBackend&>(layer).layer(), damage); }
+    void layer_present_window(IntRect damage) override { m_transaction.present_window(damage); }
+    bool has_layer_changes() const override { return !m_transaction.is_empty(); }
+    void layer_commit() override { (void)m_transaction.commit(); }
+
     [[nodiscard]] ::Window::Window& window() { return *m_window; }
 
 private:
     UI::Window& m_owner;
     NonnullOwnPtr<::Window::Window> m_window;
+    ::Window::LayerTransaction m_transaction;
 };
 
 }
@@ -148,8 +193,10 @@ ErrorOr<NonnullOwnPtr<Application>> Application::create(StringView name, StringV
     if (!name.is_empty())
         (void)application->m_connection->server().set_application(name, identifier);
     // For golden screenshots: nothing moves or blinks in this program or what it starts.
-    if (getenv("VULTURE_STILL"))
+    if (getenv("VULTURE_STILL")) {
         set_motion_enabled(false);
+        set_held_still(true);
+    }
     return application;
 }
 

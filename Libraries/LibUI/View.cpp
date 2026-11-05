@@ -7,6 +7,9 @@
 #include <LibBase/Math.h>
 #include <LibGfx/Painter.h>
 #include <LibUI/Layout.h>
+#include <LibUI/Motion.h>
+#include <LibUI/Platform.h>
+#include <LibUI/ServerLayer.h>
 #include <LibUI/View.h>
 #include <LibUI/Window.h>
 
@@ -97,6 +100,8 @@ void View::set_frame(FloatRect const& frame)
     bool resized = frame.width != m_frame.width || frame.height != m_frame.height;
     set_needs_display();
     m_frame = frame;
+    if (m_window)
+        m_window->layers_may_need_planning();
     if (resized) {
         m_needs_layout = true;
         m_layer = nullptr;
@@ -118,6 +123,11 @@ void View::set_bounds_origin(FloatPoint origin)
     if (origin == m_bounds_origin)
         return;
     m_bounds_origin = origin;
+    // All there already, for the server to move.
+    if (m_server_layer && m_scrolls_on_layer) {
+        m_window->schedule_update();
+        return;
+    }
     set_needs_display();
 }
 
@@ -156,6 +166,8 @@ void View::set_hidden(bool hidden)
     if (m_parent)
         m_parent->set_needs_layout();
     set_needs_display();
+    if (m_window)
+        m_window->layers_may_need_planning();
 }
 
 bool View::is_visible() const
@@ -172,6 +184,10 @@ void View::set_opacity(float opacity)
     if (opacity == m_opacity)
         return;
     m_opacity = opacity;
+    if (m_server_layer) {
+        m_window->schedule_update();
+        return;
+    }
     damage_without_redrawing_layer();
 }
 
@@ -179,6 +195,11 @@ void View::set_translation(FloatPoint translation)
 {
     if (translation == m_translation)
         return;
+    if (m_server_layer) {
+        m_translation = translation;
+        m_window->schedule_update();
+        return;
+    }
     damage_without_redrawing_layer();
     m_translation = translation;
     damage_without_redrawing_layer();
@@ -189,6 +210,87 @@ void View::damage_without_redrawing_layer()
     bool was_dirty = m_layer_dirty;
     set_needs_display();
     m_layer_dirty = was_dirty;
+}
+
+void View::set_wants_layer(bool wants)
+{
+    if (wants == m_wants_layer)
+        return;
+    m_wants_layer = wants;
+    if (!wants)
+        m_scrolls_on_layer = false;
+    if (m_window)
+        m_window->layers_need_planning();
+}
+
+void View::set_scrolls_on_layer(bool scrolls)
+{
+    if (scrolls == m_scrolls_on_layer)
+        return;
+    m_scrolls_on_layer = scrolls;
+    if (m_window)
+        m_window->layers_need_planning();
+}
+
+void View::animate_translation(FloatPoint from, FloatPoint to, Animation::Timing const& timing, Function<void()> finished)
+{
+    if (!motion_enabled() || !m_window) {
+        set_translation(to);
+        if (finished)
+            finished();
+        return;
+    }
+    if (m_window->backend().supports_layers()) {
+        set_wants_layer(true);
+        m_translation = to;
+        float const start[] = { from.x, from.y };
+        float const end[] = { to.x, to.y };
+        m_window->queue_layer_animation(*this, WS::LayerProperty::Translation, { start, 2 }, { end, 2 }, timing, false, 0, move(finished));
+        return;
+    }
+    set_layer_backed(true);
+    set_translation(from);
+    (void)animate(timing, [this, from, to](float progress) { set_translation({ from.x + (to.x - from.x) * progress, from.y + (to.y - from.y) * progress }); },
+        [this, finished = move(finished)]() mutable {
+            set_layer_backed(false);
+            if (finished)
+                finished();
+        });
+}
+
+void View::animate_opacity(float from, float to, Animation::Timing const& timing, Function<void()> finished)
+{
+    if (!motion_enabled() || !m_window) {
+        set_opacity(to);
+        if (finished)
+            finished();
+        return;
+    }
+    if (m_window->backend().supports_layers()) {
+        set_wants_layer(true);
+        m_opacity = to;
+        float const start[] = { from };
+        float const end[] = { to };
+        m_window->queue_layer_animation(*this, WS::LayerProperty::Opacity, { start, 1 }, { end, 1 }, timing, false, 0, move(finished));
+        return;
+    }
+    set_layer_backed(true);
+    set_opacity(from);
+    (void)animate(timing, [this, from, to](float progress) { set_opacity(from + (to - from) * progress); },
+        [this, finished = move(finished)]() mutable {
+            set_layer_backed(false);
+            if (finished)
+                finished();
+        });
+}
+
+void View::rotate_forever(float seconds, int steps)
+{
+    if (!m_window || !m_server_layer)
+        return;
+    float const start[] = { 0 };
+    float const end[] = { 2 * static_cast<float>(Base::Math::pi) };
+    m_window->queue_layer_animation(*this, WS::LayerProperty::Rotation, { start, 1 }, { end, 1 }, Animation::Timing::linear(seconds), true, steps, nullptr);
 }
 
 void View::set_layer_backed(bool backed)
@@ -225,6 +327,11 @@ void View::set_needs_display(FloatRect const& rect)
     for (auto const* view = this; view; view = view->m_parent) {
         if (view->m_hidden)
             return;
+        // Or as far as a surface of its own, in its own terms, before anything of its own has been done to them.
+        if (view->m_server_layer) {
+            m_window->add_layer_damage(*const_cast<View*>(view), area);
+            return;
+        }
         area = area.translated(-view->m_bounds_origin.x, -view->m_bounds_origin.y);
         if (view->m_clips_children && view != this) {
             area = area.intersected({ 0, 0, view->m_frame.width, view->m_frame.height });
@@ -390,14 +497,16 @@ void View::cancel_layer()
     m_layer_dirty = true;
 }
 
-void View::draw_contents(Graphics& graphics, FloatRect const& dirty)
+void View::draw_contents(Graphics& graphics, FloatRect const& dirty, bool scrolls_on_layer)
 {
     draw(graphics);
     graphics.save();
-    if (m_clips_children)
+    // All of what's held, rather than what can be seen of it now.
+    if (m_clips_children && !scrolls_on_layer)
         graphics.clip({ 0, 0, m_frame.width, m_frame.height });
-    graphics.translate(-m_bounds_origin.x, -m_bounds_origin.y);
-    auto inner_dirty = dirty.translated(m_bounds_origin.x, m_bounds_origin.y);
+    auto const origin = scrolls_on_layer ? FloatPoint {} : m_bounds_origin;
+    graphics.translate(-origin.x, -origin.y);
+    auto inner_dirty = dirty.translated(origin.x, origin.y);
     for (auto& child : m_children)
         child->draw_tree(graphics, inner_dirty);
     graphics.restore();
@@ -408,7 +517,8 @@ void View::draw_contents(Graphics& graphics, FloatRect const& dirty)
 
 void View::draw_tree(Graphics& graphics, FloatRect const& dirty_in_parent)
 {
-    if (m_hidden || m_opacity <= 0)
+    // (Over there, and drawn by itself.)
+    if (m_hidden || m_opacity <= 0 || m_server_layer)
         return;
     auto spill = overflow();
     FloatRect reach { m_frame.x + m_translation.x - spill.left, m_frame.y + m_translation.y - spill.top, m_frame.width + spill.left + spill.right, m_frame.height + spill.top + spill.bottom };

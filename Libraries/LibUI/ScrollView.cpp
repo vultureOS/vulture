@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <LibUI/Platform.h>
+#include <LibUI/Window.h>
 #include <LibBase/Math.h>
 #include <LibUI/Platform.h>
 #include <LibUI/ScrollView.h>
@@ -69,7 +71,7 @@ void Scroller::flash()
     if (m_style != ScrollerStyle::Overlay)
         return;
     set_revealed(true);
-    if (!motion_enabled())
+    if (held_still())
         return;
     auto delay = static_cast<u64>(tokens().metric("scroller.fadeDelayMilliseconds"_sv));
     m_fade_timer = Platform::the().add_timer(delay, false, [this] {
@@ -209,6 +211,8 @@ ScrollView::ScrollView()
 ScrollView::~ScrollView()
 {
     stop_motion();
+    if (m_layer_timer >= 0)
+        Platform::the().cancel_timer(m_layer_timer);
 }
 
 void ScrollView::set_document(NonnullOwnPtr<View> document)
@@ -293,8 +297,24 @@ void ScrollView::layout()
     apply_offset();
 }
 
+void ScrollView::scroll_on_layer_for_a_while()
+{
+    if (m_clip->bounds_origin() == m_offset || !window() || !window()->backend().supports_layers())
+        return;
+    m_clip->set_scrolls_on_layer(true);
+    m_clip->set_wants_layer(true);
+    // Back in with the rest of the window once it has stopped: it needs no memory of its own for sitting there.
+    if (m_layer_timer >= 0)
+        Platform::the().cancel_timer(m_layer_timer);
+    m_layer_timer = Platform::the().add_timer(500, false, [this] {
+        m_layer_timer = -1;
+        m_clip->set_wants_layer(false);
+    });
+}
+
 void ScrollView::apply_offset()
 {
+    scroll_on_layer_for_a_while();
     m_clip->set_bounds_origin(m_offset);
     update_scrollers();
     if (on_scroll)

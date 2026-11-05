@@ -57,6 +57,18 @@ bool motion_enabled()
     return s_enabled;
 }
 
+static bool s_held_still;
+
+void set_held_still(bool still)
+{
+    s_held_still = still;
+}
+
+bool held_still()
+{
+    return s_held_still;
+}
+
 Animation::Animator::Id animate(Animation::Timing const& timing, Function<void(float)> apply, Function<void()> done)
 {
     if (!s_enabled) {

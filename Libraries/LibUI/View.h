@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibAnimation/Curve.h>
 #include <LibBase/Function.h>
 #include <LibBase/OwnPtr.h>
 #include <LibBase/RefPtr.h>
@@ -28,6 +29,8 @@ namespace UI {
 class Layout;
 class RadioButton;
 class ScrollView;
+struct ServerLayer;
+
 class View;
 class Window;
 
@@ -117,6 +120,21 @@ public:
     // cheap while animating.
     void set_layer_backed(bool);
     [[nodiscard]] bool is_layer_backed() const { return m_layer_backed; }
+    // Its subtree goes in a surface of its own in the window server, which moves and fades it by itself, without this program
+    // having to draw it again or even be running. It looks the same; and where there's no server, it's just drawn with the rest.
+    void set_wants_layer(bool);
+    [[nodiscard]] bool wants_layer() const { return m_wants_layer; }
+    [[nodiscard]] bool has_server_layer() const { return m_server_layer.ptr() != nullptr; }
+    // And what's in it scrolls there: moving the bounds origin draws nothing, and more than can be seen is kept ready.
+    void set_scrolls_on_layer(bool);
+    // To be done by the window server if it can be, so that it carries on while this program's busy; or here if not. In the end
+    // it's where it was told to go, and `finished` is told, here, when this program can hear of it.
+    void animate_translation(Gfx::FloatPoint from, Gfx::FloatPoint to, Animation::Timing const&, Function<void()> finished = nullptr);
+    void animate_opacity(float from, float to, Animation::Timing const&, Function<void()> finished = nullptr);
+    // Round and round about its middle, in so many steps, for as long as it has a layer.
+    void rotate_forever(float seconds, int steps);
+    // It has a layer now, new: for what has to be asked of one to start with.
+    virtual void layer_was_made() { }
     void set_needs_display();
     void set_needs_display(Gfx::FloatRect const&);
     virtual void draw(Graphics&) { }
@@ -234,7 +252,9 @@ public:
     void cancel_layer();
 
 private:
-    void draw_contents(Graphics&, Gfx::FloatRect const& dirty);
+    friend class Window;
+
+    void draw_contents(Graphics&, Gfx::FloatRect const& dirty, bool scrolls_on_layer = false);
     void invalidate_ancestor_layers();
     void damage_without_redrawing_layer();
 
@@ -256,6 +276,10 @@ private:
     bool m_needs_layout { true };
     bool m_layer_backed { false };
     bool m_layer_dirty { true };
+    bool m_wants_layer { false };
+    bool m_scrolls_on_layer { false };
+    View* m_planned_layer_parent { nullptr };
+    OwnPtr<ServerLayer> m_server_layer;
     RefPtr<Gfx::Bitmap> m_layer;
     String m_accessibility_label;
     String m_tooltip;

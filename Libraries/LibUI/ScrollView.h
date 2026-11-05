@@ -100,6 +100,7 @@ private:
     [[nodiscard]] Gfx::FloatSize document_size() const;
     [[nodiscard]] Gfx::FloatPoint largest_offset() const;
     void apply_offset();
+    void scroll_on_layer_for_a_while();
     void update_scrollers();
     void start_motion();
     void stop_motion();
@@ -113,6 +114,7 @@ private:
     bool m_horizontal_scrolling { true };
     float m_top_inset { 0 };
     Gfx::FloatPoint m_offset;
+    int m_layer_timer { -1 };
     Gfx::FloatPoint m_velocity;
     int m_motion_timer { -1 };
     double m_last_step { 0 };

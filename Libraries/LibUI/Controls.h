@@ -374,6 +374,7 @@ class Spinner : public View {
 public:
     explicit Spinner(ControlSize = ControlSize::Regular);
     ~Spinner() override;
+    void layer_was_made() override;
 
     void set_running(bool);
     [[nodiscard]] Gfx::FloatSize intrinsic_size() const override;

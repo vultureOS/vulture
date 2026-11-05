@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibAnimation/Curve.h>
 #include <LibBase/Error.h>
 #include <LibBase/Function.h>
 #include <LibBase/OwnPtr.h>
@@ -28,6 +29,15 @@ struct MaterialRegion {
     Gfx::IntRect rect;
     WS::Material material;
     int radius { 0 };
+};
+
+// One of a window's layers, as whatever shows it sees it.
+class LayerBackend {
+public:
+    virtual ~LayerBackend() = default;
+    [[nodiscard]] virtual ErrorOr<void> set_surface(Gfx::IntSize pixels) = 0;
+    [[nodiscard]] virtual Gfx::Bitmap& back_buffer() = 0;
+    [[nodiscard]] virtual Gfx::Bitmap const& shown_buffer() const = 0;
 };
 
 // One window's link to whatever shows it.
@@ -58,6 +68,18 @@ public:
     virtual void begin_drag(WindowBackend& image, StringView type, ReadonlyBytes data) = 0;
     virtual void accept_drop(bool) = 0;
     virtual void set_materials(Span<MaterialRegion const>) = 0;
+
+    // Layers, for what can have them: with none, a view that wants one is drawn along with everything else, and looks the same.
+    [[nodiscard]] virtual bool supports_layers() const { return false; }
+    [[nodiscard]] virtual ErrorOr<NonnullOwnPtr<LayerBackend>> create_layer(LayerBackend const*);
+    // Changes, to go together: all on the screen in the same frame.
+    virtual void layer_set(LayerBackend const&, WS::LayerProperty, float = 0, float = 0, float = 0, float = 0) { }
+    virtual void layer_animate(LayerBackend const&, WS::LayerProperty, Span<float const>, Span<float const>, Animation::Timing const&, u32, bool, int) { }
+    virtual void layer_destroy(LayerBackend const&) { }
+    virtual void layer_present(LayerBackend&, Gfx::IntRect) { }
+    virtual void layer_present_window(Gfx::IntRect) { }
+    [[nodiscard]] virtual bool has_layer_changes() const { return false; }
+    virtual void layer_commit() { }
 };
 
 class Platform {

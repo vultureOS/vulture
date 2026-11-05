@@ -131,6 +131,8 @@ hold x 1000
 ax-expect textfield "Type here" ~ xxx
 # Running text: a misspelling corrected, a replacement, a capital, a period for two spaces, and red dots under what's wrong.
 key meta_l-q
+# (Gone from the Dock too, which moves everything along.)
+ax-gone textfield "Type here"
 pause 1
 click button "Text Editor"
 expect texteditor: ready

@@ -8,6 +8,7 @@
 #include <LibGfx/Painter.h>
 #include <LibUI/Appearance.h>
 #include <LibUI/Layout.h>
+#include <LibUI/ServerLayer.h>
 #include <LibUI/Window.h>
 #include <LibUI/WindowRegistry.h>
 
@@ -416,15 +417,420 @@ void Window::update_now()
         return;
     }
     m_root->layout_if_needed();
-    if (m_damage.is_empty())
+    update_layers();
+
+    bool has_layer_damage = false;
+    for (auto* view : m_layer_views) {
+        if (!view->m_server_layer->damage.is_empty() || view->m_server_layer->present_all)
+            has_layer_damage = true;
+    }
+    if (m_damage.is_empty() && !has_layer_damage && !m_backend->has_layer_changes())
         return;
 
-    auto& bitmap = m_backend->back_buffer();
-    float scale = static_cast<float>(m_backend->scale());
     IntRect total;
-    for (auto const& area : m_damage) {
-        // To the pixels it touches, and back: antialiased edges never straddle.
-        auto pixels = FloatRect { area.x * scale, area.y * scale, area.width * scale, area.height * scale }.enclosing_int_rect().intersected(bitmap.rect());
+    if (!m_damage.is_empty()) {
+        auto& bitmap = m_backend->back_buffer();
+        float scale = static_cast<float>(m_backend->scale());
+        for (auto const& area : m_damage) {
+            // To the pixels it touches, and back: antialiased edges never straddle.
+            auto pixels = FloatRect { area.x * scale, area.y * scale, area.width * scale, area.height * scale }.enclosing_int_rect().intersected(bitmap.rect());
+            if (pixels.is_empty())
+                continue;
+            total = total.united(pixels);
+            for (int y = pixels.y; y < pixels.bottom(); ++y) {
+                auto* row = bitmap.scanline(y);
+                for (int x = pixels.x; x < pixels.right(); ++x)
+                    row[x] = 0;
+            }
+            Painter painter(bitmap);
+            painter.clip_rect(pixels.to<float>());
+            painter.scale(scale, scale);
+            Graphics graphics(painter, scale);
+            FloatRect dirty { static_cast<float>(pixels.x) / scale, static_cast<float>(pixels.y) / scale, static_cast<float>(pixels.width) / scale, static_cast<float>(pixels.height) / scale };
+            m_root->draw_tree(graphics, dirty);
+        }
+        m_damage.clear();
+    }
+    for (auto* view : m_layer_views)
+        draw_layer(*view);
+    send_queued_layer_animations();
+
+    if (!m_backend->has_layer_changes()) {
+        if (total.is_empty())
+            return;
+        m_presenting = true;
+        m_backend->present(total);
+        return;
+    }
+    if (!total.is_empty())
+        m_backend->layer_present_window(total);
+    m_presenting = true;
+    m_backend->layer_commit();
+}
+
+// ---- Layers
+
+void Window::layers_need_planning()
+{
+    m_layer_plan_stale = true;
+    schedule_update();
+}
+
+void Window::layers_may_need_planning()
+{
+    if (!m_layer_views.is_empty())
+        layers_need_planning();
+}
+
+void Window::add_layer_damage(View& view, FloatRect const& area)
+{
+    auto& damage = view.m_server_layer->damage;
+    if (damage.size() >= 8) {
+        for (size_t i = 1; i < damage.size(); ++i)
+            damage[0] = damage[0].united(damage[i]);
+        damage[0] = damage[0].united(area);
+        while (damage.size() > 1)
+            (void)damage.take_last();
+    } else {
+        damage.append(area);
+    }
+    schedule_update();
+}
+
+void Window::queue_layer_animation(View& view, WS::LayerProperty property, Span<float const> from, Span<float const> to, Animation::Timing const& timing, bool repeats, int steps, Function<void()> finished)
+{
+    QueuedLayerAnimation queued { &view, property, {}, {}, timing, repeats, steps, 0 };
+    for (size_t i = 0; i < 4; ++i) {
+        queued.from[i] = i < from.size() ? from[i] : 0;
+        queued.to[i] = i < to.size() ? to[i] : 0;
+    }
+    if (finished) {
+        queued.tag = m_next_animation_tag++;
+        m_layer_animation_endings.append(LayerAnimationEnding { queued.tag, &view, move(finished) });
+    }
+    m_queued_layer_animations.append(move(queued));
+    schedule_update();
+}
+
+void Window::send_queued_layer_animations()
+{
+    for (auto const& queued : m_queued_layer_animations) {
+        if (queued.view->m_server_layer)
+            m_backend->layer_animate(*queued.view->m_server_layer->backend, queued.property, { queued.from, 4 }, { queued.to, 4 }, queued.timing, queued.tag, queued.repeats, queued.steps);
+    }
+    m_queued_layer_animations.clear();
+}
+
+void Window::handle_layer_animation_finished(u32 tag)
+{
+    for (size_t i = 0; i < m_layer_animation_endings.size(); ++i) {
+        if (m_layer_animation_endings[i].tag != tag)
+            continue;
+        auto finished = move(m_layer_animation_endings[i].finished);
+        m_layer_animation_endings.remove(i);
+        if (finished)
+            finished();
+        return;
+    }
+}
+
+void Window::plan_layers_of(View& view, View* layer_parent, Vector<FloatRect>& covered, Vector<View*>& plan)
+{
+    if (view.m_hidden)
+        return;
+    auto const spill = view.overflow();
+    auto const rect = view.rect_in_window();
+    FloatRect const reach { rect.x - spill.left, rect.y - spill.top, rect.width + spill.left + spill.right, rect.height + spill.top + spill.bottom };
+    bool layered = view.m_wants_layer;
+    // What's drawn after something with a layer, and over it, has to go over it on the screen too, and so needs one.
+    if (!layered && &view != m_root.ptr()) {
+        for (auto const& other : covered) {
+            if (other.intersects(reach)) {
+                layered = true;
+                break;
+            }
+        }
+    }
+    if (!layered) {
+        // A picture of itself, drawn here, with all that's in it.
+        if (view.m_layer_backed || view.m_opacity < 1)
+            return;
+        for (auto& child : view.m_children)
+            plan_layers_of(*child, layer_parent, covered, plan);
+        return;
+    }
+    view.m_planned_layer_parent = layer_parent;
+    plan.append(&view);
+    // What's in it is over all that it is, so only has itself to think about.
+    Vector<FloatRect> inside;
+    for (auto& child : view.m_children)
+        plan_layers_of(*child, &view, inside, plan);
+    covered.append(reach);
+}
+
+void Window::drop_layer(View& view)
+{
+    if (!view.m_server_layer)
+        return;
+    m_backend->layer_destroy(*view.m_server_layer->backend);
+    auto const spill = view.overflow();
+    auto const rect = view.rect_in_window();
+    add_damage({ rect.x - spill.left - 4, rect.y - spill.top - 4, rect.width + spill.left + spill.right + 8, rect.height + spill.top + spill.bottom + 8 });
+    view.m_server_layer = nullptr;
+}
+
+void Window::make_layer(View& view, View* parent)
+{
+    auto backend = m_backend->create_layer(parent ? parent->m_server_layer->backend.ptr() : nullptr);
+    if (backend.is_error())
+        return;
+    view.m_server_layer = adopt_own(*new ServerLayer(backend.release_value(), parent));
+    // Off the window's own surface, in the same frame as it comes on here.
+    auto const spill = view.overflow();
+    auto const rect = view.rect_in_window();
+    add_damage({ rect.x - spill.left - 4, rect.y - spill.top - 4, rect.width + spill.left + spill.right + 8, rect.height + spill.top + spill.bottom + 8 });
+    view.layer_was_made();
+}
+
+void Window::plan_layers()
+{
+    m_layer_plan_stale = false;
+    Vector<View*> plan;
+    Vector<FloatRect> covered;
+    plan_layers_of(*m_root, nullptr, covered, plan);
+
+    auto const in_plan = [&](View const* view) {
+        for (auto const* planned : plan) {
+            if (planned == view)
+                return true;
+        }
+        return false;
+    };
+    // The innermost first. (In the end, what's in something that has gone has gone too, and has to be made again.)
+    for (size_t i = m_layer_views.size(); i > 0; --i) {
+        auto* view = m_layer_views[i - 1];
+        if (!in_plan(view) || !view->m_server_layer || view->m_server_layer->parent != view->m_planned_layer_parent)
+            drop_layer(*view);
+    }
+    for (auto* view : plan) {
+        if (!view->m_server_layer)
+            make_layer(*view, view->m_planned_layer_parent);
+    }
+    m_layer_views.clear();
+    for (auto* view : plan) {
+        if (view->m_server_layer)
+            m_layer_views.append(view);
+    }
+}
+
+void Window::fit_surface(View& view)
+{
+    auto& layer = *view.m_server_layer;
+    float const scale = static_cast<float>(m_backend->scale());
+    auto const spill = view.overflow();
+    // (A focus ring goes further than anything says it does.)
+    float constexpr ring = 4;
+    FloatRect const wanted { -spill.left - ring, -spill.top - ring, view.m_frame.width + spill.left + spill.right + 2 * ring, view.m_frame.height + spill.top + spill.bottom + 2 * ring };
+    IntSize const pixels { static_cast<int>(Base::Math::ceil(static_cast<double>(wanted.width * scale))), static_cast<int>(Base::Math::ceil(static_cast<double>(wanted.height * scale))) };
+    if (pixels == layer.surface_pixels && wanted == layer.surface_rect)
+        return;
+    layer.surface_rect = wanted;
+    if (pixels != layer.surface_pixels && !pixels.is_empty()) {
+        if (layer.backend->set_surface(pixels).is_error())
+            return;
+        layer.surface_pixels = pixels;
+    }
+    layer.damage.clear();
+    layer.damage.append(wanted);
+    layer.present_all = true;
+}
+
+void Window::fit_scrolling_surface(View& view)
+{
+    auto& layer = *view.m_server_layer;
+    float const scale = static_cast<float>(m_backend->scale());
+    float const width = view.m_frame.width;
+    float const height = view.m_frame.height;
+    // As much as there is to it.
+    float document_width = width;
+    float document_height = height;
+    for (auto const& child : view.m_children) {
+        document_width = max(document_width, child->m_frame.right());
+        document_height = max(document_height, child->m_frame.bottom());
+    }
+    // Half as much again each way, in whichever way it can go. That's a good few steps of a wheel, and it's kept ready before it's needed.
+    float const more_across = document_width > width ? width / 2 : 0;
+    float const more_down = document_height > height ? height / 2 : 0;
+    float const wanted_width = min(width + 2 * more_across, document_width);
+    float const wanted_height = min(height + 2 * more_down, document_height);
+    auto const snapped = [&](float value) { return static_cast<float>(Base::Math::round(static_cast<double>(value * scale))) / scale; };
+    auto const place = [&](float origin, float more, float wanted, float document) { return snapped(clamp(origin - more, 0.0f, max(document - wanted, 0.0f))); };
+    auto const origin = view.m_bounds_origin;
+    FloatRect const centred { place(origin.x, more_across, wanted_width, document_width), place(origin.y, more_down, wanted_height, document_height), wanted_width, wanted_height };
+    IntSize const pixels { static_cast<int>(Base::Math::ceil(static_cast<double>(wanted_width * scale))), static_cast<int>(Base::Math::ceil(static_cast<double>(wanted_height * scale))) };
+    if (pixels.is_empty())
+        return;
+    if (pixels != layer.surface_pixels) {
+        if (layer.backend->set_surface(pixels).is_error())
+            return;
+        layer.surface_pixels = pixels;
+        layer.surface_rect = centred;
+        layer.damage.clear();
+        layer.damage.append(centred);
+        layer.present_all = true;
+        return;
+    }
+    auto const& held = layer.surface_rect;
+    // Close enough to the edge of what's held, with more beyond it, and it's time to move along.
+    auto const running_out = [](float at, float seen, float start, float size, float margin, float document) {
+        return (at < start + margin && start > 0) || (at + seen > start + size - margin && start + size < document);
+    };
+    bool const move_it = running_out(origin.x, width, held.x, held.width, more_across / 4, document_width) || running_out(origin.y, height, held.y, held.height, more_down / 4, document_height);
+    if (!move_it)
+        return;
+    // What's still wanted of what's there stays, and only what's new is drawn.
+    auto const dx = static_cast<int>(Base::Math::round(static_cast<double>((centred.x - held.x) * scale)));
+    auto const dy = static_cast<int>(Base::Math::round(static_cast<double>((centred.y - held.y) * scale)));
+    auto& back = layer.backend->back_buffer();
+    auto const& shown = layer.backend->shown_buffer();
+    for (int y = 0; y < back.height(); ++y) {
+        int const from_y = y + dy;
+        if (from_y < 0 || from_y >= shown.height())
+            continue;
+        int const left = max(0, -dx);
+        int const right = min(back.width(), back.width() - dx);
+        if (right > left)
+            __builtin_memcpy(back.scanline(y) + left, shown.scanline(from_y) + left + dx, static_cast<size_t>(right - left) * sizeof(Pixel));
+    }
+    layer.damage.clear();
+    auto const old = held;
+    layer.surface_rect = centred;
+    if (centred.y < old.y)
+        layer.damage.append({ centred.x, centred.y, centred.width, old.y - centred.y });
+    if (centred.bottom() > old.bottom())
+        layer.damage.append({ centred.x, old.bottom(), centred.width, centred.bottom() - old.bottom() });
+    if (centred.x < old.x)
+        layer.damage.append({ centred.x, centred.y, old.x - centred.x, centred.height });
+    if (centred.right() > old.right())
+        layer.damage.append({ old.right(), centred.y, centred.right() - old.right(), centred.height });
+    layer.present_all = true;
+}
+
+void Window::sync_layer(View& view, size_t order)
+{
+    using WS::LayerProperty;
+    auto& layer = *view.m_server_layer;
+    auto const& backend = *layer.backend;
+    if (view.m_scrolls_on_layer)
+        fit_scrolling_surface(view);
+    else
+        fit_surface(view);
+
+    // Where it goes, in the bounds of the layer it's in; and what's between them that cuts it off.
+    View const* parent = layer.parent;
+    auto position_in_parent = [&](View const& of) {
+        FloatPoint point = of.m_frame.origin();
+        if (&of != &view)
+            point = point + of.m_translation;
+        for (auto const* up = of.m_parent; up && up != parent; up = up->m_parent)
+            point = point - up->m_bounds_origin + up->m_frame.origin() + up->m_translation;
+        // A layer that scrolls is told how far itself.
+        if (parent && !parent->m_scrolls_on_layer)
+            point = point - parent->m_bounds_origin;
+        return point;
+    };
+    auto const position = position_in_parent(view);
+    FloatRect const frame { position.x, position.y, view.m_frame.width, view.m_frame.height };
+    FloatRect clip { 0, 0, -1, -1 };
+    for (auto const* up = view.m_parent; up && up != parent; up = up->m_parent) {
+        if (!up->m_clips_children)
+            continue;
+        auto const at = position_in_parent(*up);
+        FloatRect const cut { at.x, at.y, up->m_frame.width, up->m_frame.height };
+        clip = clip.width < 0 ? cut : clip.intersected(cut);
+    }
+
+    if (frame != layer.sent_frame) {
+        m_backend->layer_set(backend, LayerProperty::Frame, frame.x, frame.y, frame.width, frame.height);
+        layer.sent_frame = frame;
+    }
+    if (clip != layer.sent_clip) {
+        m_backend->layer_set(backend, LayerProperty::ClipRect, clip.x, clip.y, clip.width, clip.height);
+        layer.sent_clip = clip;
+    }
+    if (view.m_translation != layer.sent_translation) {
+        // (One that's been sent an animation is on its way there, and has been told already.)
+        bool animating = false;
+        for (auto const& queued : m_queued_layer_animations)
+            animating = animating || (queued.view == &view && queued.property == LayerProperty::Translation);
+        if (!animating)
+            m_backend->layer_set(backend, LayerProperty::Translation, view.m_translation.x, view.m_translation.y);
+        layer.sent_translation = view.m_translation;
+    }
+    if (view.m_opacity != layer.sent_opacity) {
+        bool animating = false;
+        for (auto const& queued : m_queued_layer_animations)
+            animating = animating || (queued.view == &view && queued.property == LayerProperty::Opacity);
+        if (!animating)
+            m_backend->layer_set(backend, LayerProperty::Opacity, view.m_opacity);
+        layer.sent_opacity = view.m_opacity;
+    }
+    FloatPoint bounds_origin {};
+    if (view.m_scrolls_on_layer) {
+        // On a whole pixel, for its text to stay as it was drawn.
+        float const scale = static_cast<float>(m_backend->scale());
+        bounds_origin = { static_cast<float>(Base::Math::round(static_cast<double>(view.m_bounds_origin.x * scale))) / scale, static_cast<float>(Base::Math::round(static_cast<double>(view.m_bounds_origin.y * scale))) / scale };
+    }
+    if (bounds_origin != layer.sent_bounds_origin) {
+        m_backend->layer_set(backend, LayerProperty::BoundsOrigin, bounds_origin.x, bounds_origin.y);
+        layer.sent_bounds_origin = bounds_origin;
+    }
+    auto const contents_origin = layer.surface_rect.origin();
+    if (contents_origin != layer.sent_contents_origin) {
+        m_backend->layer_set(backend, LayerProperty::ContentsOrigin, contents_origin.x, contents_origin.y);
+        layer.sent_contents_origin = contents_origin;
+    }
+    bool const clips = view.m_scrolls_on_layer;
+    if (clips != layer.sent_clips) {
+        m_backend->layer_set(backend, LayerProperty::Clips, clips ? 1 : 0);
+        layer.sent_clips = clips;
+    }
+    if (order != layer.sent_order) {
+        m_backend->layer_set(backend, LayerProperty::Order, static_cast<float>(order));
+        layer.sent_order = order;
+    }
+}
+
+void Window::update_layers()
+{
+    if (!m_backend->supports_layers())
+        return;
+    if (m_layer_plan_stale)
+        plan_layers();
+    // Each in order, among those in the same place.
+    for (size_t i = 0; i < m_layer_views.size(); ++i) {
+        size_t order = 0;
+        for (size_t before = 0; before < i; ++before) {
+            if (m_layer_views[before]->m_server_layer->parent == m_layer_views[i]->m_server_layer->parent)
+                ++order;
+        }
+        sync_layer(*m_layer_views[i], order);
+    }
+}
+
+void Window::draw_layer(View& view)
+{
+    auto& layer = *view.m_server_layer;
+    if (layer.damage.is_empty() && !layer.present_all)
+        return;
+    if (layer.surface_pixels.is_empty())
+        return;
+    auto& bitmap = layer.backend->back_buffer();
+    float const scale = static_cast<float>(m_backend->scale());
+    auto const& held = layer.surface_rect;
+    IntRect total;
+    for (auto const& area : layer.damage) {
+        auto pixels = FloatRect { (area.x - held.x) * scale, (area.y - held.y) * scale, area.width * scale, area.height * scale }.enclosing_int_rect().intersected(bitmap.rect());
         if (pixels.is_empty())
             continue;
         total = total.united(pixels);
@@ -436,15 +842,18 @@ void Window::update_now()
         Painter painter(bitmap);
         painter.clip_rect(pixels.to<float>());
         painter.scale(scale, scale);
+        painter.translate(-held.x, -held.y);
         Graphics graphics(painter, scale);
-        FloatRect dirty { static_cast<float>(pixels.x) / scale, static_cast<float>(pixels.y) / scale, static_cast<float>(pixels.width) / scale, static_cast<float>(pixels.height) / scale };
-        m_root->draw_tree(graphics, dirty);
+        FloatRect const dirty { held.x + static_cast<float>(pixels.x) / scale, held.y + static_cast<float>(pixels.y) / scale, static_cast<float>(pixels.width) / scale, static_cast<float>(pixels.height) / scale };
+        view.draw_contents(graphics, dirty, view.m_scrolls_on_layer);
     }
-    m_damage.clear();
-    if (total.is_empty())
-        return;
-    m_presenting = true;
-    m_backend->present(total);
+    layer.damage.clear();
+    if (layer.present_all) {
+        total = bitmap.rect();
+        layer.present_all = false;
+    }
+    if (!total.is_empty())
+        m_backend->layer_present(*layer.backend, total);
 }
 
 void Window::handle_presented()
@@ -782,6 +1191,22 @@ void Window::handle_appearance_changed()
 
 void Window::view_going_away(View& view)
 {
+    // Not on the screen, and nobody left to tell.
+    m_layer_animation_endings.remove_all_matching([&](auto const& ending) { return ending.view == &view; });
+    m_queued_layer_animations.remove_all_matching([&](auto const& queued) { return queued.view == &view; });
+    for (size_t i = 0; i < m_layer_views.size(); ++i) {
+        if (m_layer_views[i] == &view) {
+            m_layer_views.remove(i);
+            break;
+        }
+    }
+    if (view.m_server_layer) {
+        m_backend->layer_destroy(*view.m_server_layer->backend);
+        view.m_server_layer = nullptr;
+        layers_need_planning();
+    } else if (view.m_wants_layer) {
+        layers_need_planning();
+    }
     if (m_first_responder == &view)
         m_first_responder = nullptr;
     if (m_key_interceptor == &view)

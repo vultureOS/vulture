@@ -71,11 +71,7 @@ public:
     void slide_in()
     {
         auto const distance = m_size.height + 12;
-        m_holder->set_layer_backed(true);
-        m_holder->set_translation({ 0, -distance });
-        (void)animate(Animation::Timing::spring_with(tokens().metric("animation.standard"_sv) * 1.3f, 0), [this, distance](float progress) {
-            m_holder->set_translation({ 0, -distance * (1 - progress) });
-        }, [this] { m_holder->set_layer_backed(false); });
+        m_holder->animate_translation({ 0, -distance }, { 0, 0 }, Animation::Timing::spring_with(tokens().metric("animation.standard"_sv) * 1.3f, 0), [this] { m_holder->set_wants_layer(false); });
     }
 
     void run_dismissed()
@@ -162,14 +158,7 @@ void Sheet::dismiss(Window& window)
         scrim->run_dismissed();
         window.root_view().remove_child(*scrim);
     };
-    if (!motion_enabled()) {
-        finish();
-        return;
-    }
-    scrim->holder().set_layer_backed(true);
-    (void)animate(Animation::Timing::ease_in(tokens().metric("animation.standard"_sv) * 0.8f), [scrim, distance](float progress) {
-        scrim->holder().set_translation({ 0, -distance * progress });
-    }, move(finish));
+    scrim->holder().animate_translation({ 0, 0 }, { 0, -distance }, Animation::Timing::ease_in(tokens().metric("animation.standard"_sv) * 0.8f), move(finish));
 }
 
 bool Sheet::is_presented(Window& window)

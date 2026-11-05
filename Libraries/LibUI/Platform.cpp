@@ -22,4 +22,9 @@ void Platform::set(Platform* platform)
     s_platform = platform;
 }
 
+ErrorOr<NonnullOwnPtr<LayerBackend>> WindowBackend::create_layer(LayerBackend const*)
+{
+    return Error::from_string_literal("There are no layers here");
+}
+
 }

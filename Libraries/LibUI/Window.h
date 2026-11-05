@@ -92,6 +92,14 @@ public:
     [[nodiscard]] bool update_scheduled() const { return m_update_scheduled; }
     // Lays out, draws what is damaged, and shows it, now if the last was shown.
     void update_now();
+
+    // Views with layers of their own.
+    void layers_need_planning();
+    // Something has moved or gone, which matters only if there are any.
+    void layers_may_need_planning();
+    void add_layer_damage(View&, Gfx::FloatRect const&);
+    void queue_layer_animation(View&, WS::LayerProperty, Span<float const> from, Span<float const> to, Animation::Timing const&, bool repeats, int steps, Function<void()> finished);
+    void handle_layer_animation_finished(u32 tag);
     void draw_focus_ring(Graphics&, View&);
     void set_materials(Span<MaterialRegion const>);
     // The sidebar's material down the left, this wide, however tall the window gets. (The
@@ -153,6 +161,37 @@ private:
     Function<void()> m_default_action;
     Function<void()> m_cancel_action;
     Vector<Gfx::FloatRect> m_damage;
+
+    void update_layers();
+    void plan_layers();
+    void plan_layers_of(View&, View* layer_parent, Vector<Gfx::FloatRect>& covered, Vector<View*>& plan);
+    void make_layer(View&, View* parent);
+    void drop_layer(View&);
+    void fit_surface(View&);
+    void fit_scrolling_surface(View&);
+    void sync_layer(View&, size_t order);
+    void draw_layer(View&);
+    void send_queued_layer_animations();
+    Vector<View*> m_layer_views;
+    bool m_layer_plan_stale { false };
+    u32 m_next_animation_tag { 1 };
+    struct QueuedLayerAnimation {
+        View* view;
+        WS::LayerProperty property;
+        float from[4];
+        float to[4];
+        Animation::Timing timing;
+        bool repeats;
+        int steps;
+        u32 tag;
+    };
+    Vector<QueuedLayerAnimation> m_queued_layer_animations;
+    struct LayerAnimationEnding {
+        u32 tag;
+        View* view;
+        Function<void()> finished;
+    };
+    Vector<LayerAnimationEnding> m_layer_animation_endings;
     bool m_shown { false };
     bool m_key { false };
     bool m_transparent { false };

@@ -1328,13 +1328,22 @@ void Spinner::set_running(bool running)
         Platform::the().cancel_timer(m_timer);
         m_timer = -1;
     }
-    if (running && motion_enabled()) {
+    // On a layer it goes on whatever this program's doing, which is rather the point of a spinner.
+    bool const on_layer = running && motion_enabled() && window() && window()->backend().supports_layers();
+    set_wants_layer(on_layer);
+    if (running && motion_enabled() && !on_layer) {
         auto every = static_cast<u64>(tokens().metric("progress.spinnerStepMilliseconds"_sv));
         m_timer = Platform::the().add_timer(every, true, [this] {
             m_step = (m_step + 1) % static_cast<int>(tokens().metric("progress.spinnerSpokes"_sv));
             set_needs_display();
         });
     }
+}
+
+void Spinner::layer_was_made()
+{
+    auto const spokes = tokens().metric("progress.spinnerSpokes"_sv);
+    rotate_forever(tokens().metric("progress.spinnerStepMilliseconds"_sv) * spokes / 1000, static_cast<int>(spokes));
 }
 
 FloatSize Spinner::intrinsic_size() const

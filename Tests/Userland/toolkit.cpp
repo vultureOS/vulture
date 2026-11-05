@@ -338,6 +338,155 @@ void test_appearance()
     window->hide();
 }
 
+// Bands of color, so that where it is shows on the screen; and how often it has been asked to draw them.
+class CountingDocument final : public View {
+public:
+    int draws { 0 };
+
+    [[nodiscard]] FloatSize intrinsic_size() const override { return { 300, 6000 }; }
+    void draw(Graphics& graphics) override
+    {
+        ++draws;
+        for (int band = 0; band < 60; ++band)
+            graphics.fill({ 0, static_cast<float>(band) * 100, width(), 100 }, band % 2 ? Color::from_rgb(0x2060c0) : Color::from_rgb(0xe0a020));
+    }
+};
+
+class ColorBox final : public View {
+public:
+    void draw(Graphics& graphics) override
+    {
+        graphics.fill_rounded({ 0, 0, width(), height() }, 12, Color::from_rgb(0xc03060));
+        graphics.fill({ 20, 20, width() - 40, 10 }, Color { 255, 255, 255, 128 });
+    }
+};
+
+bool same_pixels(NonnullRefPtr<Bitmap> const& one, NonnullRefPtr<Bitmap> const& two, IntRect area)
+{
+    for (int y = area.y; y < area.bottom(); ++y) {
+        for (int x = area.x; x < area.right(); ++x) {
+            if (one->color_at(x, y) != two->color_at(x, y)) {
+                auto const a = one->color_at(x, y);
+                auto const b = two->color_at(x, y);
+                printf("(differs at %d,%d: %d %d %d, then %d %d %d)\n", x, y, a.red, a.green, a.blue, b.red, b.green, b.blue);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void test_layers()
+{
+    int const scale = s_app->connection().scale();
+    IntRect const frame { 100, 100, 400, 300 };
+    IntRect const area { frame.x * scale, frame.y * scale, frame.width * scale, frame.height * scale };
+    // Running, for what the server runs to be what's looked at.
+    set_motion_enabled(true);
+    // Out of the way: a scroller stays up with the pointer over it.
+    pointer(2, 2);
+    auto window = make_window("Layers"_sv, frame);
+    auto& box = window->root_view().add<ColorBox>();
+    box.set_frame({ 40, 60, 200, 100 });
+    settle();
+    auto const without = screen();
+    box.set_wants_layer(true);
+    settle(200);
+    report("a view has a layer when it asks for one", box.has_server_layer());
+    auto const with = screen();
+    report("with a layer, it looks just the same", same_pixels(without, with, area));
+    box.set_translation({ 30, 0 });
+    settle(200);
+    report("it moves over what's under it", screen_color(frame.x + 45, frame.y + 110) != Color::from_rgb(0xc03060) && screen_color(frame.x + 255, frame.y + 110) == Color::from_rgb(0xc03060));
+    box.set_translation({ 0, 0 });
+    bool finished = false;
+    box.animate_opacity(1, 0.25f, Animation::Timing::ease_out(0.1f), [&] { finished = true; });
+    settle(300);
+    report("what the server animated says when it's finished", finished);
+    box.set_opacity(1);
+    box.set_wants_layer(false);
+    settle(200);
+    report("without one again, it still looks just the same", !box.has_server_layer() && same_pixels(without, screen(), area));
+    window->root_view().remove_child(box);
+
+    // Something over it gets one too, or it would be under it.
+    auto& scroll = window->root_view().add<ScrollView>();
+    scroll.set_frame({ 20, 40, 300, 240 });
+    auto owned_document = adopt_own(*new CountingDocument);
+    auto& document = *owned_document;
+    scroll.set_document(move(owned_document));
+    settle(200);
+    auto const at_rest = screen();
+    scroll.scroll_to({ 0, 40 });
+    settle(400);
+    // Bands change at 100, so 60 points down the view.
+    int const column = frame.x + 100;
+    auto const top = frame.y + 40;
+    report("it has scrolled", screen_color(column, top + 50) == Color::from_rgb(0xe0a020) && screen_color(column, top + 70) == Color::from_rgb(0x2060c0));
+    // (It has been a while, so it starts by going back on a layer.)
+    scroll.scroll_to({ 0, 42 });
+    settle(100);
+    int const draws_before = document.draws;
+    for (int offset = 44; offset <= 80; offset += 4) {
+        scroll.scroll_to({ 0, static_cast<float>(offset) });
+        settle(30);
+    }
+    report("scrolling a little draws nothing again", document.draws == draws_before);
+    report("and it's where it should be", screen_color(column, top + 10) == Color::from_rgb(0xe0a020) && screen_color(column, top + 30) == Color::from_rgb(0x2060c0));
+    // A long way: only what's new.
+    for (int offset = 100; offset <= 2000; offset += 100) {
+        scroll.scroll_to({ 0, static_cast<float>(offset) });
+        settle(30);
+    }
+    report("a long way, it's all there when it gets there", screen_color(column, top + 50) == Color::from_rgb(0xe0a020) && screen_color(column, top + 150) == Color::from_rgb(0x2060c0));
+    // Stopped, it goes back in with the rest, and nothing shows that it was ever gone.
+    auto const on_layer = screen();
+    settle(800);
+    report("when it stops, it needs no layer", !scroll.children()[0]->has_server_layer());
+    // (All but the scroller, which is on its way out.)
+    IntRect const document_area { (frame.x + 20) * scale, (frame.y + 40) * scale, 280 * scale, 240 * scale };
+    report("and looks just the same", same_pixels(on_layer, screen(), document_area));
+    scroll.scroll_to({ 0, 0 });
+    // (The scroller shows itself for a while.)
+    settle(4000);
+    report("and back where it started, exactly as it was", same_pixels(at_rest, screen(), area));
+    window->root_view().remove_child(scroll);
+    settle(100);
+
+    // A sheet slides in by itself, and it's in the same place at the end as one that didn't slide.
+    auto const without_sheet = screen();
+    auto sheet_content = [] { return adopt_own(*static_cast<View*>(new ColorBox)); };
+    Sheet::present(*window, sheet_content(), { 240, 120 });
+    settle(30);
+    report("a sheet on its way has a layer", window->root_view().children().last()->children()[0]->has_server_layer());
+    settle(1000);
+    report("and when it's there, it doesn't", !window->root_view().children().last()->children()[0]->has_server_layer());
+    auto const slid = screen();
+    Sheet::dismiss(*window);
+    settle(800);
+    report("and it goes away again", same_pixels(without_sheet, screen(), area));
+    set_motion_enabled(false);
+    Sheet::present(*window, sheet_content(), { 240, 120 });
+    settle(100);
+    report("as if it hadn't slid at all", same_pixels(slid, screen(), area));
+    Sheet::dismiss(*window);
+    settle(100);
+
+    // A scroller shown with motion off still goes, and with no fading.
+    auto& quick = window->root_view().add<ScrollView>();
+    quick.set_frame({ 20, 40, 300, 240 });
+    quick.set_document(adopt_own(*static_cast<View*>(new CountingDocument)));
+    settle(200);
+    auto const before_flash = screen();
+    quick.scroll_to({ 0, 0 });
+    settle(50);
+    static_cast<Scroller*>(quick.children()[1].ptr())->flash();
+    settle(100);
+    report("a scroller shows", !same_pixels(before_flash, screen(), area));
+    settle(1200);
+    report("and goes, with motion reduced", same_pixels(before_flash, screen(), area));
+}
+
 void test_sheet()
 {
     auto window = make_window("Sheet"_sv, { 200, 100, 500, 400 });
@@ -436,6 +585,7 @@ int run_client()
     test_levels_and_closing();
     test_appearance();
     test_sheet();
+    test_layers();
     report("no token was missing", Appearance::missing_tokens() == 0);
     printf("done\n");
     fflush(stdout);
