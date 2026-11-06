@@ -79,6 +79,11 @@ struct ShellState {
     int space_count { 1 };
     bool overview { false };
     Vector<ApplicationEntry> applications;
+    // Cmd-Tab, while it's going on: by pid, the most recent first.
+    Vector<i32> switcher;
+    int switcher_selected { 0 };
+    bool stage { false };
+    bool desktop_revealed { false };
 };
 [[nodiscard]] ErrorOr<ShellState> parse_shell_state(StringView json);
 

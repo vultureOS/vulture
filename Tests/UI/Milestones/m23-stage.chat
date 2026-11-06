@@ -1,0 +1,107 @@
+# M23: Split View, Stage and hot corners: windows side by side on a Space of their own, the rest kept to one side, and the corners of the screen.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 2
+click button "Terminal"
+expect terminal: ready
+pause 1
+click button "Text Editor"
+expect texteditor: ready
+pause 1
+# ---- Full Screen Tile: Text Editor on the left, then a choice of what goes beside it, from what was on its Space.
+click menuitem "Window"
+ax-expect menuitem "Full Screen Tile"
+click menuitem "Full Screen Tile"
+ax-expect menuitem "Left of Screen"
+click menuitem "Left of Screen"
+pause 1.5
+ax-expect window "vulture — vsh — 80×24"
+pointer 31500 25000
+pause 0.5
+screenshot split-choosing.png
+click window "vulture — vsh — 80×24"
+pause 1.5
+ax-expect window "Untitled" at 0 -28 637 828
+pointer 8000 16000
+pause 0.5
+screenshot split-view.png
+# ---- The line between them moves both.
+pointer 16384 16384
+pause 0.3
+button left down
+pause 0.2
+pointer 17600 16384
+pause 0.2
+pointer 18944 16384
+pause 0.3
+button left up
+pause 1
+ax-expect window "Untitled" at 0 -28 740 828
+pointer 8000 16000
+pause 0.5
+screenshot split-moved.png
+# ---- Out of full screen, the one that's in front: the other has the Space to itself. Then that one too.
+key ctrl-meta_l-f
+pause 2
+ax-expect window "Untitled" at 0 -28 1280 828
+key ctrl-meta_l-f
+pause 2
+ax-expect window "Untitled" at 330 113 620 460
+ax-expect window "vulture — vsh — 80×24"
+# ---- Desktop & Dock, in Settings.
+click button "Settings"
+expect settings: Appearance
+pause 1
+click row "Desktop & Dock"
+expect settings: Desktop & Dock
+ax-expect switch "Stage"
+ax-expect switch "Drag windows to menu bar to fill screen" = on
+pause 1
+screenshot desktop-and-dock.png
+# ---- Stage: what's being used, in the middle; the rest along the left.
+click switch "Stage"
+pause 2
+ax-expect button "Text Editor"
+pointer 31500 25000
+pause 0.5
+screenshot stage.png
+click button "Text Editor"
+pause 2
+ax-expect window "Untitled"
+ax-gone switch "Stage"
+pointer 31500 25000
+pause 0.5
+screenshot stage-switched.png
+click button "Settings"
+pause 2
+ax-expect switch "Stage" = on
+click switch "Stage"
+pause 2
+ax-gone group "Stage"
+# ---- Hot corners: the top right one, to uncover the desktop. (Further down the pane.)
+pointer 20000 16000
+pause 0.3
+wheel -12
+pause 1
+screenshot desktop-and-dock-scrolled.png
+click button "Hot Corners…"
+ax-expect popup "Top right"
+click popup "Top right"
+ax-expect menuitem "Desktop"
+click menuitem "Desktop"
+pause 0.5
+screenshot hot-corners.png
+click button "Done"
+pause 1
+pointer 32767 0
+pause 1.5
+screenshot hot-corner.png
+pointer 16000 16000
+pause 0.5
+pointer 32767 0
+pause 1.5
+pointer 16000 16000
+pause 1
+screenshot hot-corner-again.png

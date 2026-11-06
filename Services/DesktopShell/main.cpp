@@ -820,6 +820,137 @@ private:
     Slider* m_slider { nullptr };
 };
 
+// Cmd-Tab: every application, the most recent first, with one chosen. It goes when Cmd does, and it's the server that decides.
+class SwitcherView final : public View {
+public:
+    struct Entry {
+        i32 pid { 0 };
+        String name;
+        String icon;
+    };
+
+    void set(Vector<Entry> entries, int selected)
+    {
+        m_entries = move(entries);
+        m_selected = selected;
+        set_needs_display();
+    }
+
+    [[nodiscard]] FloatSize size_wanted() const
+    {
+        auto const& t = tokens();
+        return { t.metric("switcher.padding"_sv) * 2 + t.metric("switcher.cell"_sv) * static_cast<float>(m_entries.size()), t.metric("switcher.padding"_sv) * 2 + t.metric("switcher.cell"_sv) + t.metric("switcher.label"_sv) };
+    }
+
+private:
+    void draw(Graphics& graphics) override
+    {
+        auto const& t = tokens();
+        float const padding = t.metric("switcher.padding"_sv);
+        float const cell = t.metric("switcher.cell"_sv);
+        float const icon = t.metric("switcher.icon"_sv);
+        for (size_t i = 0; i < m_entries.size(); ++i) {
+            FloatRect const place { padding + cell * static_cast<float>(i), padding, cell, cell };
+            if (static_cast<int>(i) == m_selected)
+                graphics.fill_rounded(place, t.metric("switcher.radius"_sv), t.color("switcher.selected"_sv));
+            // (At the size it's shown: a smaller one made bigger is blurred.)
+            if (auto picture = Desktop::icon_named(m_entries[i].icon.view(), static_cast<int>(icon), static_cast<int>(graphics.scale())))
+                graphics.painter().draw_bitmap(*picture, { place.x + (cell - icon) / 2, place.y + (cell - icon) / 2, icon, icon });
+        }
+        if (m_selected >= 0 && m_selected < static_cast<int>(m_entries.size())) {
+            FloatRect const label { 0, padding + cell, width(), t.metric("switcher.label"_sv) };
+            graphics.draw_text_centered(m_entries[static_cast<size_t>(m_selected)].name.view(), t.named_font("body"_sv), label, t.color("label"_sv));
+        }
+    }
+
+    void accessibility_parts(Vector<Accessibility::Node>& parts) override
+    {
+        auto const& t = tokens();
+        float const padding = t.metric("switcher.padding"_sv);
+        float const cell = t.metric("switcher.cell"_sv);
+        for (size_t i = 0; i < m_entries.size(); ++i) {
+            StringView const value = static_cast<int>(i) == m_selected ? "chosen"_sv : StringView {};
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::Cell, m_entries[i].name.view(), { padding + cell * static_cast<float>(i), padding, cell, cell }, value));
+        }
+    }
+
+    Vector<Entry> m_entries;
+    int m_selected { 0 };
+};
+
+class Switcher {
+public:
+    Switcher()
+    {
+        auto screen = Platform::the().screen_size();
+        m_window = adopt_own(*new UI::Window("Switcher"_sv, { 0, 0, 200, 200 }, WS::WindowBare | WS::WindowPopup));
+        m_window->set_transparent(true);
+        m_window->backend().set_level(WS::LevelPopup);
+        m_view = &m_window->root_view().add<SwitcherView>();
+        (void)screen;
+    }
+
+    void update(Desktop::ShellState const& state)
+    {
+        if (state.switcher.is_empty()) {
+            m_window->hide();
+            // Ready for when it's wanted: what each one running looks like, found now rather than then.
+            int const scale = m_window->backend().scale();
+            int const size = static_cast<int>(tokens().metric("switcher.icon"_sv));
+            for (auto const& application : state.applications) {
+                if (!application.identifier.is_empty())
+                    (void)Desktop::icon_named(icon_of(application.identifier.view()).view(), size, scale);
+            }
+            return;
+        }
+        Vector<SwitcherView::Entry> entries;
+        for (auto pid : state.switcher) {
+            for (auto const& application : state.applications) {
+                if (application.pid != pid)
+                    continue;
+                SwitcherView::Entry entry;
+                entry.pid = pid;
+                entry.name = MUST(String::from_view(application.name.view()));
+                entry.icon = icon_of(application.identifier.view());
+                entries.append(move(entry));
+            }
+        }
+        m_view->set(move(entries), state.switcher_selected);
+        auto const wanted = m_view->size_wanted();
+        auto const screen = Platform::the().screen_size();
+        Gfx::IntRect const frame { (screen.width - static_cast<int>(wanted.width)) / 2, (screen.height - static_cast<int>(wanted.height)) / 2, static_cast<int>(wanted.width), static_cast<int>(wanted.height) };
+        m_window->set_frame(frame);
+        float const radius = tokens().metric("switcher.panelRadius"_sv);
+        MaterialRegion material { { 0, 0, frame.width, frame.height }, WS::Material::HUD, static_cast<int>(radius) };
+        m_window->set_materials(Span<MaterialRegion const>(&material, 1));
+        m_view->set_frame({ 0, 0, wanted.width, wanted.height });
+        m_window->show();
+    }
+
+private:
+    // Which icon an application has, kept: finding out reads every application's bundle, and the panel has to be
+    // there at once.
+    String icon_of(StringView identifier)
+    {
+        for (auto const& known : m_icons) {
+            if (known.identifier.view() == identifier)
+                return MUST(String::from_view(known.icon.view()));
+        }
+        auto bundle = Desktop::application_with_identifier(identifier);
+        auto icon = MUST(String::from_view(bundle.has_value() ? bundle.value().icon.view() : "GenericApplication"_sv));
+        m_icons.append({ MUST(String::from_view(identifier)), MUST(String::from_view(icon.view())) });
+        return icon;
+    }
+
+    struct KnownIcon {
+        String identifier;
+        String icon;
+    };
+    Vector<KnownIcon> m_icons;
+    OwnPtr<UI::Window> m_window;
+    SwitcherView* m_view { nullptr };
+};
+
 class QuickSettingsPanel {
 public:
     QuickSettingsPanel()
@@ -1185,6 +1316,11 @@ int main(int argc, char** argv)
         (void)server.set_pointer_speed(static_cast<i32>(saved.value()));
     if (auto saved = preferences.number("nightShift"_sv); saved.has_value() && saved.value() > 0)
         (void)server.set_warmth(static_cast<i32>(saved.value()));
+    (void)server.set_tiling(preferences.boolean("tileByEdges"_sv).value_or(true), preferences.boolean("tileToMenuBar"_sv).value_or(true), preferences.boolean("tileWithOption"_sv).value_or(true), preferences.boolean("tileMargins"_sv).value_or(true));
+    (void)server.set_click_wallpaper(preferences.boolean("clickWallpaperReveals"_sv).value_or(true));
+    (void)server.set_hot_corners(static_cast<i32>(preferences.number("hotCornerTopLeft"_sv).value_or(0)), static_cast<i32>(preferences.number("hotCornerTopRight"_sv).value_or(0)), static_cast<i32>(preferences.number("hotCornerBottomLeft"_sv).value_or(0)), static_cast<i32>(preferences.number("hotCornerBottomRight"_sv).value_or(0)));
+    if (preferences.boolean("stage"_sv).value_or(false))
+        (void)server.set_stage(true);
     if (preferences.boolean("mirrorDisplays"_sv).value_or(false))
         (void)server.set_mirroring(true);
     // Where each display goes, and how big it's to look: "output x y width height" and so on.
@@ -1296,11 +1432,52 @@ int main(int argc, char** argv)
     };
     application->connection().on_displays_change = [&] { place_bars(); };
 
+    // The green button's menu, for whichever window's asking: they don't all have a menu bar, and it's not the program's business.
+    OwnPtr<Menu> window_menu;
+    application->connection().on_window_menu_wanted = [&](u32 target, IntPoint at) {
+        window_menu = adopt_own(*new Menu);
+        auto arranging = [&server, target](WS::WindowArrangement arrangement) {
+            return [&server, target, arrangement] { (void)server.arrange_window(target, static_cast<i32>(arrangement)); };
+        };
+        // Sequoia's: rows of pictures under headings, Option changing some of them.
+        auto picture = [&](StringView title, WS::WindowArrangement arrangement) -> MenuItem& {
+            return window_menu->add_picture(title, picture_of_arrangement(arrangement), arranging(arrangement));
+        };
+        auto alternate = [&](MenuItem& item, StringView title, WS::WindowArrangement arrangement) {
+            Menu::add_alternate(item, title, arranging(arrangement)).picture = picture_of_arrangement(arrangement);
+        };
+        (void)window_menu->add_heading("Move & Resize"_sv);
+        (void)picture("Left"_sv, WS::WindowArrangement::Left);
+        (void)picture("Right"_sv, WS::WindowArrangement::Right);
+        (void)picture("Top"_sv, WS::WindowArrangement::Top);
+        (void)picture("Bottom"_sv, WS::WindowArrangement::Bottom);
+        (void)window_menu->add_heading("Fill & Arrange"_sv);
+        alternate(picture("Fill"_sv, WS::WindowArrangement::Fill), "Center"_sv, WS::WindowArrangement::Center);
+        alternate(picture("Left & Right"_sv, WS::WindowArrangement::LeftAndRight), "Right & Left"_sv, WS::WindowArrangement::RightAndLeft);
+        alternate(picture("Left & Quarters"_sv, WS::WindowArrangement::LeftAndQuarters), "Right & Quarters"_sv, WS::WindowArrangement::RightAndQuarters);
+        (void)picture("Quarters"_sv, WS::WindowArrangement::Quarters);
+        (void)window_menu->add_heading("Full Screen Tile"_sv);
+        (void)window_menu->add_picture("Entire Screen"_sv, picture_of_arrangement(WS::WindowArrangement::Fill), [&server, target] { (void)server.set_full_screen(target, true); });
+        (void)window_menu->add_picture("Left of Screen"_sv, picture_of_split_view(true), [&server, target] { (void)server.tile_in_split_view(target, true); });
+        (void)window_menu->add_picture("Right of Screen"_sv, picture_of_split_view(false), [&server, target] { (void)server.tile_in_split_view(target, false); });
+        window_menu->open(*window, at);
+    };
+    (void)server.show_window_menus();
+    application->connection().on_hot_corner = [&](WS::HotCornerAction action) {
+        if (action == WS::HotCornerAction::NotificationCenter)
+            center.toggle();
+        else if (action == WS::HotCornerAction::Launcher)
+            (void)Desktop::open_path("/System/Applications/Launcher.app"_sv);
+    };
+
+    Switcher switcher;
     application->connection().on_shell_state = [&](StringView json) {
         last_state = MUST(String::from_view(json));
         auto state = Desktop::parse_shell_state(json);
-        if (!state.is_error())
+        if (!state.is_error()) {
+            switcher.update(state.value());
             bar.set_state(state.release_value());
+        }
         for (auto& other : other_bars) {
             auto again = Desktop::parse_shell_state(json);
             if (!again.is_error())

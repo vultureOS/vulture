@@ -80,7 +80,8 @@ public:
             shortcut.code = event.code;
             shortcut.modifiers = event.modifiers;
             shortcut.text = event.text.view();
-            if (event.pressed && (event.modifiers & ::Window::ModifierCommand) && Application::the().perform_main_menu_shortcut(shortcut))
+            // (With Control alone too, as Show Next Tab's: an item only takes the modifiers it names, so the rest still type.)
+            if (event.pressed && (event.modifiers & (::Window::ModifierCommand | ::Window::ModifierControl)) && Application::the().perform_main_menu_shortcut(shortcut))
                 return;
             m_owner.handle_key(event.pressed, event.code, event.modifiers, event.text.view());
         };
@@ -120,6 +121,10 @@ public:
     void grab_pointer(bool grab) override { m_window->grab_pointer(grab); }
     void set_cursor(WS::CursorShape shape) override { m_window->set_cursor(shape); }
     void minimize() override { m_window->minimize(); }
+    void arrange(WS::WindowArrangement arrangement) override { m_window->arrange(arrangement); }
+    void toggle_full_screen() override { m_window->toggle_full_screen(); }
+    void take_place_of(WindowBackend& other) override { m_window->take_place_of(static_cast<decltype(*this)>(other).m_window->id()); }
+    void tile_in_split_view(bool on_left) override { m_window->tile_in_split_view(on_left); }
     void zoom() override { m_window->zoom(); }
     void set_input_region(IntRect region) override { m_window->set_input_region(region); }
     void begin_drag(WindowBackend& image, StringView type, ReadonlyBytes data) override
@@ -197,6 +202,7 @@ ErrorOr<NonnullOwnPtr<Application>> Application::create(StringView name, StringV
         set_motion_enabled(false);
         set_held_still(true);
     }
+    application->m_connection->on_full_screen_change = [raw](u32, bool full) { raw->full_screen_changed(full); };
     application->m_connection->on_motion_change = [](bool reduced) {
         if (!held_still())
             set_motion_enabled(!reduced);
@@ -215,6 +221,14 @@ Application& Application::the()
 {
     VERIFY(s_application);
     return *s_application;
+}
+
+void Application::full_screen_changed(bool full)
+{
+    if (!m_full_screen_item)
+        return;
+    m_full_screen_item->title = MUST(String::from_view(full ? "Exit Full Screen"_sv : "Enter Full Screen"_sv));
+    publish_menus();
 }
 
 void Application::set_main_menu(NonnullOwnPtr<Menu> menu)
@@ -260,15 +274,40 @@ void Application::publish_menus()
                 continue;
             }
             MUST(one.set("title"_sv, MUST(JSON::Value::string(item.title.view()))));
+            if (item.heading) {
+                MUST(one.set("heading"_sv, JSON::Value(true)));
+                MUST(items.append(move(one)));
+                continue;
+            }
+            auto leaf = [this](JSON::Value& into, MenuItem& leaf_item) {
+                MUST(into.set("id"_sv, JSON::Value(static_cast<i64>(m_menu_items.size()))));
+                MUST(into.set("enabled"_sv, JSON::Value(leaf_item.enabled)));
+                MUST(into.set("checked"_sv, JSON::Value(leaf_item.checked)));
+                if (!leaf_item.shortcut_text.is_empty())
+                    MUST(into.set("shortcut"_sv, MUST(JSON::Value::string(leaf_item.shortcut_text.view()))));
+                if (!leaf_item.picture.is_empty()) {
+                    auto parts = JSON::Value::array();
+                    for (auto const& part : leaf_item.picture) {
+                        MUST(parts.append(JSON::Value(static_cast<double>(part.x))));
+                        MUST(parts.append(JSON::Value(static_cast<double>(part.y))));
+                        MUST(parts.append(JSON::Value(static_cast<double>(part.width))));
+                        MUST(parts.append(JSON::Value(static_cast<double>(part.height))));
+                    }
+                    MUST(into.set("picture"_sv, move(parts)));
+                    MUST(into.set("palette"_sv, JSON::Value(leaf_item.palette)));
+                }
+                m_menu_items.append(&leaf_item);
+            };
             if (item.submenu) {
                 MUST(one.set("items"_sv, self(self, *item.submenu)));
             } else {
-                MUST(one.set("id"_sv, JSON::Value(static_cast<i64>(m_menu_items.size()))));
-                MUST(one.set("enabled"_sv, JSON::Value(item.enabled)));
-                MUST(one.set("checked"_sv, JSON::Value(item.checked)));
-                if (!item.shortcut_text.is_empty())
-                    MUST(one.set("shortcut"_sv, MUST(JSON::Value::string(item.shortcut_text.view()))));
-                m_menu_items.append(&item);
+                leaf(one, item);
+                if (item.alternate) {
+                    auto alternate = JSON::Value::object();
+                    MUST(alternate.set("title"_sv, MUST(JSON::Value::string(item.alternate->title.view()))));
+                    leaf(alternate, *item.alternate);
+                    MUST(one.set("alternate"_sv, move(alternate)));
+                }
             }
             MUST(items.append(move(one)));
         }
@@ -376,6 +415,12 @@ NonnullOwnPtr<Menu> Application::standard_menus(Function<void()> on_about, bool 
     application_menu.add_with_shortcut(hide_title.view(), KeyH, shown("H"_sv).view(), [this] {
         (void)m_connection->server().hide_application(static_cast<i32>(getpid()), true);
     });
+    StringBuilder hide_others;
+    hide_others.append("\xE2\x8C\xA5"_sv);
+    hide_others.append(cmd);
+    hide_others.append("H"_sv);
+    application_menu.add_with_shortcut("Hide Others"_sv, KeyH, hide_others.view(), [this] { (void)m_connection->server().hide_others(true); }, WS::ModifierCommand | WS::ModifierOption);
+    application_menu.add("Show All"_sv, [this] { (void)m_connection->server().hide_others(false); });
     if (can_quit) {
         application_menu.add_separator();
         application_menu.add_with_shortcut(quit_title.view(), KeyQ, shown("Q"_sv).view(), [this] { request_quit(); });
@@ -405,6 +450,86 @@ NonnullOwnPtr<Menu> Application::standard_menus(Function<void()> on_about, bool 
     window_menu.add("Zoom"_sv, [this] {
         if (auto* window = key_window())
             window->backend().zoom();
+    });
+    auto arranging = [this](WS::WindowArrangement arrangement) {
+        return [this, arrangement] {
+            if (auto* window = key_window())
+                window->backend().arrange(arrangement);
+        };
+    };
+    // Sequoia's order: the active window's place, then its tiles, then full screen, then tabs.
+    window_menu.add("Fill"_sv, arranging(WS::WindowArrangement::Fill));
+    window_menu.add("Center"_sv, arranging(WS::WindowArrangement::Center));
+    window_menu.add_separator();
+    auto& move_and_resize = window_menu.add_submenu("Move & Resize"_sv);
+    auto pictured = [&](Menu& menu, StringView title, WS::WindowArrangement arrangement) -> MenuItem& {
+        auto& item = menu.add(title, arranging(arrangement));
+        item.picture = picture_of_arrangement(arrangement);
+        return item;
+    };
+    auto alternate = [&](MenuItem& item, StringView title, WS::WindowArrangement arrangement) {
+        Menu::add_alternate(item, title, arranging(arrangement)).picture = picture_of_arrangement(arrangement);
+    };
+    (void)pictured(move_and_resize, "Left"_sv, WS::WindowArrangement::Left);
+    (void)pictured(move_and_resize, "Right"_sv, WS::WindowArrangement::Right);
+    (void)pictured(move_and_resize, "Top"_sv, WS::WindowArrangement::Top);
+    (void)pictured(move_and_resize, "Bottom"_sv, WS::WindowArrangement::Bottom);
+    move_and_resize.add_separator();
+    (void)pictured(move_and_resize, "Top Left"_sv, WS::WindowArrangement::TopLeft);
+    (void)pictured(move_and_resize, "Top Right"_sv, WS::WindowArrangement::TopRight);
+    (void)pictured(move_and_resize, "Bottom Left"_sv, WS::WindowArrangement::BottomLeft);
+    (void)pictured(move_and_resize, "Bottom Right"_sv, WS::WindowArrangement::BottomRight);
+    move_and_resize.add_separator();
+    // The windows under it too; with Option, three of them.
+    alternate(pictured(move_and_resize, "Left & Right"_sv, WS::WindowArrangement::LeftAndRight), "Left & Quarters"_sv, WS::WindowArrangement::LeftAndQuarters);
+    alternate(pictured(move_and_resize, "Right & Left"_sv, WS::WindowArrangement::RightAndLeft), "Right & Quarters"_sv, WS::WindowArrangement::RightAndQuarters);
+    alternate(pictured(move_and_resize, "Top & Bottom"_sv, WS::WindowArrangement::TopAndBottom), "Top & Quarters"_sv, WS::WindowArrangement::TopAndQuarters);
+    alternate(pictured(move_and_resize, "Bottom & Top"_sv, WS::WindowArrangement::BottomAndTop), "Bottom & Quarters"_sv, WS::WindowArrangement::BottomAndQuarters);
+    (void)pictured(move_and_resize, "Quarters"_sv, WS::WindowArrangement::Quarters);
+    move_and_resize.add_separator();
+    move_and_resize.add("Return to Previous Size"_sv, arranging(WS::WindowArrangement::Previous));
+    auto& full_screen_tile = window_menu.add_submenu("Full Screen Tile"_sv);
+    full_screen_tile.add("Left of Screen"_sv, [this] {
+        if (auto* window = key_window())
+            window->backend().tile_in_split_view(true);
+    }).picture = picture_of_split_view(true);
+    full_screen_tile.add("Right of Screen"_sv, [this] {
+        if (auto* window = key_window())
+            window->backend().tile_in_split_view(false);
+    }).picture = picture_of_split_view(false);
+    {
+        StringBuilder full;
+        full.append("\xE2\x8C\x83"_sv);
+        full.append(cmd);
+        full.append("F"_sv);
+        // (Said by the server, which sees it first, and works when it's the title bar that's hidden too.)
+        m_full_screen_item = &window_menu.add_with_shortcut("Enter Full Screen"_sv, KeyF, full.view(), [this] {
+            if (auto* window = key_window())
+                window->backend().toggle_full_screen();
+        }, WS::ModifierCommand | WS::ModifierControl);
+    }
+    window_menu.add_separator();
+    {
+        StringBuilder previous;
+        previous.append("\xE2\x8C\x83\xE2\x87\xA7\xE2\x87\xA5"_sv);
+        window_menu.add_with_shortcut("Show Previous Tab"_sv, KeyTab, previous.view(), [this] {
+            if (auto* window = key_window())
+                window->show_adjacent_tab(-1);
+        }, WS::ModifierControl | WS::ModifierShift);
+        StringBuilder next;
+        next.append("\xE2\x8C\x83\xE2\x87\xA5"_sv);
+        window_menu.add_with_shortcut("Show Next Tab"_sv, KeyTab, next.view(), [this] {
+            if (auto* window = key_window())
+                window->show_adjacent_tab(1);
+        }, WS::ModifierControl);
+    }
+    window_menu.add("Move Tab to New Window"_sv, [this] {
+        if (auto* window = key_window())
+            window->move_tab_to_new_window();
+    });
+    window_menu.add("Merge All Windows"_sv, [this] {
+        if (auto* window = key_window())
+            window->merge_all_windows();
     });
     return menus;
 }

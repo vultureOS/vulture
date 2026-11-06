@@ -81,11 +81,6 @@ float ease_out(float t)
     return 1 - inverse * inverse * inverse;
 }
 
-FloatRect between(FloatRect const& a, FloatRect const& b, float t)
-{
-    return { a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.width + (b.width - a.width) * t, a.height + (b.height - a.height) * t };
-}
-
 }
 
 Client* Server::client_with_pid(i32 pid)
@@ -104,8 +99,10 @@ void Server::set_application(IPC::Sender const& sender, String name, String iden
         return;
     client->application_name = move(name);
     client->application_identifier = move(identifier);
-    if (!m_active_application)
+    if (!m_active_application) {
         m_active_application = client;
+        application_became_active(nullptr);
+    }
     shell_state_changed();
 }
 
@@ -144,7 +141,10 @@ void Server::choose_menu_item(IPC::Sender const&, i32 pid, u32 item)
 
 void Server::activate_client(Client& client)
 {
+    auto* previous_application = m_active_application;
     m_active_application = &client;
+    application_became_active(previous_application);
+    reveal_desktop(false, true);
     if (client.hidden) {
         client.hidden = false;
         update_all_visibility();
@@ -165,8 +165,7 @@ void Server::activate_client(Client& client)
         best = minimized;
     }
     if (best) {
-        if (!best->is_on_every_space() && best->space != m_space)
-            go_to_space(best->space, true);
+        show_space_of(*best);
         activate(best);
     } else if (m_active) {
         // No windows: it is the active application, with its menus, and no window.
@@ -228,8 +227,7 @@ void Server::activate_window(IPC::Sender const&, u32 id)
         }
         if (window->minimized)
             restore_window(*window);
-        if (!window->is_on_every_space() && window->space != m_space)
-            go_to_space(window->space, true);
+        show_space_of(*window);
         if (window->can_become_key())
             activate(window);
         shell_state_changed();
@@ -337,8 +335,20 @@ void Server::send_shell_state()
         MUST(state.set("activeIdentifier"_sv, MUST(JSON::Value::string(active->application_identifier.view()))));
         MUST(state.set("menus"_sv, MUST(JSON::Value::string(active->menus.view()))));
     }
-    MUST(state.set("space"_sv, JSON::Value(m_space)));
-    MUST(state.set("spaces"_sv, JSON::Value(m_space_count)));
+    {
+        auto const& main_spaces = spaces_of(m_screen.main_display());
+        MUST(state.set("space"_sv, JSON::Value(main_spaces.current)));
+        MUST(state.set("spaces"_sv, JSON::Value(static_cast<int>(main_spaces.spaces.size()))));
+    }
+    MUST(state.set("stage"_sv, JSON::Value(m_stage)));
+    MUST(state.set("desktopRevealed"_sv, JSON::Value(m_desktop_revealed)));
+    if (m_switching) {
+        auto switcher = JSON::Value::array();
+        for (auto* one : applications_most_recent_first())
+            MUST(switcher.append(JSON::Value(static_cast<i64>(one->pid))));
+        MUST(state.set("switcher"_sv, move(switcher)));
+        MUST(state.set("switcherSelected"_sv, JSON::Value(m_switch_selected)));
+    }
     MUST(state.set("overview"_sv, JSON::Value(m_overview)));
     auto applications = JSON::Value::array();
     for (auto const& client : m_clients) {
@@ -358,7 +368,8 @@ void Server::send_shell_state()
             MUST(one.set("id"_sv, JSON::Value(static_cast<i64>(window->id))));
             MUST(one.set("title"_sv, MUST(JSON::Value::string(window->title.view()))));
             MUST(one.set("minimized"_sv, JSON::Value(window->minimized)));
-            MUST(one.set("space"_sv, JSON::Value(window->space)));
+            MUST(one.set("space"_sv, JSON::Value(index_of_space(window->space))));
+            MUST(one.set("fullScreen"_sv, JSON::Value(window->full_screen)));
             MUST(windows.append(move(one)));
         }
         MUST(application.set("windows"_sv, move(windows)));
@@ -379,7 +390,12 @@ void Server::send_shell_state()
 
 void Server::update_visibility(ServerWindow& window)
 {
-    bool on_this_space = window.is_on_every_space() || window.space == m_space || m_sliding;
+    bool on_this_space = window.is_on_every_space() || space_is_showing(window.space) || space_is_sliding(window.space);
+    if (is_kept_out_of_the_way(window))
+        on_this_space = false;
+    // In Stage, an application's windows are only there when it's the one that's up.
+    if (m_stage && window.level == Window::LevelNormal && window.is_document_window() && window.client != m_stage_shown)
+        on_this_space = false;
     bool hidden_with_application = window.client && window.client->hidden && window.can_become_key();
     bool should = window.shown_by_client && !window.minimized && !hidden_with_application && on_this_space;
     if (window.visible == should)
@@ -392,8 +408,11 @@ void Server::update_visibility(ServerWindow& window)
     if (!should) {
         if (m_grab == &window)
             m_grab = nullptr;
-        if (m_hovered == &window)
+        // It's told the pointer has gone, or it would go on showing what it showed for it (the Dock, magnified).
+        if (m_hovered == &window) {
+            send_mouse(window, MouseKind::Left, m_pointer, 0);
             m_hovered = nullptr;
+        }
         if (m_active == &window) {
             m_compositor.invalidate_window(window);
             window.active = false;
@@ -513,16 +532,48 @@ bool Server::handle_hotkey(u16 code)
                 enter_overview();
             return true;
         case VULTURE_KEY_LEFT:
-            if (m_space > 0)
-                go_to_space(m_space - 1, true);
+            if (auto& where = focused_spaces(); where.current > 0)
+                go_to_space(where, where.current - 1, true);
             return true;
         case VULTURE_KEY_RIGHT:
-            if (m_space + 1 < m_space_count)
-                go_to_space(m_space + 1, true);
+            if (auto& where = focused_spaces(); where.current + 1 < static_cast<int>(where.spaces.size()))
+                go_to_space(where, where.current + 1, true);
+            return true;
+        case VULTURE_KEY_DOWN:
+            if (m_overview)
+                leave_overview(nullptr);
+            else
+                enter_overview(OverviewMode::OneApplication);
             return true;
         default:
             break;
         }
+    }
+    if (pressed == (Window::ModifierCommand | Window::ModifierControl) && code == VULTURE_KEY_F) {
+        if (m_active && m_active->full_screen)
+            leave_full_screen(*m_active, false);
+        else if (m_active)
+            enter_full_screen(*m_active);
+        return true;
+    }
+    if (m_switching && code == VULTURE_KEY_ESC) {
+        finish_switching(false);
+        return true;
+    }
+    if (m_switching && pressed == Window::ModifierCommand && (code == VULTURE_KEY_Q || code == VULTURE_KEY_H)) {
+        auto applications = applications_most_recent_first();
+        if (m_switch_selected < static_cast<int>(applications.size())) {
+            auto* chosen = applications[static_cast<size_t>(m_switch_selected)];
+            if (code == VULTURE_KEY_Q) {
+                IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::QuitRequested));
+                send_to(*chosen, encoder);
+            } else {
+                chosen->hidden = true;
+                update_all_visibility();
+                shell_state_changed();
+            }
+        }
+        return true;
     }
     if (pressed == Window::ModifierCommand && code == VULTURE_KEY_TAB) {
         cycle_applications(false);
@@ -532,25 +583,37 @@ bool Server::handle_hotkey(u16 code)
         cycle_applications(true);
         return true;
     }
+    if (pressed == Window::ModifierCommand && code == VULTURE_KEY_GRAVE) {
+        cycle_windows(false);
+        return true;
+    }
+    if (pressed == (Window::ModifierCommand | Window::ModifierShift) && code == VULTURE_KEY_GRAVE) {
+        cycle_windows(true);
+        return true;
+    }
     return false;
 }
 
-void Server::cycle_applications(bool backward)
+void Server::cycle_windows(bool backward)
 {
-    Vector<Client*> applications;
-    for (auto& client : m_clients) {
-        if (!client->application_name.is_empty())
-            applications.append(client.ptr());
-    }
-    if (applications.size() < 2)
+    if (!m_active || !m_active->client)
         return;
-    size_t at = 0;
-    for (size_t i = 0; i < applications.size(); ++i) {
-        if (applications[i] == m_active_application)
-            at = i;
+    // Of this application, here, bottom to top, as they're stacked.
+    Vector<ServerWindow*> own;
+    for (auto* window : m_windows) {
+        if (window->client == m_active->client && window->visible && window->can_become_key() && window->is_titled())
+            own.append(window);
     }
-    size_t next = backward ? (at + applications.size() - 1) % applications.size() : (at + 1) % applications.size();
-    activate_client(*applications[next]);
+    if (own.size() < 2)
+        return;
+    // Forward: the one at the bottom comes up. Back: the top one goes to the bottom, by bringing up all the rest in turn.
+    if (!backward) {
+        activate(own[0]);
+        return;
+    }
+    for (size_t i = own.size() - 1; i > 0; --i)
+        raise(*own[i - 1]);
+    activate(own[own.size() - 2]);
 }
 
 // ---- Desktops
@@ -569,263 +632,6 @@ void Server::set_input_region(IPC::Sender const& sender, u32 id, i32 x, i32 y, i
         window->input_region = { x, y, width, height };
 }
 
-void Server::switch_space(IPC::Sender const&, i32 space)
-{
-    if (space < 0)
-        return;
-    if (space >= m_space_count)
-        m_space_count = space + 1;
-    go_to_space(space, true);
-}
-
-void Server::go_to_space(int space, bool animated)
-{
-    if (space == m_space)
-        return;
-    m_slide_from = m_space;
-    m_space = space;
-    animated = animated && !m_reduce_motion;
-    m_sliding = animated;
-    m_slide_started = now_seconds();
-    m_slide_start_travel = 0;
-    if (animated)
-        start_animating();
-    update_all_visibility();
-    // The new space's frontmost has the keyboard, or nothing does.
-    if (!animated) {
-        if (m_active && !m_active->is_on_every_space() && m_active->space != m_space)
-            activate(nullptr);
-        activate_frontmost();
-    }
-    shell_state_changed();
-    schedule_frame();
-}
-
-void Server::swipe_changed(float across, float speed, bool ended)
-{
-    float const width = static_cast<float>(m_screen.main_display().points.width);
-    // Fingers going left bring on what's to the right.
-    float const towards_next = -across / width;
-    if (!m_swiping && !ended) {
-        if (m_overview || m_sliding || towards_next == 0)
-            return;
-        int const target = m_space + (towards_next > 0 ? 1 : -1);
-        // Nothing that way: it stays where it is.
-        if (target < 0 || target >= m_space_count)
-            return;
-        m_slide_from = m_space;
-        m_space = target;
-        m_sliding = true;
-        m_swiping = true;
-        update_all_visibility();
-        start_animating();
-    }
-    if (!m_swiping)
-        return;
-    bool const towards_higher = m_space > m_slide_from;
-    float const travel = clamp(towards_higher ? towards_next : -towards_next, 0.0f, 1.0f);
-    m_swipe_travel = travel;
-    if (!ended)
-        return;
-    m_swiping = false;
-    if (!::Gesture::swipe_carries_on(travel, towards_higher ? -speed : speed)) {
-        int const was_going_to = m_space;
-        m_space = m_slide_from;
-        m_slide_from = was_going_to;
-        m_swipe_travel = 1 - travel;
-    }
-    m_slide_start_travel = m_swipe_travel;
-    m_slide_started = now_seconds();
-    shell_state_changed();
-}
-
-// ---- Overview
-
-void Server::layout_overview()
-{
-    // The windows of this space in a grid, in the work area, under the bar of spaces.
-    auto points = m_screen.main_display().points.size();
-    float top = static_cast<float>(m_work_top) + m_theme.overview_bar;
-    float bottom = static_cast<float>(points.height - m_work_bottom);
-    float left = static_cast<float>(m_work_left);
-    float right = static_cast<float>(points.width - m_work_right);
-    float padding = m_theme.overview_padding;
-    size_t count = m_thumbnails.size();
-    if (count == 0)
-        return;
-    size_t columns = 1;
-    while (columns * columns < count)
-        ++columns;
-    size_t rows = (count + columns - 1) / columns;
-    float cell_width = (right - left) / static_cast<float>(columns);
-    float cell_height = (bottom - top) / static_cast<float>(rows);
-    for (size_t i = 0; i < count; ++i) {
-        auto& thumbnail = m_thumbnails[i];
-        size_t column = i % columns;
-        size_t row = i / columns;
-        float available_width = cell_width - padding * 2;
-        float available_height = cell_height - padding * 2;
-        float scale = min(min(available_width / thumbnail.home.width, available_height / thumbnail.home.height), 1.0f);
-        float width = thumbnail.home.width * scale;
-        float height = thumbnail.home.height * scale;
-        thumbnail.spread = { left + cell_width * static_cast<float>(column) + (cell_width - width) / 2, top + cell_height * static_cast<float>(row) + (cell_height - height) / 2, width, height };
-    }
-}
-
-void Server::enter_overview()
-{
-    m_thumbnails.clear();
-    for (auto* window : m_windows) {
-        if (!window->visible || window->level != Window::LevelNormal || window->is_popup())
-            continue;
-        if (window->chrome_is_stale && window->is_titled())
-            render_chrome(*window);
-        auto picture = m_compositor.snapshot(*window);
-        if (picture.is_error())
-            continue;
-        Thumbnail thumbnail;
-        thumbnail.window = window;
-        thumbnail.picture = picture.release_value();
-        thumbnail.home = window->frame.to<float>();
-        thumbnail.spread = thumbnail.home;
-        m_thumbnails.append(move(thumbnail));
-    }
-    layout_overview();
-    m_overview = true;
-    m_overview_leaving = false;
-    m_overview_chosen = nullptr;
-    m_overview_started = now_seconds();
-    m_overview_hover = -1;
-    m_overview_hover_space = -1;
-    m_compositor.set_hides_normal_windows(true);
-    start_animating();
-    m_compositor.invalidate_all();
-    shell_state_changed();
-    schedule_frame();
-}
-
-void Server::leave_overview(ServerWindow* to_activate)
-{
-    if (!m_overview || m_overview_leaving)
-        return;
-    m_overview_leaving = true;
-    m_overview_chosen = to_activate;
-    m_overview_started = now_seconds();
-    start_animating();
-}
-
-void Server::update_overview_overlays()
-{
-    // (With motion reduced: there at once.)
-    float duration = m_reduce_motion ? 0.001f : m_theme.overview_seconds;
-    auto t = static_cast<float>((now_seconds() - m_overview_started) / static_cast<double>(duration));
-    t = clamp(t, 0.0f, 1.0f);
-    float amount = ease_out(t);
-    if (m_overview_leaving)
-        amount = 1 - amount;
-    Vector<Compositor::Overlay> overlays;
-
-    // Desktops along the top.
-    auto points = m_screen.main_display().points.size();
-    float tile_width = m_theme.overview_tile_width;
-    float tile_height = m_theme.overview_tile_height;
-    float gap = m_theme.overview_padding;
-    int tiles = m_space_count + 1;
-    float total = static_cast<float>(tiles) * tile_width + static_cast<float>(tiles - 1) * gap;
-    float x = (static_cast<float>(points.width) - total) / 2;
-    float y = (m_theme.overview_bar - tile_height) / 2 + static_cast<float>(m_work_top) - (1 - amount) * m_theme.overview_bar;
-    for (int i = 0; i < tiles; ++i) {
-        Compositor::Overlay tile;
-        tile.kind = Compositor::Overlay::Kind::Tile;
-        tile.rect = { x + static_cast<float>(i) * (tile_width + gap), y, tile_width, tile_height };
-        tile.radius = m_theme.overview_tile_radius;
-        bool current = i == m_space;
-        bool hovered = i == m_overview_hover_space;
-        tile.color = current ? m_theme.overview_tile_active : (hovered ? m_theme.overview_highlight : m_theme.overview_tile);
-        StringBuilder label;
-        if (i == m_space_count)
-            label.append("+"_sv);
-        else
-            label.appendff("Desktop {}", i + 1);
-        tile.label = MUST(label.to_string());
-        overlays.append(move(tile));
-    }
-
-    for (size_t i = 0; i < m_thumbnails.size(); ++i) {
-        auto const& thumbnail = m_thumbnails[i];
-        auto rect = between(thumbnail.home, thumbnail.spread, amount);
-        if (static_cast<int>(i) == m_overview_hover) {
-            Compositor::Overlay ring;
-            ring.kind = Compositor::Overlay::Kind::Tile;
-            ring.rect = rect.inflated(3);
-            ring.radius = m_theme.corner_radius + 3;
-            ring.color = m_theme.overview_highlight;
-            overlays.append(move(ring));
-        }
-        Compositor::Overlay overlay;
-        overlay.kind = Compositor::Overlay::Kind::Thumbnail;
-        overlay.picture = thumbnail.picture;
-        overlay.rect = rect;
-        overlay.radius = m_theme.corner_radius;
-        overlay.shadow = true;
-        overlays.append(move(overlay));
-    }
-    m_compositor.set_dim(m_theme.overview_dim.with_opacity(amount));
-    m_compositor.set_overlays(move(overlays));
-    m_compositor.invalidate_all();
-}
-
-bool Server::overview_pointer(IntPoint point, u32 pressed)
-{
-    if (m_overview_leaving)
-        return true;
-    auto points = m_screen.main_display().points.size();
-    // What it is over: a space along the top, or a window.
-    float tile_width = m_theme.overview_tile_width;
-    float tile_height = m_theme.overview_tile_height;
-    float gap = m_theme.overview_padding;
-    int tiles = m_space_count + 1;
-    float total = static_cast<float>(tiles) * tile_width + static_cast<float>(tiles - 1) * gap;
-    float x = (static_cast<float>(points.width) - total) / 2;
-    float y = (m_theme.overview_bar - tile_height) / 2 + static_cast<float>(m_work_top);
-    int over_space = -1;
-    for (int i = 0; i < tiles; ++i) {
-        FloatRect tile { x + static_cast<float>(i) * (tile_width + gap), y, tile_width, tile_height };
-        if (tile.contains(point.to<float>()))
-            over_space = i;
-    }
-    int over_window = -1;
-    for (size_t i = 0; i < m_thumbnails.size(); ++i) {
-        if (m_thumbnails[i].spread.contains(point.to<float>()))
-            over_window = static_cast<int>(i);
-    }
-    if (over_space != m_overview_hover_space || over_window != m_overview_hover) {
-        m_overview_hover_space = over_space;
-        m_overview_hover = over_window;
-        update_overview_overlays();
-    }
-    if (!pressed)
-        return true;
-    if (over_space == m_space_count) {
-        ++m_space_count;
-        update_overview_overlays();
-        shell_state_changed();
-        return true;
-    }
-    if (over_space >= 0) {
-        go_to_space(over_space, false);
-        // Its windows now.
-        leave_overview(nullptr);
-        return true;
-    }
-    if (over_window >= 0) {
-        leave_overview(m_thumbnails[static_cast<size_t>(over_window)].window);
-        return true;
-    }
-    leave_overview(nullptr);
-    return true;
-}
-
 // ---- Time passing
 
 void Server::animation_tick()
@@ -835,7 +641,7 @@ void Server::animation_tick()
 
     // Genies.
     if (!m_genies.is_empty()) {
-        Vector<Compositor::Overlay> overlays;
+        Vector<Compositor::Overlay> overlays = lasting_overlays();
         for (size_t i = 0; i < m_genies.size();) {
             auto& genie = m_genies[i];
             auto t = static_cast<float>((now - genie.started) / static_cast<double>(m_theme.minimize_seconds));
@@ -870,47 +676,26 @@ void Server::animation_tick()
         if (!m_overview)
             m_compositor.set_overlays(move(overlays));
     } else if (!m_overview && !m_boot_screen) {
-        m_compositor.set_overlays({});
+        m_compositor.set_overlays(lasting_overlays());
     }
 
-    // Sliding between spaces.
-    if (m_sliding) {
-        auto t = static_cast<float>((now - m_slide_started) / static_cast<double>(m_theme.space_slide_seconds));
-        int width = m_screen.pixels().width;
-        int direction = m_space > m_slide_from ? 1 : -1;
-        if (!m_swiping && t >= 1) {
-            m_sliding = false;
-            for (auto* window : m_windows)
-                window->slide_x = 0;
-            update_all_visibility();
-            if (m_active && !m_active->is_on_every_space() && m_active->space != m_space)
-                activate(nullptr);
-            if (!m_active)
-                activate_frontmost();
-        } else {
-            // With the fingers on it, it's where they are. Let go, it goes on from there.
-            float travel = m_swiping ? m_swipe_travel : m_slide_start_travel + (1 - m_slide_start_travel) * ease_out(t);
-            for (auto* window : m_windows) {
-                if (window->is_on_every_space())
-                    continue;
-                // Those leaving slide off; those coming, in from the other side.
-                float from_new = window->space == m_space ? 1 - travel : -travel;
-                window->slide_x = static_cast<int>(static_cast<float>(direction * width) * from_new);
-            }
-            still_going = true;
-        }
-        m_compositor.invalidate_all();
-    }
+    // Sliding between Spaces; what comes into view on a full screen one; the desktop being uncovered.
+    still_going = advance_slide(now) || still_going;
+    still_going = advance_reveals(now) || still_going;
+    still_going = advance_desktop_reveal(now) || still_going;
 
     // Overview.
     if (m_overview) {
         bool finished = m_reduce_motion || now - m_overview_started >= static_cast<double>(m_theme.overview_seconds);
+        if (advance_overview_bar(now))
+            still_going = true;
         update_overview_overlays();
         if (finished && m_overview_leaving) {
             m_overview = false;
             m_overview_leaving = false;
+            slide_menu_bars(0);
             m_compositor.set_hides_normal_windows(false);
-            m_compositor.set_overlays({});
+            m_compositor.set_overlays(lasting_overlays());
             m_compositor.set_dim(Color { 0, 0, 0, 0 });
             auto* chosen = m_overview_chosen;
             m_thumbnails.clear();

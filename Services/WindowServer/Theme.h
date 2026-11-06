@@ -58,7 +58,13 @@ struct Theme {
     float space_slide_seconds { 0 };
     float overview_seconds { 0 };
     float overview_bar { 0 };
+    // Its row of Spaces, only their names until the pointer goes up to it; and how long opening it takes.
+    float overview_collapsed_bar { 0 };
+    float overview_bar_seconds { 0 };
     float overview_padding { 0 };
+    float tile_margin { 0 };
+    Gfx::Color tile_preview;
+    Gfx::Color tile_preview_border;
     float overview_tile_width { 0 };
     float overview_tile_height { 0 };
     float overview_tile_radius { 0 };

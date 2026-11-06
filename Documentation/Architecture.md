@@ -350,7 +350,18 @@ macOS-style at the top, real Unix underneath:
   over it gets one too; where there's no server, it's just drawn with the rest and looks the
   same. Sheets and spinners use them. A `ScrollView` goes on to a layer while it's being
   scrolled, with half as much again kept ready each way, and comes off once it stops. Genie and
-  Overview aren't layers yet: M23 rebuilds Overview.
+  Overview aren't layers yet: they're the compositor's overlays, drawn by the server.
+- **Windows and Spaces (M23).** `Spaces.cpp` is the window manager's model of where windows are: each display has its own
+  list of Spaces (`DisplaySpaces`), a window belongs to one of them or to all, and one of each display's is showing. A full
+  screen window has a Space to itself, or shares it with another in Split View, divided by a line the server draws. Tiling
+  is an arrangement (`WindowArrangement`), from the edges, from Option-dragging, from the Window menu or from the green
+  button's: what the server puts the window, and for Fill & Arrange the ones under it, at, with each tiled window's old
+  frame kept for Return to Previous Size. Windows tiled next to each other are found when an edge between them is taken,
+  and move with it. Overview, App Exposé, Stage's strip and Cmd-Tab's panel's choice are the server's: Overview and the
+  strip are compositor overlays of pictures of the windows, which the server also describes in the accessibility tree, as
+  a client describes its views, so that they can be found and pressed by name. Uncovering the desktop slides each window
+  aside without moving it. The desktop's own window (Files') says when a click on it was on no icon, which is what clicking
+  the wallpaper means. Tabs are the toolkit's: windows of one program, one showing in another's place.
 - **Not responding (M21).** A program is pinged when input is sent to it, and its event loop
   answers. After two seconds with no answer, the cursor over its windows spins, and the shell
   state says so, for the Dock and Monitor. The server still moves and resizes its windows.

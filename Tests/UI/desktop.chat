@@ -113,16 +113,16 @@ button left down
 pause 0.2
 button left up
 pause 0.6
-# Overview, and a new space.
+# Overview, and a new space: the row of them opens at the top, and its "+" adds one.
 key ctrl-up
 pause 1
 screenshot overview.png
-pointer 18227 2949
-pause 0.2
-button left down
-pause 0.2
-button left up
+pointer 16000 0
 pause 0.6
+ax-expect button "Add Desktop"
+click button "Add Desktop"
+pause 0.6
+ax-expect button "Desktop 2"
 screenshot overview-spaces.png
 pointer 26000 28000
 pause 0.2

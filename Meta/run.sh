@@ -65,6 +65,7 @@
 #                       "nudge DX DY" moves the pointer by that much, as a mouse does,
 #                       "pointer X Y" moves the pointer (0 to 32767 across the
 #                       screen), "button left down" presses a mouse button,
+#                       "wheel N" turns the wheel N clicks (down; up if negative),
 #                       "pause SECONDS" waits (as a person would before ^Z);
 #                       blank lines and "#" comments are skipped. Succeeds
 #                       once every step is done (and any --expect found).
@@ -73,8 +74,11 @@
 #                       uidesktop, which runs "ax --serve"; a ROLE is optional):
 #                       'click ROLE "Label"' presses it with the real pointer,
 #                       'ax-expect ROLE "Label"' waits for it, optionally followed by
+#                       "at X Y WIDTH HEIGHT" (where it is, in points on the screen), or by
 #                       "enabled", "disabled", "focused", "= VALUE" or "~ PART OF VALUE", and
-#                       'ax-gone ROLE "Label"' waits until it's gone.
+#                       'ax-gone ROLE "Label"' waits until it's gone,
+#                       'grab ROLE "Label"' presses it and holds on, and 'drop ROLE "Label"'
+#                       carries what's held over to it and lets go.
 #
 #                       Everything else a test might need to do to the machine:
 #                       "timeout SECONDS" limits how long each later step may wait
@@ -418,7 +422,9 @@ if [ "$real_devices" -eq 1 ]; then
     fi
     network_device=e1000e
 else
-    input_devices=(-device virtio-keyboard-pci -device virtio-tablet-pci)
+    # The first display's own too. (Otherwise QEMU gives what isn't sent to a display to whichever device the guest
+    # started last, which may be a touch device that takes buttons as well, and says the wheel's are keys.)
+    input_devices=(-device virtio-keyboard-pci -device virtio-tablet-pci,display=gpu0,head=0)
     # One pointer for each display: QEMU's tablet has no way to say which it's on.
     for ((head = 1; head < ${VULTURE_GPU_OUTPUTS:-1}; head++)); do
         input_devices+=(-device "virtio-tablet-pci,display=gpu0,head=$head")
@@ -524,8 +530,8 @@ if [ -n "$chat_file" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
             "" | "#"*) ;;
-            "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "nudge "* | "button "* | "screenshot "* | \
-                "click "* | "ax-expect "* | "ax-gone "* | "timeout "* | "forbid "* | "reboot" | "plug "* | "hold "* | "unplug "* | "qmp "* | "qmp-result "* | \
+            "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "nudge "* | "button "* | "wheel "* | "screenshot "* | \
+                "click "* | "grab "* | "drop "* | "ax-expect "* | "ax-gone "* | "timeout "* | "forbid "* | "reboot" | "plug "* | "hold "* | "unplug "* | "qmp "* | "qmp-result "* | \
                 "touch "* | "fingers "* | "display "* | "host "* | "host-start "* | "host-stop "*) chat_steps+=("$line") ;;
             *) echo "run.sh: $chat_file: not a step: $line" >&2; exit 2 ;;
         esac
@@ -578,9 +584,10 @@ hold_key() {
 }
 
 send_input_events() {
-    # On the display that's being looked at, if it's been said.
-    local where=""
-    [ -n "$chat_head" ] && where="\"device\":\"gpu0\",\"head\":$chat_head,"
+    # On the display that's being looked at, if it's been said; the first, if not, where each has its own pointer.
+    local where="" head="$chat_head"
+    [ -z "$head" ] && [ "$real_devices" -eq 0 ] && head=0
+    [ -n "$head" ] && where="\"device\":\"gpu0\",\"head\":$head,"
     printf '{"execute":"qmp_capabilities"}\n{"execute":"input-send-event","arguments":{%s"events":[%s]}}\n' "$where" "$1" |
         nc -U -w 1 "$qmp_socket" > /dev/null || echo "run.sh: QMP failed" >&2
 }
@@ -642,6 +649,20 @@ key_for() {
         ')') printf 'shift-0' ;;
         *) echo "run.sh: no key for '$1'" >&2 ;;
     esac
+}
+
+# The wheel, a click at a time, as QEMU's buttons: down, or up if it's negative.
+turn_wheel() {
+    local clicks="$1" button=wheel-down
+    if [ "$clicks" -lt 0 ]; then
+        button=wheel-up
+        clicks=$((-clicks))
+    fi
+    while [ "$clicks" -gt 0 ]; do
+        send_input_events "{\"type\":\"btn\",\"data\":{\"down\":true,\"button\":\"$button\"}},{\"type\":\"btn\",\"data\":{\"down\":false,\"button\":\"$button\"}}"
+        sleep 0.05
+        clicks=$((clicks - 1))
+    done
 }
 
 # Text at the keyboard; \\r presses Return.
@@ -844,9 +865,10 @@ ax_ask() {
 
 # True if what was found is as this step wants: "enabled", "disabled", "focused" or "= VALUE".
 ax_condition_holds() {
-    local enabled="$1" focused="$2" value="$3"
+    local enabled="$1" focused="$2" value="$3" where="$4"
     case "$ax_rest" in
         "") return 0 ;;
+        "at "*) [ "$where" = "${ax_rest#at }" ] ;;
         enabled) [ "$enabled" = 1 ] ;;
         disabled) [ "$enabled" = 0 ] ;;
         focused) [ "$focused" = 1 ] ;;
@@ -878,16 +900,46 @@ ax_step() {
     read -r _ x y width height screen_width screen_height enabled focused value <<< "$ax_reply"
     case "$kind" in
         gone) return 1 ;;
-        expect) ax_condition_holds "$enabled" "$focused" "$value" ;;
+        expect) ax_condition_holds "$enabled" "$focused" "$value" "$x $y $width $height" ;;
         click)
             if [ "$enabled" != 1 ]; then
                 return 1
             fi
-            # Its middle, as a fraction of the screen.
+            # Its middle, as a fraction of the screen. What it's in may move as the pointer comes (the Dock, swelling around
+            # it), so it's gone to, and then found again from there, as someone would look before they pressed.
             move_pointer $(((x + width / 2) * 32768 / screen_width)) $(((y + height / 2) * 32768 / screen_height))
+            if [ "$ax_aimed" != "$chat_index" ]; then
+                ax_aimed="$chat_index"
+                sleep 0.3
+                return 1
+            fi
+            ax_aimed=""
             sleep 0.2
             press_button left down
             sleep 0.1
+            press_button left up
+            return 0
+            ;;
+        grab)
+            [ "$enabled" = 1 ] || return 1
+            move_pointer $(((x + width / 2) * 32768 / screen_width)) $(((y + height / 2) * 32768 / screen_height))
+            if [ "$ax_aimed" != "$chat_index" ]; then
+                ax_aimed="$chat_index"
+                sleep 0.3
+                return 1
+            fi
+            ax_aimed=""
+            sleep 0.2
+            press_button left down
+            sleep 0.2
+            return 0
+            ;;
+        drop)
+            # Most of the way, then onto it: what's under the pointer sees it arrive.
+            move_pointer $(((x + width / 2 - 12) * 32768 / screen_width)) $(((y + height / 2 - 12) * 32768 / screen_height))
+            sleep 0.2
+            move_pointer $(((x + width / 2) * 32768 / screen_width)) $(((y + height / 2) * 32768 / screen_height))
+            sleep 0.3
             press_button left up
             return 0
             ;;
@@ -897,6 +949,7 @@ ax_step() {
 # The chat: which step is next, and where in the log the last expected
 # text ended (byte offsets, so no locale may count characters instead).
 chat_index=0
+ax_aimed=""
 chat_offset=0
 chat_failure=""
 chat_head=""
@@ -947,6 +1000,10 @@ advance_chat() {
                 press_button ${step#button }
                 chat_index=$((chat_index + 1))
                 ;;
+            "wheel "*)
+                turn_wheel "${step#wheel }" || return 0
+                chat_index=$((chat_index + 1))
+                ;;
             "pause "*)
                 # (Not the moments between the two clicks of a double click, which have a time limit.)
                 sleep "$(awk "BEGIN { pause = ${step#pause }; if (pause < 0.3) print pause; else print pause * $chat_pause_scale }")"
@@ -965,6 +1022,16 @@ advance_chat() {
                 ;;
             "click "*)
                 ax_step click "${step#click }" || return 0
+                [ -n "$chat_failure" ] && return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "grab "*)
+                ax_step grab "${step#grab }" || return 0
+                [ -n "$chat_failure" ] && return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "drop "*)
+                ax_step drop "${step#drop }" || return 0
                 [ -n "$chat_failure" ] && return 0
                 chat_index=$((chat_index + 1))
                 ;;

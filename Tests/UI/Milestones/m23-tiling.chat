@@ -1,0 +1,209 @@
+# M23: windows that go where they're put. Dragged to an edge or a corner, with Option held, from the Window menu, and together.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 2
+ax-expect window "vulture" at 180 80 860 520
+# ---- Over to the left edge, by its top, with where it'll go showing.
+pointer 16400 3932
+pause 0.3
+button left down
+pause 0.2
+pointer 6000 3932
+pause 0.2
+pointer 0 14000
+pause 0.5
+screenshot left-zone.png
+button left up
+ax-expect window "vulture" at 8 32 628 686
+pause 1
+pointer 16000 3000
+pause 0.5
+screenshot tiled-left.png
+# ---- And another, from the menu.
+click button "Terminal"
+expect terminal: ready
+pause 1
+click menuitem "Window"
+ax-expect menuitem "Move & Resize"
+click menuitem "Move & Resize"
+ax-expect menuitem "Right"
+click menuitem "Right"
+pause 1
+pointer 16000 3000
+pause 0.5
+screenshot tiled-both.png
+ax-expect window "vulture" at 8 32 628 686
+# ---- Taking the edge between them takes both.
+pointer 16384 16000
+pause 0.3
+button left down
+pause 0.2
+pointer 20000 16000
+pause 0.3
+pointer 20480 16000
+pause 0.5
+button left up
+pause 1
+pointer 16000 3000
+pause 0.5
+screenshot resized-together.png
+# ---- Taking one away: it's the size it was, under the pointer where it was taken.
+pointer 10240 2294
+pause 0.3
+button left down
+pause 0.2
+pointer 11240 8000
+pause 0.3
+pointer 11240 9000
+pause 0.3
+button left up
+pause 1
+ax-expect window "vulture" at 12 195 860 520
+pointer 28000 30000
+pause 0.5
+screenshot taken-away.png
+# ---- Its corner, with the mouse.
+click button "Terminal"
+pause 1
+click menuitem "Window"
+ax-expect menuitem "Move & Resize"
+click menuitem "Move & Resize"
+ax-expect menuitem "Bottom Right"
+click menuitem "Bottom Right"
+pause 1
+pointer 16000 3000
+pause 0.5
+screenshot corner.png
+click menuitem "Window"
+ax-expect menuitem "Move & Resize"
+click menuitem "Move & Resize"
+ax-expect menuitem "Return to Previous Size"
+click menuitem "Return to Previous Size"
+pause 1
+pointer 16000 3000
+pause 0.5
+screenshot previous-size.png
+# ---- With Option down, it doesn't take going all the way to the edge. By its title bar.
+click button "Text Editor"
+expect texteditor: ready
+pause 1
+ax-expect window "Untitled" at 330 113 620 460
+pointer 16000 5202
+pause 0.3
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"alt"}}}]}}
+pause 0.2
+button left down
+pause 0.2
+pointer 24000 6000
+pause 0.2
+pointer 30000 9000
+pause 0.5
+screenshot option-zone.png
+button left up
+pause 0.3
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"alt"}}}]}}
+ax-expect window "Untitled" at 644 32 628 686
+pause 1
+pointer 31500 25000
+pause 0.5
+screenshot option-tiled.png
+# ---- Waiting on the green button: its menu.
+pointer 17800 1880
+pause 0.3
+pointer 17869 1880
+pause 1.2
+ax-expect text "Move & Resize"
+ax-expect text "Fill & Arrange"
+ax-expect menuitem "Entire Screen"
+ax-expect menuitem "Left of Screen"
+screenshot green-menu.png
+click menuitem "Fill"
+ax-expect window "Untitled" at 8 32 1264 686
+pause 1
+pointer 31500 25000
+pause 0.5
+screenshot filled.png
+click menuitem "Window"
+ax-expect menuitem "Move & Resize"
+click menuitem "Move & Resize"
+ax-expect menuitem "Return to Previous Size"
+click menuitem "Return to Previous Size"
+ax-expect window "Untitled" at 330 113 620 460
+click menuitem "Window"
+ax-expect menuitem "Center"
+click menuitem "Center"
+ax-expect window "Untitled" at 330 145 620 460
+# ---- Resized by any edge: the left,
+pointer 8397 15360
+pause 0.3
+button left down
+pause 0.2
+pointer 7700 15360
+pause 0.2
+pointer 7117 15360
+pause 0.3
+button left up
+ax-expect window "Untitled" at 280 145 670 460
+# the top,
+pointer 15360 5981
+pause 0.3
+button left down
+pause 0.2
+pointer 15360 5500
+pause 0.2
+pointer 15360 5120
+pause 0.3
+button left up
+ax-expect window "Untitled" at 280 124 670 481
+# and a corner, both ways at once.
+pointer 24295 24740
+pause 0.3
+button left down
+pause 0.2
+pointer 24800 25300
+pause 0.2
+pointer 25319 25969
+pause 0.3
+button left up
+ax-expect window "Untitled" at 280 124 710 511
+pause 1
+pointer 2000 30000
+pause 0.5
+screenshot edges.png
+# ---- Several at once: Left & Right puts the window under it on the right.
+click menuitem "Window"
+ax-expect menuitem "Move & Resize"
+click menuitem "Move & Resize"
+ax-expect menuitem "Left & Right"
+pause 0.5
+screenshot move-and-resize.png
+click menuitem "Left & Right"
+ax-expect window "Untitled" at 8 32 628 686
+ax-expect window "vulture — vsh — 86×40" at 644 32 628 686
+pause 1
+pointer 31500 25000
+pause 0.5
+screenshot left-and-right.png
+# ---- And with Option, from the green button: three of them, this one on the right.
+pointer 1500 1880
+pause 0.3
+pointer 1587 1880
+pause 1.2
+ax-expect menuitem "Left & Quarters"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"alt"}}}]}}
+pause 0.3
+pointer 1600 1900
+pause 0.5
+ax-expect menuitem "Right & Quarters"
+ax-expect menuitem "Center"
+screenshot green-menu-option.png
+click menuitem "Right & Quarters"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"alt"}}}]}}
+ax-expect window "Untitled" at 644 32 628 686
+ax-expect window "vulture" at 8 379 628 339
+pause 1
+pointer 31500 25000
+pause 0.5
+screenshot right-and-quarters.png

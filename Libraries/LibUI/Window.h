@@ -80,6 +80,18 @@ public:
     [[nodiscard]] bool shows_focus() const { return m_shows_focus; }
     void set_shows_focus(bool);
 
+    // Tabs: this application's windows, sharing a frame, one showing at a time, with a bar under the title to go between them.
+    void merge_all_windows();
+    // By this many along, going round.
+    void show_adjacent_tab(int by);
+    void move_tab_to_new_window();
+    void select_tab(int index);
+    void close_tab(int index);
+    [[nodiscard]] bool has_tab_bar() const { return m_tab_bar != nullptr; }
+    [[nodiscard]] int tab_count() const;
+    [[nodiscard]] int selected_tab() const;
+    [[nodiscard]] Window const* tab_at(int index) const;
+
     // What happens to it.
     Function<bool()> on_close_request;
     Function<void()> on_closed;
@@ -115,6 +127,10 @@ public:
     // following the pointer.
     void begin_drag(StringView type, ReadonlyBytes data, Gfx::FloatSize size, Function<void(Graphics&)> draw);
     Function<void(bool accepted)> on_drag_finished;
+
+    // Everything's been decided: goes in or out of the group it's in.
+    void leave_tab_group();
+    void tabs_changed();
 
     // From the backend.
     void handle_mouse(WS::MouseKind, Gfx::FloatPoint, u32 buttons, u32 modifiers, int wheel_x, int wheel_y);
@@ -192,6 +208,11 @@ private:
         Function<void()> finished;
     };
     Vector<LayerAnimationEnding> m_layer_animation_endings;
+    struct TabGroup {
+        Vector<Window*> windows;
+    };
+    TabGroup* m_tab_group { nullptr };
+    View* m_tab_bar { nullptr };
     bool m_shown { false };
     bool m_key { false };
     bool m_transparent { false };

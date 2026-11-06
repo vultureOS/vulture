@@ -139,9 +139,15 @@ ErrorOr<Theme> load_theme(StringView path)
     auto const* desktop = TRY(object_in(root, "desktop"_sv));
     theme.minimize_seconds = TRY(number_in(*desktop, "minimizeSeconds"_sv));
     theme.space_slide_seconds = TRY(number_in(*desktop, "spaceSlideSeconds"_sv));
+    auto const* tiling = TRY(object_in(*desktop, "tile"_sv));
+    theme.tile_margin = TRY(number_in(*tiling, "margin"_sv));
+    theme.tile_preview = TRY(color_in(*tiling, "preview"_sv));
+    theme.tile_preview_border = TRY(color_in(*tiling, "previewBorder"_sv));
     auto const* mission = TRY(object_in(*desktop, "overview"_sv));
     theme.overview_seconds = TRY(number_in(*mission, "seconds"_sv));
     theme.overview_bar = TRY(number_in(*mission, "bar"_sv));
+    theme.overview_collapsed_bar = TRY(number_in(*mission, "collapsedBar"_sv));
+    theme.overview_bar_seconds = TRY(number_in(*mission, "barSeconds"_sv));
     theme.overview_padding = TRY(number_in(*mission, "padding"_sv));
     theme.overview_tile_width = TRY(number_in(*mission, "tileWidth"_sv));
     theme.overview_tile_height = TRY(number_in(*mission, "tileHeight"_sv));

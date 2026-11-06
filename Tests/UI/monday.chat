@@ -110,6 +110,19 @@ key meta_l-q
 ax-expect button "Don’t Save"
 click button "Don’t Save"
 ax-gone textarea "Document"
+# ---- Two things side by side: a terminal, and the files under it.
+click button "Terminal"
+expect terminal: ready
+pause 1
+click menuitem "Window"
+ax-expect menuitem "Move & Resize"
+click menuitem "Move & Resize"
+ax-expect menuitem "Left & Right"
+click menuitem "Left & Right"
+pause 1
+ax-expect window "vulture" at 644 32 628 686
+key meta_l-q
+ax-gone window "vulture — vsh — 86×40"
 
 # ---- And leave.
 click menuitem "Logo"

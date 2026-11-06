@@ -96,12 +96,22 @@ public:
     void layout() override
     {
         auto title_bar = m_window.title_bar_height();
-        m_window.content_view().set_frame({ 0, title_bar, width(), height() - title_bar });
+        float const tabs = m_window.has_tab_bar() ? Appearance::the().metric("tabBar.height"_sv) : 0;
+        m_window.content_view().set_frame({ 0, title_bar + tabs, width(), height() - title_bar - tabs });
+        if (m_tab_bar)
+            m_tab_bar->set_frame({ 0, title_bar, width(), tabs });
+    }
+
+    void set_tab_bar(View* bar)
+    {
+        m_tab_bar = bar;
+        set_needs_layout();
     }
 
     [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::Group; }
 
 private:
+    View* m_tab_bar { nullptr };
     Window& m_window;
 };
 
@@ -133,8 +143,261 @@ Window::Window(StringView title, IntRect frame, u32 flags)
     WindowRegistry::add(*this);
 }
 
+// The bar of a window with tabs: one each, of equal width, the one that's showing the color of the title bar.
+class WindowTabBar final : public View {
+public:
+    explicit WindowTabBar(Window& window)
+        : m_window(window)
+    {
+    }
+
+private:
+    [[nodiscard]] FloatRect tab_rect(int index) const
+    {
+        float const each = width() / static_cast<float>(max(m_window.tab_count(), 1));
+        return { each * static_cast<float>(index), 0, each, height() };
+    }
+
+    [[nodiscard]] FloatRect close_rect(int index) const
+    {
+        auto const tab = tab_rect(index);
+        float const size = Appearance::the().metric("tabBar.closeSize"_sv);
+        return { tab.x + 6, (height() - size) / 2, size, size };
+    }
+
+    void draw(Graphics& graphics) override
+    {
+        auto const& t = Appearance::the();
+        graphics.fill({ 0, 0, width(), height() }, t.color("tabBar.background"_sv));
+        auto const font = t.named_font("small"_sv);
+        int const count = m_window.tab_count();
+        int const selected = m_window.selected_tab();
+        for (int i = 0; i < count; ++i) {
+            auto const tab = tab_rect(i);
+            bool const is_selected = i == selected;
+            if (is_selected)
+                graphics.fill(tab, t.color("tabBar.selected"_sv));
+            else if (i == m_hovered)
+                graphics.fill(tab, t.color("tabBar.hover"_sv));
+            if (i > 0)
+                graphics.fill({ tab.x, 0, graphics.pixel(), height() }, t.color("tabBar.separator"_sv));
+            auto const* window = m_window.tab_at(i);
+            graphics.draw_text_centered(window ? window->title() : StringView {}, font, FloatRect { tab.x + 24, tab.y, tab.width - 48, tab.height }, is_selected ? t.color("label"_sv) : t.color("secondaryLabel"_sv));
+            if (i == m_hovered) {
+                auto const close = close_rect(i);
+                if (i == m_over_close)
+                    graphics.fill_rounded(close, 3, t.color("tabBar.separator"_sv));
+                graphics.draw_text_centered("\xC3\x97"_sv, font, close, t.color("secondaryLabel"_sv));
+            }
+        }
+        // The line under the title bar goes on everywhere but over the one that's showing.
+        graphics.fill({ 0, height() - graphics.pixel(), width(), graphics.pixel() }, t.color("tabBar.separator"_sv));
+        if (selected >= 0) {
+            auto const tab = tab_rect(selected);
+            graphics.fill({ tab.x, 0, tab.width, graphics.pixel() }, t.color("tabBar.selected"_sv));
+        }
+    }
+
+    [[nodiscard]] int tab_under(FloatPoint point) const
+    {
+        for (int i = 0; i < m_window.tab_count(); ++i) {
+            if (tab_rect(i).contains(point))
+                return i;
+        }
+        return -1;
+    }
+
+    void mouse_moved(MouseEvent const& event) override
+    {
+        int const hovered = tab_under(event.position);
+        int const close = hovered >= 0 && close_rect(hovered).contains(event.position) ? hovered : -1;
+        if (hovered == m_hovered && close == m_over_close)
+            return;
+        m_hovered = hovered;
+        m_over_close = close;
+        set_needs_display();
+    }
+
+    void mouse_exited() override
+    {
+        m_hovered = -1;
+        m_over_close = -1;
+        set_needs_display();
+    }
+
+    bool mouse_down(MouseEvent const& event) override
+    {
+        int const index = tab_under(event.position);
+        if (index < 0)
+            return false;
+        if (close_rect(index).contains(event.position) && m_hovered == index)
+            m_window.close_tab(index);
+        else
+            m_window.select_tab(index);
+        return true;
+    }
+
+    void accessibility_parts(Vector<Accessibility::Node>& parts) override
+    {
+        for (int i = 0; i < m_window.tab_count(); ++i) {
+            auto const* window = m_window.tab_at(i);
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::Tab, window ? window->title() : StringView {}, tab_rect(i), i == m_window.selected_tab() ? "selected"_sv : StringView {}));
+        }
+    }
+
+    [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::TabGroup; }
+
+    Window& m_window;
+    int m_hovered { -1 };
+    int m_over_close { -1 };
+};
+
+int Window::tab_count() const
+{
+    return m_tab_group ? static_cast<int>(m_tab_group->windows.size()) : 1;
+}
+
+int Window::selected_tab() const
+{
+    if (!m_tab_group)
+        return 0;
+    for (size_t i = 0; i < m_tab_group->windows.size(); ++i) {
+        if (m_tab_group->windows[i] == this)
+            return static_cast<int>(i);
+    }
+    return 0;
+}
+
+Window const* Window::tab_at(int index) const
+{
+    if (!m_tab_group)
+        return this;
+    return m_tab_group->windows[static_cast<size_t>(index)];
+}
+
+void Window::tabs_changed()
+{
+    bool const wanted = m_tab_group && m_tab_group->windows.size() > 1;
+    auto* root = static_cast<RootView*>(m_root.ptr());
+    if (wanted && !m_tab_bar) {
+        m_tab_bar = &m_root->add<WindowTabBar>(*this);
+        root->set_tab_bar(m_tab_bar);
+    } else if (!wanted && m_tab_bar) {
+        root->set_tab_bar(nullptr);
+        m_root->remove_child(*m_tab_bar);
+        m_tab_bar = nullptr;
+    }
+    m_root->set_needs_layout();
+    if (m_tab_bar)
+        m_tab_bar->set_needs_display();
+    schedule_update();
+    add_damage(m_root->frame());
+}
+
+void Window::merge_all_windows()
+{
+    // Those of the same kind: with a title bar that can be resized, and not a sheet or a panel.
+    if (!(m_flags & WS::WindowTitled) || !(m_flags & WS::WindowResizable))
+        return;
+    if (!m_tab_group) {
+        m_tab_group = new TabGroup;
+        m_tab_group->windows.append(this);
+    }
+    for (auto* window : WindowRegistry::windows()) {
+        if (window == this || !window->is_shown() || !(window->flags() & WS::WindowTitled) || !(window->flags() & WS::WindowResizable) || window->m_tab_group)
+            continue;
+        m_tab_group->windows.append(window);
+        window->m_tab_group = m_tab_group;
+        window->m_backend->take_place_of(*m_backend);
+        window->hide();
+    }
+    for (auto* window : m_tab_group->windows)
+        window->tabs_changed();
+}
+
+void Window::select_tab(int index)
+{
+    if (!m_tab_group || index < 0 || index >= tab_count() || index == selected_tab())
+        return;
+    auto* chosen = m_tab_group->windows[static_cast<size_t>(index)];
+    // Over the old one and then that goes, so there's never nothing there.
+    chosen->m_backend->take_place_of(*m_backend);
+    chosen->show();
+    hide();
+}
+
+void Window::show_adjacent_tab(int by)
+{
+    if (!m_tab_group)
+        return;
+    int const count = tab_count();
+    select_tab((selected_tab() + by + count) % count);
+}
+
+void Window::close_tab(int index)
+{
+    if (!m_tab_group || index < 0 || index >= tab_count())
+        return;
+    m_tab_group->windows[static_cast<size_t>(index)]->close();
+}
+
+void Window::move_tab_to_new_window()
+{
+    if (!m_tab_group || tab_count() < 2)
+        return;
+    auto frame = this->frame();
+    int const index = selected_tab();
+    auto* group = m_tab_group;
+    int const count = tab_count();
+    auto* next = group->windows[static_cast<size_t>((index + 1) % count)];
+    next->m_backend->take_place_of(*m_backend);
+    next->show();
+    group->windows.remove(static_cast<size_t>(index));
+    m_tab_group = nullptr;
+    for (auto* window : group->windows)
+        window->tabs_changed();
+    if (group->windows.size() == 1) {
+        group->windows[0]->m_tab_group = nullptr;
+        group->windows[0]->tabs_changed();
+        delete group;
+    }
+    tabs_changed();
+    // A little down and across, to be seen as another.
+    frame.x += 24;
+    frame.y += 24;
+    set_frame(frame);
+    m_backend->activate();
+}
+
+void Window::leave_tab_group()
+{
+    if (!m_tab_group)
+        return;
+    auto* group = m_tab_group;
+    int const index = selected_tab();
+    bool const was_showing = is_shown();
+    int const count = tab_count();
+    m_tab_group = nullptr;
+    if (was_showing && count > 1) {
+        auto* next = group->windows[static_cast<size_t>(index + 1 < count ? index + 1 : index - 1)];
+        next->m_backend->take_place_of(*m_backend);
+        next->show();
+    }
+    group->windows.remove(static_cast<size_t>(index));
+    for (auto* window : group->windows)
+        window->tabs_changed();
+    if (group->windows.size() <= 1) {
+        if (!group->windows.is_empty()) {
+            group->windows[0]->m_tab_group = nullptr;
+            group->windows[0]->tabs_changed();
+        }
+        delete group;
+    }
+}
+
 Window::~Window()
 {
+    leave_tab_group();
     hide_tooltip();
     WindowRegistry::remove(*this);
     m_first_responder = nullptr;
@@ -183,6 +446,7 @@ void Window::close()
     if (on_close_request && !on_close_request())
         return;
     m_closed = true;
+    leave_tab_group();
     hide();
     if (on_closed)
         on_closed();

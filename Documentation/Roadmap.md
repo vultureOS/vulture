@@ -102,7 +102,7 @@ Sizes are rough estimates of new lines, scaled from the reference figures above.
 | | M20 | [External media](#m20-external-media) | Done | Plug in a USB stick; erase and repair disks; open disk images | 8k |
 | | M21 | [Layers](#m21-layers) | Done | See animations stay smooth even when an app hangs, with the spinning cursor | 18k |
 | | M22 | [Displays and gestures](#m22-displays-and-gestures) | Done | Use two displays, swipe between Spaces, record the screen | 8k |
-| **2 Mac feel** | M23 | [Windows and Spaces](#m23-windows-and-spaces) | | Tile, go full screen, use App Exposé and Stage | 10k |
+| **2 Mac feel** | M23 | [Windows and Spaces](#m23-windows-and-spaces) | Done, but for timing against the VM (waiting on a decision) | Tile, go full screen, use App Exposé and Stage | 10k |
 | | M24 | [The desktop](#m24-the-desktop) | | Use the full Dock, menu bar, Control Center, widgets and screenshots | 12k |
 | | M25 | [Sessions](#m25-sessions) | | Set up a new machine, lock it, switch between users | 8k |
 | | M26 | [Documents and Search](#m26-documents-and-search) | | Have autosave, default apps, Quick View, and fast Search that lasts across reboots | 20k |
@@ -554,10 +554,10 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on. M15 me
 | Null syscall | < 150 ns | 72 ns (M19) |
 | Context switch | < 1 µs | 173 ns (M3, yield between two threads on one processor) |
 | IPC round trip | < 3 µs | 0.84 µs (M7, call and answer between two processes; 4.6 µs through a generated proxy to a vlaunchd-started service) |
-| Window drag at 2560×1600 | 60 fps | 111 fps (M21: 10 windows, 5 with blur; about 4 ms of composing and 0.7 ms of flushing per frame; 120 fps is the most it asks for). With all of the screen drawn for every frame, 12 windows and blur: 119 fps |
-| Input to photon | ≤ 1 frame | 12.5 ms at the 99th percentile from the event to the flush, worst 14.2 ms; 9.5 ms with all of the screen drawn for every frame (M21, on a machine with little else going on). Measured at M22 with a game taking 3 of this Mac's 10 cores, on the same binary: 13 to 21 ms, and 18 to 26 ms, going up with the load average from 7 to 10, though a frame's work hadn't changed (4.4 ms composing, 0.8 ms flushing). It was 23.5 ms at M19, measured from when the event was read rather than when it happened. QEMU shows no photon, so this is as far as it can be measured |
-| Text Editor cold launch | < 300 ms | 37 ms, 21 ms warm (M22) |
-| Cmd-Tab appears | ≤ 1 frame | |
+| Window drag at 2560×1600 | 60 fps | 111 fps (M21: 10 windows, 5 with blur; about 4 ms of composing and 0.7 ms of flushing per frame; 120 fps is the most it asks for). With all of the screen drawn for every frame, 12 windows and blur: 119 fps. At M23, at a load of 5: 101 fps and 112 to 115 fps, with a frame's work the same (3.9 ms composing, 0.8 ms flushing) |
+| Input to photon | ≤ 1 frame | 12.5 ms at the 99th percentile from the event to the flush, worst 14.2 ms; 9.5 ms with all of the screen drawn for every frame (M21, on a machine with little else going on). Measured at M22 with a game taking 3 of this Mac's 10 cores, on the same binary: 13 to 21 ms, and 18 to 26 ms, going up with the load average from 7 to 10, though a frame's work hadn't changed (4.4 ms composing, 0.8 ms flushing). It was 23.5 ms at M19, measured from when the event was read rather than when it happened. At M23, at a load of 5 to 6: 14.0 to 14.5 ms, and 13.5 to 18.5 ms with all of the screen drawn. QEMU shows no photon, so this is as far as it can be measured |
+| Text Editor cold launch | < 300 ms | 33 ms, 32 to 37 ms warm (M23) |
+| Cmd-Tab appears | ≤ 1 frame | 9.7 to 20.8 ms from the key to the flush that shows the panel, usually 10 to 12 ms (M23, five in a row, with macOS's own background work keeping this Mac's load at 5 to 6); on a quieter run all five were under 16.4 ms. The shell draws the panel, so it's a round trip to another process and back |
 | Search, per keystroke | ≤ 50 ms | |
 | Application launch | < 300 ms | 24 ms (M19, Calculator, cold) |
 | Clone of a 1 GiB file | < 50 ms | Under 1 ms (M19): it takes the same for any size |
@@ -600,6 +600,29 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **Tests that click by position go stale.** One new row in Settings moved everything under it, and each walkthrough that clicked one of those by coordinates went wrong, as M15 said it would. They go by name now.
 - **What a Mac does that's wrong.** Nine of POSIX's checks and seven of the commands are different on purpose. Each is written down in `Tests/Parity`, with why.
 
+### M23
+
+- **A test passed with the window drawn in the wrong place.** Dragged to the left edge, the window was where the server said, and its frame asserted right, while the screen showed only the part where its old and new places overlapped, with what had been in the old one. The preview of where it would go is drawn under the window being dragged, so the compositor drew what was under it first, and then emptied its list of steps. Each piece of the screen remembers how far along that list it has got, so the window's own steps went where the pieces thought they'd been. The list is kept now. Only the screenshot showed it.
+- **The wallpaper was a window.** Files has the desktop's icons in a window the size of the screen, under everything, so a click on the wallpaper was a click on that. Clicking the wallpaper never uncovered the desktop, Stage's strip never got a click, and nor did the line between the two sides of Split View. What the server draws over the desktop comes first now, and the desktop's window says when a click there wasn't on an icon, as only it knows where they are. A full screen Space showed the icons too.
+- **What isn't in the tree can't be tested by name.** Overview and Stage's strip are drawn by the server, so a walkthrough had nothing to click but coordinates, which M15 found go stale. The server now describes them as it does windows, with a button for each Space, "Add Desktop" and each "Remove", so a test drags a window on to "Desktop 2" by name, and so could a screen reader.
+- **A drag that never was.** Taking a tiled window away seemed to leave it tiled. The test had pressed below Files' toolbar, in the list, so nothing moved. Pressed in the toolbar, it goes back to its size. Return to Previous Size then went back to where the window was let go rather than where it was before it was dragged, which is fixed.
+- **Ctrl-Tab went to the terminal.** Menu shortcuts were only looked for with Command held, so Show Next Tab's never got there. AppKit tries a shortcut with Control too; one only takes the modifiers it names, so Ctrl-C still reaches the shell.
+- **A Dock that stayed magnified.** A window hidden while the pointer was over it, as the Dock is when a full screen Space is left, was forgotten without being told the pointer had gone. It went on showing what it showed for it, a label and all, until the pointer came back.
+- **Settings didn't scroll.** Desktop & Dock is longer than its window, and nothing below its edge could be reached. Its panes scroll now. And QEMU sends anything not addressed to a display to whichever device the guest started last, which was the touch device: it took the wheel's "buttons" and said they were keys. The first display's tablet is its own now, and the harness says which display.
+- **Sequoia's menus have headings and rows of pictures.** That's AppKit since macOS 14, so it's the toolkit's too: the green button's menu is pictures under "Move & Resize", "Fill & Arrange" and "Full Screen Tile", Option turns Fill into Center and the left-handed layouts into right-handed ones, and Move & Resize in the Window menu has the same pictures beside its names.
+- **Overview had the menu bar.** Mission Control doesn't. It goes now, and the row of Spaces shows only their names until the pointer goes up to it, on that display.
+- **A window that had gone, still being called.** Files' windows look at `/Volumes` twice a second, and a closed one went on doing it from freed memory. Nothing noticed until a walkthrough asked for the accessibility tree twice in a row, and its answer, being built, landed where the window had been: Files crashed with that answer's text in its registers. It stops when its window does now.
+- **An erased stick, still listed.** Files went by a volume's name, so one erased and mounted again between two looks was the same volume, with the files it no longer had. Each mount has a number of its own, and a new number is a new volume: Files leaves it, as Finder does.
+- **Cmd-Tab read every application.** To know which icon to show, the panel read every application's bundle, each time it came up, and drew a 64-point icon at 88. It keeps what it found now, finds it when an application starts rather than when it's wanted, and asks for the size it draws. The budget it's measured against is new: the server times from the key to the first frame with the panel.
+- **The Dock moved under a test's pointer.** With the pointer resting over the Dock, where a test found an icon was where it had swelled to; by the time the pointer got there, the Dock had swelled round the pointer instead, and the click went to its neighbour. A test now goes to what it's after, looks again, and then presses, as a person does.
+- **Limit: the timing isn't measured.** How long Overview, its row, the reveals in full screen, uncovering the desktop and a hot corner take are estimates until there's a Sequoia VM to measure (waiting on a decision), and so are the menu's pictures and their spacing. Apple doesn't say exactly what Sequoia's green-button menu has; its page now is for a later macOS.
+- **Limit: no Globe key.** Fill, Center and the halves have fn-Control shortcuts on a Mac. No PC keyboard has that key, and nor does QEMU.
+- **Limit: Stage's strip is flat,** with no tilt and no application icon, and a window can't be dragged from it on to the stage.
+- **Limit: tabs can't be dragged,** along the bar or out of it, and there's no + to open one.
+- **Limit: the hot corners sheet is a list,** not four menus around a picture of the screen, and a corner can't start the screen saver, sleep or lock the screen until M25.
+- **Limit: in full screen, what comes down at the top pushes the window down** rather than going over it.
+- **Limit: a test can only click by name on the first display.** The second's are reached by position.
+
 ### M22
 
 - **A picture of nothing passed.** The first walkthrough dragged a window on to the second display and every step passed, with the window still where it was: the pointer had gone down on the wrong part of it. And the first scroll with two fingers scrolled a page that fits. It's the second time in two milestones that a screenshot has shown what a test couldn't, so they're looked at now before they're kept.
@@ -609,7 +632,7 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **QEMU's tablet can't say which display it's on.** It's one per display, bound to its head, in order. A real mouse only says how far, so it's only here that this comes up.
 - **Asking has to be done by the one who wants it.** The window server can't wait for an answer, as it's what shows the question. So a program asks for itself, and the server only looks up what it was told.
 - **Limit: all displays have the one scale.** A surface's pixels are its points times one number, for the whole system. A display that doesn't suit it gets the picture scaled to fit, as a "looks like" mode does. A window would have to be drawn again going from one to the other otherwise.
-- **Limit: a Space goes across all displays,** and Overview's on the main one. Separate Spaces on each are M23's.
+- **Limit: a Space goes across all displays,** and Overview's on the main one. Separate Spaces on each are M23's (and are there now).
 - **Limit: a menu bar on the second display is the same as on the first, but dimmer.** Which one's dim doesn't follow where the pointer goes.
 - **Limit: a recording is frames, until there's video to put them in** (M35).
 - **Limit: Night Shift has no schedule, or a sunset to go by.**

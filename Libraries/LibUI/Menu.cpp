@@ -34,8 +34,20 @@ public:
     {
     }
 
-    bool key_down(KeyEvent const& event) override { return m_menu.key(event); }
-    bool key_up(KeyEvent const&) override { return true; }
+    bool key_down(KeyEvent const& event) override
+    {
+        m_menu.set_option(event.has_option() || is_option(event.code));
+        return m_menu.key(event);
+    }
+    bool key_up(KeyEvent const& event) override
+    {
+        m_menu.set_option(event.has_option() && !is_option(event.code));
+        return true;
+    }
+
+private:
+    // (Left and right Option: <linux/input.h>'s KEY_LEFTALT and KEY_RIGHTALT.)
+    static bool is_option(u16 code) { return code == 56 || code == 100; }
 
 private:
     Menu& m_menu;
@@ -56,18 +68,33 @@ public:
         graphics.fill(all, t.color("menu.tint"_sv));
 
         float inset = t.metric("menu.selectionInset"_sv);
-        float text_left = t.metric("menu.textLeft"_sv);
+        float const picture_left = t.metric("menu.textLeft"_sv);
+        float text_left = picture_left + (m_menu.has_pictures() ? t.metric("menu.pictureColumn"_sv) : 0);
         float text_right = t.metric("menu.textRight"_sv);
         float row = t.metric("menu.rowHeight"_sv);
         float check_left = t.metric("menu.checkLeft"_sv);
         float check_size = t.metric("menu.checkSize"_sv);
         float cap = Appearance::cap_height(font);
+        auto const layout = m_menu.layout(width());
         for (size_t i = 0; i < m_menu.m_items.size(); ++i) {
-            auto const& item = m_menu.m_items[i];
-            auto rect = m_menu.item_rect(static_cast<int>(i));
+            auto const& item = m_menu.shown(i);
+            auto rect = layout.rects[i];
+            if (item.heading) {
+                auto heading_font = t.named_font("menuHeading"_sv);
+                float heading_baseline = rect.y + (rect.height + Appearance::cap_height(heading_font)) / 2;
+                graphics.draw_text(item.title.view(), heading_font, { text_left, heading_baseline }, t.color("menu.heading"_sv));
+                continue;
+            }
+            if (item.palette) {
+                bool highlighted = static_cast<int>(i) == m_menu.m_highlight && item.enabled;
+                if (highlighted)
+                    graphics.fill_rounded(rect.inflated(-t.metric("menu.paletteInset"_sv)), t.metric("menu.selectionRadius"_sv), t.color("menu.selection"_sv));
+                draw_picture(graphics, item.picture, rect, t.color(!item.enabled ? "menu.disabled"_sv : (highlighted ? "menu.selectedText"_sv : "menu.text"_sv)));
+                continue;
+            }
             if (item.separator) {
                 float line_y = graphics.snap(rect.y + rect.height / 2 - 0.5f);
-                graphics.fill({ text_left - 11, line_y, width() - (text_left - 11) * 2, 1 }, t.color("menu.separator"_sv));
+                graphics.fill({ picture_left - 11, line_y, width() - (picture_left - 11) * 2, 1 }, t.color("menu.separator"_sv));
                 continue;
             }
             bool highlighted = static_cast<int>(i) == m_menu.m_highlight && item.enabled;
@@ -76,6 +103,8 @@ public:
             auto text_color = t.color(!item.enabled ? "menu.disabled"_sv : (highlighted ? "menu.selectedText"_sv : "menu.text"_sv));
             float baseline = rect.y + (row + cap) / 2;
             graphics.draw_text(item.title.view(), font, { text_left, baseline }, text_color);
+            if (!item.picture.is_empty())
+                draw_picture(graphics, item.picture, { picture_left, rect.y, t.metric("menu.pictureWidth"_sv), rect.height }, text_color);
             if (item.checked)
                 graphics.draw_symbol(Symbol::Checkmark, { check_left, rect.y + (row - check_size) / 2, check_size, check_size }, text_color, 2);
             if (item.submenu) {
@@ -85,6 +114,35 @@ public:
                 float shortcut_width = Appearance::text_width(font, item.shortcut_text.view());
                 graphics.draw_text(item.shortcut_text.view(), font, { width() - text_right - shortcut_width, baseline }, shortcut_color);
             }
+        }
+    }
+
+    // The screen, small, with the parts of it that this fills: the window's own solid, the others' fainter.
+    static void draw_picture(Graphics& graphics, Vector<Gfx::FloatRect> const& parts, FloatRect cell, Gfx::Color color)
+    {
+        auto const& t = tokens();
+        float const width = t.metric("menu.pictureWidth"_sv);
+        float const height = t.metric("menu.pictureHeight"_sv);
+        float const radius = t.metric("menu.pictureRadius"_sv);
+        float const line = t.metric("menu.pictureLine"_sv);
+        float const gap = t.metric("menu.pictureGap"_sv);
+        FloatRect const screen { graphics.snap(cell.x + (cell.width - width) / 2), graphics.snap(cell.y + (cell.height - height) / 2), width, height };
+        graphics.stroke_rounded(screen, radius, line, color);
+        float const inset = line + gap;
+        FloatRect const inside { screen.x + inset, screen.y + inset, screen.width - inset * 2, screen.height - inset * 2 };
+        for (size_t i = 0; i < parts.size(); ++i) {
+            auto const& part = parts[i];
+            FloatRect area { inside.x + part.x * inside.width, inside.y + part.y * inside.height, part.width * inside.width, part.height * inside.height };
+            // Apart from each other by a gap, as tiled windows are.
+            if (part.x > 0)
+                area = { area.x + gap / 2, area.y, area.width - gap / 2, area.height };
+            if (part.x + part.width < 1)
+                area.width -= gap / 2;
+            if (part.y > 0)
+                area = { area.x, area.y + gap / 2, area.width, area.height - gap / 2 };
+            if (part.y + part.height < 1)
+                area.height -= gap / 2;
+            graphics.fill_rounded(area, max(radius - inset, 1.0f), i == 0 ? color : color.with_opacity(t.metric("menu.pictureOthers"_sv)));
         }
     }
 
@@ -106,6 +164,7 @@ public:
 
     void mouse_dragged(MouseEvent const& event) override
     {
+        m_menu.set_option(event.modifiers & ::Window::ModifierOption);
         m_menu.m_dragged = true;
         m_menu.pointer_at(screen_of(event), event.buttons);
     }
@@ -115,6 +174,7 @@ public:
         // Still held, from the press that opened it.
         if (event.buttons)
             m_menu.m_dragged = true;
+        m_menu.set_option(event.modifiers & ::Window::ModifierOption);
         m_menu.pointer_at(screen_of(event), event.buttons);
     }
 
@@ -126,10 +186,13 @@ public:
     [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::Menu; }
     void accessibility_parts(Vector<Accessibility::Node>& parts) override
     {
+        auto const layout = m_menu.layout(width());
         for (size_t i = 0; i < m_menu.m_items.size(); ++i) {
-            auto const& item = m_menu.m_items[i];
-            if (!item.separator)
-                parts.append(Accessibility::part_of(*this, Accessibility::Role::MenuItem, item.title.view(), m_menu.item_rect(static_cast<int>(i)), item.checked ? "on"_sv : StringView {}, item.enabled));
+            auto const& item = m_menu.shown(i);
+            if (item.heading)
+                parts.append(Accessibility::part_of(*this, Accessibility::Role::StaticText, item.title.view(), layout.rects[i], {}, true));
+            else if (!item.separator)
+                parts.append(Accessibility::part_of(*this, Accessibility::Role::MenuItem, item.title.view(), layout.rects[i], item.checked ? "on"_sv : StringView {}, item.enabled));
         }
     }
 
@@ -178,6 +241,138 @@ void Menu::add_separator()
     (void)m_items.append(move(item));
 }
 
+MenuItem& Menu::add_heading(StringView title)
+{
+    auto& item = add(title);
+    item.heading = true;
+    item.enabled = false;
+    return item;
+}
+
+MenuItem& Menu::add_picture(StringView title, Vector<Gfx::FloatRect> picture, Function<void()> action)
+{
+    auto& item = add(title, move(action));
+    item.picture = move(picture);
+    item.palette = true;
+    return item;
+}
+
+MenuItem& Menu::add_alternate(MenuItem& item, StringView title, Function<void()> action)
+{
+    item.alternate = adopt_own(*new MenuItem);
+    auto& alternate = *item.alternate;
+    alternate.title = MUST(String::from_view(title));
+    alternate.action = move(action);
+    alternate.palette = item.palette;
+    return alternate;
+}
+
+Vector<Gfx::FloatRect> picture_of_arrangement(WS::WindowArrangement arrangement)
+{
+    using WS::WindowArrangement;
+    constexpr FloatRect left { 0, 0, 0.5f, 1 }, right { 0.5f, 0, 0.5f, 1 }, top { 0, 0, 1, 0.5f }, bottom { 0, 0.5f, 1, 0.5f };
+    constexpr FloatRect top_left { 0, 0, 0.5f, 0.5f }, top_right { 0.5f, 0, 0.5f, 0.5f }, bottom_left { 0, 0.5f, 0.5f, 0.5f }, bottom_right { 0.5f, 0.5f, 0.5f, 0.5f };
+    Vector<FloatRect> parts;
+    auto add = [&](FloatRect part) { parts.append(part); };
+    switch (arrangement) {
+    case WindowArrangement::Left: add(left); break;
+    case WindowArrangement::Right: add(right); break;
+    case WindowArrangement::Top: add(top); break;
+    case WindowArrangement::Bottom: add(bottom); break;
+    case WindowArrangement::TopLeft: add(top_left); break;
+    case WindowArrangement::TopRight: add(top_right); break;
+    case WindowArrangement::BottomLeft: add(bottom_left); break;
+    case WindowArrangement::BottomRight: add(bottom_right); break;
+    case WindowArrangement::Fill: add({ 0, 0, 1, 1 }); break;
+    case WindowArrangement::Center: add({ 0.25f, 0.2f, 0.5f, 0.6f }); break;
+    case WindowArrangement::LeftAndRight: add(left); add(right); break;
+    case WindowArrangement::RightAndLeft: add(right); add(left); break;
+    case WindowArrangement::TopAndBottom: add(top); add(bottom); break;
+    case WindowArrangement::BottomAndTop: add(bottom); add(top); break;
+    case WindowArrangement::Quarters: add(top_left); add(top_right); add(bottom_left); add(bottom_right); break;
+    case WindowArrangement::LeftAndQuarters: add(left); add(top_right); add(bottom_right); break;
+    case WindowArrangement::RightAndQuarters: add(right); add(top_left); add(bottom_left); break;
+    case WindowArrangement::TopAndQuarters: add(top); add(bottom_left); add(bottom_right); break;
+    case WindowArrangement::BottomAndQuarters: add(bottom); add(top_left); add(top_right); break;
+    default: break;
+    }
+    return parts;
+}
+
+Vector<Gfx::FloatRect> picture_of_split_view(bool on_left)
+{
+    return picture_of_arrangement(on_left ? WS::WindowArrangement::LeftAndRight : WS::WindowArrangement::RightAndLeft);
+}
+
+bool Menu::has_pictures() const
+{
+    for (size_t i = 0; i < m_items.size(); ++i) {
+        if (!m_items[i].palette && !m_items[i].picture.is_empty())
+            return true;
+    }
+    return false;
+}
+
+MenuItem& Menu::shown(size_t index)
+{
+    auto& item = m_items[index];
+    return m_option && item.alternate ? *item.alternate : item;
+}
+
+MenuItem const& Menu::shown(size_t index) const
+{
+    auto const& item = m_items[index];
+    return m_option && item.alternate ? *item.alternate : item;
+}
+
+void Menu::set_option(bool held)
+{
+    for (auto* menu = this; menu; menu = menu->m_open_child) {
+        if (menu->m_option == held)
+            continue;
+        menu->m_option = held;
+        if (menu->m_window)
+            menu->m_window->root_view().children()[1]->set_needs_display();
+    }
+}
+
+Menu::Layout Menu::layout(float width) const
+{
+    auto const& t = tokens();
+    float const row = t.metric("menu.rowHeight"_sv);
+    float const separator = t.metric("menu.separatorHeight"_sv);
+    float const heading = t.metric("menu.headingHeight"_sv);
+    float const cell = t.metric("menu.paletteCell"_sv);
+    float const palette_row = t.metric("menu.paletteRow"_sv);
+    float const palette_left = t.metric("menu.paletteLeft"_sv);
+    Layout layout;
+    float y = t.metric("menu.padding"_sv);
+    float x = palette_left;
+    bool in_row = false;
+    for (size_t i = 0; i < m_items.size(); ++i) {
+        auto const& item = m_items[i];
+        if (item.palette) {
+            if (!in_row)
+                x = palette_left;
+            in_row = true;
+            layout.rects.append({ x, y, cell, palette_row });
+            x += cell;
+            layout.palette_width = max(layout.palette_width, x + palette_left);
+            continue;
+        }
+        if (in_row)
+            y += palette_row;
+        in_row = false;
+        float const own = item.separator ? separator : (item.heading ? heading : row);
+        layout.rects.append({ 0, y, width, own });
+        y += own;
+    }
+    if (in_row)
+        y += palette_row;
+    layout.height = y + t.metric("menu.padding"_sv);
+    return layout;
+}
+
 Menu& Menu::add_submenu(StringView title)
 {
     auto& item = add(title);
@@ -193,45 +388,46 @@ FloatSize Menu::size() const
     float row = t.metric("menu.rowHeight"_sv);
     float separator = t.metric("menu.separatorHeight"_sv);
     float padding = t.metric("menu.padding"_sv);
-    float height = padding * 2;
+    (void)row;
+    (void)separator;
+    (void)padding;
+    auto const heading_font = t.named_font("menuHeading"_sv);
     float widest = 0;
     float widest_shortcut = 0;
     bool has_submenu = false;
     for (size_t i = 0; i < m_items.size(); ++i) {
-        auto const& item = m_items[i];
-        height += item.separator ? separator : row;
-        if (item.separator)
-            continue;
-        widest = max(widest, Appearance::text_width(font, item.title.view()));
-        widest_shortcut = max(widest_shortcut, Appearance::text_width(font, item.shortcut_text.view()));
-        has_submenu = has_submenu || item.submenu;
+        // Whichever of it and its alternate is wider.
+        for (int which = 0; which < 2; ++which) {
+            auto const* item = which == 0 ? &m_items[i] : m_items[i].alternate.ptr();
+            if (!item || item->separator || item->palette)
+                continue;
+            widest = max(widest, Appearance::text_width(item->heading ? heading_font : font, item->title.view()));
+            widest_shortcut = max(widest_shortcut, Appearance::text_width(font, item->shortcut_text.view()));
+            has_submenu = has_submenu || item->submenu;
+        }
     }
-    float width = t.metric("menu.textLeft"_sv) + widest + t.metric("menu.textRight"_sv);
+    float width = t.metric("menu.textLeft"_sv) + (has_pictures() ? t.metric("menu.pictureColumn"_sv) : 0) + widest + t.metric("menu.textRight"_sv);
     if (widest_shortcut > 0)
         width += t.metric("menu.shortcutGap"_sv) + widest_shortcut;
     else if (has_submenu)
         width += t.metric("menu.shortcutGap"_sv);
-    return { max(ceiling(width), t.metric("menu.minimumWidth"_sv)), height };
+    auto const measured = layout(0);
+    width = max(width, measured.palette_width);
+    return { max(ceiling(width), t.metric("menu.minimumWidth"_sv)), measured.height };
 }
 
 FloatRect Menu::item_rect(int index) const
 {
-    auto const& t = tokens();
-    float row = t.metric("menu.rowHeight"_sv);
-    float separator = t.metric("menu.separatorHeight"_sv);
-    float y = t.metric("menu.padding"_sv);
-    for (int i = 0; i < index; ++i)
-        y += m_items[static_cast<size_t>(i)].separator ? separator : row;
-    float own = m_items[static_cast<size_t>(index)].separator ? separator : row;
-    return { 0, y, m_window ? m_window->size().width : size().width, own };
+    return layout(m_window ? m_window->size().width : size().width).rects[static_cast<size_t>(index)];
 }
 
 int Menu::item_at(FloatPoint point) const
 {
     if (!m_window || point.x < 0 || point.x >= m_window->size().width)
         return -1;
+    auto const rects = layout(m_window->size().width).rects;
     for (size_t i = 0; i < m_items.size(); ++i) {
-        if (item_rect(static_cast<int>(i)).contains(point))
+        if (rects[i].contains(point))
             return static_cast<int>(i);
     }
     return -1;
@@ -376,10 +572,10 @@ void Menu::pointer_at(FloatPoint screen, u32)
         if (!frame.to<float>().contains(screen))
             continue;
         int over = menu->item_at({ screen.x - static_cast<float>(frame.x), screen.y - static_cast<float>(frame.y) });
-        if (over >= 0 && !menu->m_items[static_cast<size_t>(over)].enabled)
+        if (over >= 0 && !menu->shown(static_cast<size_t>(over)).enabled)
             over = -1;
         menu->set_highlight(over);
-        if (over >= 0 && menu->m_items[static_cast<size_t>(over)].submenu)
+        if (over >= 0 && menu->shown(static_cast<size_t>(over)).submenu)
             menu->open_submenu(over);
         else if (over >= 0)
             menu->close_submenu();
@@ -420,7 +616,7 @@ void Menu::choose(int index)
 {
     if (index < 0 || static_cast<size_t>(index) >= m_items.size())
         return;
-    auto& item = m_items[static_cast<size_t>(index)];
+    auto& item = shown(static_cast<size_t>(index));
     if (!item.enabled || item.separator || item.submenu)
         return;
     auto* root = this;
@@ -447,7 +643,7 @@ bool Menu::key(KeyEvent const& event)
                 at = count - 1;
             if (at >= count)
                 at = 0;
-            if (menu->m_items[static_cast<size_t>(at)].enabled)
+            if (menu->shown(static_cast<size_t>(at)).enabled)
                 return at;
         }
         return from;
@@ -460,7 +656,7 @@ bool Menu::key(KeyEvent const& event)
         menu->set_highlight(next_enabled(menu->m_highlight < 0 ? 0 : menu->m_highlight, -1));
         return true;
     case KeyRight:
-        if (menu->m_highlight >= 0 && menu->m_items[static_cast<size_t>(menu->m_highlight)].submenu) {
+        if (menu->m_highlight >= 0 && menu->shown(static_cast<size_t>(menu->m_highlight)).submenu) {
             menu->open_submenu(menu->m_highlight);
             menu->m_open_child->set_highlight(next_enabled(-1, 1));
         }

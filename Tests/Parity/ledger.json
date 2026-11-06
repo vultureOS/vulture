@@ -39,13 +39,26 @@
                 },
                 {
                     "feature": "Resize a window",
-                    "claim": "partial",
-                    "missing": "from every edge and corner, with the right pointer on each, is to be checked by name",
                     "milestone": "M23",
+                    "claim": "present",
                     "proof": [
                         {
-                            "suite": "test-userland",
-                            "output": "windows: rate"
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-tiling.chat",
+                                "ax-expect window \"Untitled\" at 280 145 670 460"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-tiling.chat",
+                                "ax-expect window \"Untitled\" at 280 124 710 511"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-edges.png"
                         }
                     ]
                 },
@@ -65,20 +78,30 @@
                 },
                 {
                     "feature": "Zoom with the green button",
-                    "claim": "partial",
-                    "missing": "its menu, full screen and tiling from it",
                     "milestone": "M23",
+                    "claim": "present",
                     "proof": [
                         {
-                            "suite": "test-userland"
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-tiling.chat",
+                                "ax-expect text \"Fill & Arrange\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-green-menu.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-green-menu-option.png"
                         }
                     ]
                 },
                 {
                     "feature": "Close and quit from the keyboard",
-                    "claim": "partial",
-                    "missing": "Hide, Hide Others",
                     "milestone": "M23",
+                    "claim": "present",
                     "proof": [
                         {
                             "suite": "test-ui",
@@ -86,52 +109,285 @@
                                 "monday.chat",
                                 "key meta_l-q"
                             ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-spaces.chat",
+                                "key alt-meta_l-h"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-hid-others.png"
                         }
                     ]
                 },
                 {
                     "feature": "Tile by dragging to an edge or corner",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-tiling.chat",
+                                "ax-expect window \"vulture\" at 8 32 628 686"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-left-zone.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-tiled-left.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Tile by holding Option",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-tiling.chat",
+                                "ax-expect window \"Untitled\" at 644 32 628 686"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-option-zone.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Move & Resize in the Window menu",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-tiling.chat",
+                                "click menuitem \"Left & Right\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-move-and-resize.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-corner.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-previous-size.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Tiled windows resize together",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "output": "m23-tiling: all of it done"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-resized-together.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Fill & Arrange: several windows at once",
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-tiling.chat",
+                                "click menuitem \"Right & Quarters\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-left-and-right.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-right-and-quarters.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "A tiled window dragged away goes back to its size",
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-tiling.chat",
+                                "ax-expect window \"vulture\" at 12 195 860 520"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-tiling-taken-away.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Fill and tile with the Globe key (fn-Control and an arrow): no PC keyboard, nor QEMU, has that key"
                 },
                 {
                     "feature": "Full screen, in a Space of its own",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-full-screen.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-full-screen-menu.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-full-screen-dock.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Split View",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-stage.chat",
+                                "ax-expect window \"Untitled\" at 0 -28 740 828"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-stage-split-choosing.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-stage-split-view.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-stage-split-moved.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Tabs in a window, and Merge All Windows",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "partial",
+                    "missing": "dragging a tab along the bar, or out into a window of its own; the + to open one",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-spaces.chat",
+                                "ax-expect tab \"vulture — vsh — 80×22\" = selected"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-merged.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-tab-moved-out.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Cmd-Tab between applications",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-spaces.chat",
+                                "ax-expect cell \"Files\" = chosen"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-switcher.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Cmd-` between windows",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-spaces.chat",
+                                "key meta_l-grave"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-next-window.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Click the wallpaper to reveal the desktop",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-desktop-uncovered.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-desktop-covered.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Stage (Stage Manager)",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "partial",
+                    "missing": "the strip's pictures are flat, with no tilt and no application icon, and a window can't be dragged from it onto the stage",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-stage.chat",
+                                "click button \"Text Editor\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-stage-stage.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-stage-stage-switched.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "An application that's stopped answering gets the spinning pointer",
@@ -238,24 +494,129 @@
                     ]
                 },
                 {
+                    "feature": "Overview's row of Spaces: their names, then pictures of them at the top",
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-spaces.chat",
+                                "ax-gone button \"Add Desktop\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-overview.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-overview-open.png"
+                        }
+                    ]
+                },
+                {
                     "feature": "App Exposé",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-spaces.chat",
+                                "key ctrl-down"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-app-windows.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Hot corners",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "partial",
+                    "missing": "the sheet is a list of four, not set out around a picture of the screen; Quick Note, the screen saver, sleep and Lock Screen aren't among what a corner can do",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-stage.chat",
+                                "click menuitem \"Desktop\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-stage-hot-corners.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-stage-hot-corner.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Drag a window to another Space",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-spaces.chat",
+                                "drop button \"Desktop 2\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-overview-carried.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Remove and reorder Spaces",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-spaces.chat",
+                                "click button \"Remove Desktop 1\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-overview-reordered.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-spaces-overview-removed.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Spaces on each display",
-                    "milestone": "M23"
+                    "milestone": "M23",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-displays.chat",
+                                "ax-expect button \"Desktop 2\" = current"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-displays-second-on-desktop-2.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-displays-main-as-it-was.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Swipe between Spaces",
@@ -1578,12 +1939,20 @@
                 },
                 {
                     "feature": "Desktop & Dock",
-                    "claim": "partial",
-                    "missing": "few of its settings (M24)",
                     "milestone": "M24",
+                    "claim": "partial",
+                    "missing": "the Dock's position, hiding and the rest of its settings (M24); widgets; Overview's settings other than hot corners",
                     "proof": [
                         {
-                            "suite": "test-ui"
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m23-stage.chat",
+                                "ax-expect switch \"Drag windows to menu bar to fill screen\" = on"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m23-stage-desktop-and-dock.png"
                         }
                     ]
                 },
@@ -3488,7 +3857,7 @@
                     "feature": "Two displays",
                     "milestone": "M23",
                     "claim": "partial",
-                    "missing": "both at the same scale; separate Spaces on each (M23)",
+                    "missing": "both at the same scale",
                     "proof": [
                         {
                             "suite": "test-ui",

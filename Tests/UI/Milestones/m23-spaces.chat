@@ -1,0 +1,151 @@
+# M23: full screen and Split View, and Overview: App Expose, dragging a window to another Space, adding, removing and reordering them.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 2
+click button "Terminal"
+expect terminal: ready
+pause 1
+# ---- Green takes it to a Space of its own, with nothing else showing.
+key ctrl-meta_l-f
+pause 2
+pointer 16000 16000
+pause 0.5
+screenshot full-screen.png
+# ---- At the top, what's hidden comes down.
+pointer 16000 0
+pause 1
+screenshot full-screen-menu.png
+pointer 16000 16000
+pause 1
+# ---- At the bottom, the Dock comes up.
+pointer 16000 32767
+pause 1
+screenshot full-screen-dock.png
+pointer 16000 8000
+pause 1
+screenshot full-screen-again.png
+# ---- Overview shows it as a Space of its own, by name.
+key ctrl-up
+pause 1
+screenshot overview-full-screen.png
+key esc
+pause 1
+key ctrl-left
+pause 2
+screenshot back-on-the-desktop.png
+key ctrl-right
+pause 2
+key ctrl-meta_l-f
+pause 2
+pointer 31500 25000
+pause 0.5
+screenshot left-full-screen.png
+# ---- App Expose.
+key meta_l-n
+pause 2
+key ctrl-down
+pause 1
+screenshot app-windows.png
+key esc
+pause 1
+# ---- Cmd-` goes between its windows.
+key meta_l-grave
+pause 1
+screenshot next-window.png
+# ---- Tabs: both of them in the one window, and back again. One is given a name, to tell them apart.
+type printf '\033]0;Second\007'\r
+ax-expect window "Second — 80×24"
+click menuitem "Window"
+ax-expect menuitem "Merge All Windows"
+click menuitem "Merge All Windows"
+pause 1
+ax-expect tab "Second — 80×22" = selected
+pointer 31500 25000
+pause 0.5
+screenshot merged.png
+key ctrl-tab
+pause 1
+ax-expect tab "vulture — vsh — 80×22" = selected
+screenshot other-tab.png
+click menuitem "Window"
+ax-expect menuitem "Move Tab to New Window"
+click menuitem "Move Tab to New Window"
+pause 1
+ax-gone tab "Second — 80×22"
+ax-expect window "Second — 80×24"
+ax-expect window "vulture — vsh — 80×24"
+pointer 31500 25000
+pause 0.5
+screenshot tab-moved-out.png
+# ---- Cmd-Tab, with Cmd held: every application, the last one used next.
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"meta_l"}}}]}}
+pause 0.2
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"tab"}}},{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"tab"}}}]}}
+pause 0.5
+ax-expect cell "Files" = chosen
+screenshot switcher.png
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"meta_l"}}}]}}
+pause 1
+ax-gone cell "Files"
+screenshot switched.png
+# ---- Hide Others.
+key alt-meta_l-h
+pause 1
+screenshot hid-others.png
+click menuitem "Files"
+ax-expect menuitem "Show All"
+click menuitem "Show All"
+ax-expect window "Second — 80×24"
+pause 1
+# ---- A click on the wallpaper uncovers the desktop, and another brings it all back.
+pointer 400 2000
+pause 0.3
+button left down
+pause 0.1
+button left up
+pause 1
+screenshot desktop-uncovered.png
+button left down
+pause 0.1
+button left up
+pause 1
+screenshot desktop-covered.png
+# ---- Overview: another Space, a window taken over to it.
+key ctrl-up
+pause 1
+screenshot overview.png
+ax-expect button "Desktop 1" = current
+ax-gone button "Add Desktop"
+# ---- At the top, the row of Spaces opens: pictures of them, and another from the end of it.
+pointer 16000 0
+pause 0.6
+ax-expect button "Add Desktop"
+screenshot overview-open.png
+click button "Add Desktop"
+ax-expect button "Desktop 2"
+pause 0.5
+screenshot overview-added.png
+# ---- A window carried over to it.
+grab window "vulture"
+drop button "Desktop 2"
+pause 1
+ax-gone window "vulture"
+screenshot overview-carried.png
+# ---- The new one taken along the row, to the front: the one showing is second now.
+grab button "Desktop 2"
+drop button "Desktop 1"
+pause 0.5
+ax-expect button "Desktop 2" = current
+screenshot overview-reordered.png
+# ---- Taken away again: what was on it goes to the one next to it.
+click button "Remove Desktop 1"
+ax-gone button "Desktop 2"
+ax-expect button "Desktop 1" = current
+ax-expect window "vulture"
+pause 0.5
+screenshot overview-removed.png
+key esc
+pause 1
+ax-gone button "Desktop 1"

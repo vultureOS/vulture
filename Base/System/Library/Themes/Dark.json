@@ -218,6 +218,8 @@
             "legacyBorder" : "#1a1a1a"
         },
         "tableHeader" : { "fill" : "#000000", "border" : "#1a1a1a", "divider" : "#ffffff19", "text" : "#ffffffd8" },
+        "switcher" : { "padding" : 10, "cell" : 104, "icon" : 88, "label" : 26, "radius" : 12, "panelRadius" : 22, "selected" : "#ffffff26" },
+        "tabBar" : { "height" : 28, "closeSize" : 16, "background" : "#1e1e1e", "selected" : "#3a3a3a", "hover" : "#2a2a2a", "separator" : "#ffffff22" },
         "tabs" : { "fill" : "#ffffff04", "border" : "#ffffff10" },
         "menu" : {
             "tint" : "#323232e0",
@@ -227,6 +229,7 @@
             "selectedText" : "#ffffff",
             "separator" : "#ffffff19",
             "shortcut" : "#ffffff8c",
+            "heading" : "#ffffff8c",
             "border" : "#00000066"
         },
         "tooltip" : { "background" : "#323232" },
@@ -308,12 +311,19 @@
     "desktop" : {
         "minimizeSeconds" : 0.45,
         "spaceSlideSeconds" : 0.35,
+        "tile" : {
+            "margin" : 8,
+            "preview" : "#ffffff30",
+            "previewBorder" : "#ffffff80"
+        },
         "overview" : {
             "seconds" : 0.3,
-            "bar" : 96,
+            "bar" : 120,
+            "collapsedBar" : 28,
+            "barSeconds" : 0.25,
             "padding" : 16,
-            "tileWidth" : 128,
-            "tileHeight" : 72,
+            "tileWidth" : 136,
+            "tileHeight" : 85,
             "tileRadius" : 8,
             "dim" : "#00000066",
             "tile" : "#ffffff33",

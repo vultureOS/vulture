@@ -4,15 +4,14 @@ expect loginwindow: ready
 type vulture\r
 expect files: ready
 pause 2
-# ---- A second Space, to go to.
+# ---- A second Space, to go to: the row of them opens at the top, and its "+" adds one.
 key ctrl-up
 pause 1
-pointer 18227 2949
-pause 0.2
-button left down
-pause 0.2
-button left up
+pointer 16000 0
 pause 0.6
+click button "Add Desktop"
+ax-expect button "Desktop 2"
+pause 0.3
 key esc
 pause 1
 ax-expect window "vulture"

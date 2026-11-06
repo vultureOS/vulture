@@ -98,12 +98,21 @@ public:
         Gfx::Color color;
         float radius { 0 };
         String label;
+        // The size of a caption, rather than of a title.
+        bool small_label { false };
         bool shadow { false };
     };
     void set_overlays(Vector<Overlay>);
+    // The wallpaper of this part of the desktop, in points, this small, in points, with its corners rounded.
+    [[nodiscard]] ErrorOr<NonnullRefPtr<Gfx::Bitmap>> miniature_of_wallpaper(Gfx::IntRect points, Gfx::IntSize size, float radius) const;
+    // This part of it, in pixels, likewise.
+    [[nodiscard]] ErrorOr<NonnullRefPtr<Gfx::Bitmap>> miniature_of(Gfx::Bitmap const&, Gfx::IntRect part, Gfx::IntSize size, float radius) const;
     void set_dim(Gfx::Color);
+    // Where a window being dragged would go if it were let go now, in points: nothing, if it's empty.
+    void set_tile_preview(Gfx::FloatRect);
     [[nodiscard]] Gfx::Color dim() const { return m_dim; }
     void set_overlay_font(Text::Font* font) { m_overlay_font = font; }
+    void set_overlay_small_font(Text::Font* font) { m_overlay_small_font = font; }
     // A picture of a window as it now is, title bar and all.
     [[nodiscard]] ErrorOr<NonnullRefPtr<Gfx::Bitmap>> snapshot(ServerWindow const&) const;
     // Hides the windows below the Dock's level, for Overview.
@@ -225,6 +234,7 @@ private:
 
     ErrorOr<void> render_wallpaper();
     void draw_overlays(Vector<Gfx::IntRect> const& rects);
+    void draw_tile_preview(Vector<Gfx::IntRect> const& rects);
     ErrorOr<NineSlice> make_shadow(WindowShape const&, ShadowStyle const&);
     ErrorOr<NineSlice> make_outline(WindowShape const&);
     ErrorOr<void> make_shape(WindowShape&);
@@ -274,8 +284,10 @@ private:
     Vector<Gfx::Color> m_wallpaper_colors;
     Vector<Overlay> m_overlays;
     Gfx::Color m_dim { 0, 0, 0, 0 };
+    Gfx::FloatRect m_tile_preview;
     bool m_hides_normal_windows { false };
     Text::Font* m_overlay_font { nullptr };
+    Text::Font* m_overlay_small_font { nullptr };
     Vector<NonnullOwnPtr<WindowShape>> m_shapes;
 
     int m_tiles_across { 0 };

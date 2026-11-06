@@ -13,6 +13,7 @@
 #include <LibCore/Account.h>
 #include <LibDiskManagement/Disks.h>
 #include <LibLocale/Locale.h>
+#include <LibUI/Panels.h>
 #include <LibUI/Application.h>
 #include <LibUI/Containers.h>
 #include <LibUI/Layout.h>
@@ -276,6 +277,57 @@ void build_wallpaper(Page& page)
     page.finish();
 }
 
+// What each of a display's corners does, at each corner of a picture of one.
+class HotCornersSheet final : public StackView {
+public:
+    explicit HotCornersSheet(UI::Window& window)
+        : StackView(Axis::Vertical, 14, Alignment::Fill, Insets::all(20))
+    {
+        auto add = [&](StringView title, StringView key, int index) {
+            auto& row = this->add<StackView>(Axis::Horizontal, 12, Alignment::Center);
+            (void)row.add<Label>(title);
+            auto& filler = row.add<View>();
+            filler.set_stretch(1, 0);
+            auto& popup = row.add<PopUpButton>();
+            popup.set_accessibility_label(title);
+            popup.add_item("-"_sv);
+            popup.add_item("Overview"_sv);
+            popup.add_item("Application Windows"_sv);
+            popup.add_item("Desktop"_sv);
+            popup.add_item("Launcher"_sv);
+            popup.add_item("Notification Center"_sv);
+            Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
+            s_corners[index] = static_cast<i32>(preferences.number(key).value_or(0));
+            popup.set_selected_index(s_corners[index]);
+            auto const key_string = MUST(String::from_view(key));
+            popup.on_change = [key_string, index](int chosen) {
+                s_corners[index] = chosen;
+                Desktop::Preferences saved(StringView(s_preferences, strlen(s_preferences)));
+                saved.set(key_string.view(), JSON::Value(static_cast<double>(chosen)));
+                saved.save();
+                (void)Application::the().connection().server().set_hot_corners(s_corners[0], s_corners[1], s_corners[2], s_corners[3]);
+            };
+        };
+        add("Top left"_sv, "hotCornerTopLeft"_sv, 0);
+        add("Top right"_sv, "hotCornerTopRight"_sv, 1);
+        add("Bottom left"_sv, "hotCornerBottomLeft"_sv, 2);
+        add("Bottom right"_sv, "hotCornerBottomRight"_sv, 3);
+        auto& buttons = this->add<StackView>(Axis::Horizontal, 8, Alignment::Center);
+        auto& filler = buttons.add<View>();
+        filler.set_stretch(1, 0);
+        auto& done = buttons.add<Button>("Done"_sv, ButtonStyle::Default);
+        done.on_action = [&window] { Sheet::dismiss(window); };
+    }
+
+private:
+    static inline i32 s_corners[4] {};
+};
+
+void show_hot_corners(UI::Window& window)
+{
+    Sheet::present(window, adopt_own(*new HotCornersSheet(window)), { 420, 260 });
+}
+
 void build_dock(Page& page)
 {
     auto& group = page.add_group("Dock"_sv);
@@ -284,6 +336,65 @@ void build_dock(Page& page)
     size.set_fixed_width(220);
     auto& magnification_row = group.rows().add<Row>("Magnification"_sv);
     (void)magnification_row.add<Switch>(true);
+
+    auto saved = [](StringView key, JSON::Value value) {
+        Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
+        preferences.set(key, move(value));
+        preferences.save();
+    };
+    Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
+    auto server = [] -> auto& { return Application::the().connection().server(); };
+
+    auto& stage_group = page.add_group("Desktop & Stage"_sv);
+    auto& reveal_row = stage_group.rows().add<Row>("Click wallpaper to reveal desktop"_sv);
+    auto& reveal = reveal_row.add<PopUpButton>();
+    reveal.set_accessibility_label("Click wallpaper to reveal desktop"_sv);
+    reveal.add_item("Always"_sv);
+    reveal.add_item("Only in Stage"_sv);
+    reveal.set_selected_index(preferences.boolean("clickWallpaperReveals"_sv).value_or(true) ? 0 : 1);
+    reveal.on_change = [saved, server](int index) {
+        saved("clickWallpaperReveals"_sv, JSON::Value(index == 0));
+        (void)server().set_click_wallpaper(index == 0);
+    };
+    auto& stage_row = stage_group.rows().add<Row>("Stage"_sv);
+    auto& stage = stage_row.add<Switch>(preferences.boolean("stage"_sv).value_or(false));
+    stage.set_accessibility_label("Stage"_sv);
+    stage.on_action = [saved, server, &stage] {
+        bool const on = stage.is_on();
+        saved("stage"_sv, JSON::Value(on));
+        (void)server().set_stage(on);
+    };
+
+    auto& windows_group = page.add_group("Windows"_sv);
+    struct Tiling {
+        bool by_edges;
+        bool to_menu_bar;
+        bool with_option;
+        bool margins;
+    };
+    static Tiling tiling;
+    tiling = { preferences.boolean("tileByEdges"_sv).value_or(true), preferences.boolean("tileToMenuBar"_sv).value_or(true), preferences.boolean("tileWithOption"_sv).value_or(true), preferences.boolean("tileMargins"_sv).value_or(true) };
+    auto add_tiling = [&](StringView title, StringView key, bool Tiling::* field) {
+        auto& row = windows_group.rows().add<Row>(title);
+        auto& toggle = row.add<Switch>(tiling.*field);
+        toggle.set_accessibility_label(title);
+        auto const key_string = MUST(String::from_view(key));
+        toggle.on_action = [saved, server, key_string, field, &toggle] {
+            bool const on = toggle.is_on();
+            tiling.*field = on;
+            saved(key_string.view(), JSON::Value(on));
+            (void)server().set_tiling(tiling.by_edges, tiling.to_menu_bar, tiling.with_option, tiling.margins);
+        };
+    };
+    add_tiling("Drag windows to screen edges to tile"_sv, "tileByEdges"_sv, &Tiling::by_edges);
+    add_tiling("Drag windows to menu bar to fill screen"_sv, "tileToMenuBar"_sv, &Tiling::to_menu_bar);
+    add_tiling("Hold \xE2\x8C\xA5 key while dragging windows to tile"_sv, "tileWithOption"_sv, &Tiling::with_option);
+    add_tiling("Tiled windows have margins"_sv, "tileMargins"_sv, &Tiling::margins);
+
+    auto& overview_group = page.add_group("Overview"_sv);
+    auto& corners_row = overview_group.rows().add<Row>("Hot Corners"_sv);
+    auto& corners = corners_row.add<Button>("Hot Corners\xE2\x80\xA6"_sv);
+    corners.on_action = [&corners] { show_hot_corners(*corners.window()); };
     page.finish();
 }
 
@@ -1078,9 +1189,12 @@ private:
     {
         m_names.append(MUST(String::from_view(name)));
         m_sidebar->add_row(name, symbol);
-        auto& page = m_pages->add<Page>();
+        // Longer than the window, some of them: they scroll, under the title.
+        auto& scroll = m_pages->add<ScrollView>();
+        scroll.set_scrolls_horizontally(false);
+        auto& page = scroll.make_document<Page>();
         build(page);
-        page.set_hidden(true);
+        scroll.set_hidden(true);
         if (!m_pages->layout_manager())
             m_pages->set_layout<PagesLayout>();
     }

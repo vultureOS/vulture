@@ -63,6 +63,10 @@ public:
     virtual void grab_pointer(bool) = 0;
     virtual void set_cursor(WS::CursorShape) = 0;
     virtual void minimize() { }
+    virtual void arrange(WS::WindowArrangement) { }
+    virtual void toggle_full_screen() { }
+    virtual void take_place_of(WindowBackend&) { }
+    virtual void tile_in_split_view(bool) { }
     virtual void zoom() { }
     virtual void set_input_region(Gfx::IntRect) { }
     virtual void begin_drag(WindowBackend& image, StringView type, ReadonlyBytes data) = 0;

@@ -57,6 +57,8 @@ struct vulture_input_event {
 #define VULTURE_KEY_ENTER 28
 #define VULTURE_KEY_LEFTCTRL 29
 #define VULTURE_KEY_A 30
+#define VULTURE_KEY_F 33
+#define VULTURE_KEY_H 35
 #define VULTURE_KEY_L 38
 #define VULTURE_KEY_SEMICOLON 39
 #define VULTURE_KEY_APOSTROPHE 40

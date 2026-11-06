@@ -64,6 +64,44 @@ enum class CursorShape : i32 {
     Count,
 };
 
+// Where a window can be put, in whatever's free of the display it's on.
+enum class WindowArrangement : i32 {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    Fill,
+    Center,
+    // As it was before any of those.
+    Previous,
+    // This window and the next ones under it, together: the first named is this one's place.
+    LeftAndRight,
+    RightAndLeft,
+    TopAndBottom,
+    BottomAndTop,
+    Quarters,
+    LeftAndQuarters,
+    RightAndQuarters,
+    TopAndQuarters,
+    BottomAndQuarters,
+    Count,
+};
+
+// What the pointer staying in a corner of a display does.
+enum class HotCornerAction : i32 {
+    None,
+    Overview,
+    ApplicationWindows,
+    Desktop,
+    Launcher,
+    NotificationCenter,
+    Count,
+};
+
 // A display, as `displays` says: the main one first, at 0,0, and the others around it. Points.
 struct DisplayRecord {
     i32 output { 0 };

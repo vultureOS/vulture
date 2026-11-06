@@ -1,0 +1,53 @@
+# M23: Spaces of each display's own. Another one on the second display, and going to it there, leaves the first as it was.
+# displays: 2
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 2
+# ---- Overview, from the second display: a row of Spaces for each.
+display 1
+pointer 16000 16000
+pause 0.5
+key ctrl-up
+pause 1
+ax-expect group "Overview"
+pointer 16000 0
+pause 0.8
+screenshot overview-second.png
+display 0
+screenshot overview-main.png
+display 1
+# ---- Another Space on the second display only: its "+".
+pointer 18330 2048
+pause 0.3
+button left down
+pause 0.1
+button left up
+pause 0.8
+ax-expect button "Desktop 2"
+screenshot overview-second-added.png
+key esc
+pause 1
+ax-gone group "Overview"
+# ---- Over to it, there: the first display stays as it was.
+pointer 16000 16000
+pause 0.3
+key ctrl-right
+pause 2
+screenshot second-on-desktop-2.png
+display 0
+ax-expect window "vulture"
+screenshot main-as-it-was.png
+# ---- Overview again: the second display's row says it's on its Desktop 2.
+display 1
+pointer 16000 16000
+pause 0.3
+key ctrl-up
+pause 1
+ax-expect button "Desktop 2" = current
+pointer 16000 0
+pause 0.8
+screenshot overview-second-again.png
+key esc
+pause 1

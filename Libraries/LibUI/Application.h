@@ -54,6 +54,8 @@ public:
     [[nodiscard]] NonnullOwnPtr<Menu> standard_menus(Function<void()> on_about = nullptr, bool can_quit = true);
     // Says the menus again, after a change to them.
     void publish_menus();
+    // The Window menu says the right thing.
+    void full_screen_changed(bool full);
     // What has the keyboard: gets "copy" and the like, up the responder chain.
     bool send_command(StringView command);
     [[nodiscard]] Window* key_window() const;
@@ -100,6 +102,7 @@ private:
     OwnPtr<AudioProxy> m_audio;
     int m_volume_tick_timer { -1 };
     OwnPtr<Menu> m_main_menu;
+    MenuItem* m_full_screen_item { nullptr };
     Vector<MenuItem*> m_menu_items;
     Vector<NonnullOwnPtr<Window>> m_windows;
     String m_name;

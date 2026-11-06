@@ -36,6 +36,9 @@ shown="$(sed -n 's/.*launch: first window on screen at \([0-9.]*\).*/\1/p' "$out
 VULTURE_GPU_WIDTH=2560 VULTURE_GPU_HEIGHT=1600 "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --fresh-disk --boot-args uibudgets \
     --expect "budgets: done" --timeout 120 > "$out/budgets.log" 2>&1 || status=1
 
+# Cmd-Tab, on the whole desktop: the shell draws its panel.
+VULTURE_GPU_WIDTH=2560 VULTURE_GPU_HEIGHT=1600 "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --fresh-disk --boot-args uidesktop \
+    --chat "$source_dir/Tests/UI/switcher-budget.chat" --timeout 120 > "$out/switcher.log" 2>&1 || status=1
 value_of() {
     { grep -a "budget: $1: " "$out/budgets.log" || true; } | head -n 1 | tr -d '\r' | sed "s/.*budget: $1: //"
 }
@@ -68,6 +71,9 @@ row "input to flush, worst" "for information" 100000 "$(value_of "input to flush
 row "whole screen, 12 windows and blur" "at least 58 fps" 100000 "$(value_of "whole screen drag frames")"
 row "input to flush, whole screen, 99th percentile" "at most 16.7 ms" 16.7 "$(value_of "whole screen input to flush p99")"
 
+# The slowest of five, the first included.
+switcher="$({ grep -a "budget: Cmd-Tab appears: " "$out/switcher.log" || true; } | tr -d '\r' | sed 's/.*budget: Cmd-Tab appears: //; s/ ms.*//' | sort -n | tail -n 1)"
+row "Cmd-Tab appears, the slowest of five" "at most a frame, 16.7 ms" 16.7 "${switcher:+$switcher ms}"
 if [ "$status" -eq 0 ]; then
     echo "budgets: PASS"
 else

@@ -15,6 +15,7 @@
 #include <LibCore/EventLoop.h>
 #include <LibGesture/Recognizer.h>
 #include <LibIPC/Listener.h>
+#include <LibJSON/JSON.h>
 #include <LibText/Font.h>
 #include <WindowServerEndpoint.h>
 
@@ -36,9 +37,35 @@ struct Client {
     u64 ping_sent_at { 0 };
     u64 answered_at { 0 };
     bool not_responding { false };
+    bool shows_window_menus { false };
     // Its last answer to request_accessibility, and to which.
     u32 accessibility_generation { 0 };
     String accessibility;
+};
+
+// A desktop's worth of windows, on a display.
+struct Space {
+    int id { 0 };
+    // The window that has it to itself, and if it's Split View, the one beside that.
+    ServerWindow* full { nullptr };
+    ServerWindow* beside { nullptr };
+    bool full_on_left { true };
+    float divider { 0.5f };
+    // Split View, waiting to be told what goes on the other side.
+    bool choosing { false };
+    // Done with, once it's stopped being looked at.
+    bool leaving { false };
+};
+
+struct DisplaySpaces {
+    int output { 0 };
+    Vector<Space> spaces;
+    int current { 0 };
+    // Its row of Spaces in Overview: open (pictures of them) or not (names), and how far between.
+    bool bar_open { false };
+    float bar_amount { 0 };
+    float bar_from { 0 };
+    double bar_started { 0 };
 };
 
 // The service: clients and their windows, the window manager (stacking, focus,
@@ -104,6 +131,20 @@ private:
     i32 set_mirroring(IPC::Sender const&, bool mirrored) override;
     i32 set_warmth(IPC::Sender const&, i32 percent) override;
     void set_input_region(IPC::Sender const&, u32 window, i32 x, i32 y, i32 width, i32 height) override;
+    void arrange_window(IPC::Sender const&, u32 window, i32 arrangement) override;
+    void set_full_screen(IPC::Sender const&, u32 window, bool full) override;
+    void toggle_full_screen(IPC::Sender const&, u32 window) override;
+    void tile_in_split_view(IPC::Sender const&, u32 window, bool on_left) override;
+    void set_hot_corners(IPC::Sender const&, i32 top_left, i32 top_right, i32 bottom_left, i32 bottom_right) override;
+    void set_tiling(IPC::Sender const&, bool by_edges, bool to_menu_bar, bool with_option, bool margins) override;
+    void take_place_of(IPC::Sender const&, u32 window, u32 other) override;
+    void set_click_wallpaper(IPC::Sender const&, bool reveals) override;
+    void wallpaper_clicked(IPC::Sender const&) override;
+    // The wallpaper pressed, at this point: what's on the desktop comes out from under everything, or goes back.
+    void press_on_wallpaper(Gfx::IntPoint, bool activating);
+    void set_stage(IPC::Sender const&, bool on) override;
+    void hide_others(IPC::Sender const&, bool hidden) override;
+    void show_window_menus(IPC::Sender const&) override;
     void switch_space(IPC::Sender const&, i32 space) override;
     void inject_pointer(IPC::Sender const&, i32 x, i32 y, u32 buttons, u64 sent_at) override;
     WindowServerEndpoint::StatisticsAnswer statistics(IPC::Sender const&) override;
@@ -172,13 +213,89 @@ private:
     void zoom_window(ServerWindow&);
     void activate_client(Client&);
     void cycle_applications(bool backward);
+    void cycle_windows(bool backward);
+    // Tiling.
+    [[nodiscard]] Gfx::IntRect frame_for_arrangement(ServerWindow const&, Window::WindowArrangement) const;
+    void arrange(ServerWindow&, Window::WindowArrangement);
+    // Those that place more than one window: where each goes, this one's first. Empty for the others.
+    [[nodiscard]] static Vector<Window::WindowArrangement> places_of(Window::WindowArrangement);
+    // Where a window would be tiled, if it were let go with the pointer here.
+    [[nodiscard]] int tile_zone_at(Gfx::IntPoint, ServerWindow const&) const;
+    void show_tile_preview(int arrangement, ServerWindow const&);
+    void find_tile_neighbors(ServerWindow&, int edges);
+    void arm_window_menu(ServerWindow&);
+    void disarm_window_menu();
     [[nodiscard]] bool handle_hotkey(u16 code);
-    void go_to_space(int space, bool animated);
-    void enter_overview();
+    // Spaces.cpp.
+    enum class OverviewMode : u8 {
+        Everything,
+        OneApplication,
+        ChoosingSplit,
+    };
+    void sync_display_spaces();
+    [[nodiscard]] DisplaySpaces const& spaces_of_const(Display const&) const;
+    [[nodiscard]] String space_label(DisplaySpaces const&, int index) const;
+    // What Overview shows on this display, as the accessibility tree has it (as one of an application's windows).
+    [[nodiscard]] JSON::Value overview_accessibility(Display const&) const;
+    [[nodiscard]] DisplaySpaces& spaces_of(Display const&);
+    // Of the display the pointer's on.
+    [[nodiscard]] DisplaySpaces& focused_spaces();
+    [[nodiscard]] Display const& display_of_spaces(DisplaySpaces const&) const;
+    [[nodiscard]] Space* space_with_id(int id, DisplaySpaces** where = nullptr);
+    [[nodiscard]] bool space_is_showing(int id) const;
+    [[nodiscard]] bool space_is_sliding(int id) const;
+    [[nodiscard]] int index_of_space(int id) const;
+    [[nodiscard]] int space_for_new_window(ServerWindow const&);
+    // It's been moved on to another display: and so on to what's showing there.
+    void settle_on_display(ServerWindow&);
+    void show_space_of(ServerWindow const&);
+    void go_to_space(DisplaySpaces&, int index, bool animated);
+    void finish_slide();
+    [[nodiscard]] bool advance_slide(double now);
+    void remove_leaving_spaces();
+    [[nodiscard]] int hidden_top_of(ServerWindow const&) const;
+    void layout_space(Space&, Display const&);
+    void enter_full_screen(ServerWindow&);
+    void enter_split_view(ServerWindow&, bool on_left);
+    void finish_split_view(ServerWindow& chosen);
+    void come_back_from_full_screen(ServerWindow&);
+    void leave_full_screen(ServerWindow&, bool window_is_going);
+    void notify_full_screen(ServerWindow&);
+    // The Dock and a menu bar, on a display with a Space that's full screen.
+    [[nodiscard]] bool is_kept_out_of_the_way(ServerWindow const&) const;
+    [[nodiscard]] Optional<int> split_divider_at(Gfx::IntPoint);
+    void drag_divider(Gfx::IntPoint);
+    void check_full_screen_edges(Gfx::IntPoint);
+    void set_menu_reveal(int output, bool wanted);
+    void set_dock_reveal(bool wanted);
+    [[nodiscard]] bool advance_reveals(double now);
+    void reveal_desktop(bool revealed, bool animated);
+    [[nodiscard]] bool advance_desktop_reveal(double now);
+    void check_hot_corner(Gfx::IntPoint);
+    void fire_hot_corner(int action);
+    [[nodiscard]] Vector<Client*> applications_most_recent_first();
+    void finish_switching(bool go);
+    // Who was before. After m_active_application's been changed.
+    void application_became_active(Client* previous);
+    void add_to_stage_strip(Client&);
+    void layout_stage_strip();
+    [[nodiscard]] bool stage_strip_is_covered() const;
+    void make_room_for_stage();
+    void stage_application_changed();
+    [[nodiscard]] bool stage_strip_pointer(Gfx::IntPoint);
+    // What's there whatever else is going on.
+    [[nodiscard]] Vector<Compositor::Overlay> lasting_overlays();
+    void refresh_lasting_overlays();
+    [[nodiscard]] Gfx::FloatRect overview_tile(Display const&, DisplaySpaces const&, int index) const;
+    void collect_overview_windows();
+    void enter_overview(OverviewMode = OverviewMode::Everything);
     void leave_overview(ServerWindow* to_activate);
+    void finish_overview_at_once();
     void layout_overview();
     void update_overview_overlays();
-    [[nodiscard]] bool overview_pointer(Gfx::IntPoint, u32 pressed);
+    void move_window_to_space(ServerWindow&, DisplaySpaces&, int index);
+    void remove_space(DisplaySpaces&, int index);
+    [[nodiscard]] bool overview_pointer(Gfx::IntPoint, u32 pressed, u32 released);
     void start_animating();
     void animation_tick();
     void apply_wallpaper();
@@ -220,6 +337,7 @@ private:
     Text::GlyphAtlas m_atlas;
     NonnullRefPtr<Text::Typeface> m_title_face;
     OwnPtr<Text::Font> m_title_font;
+    OwnPtr<Text::Font> m_small_label_font;
 
     int m_input_fd { -1 };
     Gfx::IntPoint m_pointer;
@@ -267,7 +385,25 @@ private:
     ServerWindow* m_gesture_window { nullptr };
     Gfx::IntPoint m_gesture_start;
     Gfx::IntRect m_gesture_frame;
+    // Where a window being moved was before it was tiled, if it was, or else where it started: for Return to Previous Size.
+    Gfx::IntRect m_gesture_restore;
     int m_gesture_edges { 0 };
+    bool m_tile_by_edges { true };
+    bool m_tile_to_menu_bar { true };
+    bool m_tile_with_option { true };
+    bool m_tile_margins { true };
+    // Being dragged, where it would be tiled if it were let go, or -1.
+    int m_tile_zone { -1 };
+    // Windows tiled next to one being resized, that go with it.
+    struct TileNeighbor {
+        ServerWindow* window;
+        Gfx::IntRect start;
+        int edges;
+    };
+    Vector<TileNeighbor> m_tile_neighbors;
+    // The green button's menu, waiting for the pointer to stay long enough.
+    int m_window_menu_timer { -1 };
+    ServerWindow* m_window_menu_window { nullptr };
     ServerWindow* m_hovered { nullptr };
     ServerWindow* m_grab { nullptr };
 
@@ -351,10 +487,11 @@ private:
     Vector<Genie> m_genies;
     int m_animation_timer { -1 };
 
-    int m_space { 0 };
-    int m_space_count { 1 };
-    // A slide between spaces.
+    Vector<DisplaySpaces> m_display_spaces;
+    int m_next_space_id { 1 };
+    // A slide between Spaces: on one display at a time.
     bool m_sliding { false };
+    int m_slide_output { 0 };
     int m_slide_from { 0 };
     double m_slide_started { 0 };
 
@@ -363,7 +500,70 @@ private:
         RefPtr<Gfx::Bitmap> picture;
         Gfx::FloatRect home;
         Gfx::FloatRect spread;
+        // Full screen: as it is in the row along the top, where a window's corners would be the wrong size.
+        RefPtr<Gfx::Bitmap> tile_picture;
+        // On a Space that's showing: the others are only in the row along the top.
+        bool shown { true };
     };
+    struct OverviewWallpaper {
+        int output { 0 };
+        RefPtr<Gfx::Bitmap> picture;
+    };
+    Vector<OverviewWallpaper> m_overview_wallpapers;
+    OverviewMode m_overview_mode { OverviewMode::Everything };
+    Gfx::IntPoint m_overview_press_at;
+    int m_overview_press_window { -1 };
+    int m_overview_press_tile { -1 };
+    bool m_overview_dragging { false };
+    bool m_overview_hover_close { false };
+    // Moves each display's row of Spaces towards open or closed: true while one's still going.
+    bool advance_overview_bar(double now);
+    void open_overview_bar(DisplaySpaces&, bool);
+    // Where a Space's name is, open or not.
+    [[nodiscard]] Gfx::FloatRect overview_label(Display const&, DisplaySpaces const&, int index) const;
+    // The menu bar, out of the way as far as this.
+    void slide_menu_bars(float amount);
+
+    // Coming into view on a full screen Space, each from 0 to 1.
+    float m_reveal { 0 };
+    float m_reveal_from { 0 };
+    double m_reveal_started { 0 };
+    int m_reveal_output { -1 };
+    bool m_reveal_wanted { false };
+    float m_dock_reveal { 0 };
+    float m_dock_reveal_from { 0 };
+    double m_dock_reveal_started { 0 };
+    bool m_dock_wanted { false };
+    bool m_dragging_divider { false };
+
+    // The wallpaper, uncovered.
+    bool m_desktop_revealed { false };
+    float m_desktop_reveal { 0 };
+    float m_desktop_reveal_from { 0 };
+    double m_desktop_reveal_started { 0 };
+    bool m_click_wallpaper_reveals { true };
+
+    i32 m_hot_corners[4] { 0, 0, 0, 0 };
+    int m_hot_corner { -1 };
+    int m_hot_corner_timer { -1 };
+
+    // Cmd-Tab, for as long as Cmd is down.
+    Vector<Client*> m_recent_applications;
+    bool m_switching { false };
+    int m_switch_selected { 0 };
+    // When the key that brought up the application switcher happened, until the shell's panel for it is on the screen
+    // (the budget "Cmd-Tab appears").
+    u64 m_switch_asked_at { 0 };
+
+    bool m_stage { false };
+    Client* m_stage_shown { nullptr };
+    struct StageItem {
+        Client* client { nullptr };
+        RefPtr<Gfx::Bitmap> picture;
+        Gfx::FloatRect rect;
+    };
+    Vector<StageItem> m_stage_strip;
+
     Vector<Thumbnail> m_thumbnails;
     bool m_overview { false };
     bool m_overview_leaving { false };

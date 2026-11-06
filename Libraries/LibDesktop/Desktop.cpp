@@ -331,6 +331,13 @@ ErrorOr<ShellState> parse_shell_state(StringView text)
     state.space = static_cast<int>(json.get_integer("space"_sv).value_or(0));
     state.space_count = static_cast<int>(json.get_integer("spaces"_sv).value_or(1));
     state.overview = json.get_boolean("overview"_sv).value_or(false);
+    state.stage = json.get_boolean("stage"_sv).value_or(false);
+    state.desktop_revealed = json.get_boolean("desktopRevealed"_sv).value_or(false);
+    state.switcher_selected = static_cast<int>(json.get_integer("switcherSelected"_sv).value_or(0));
+    if (auto const* switcher = json.get_array("switcher"_sv)) {
+        for (size_t i = 0; i < switcher->size(); ++i)
+            state.switcher.append(static_cast<i32>(switcher->at(i).as_integer()));
+    }
     if (auto const* applications = json.get_array("applications"_sv)) {
         for (size_t i = 0; i < applications->size(); ++i) {
             auto const& one = applications->at(i);
@@ -379,14 +386,31 @@ NonnullOwnPtr<UI::Menu> menu_from_json(JSON::Value const& description, Function<
             built->items().clear();
             continue;
         }
-        auto id = static_cast<u32>(item.get_integer("id"_sv).value_or(0));
-        auto& added = menu->add(title, [id, &chosen] {
-            if (chosen)
-                chosen(id);
-        });
-        added.enabled = item.get_boolean("enabled"_sv).value_or(true);
-        added.checked = item.get_boolean("checked"_sv).value_or(false);
-        added.shortcut_text = copy(item.get_string("shortcut"_sv).value_or(StringView {}));
+        if (item.get_boolean("heading"_sv).value_or(false)) {
+            (void)menu->add_heading(title);
+            continue;
+        }
+        auto fill = [&chosen](UI::MenuItem& into, JSON::Value const& from) {
+            auto id = static_cast<u32>(from.get_integer("id"_sv).value_or(0));
+            into.action = [id, &chosen] {
+                if (chosen)
+                    chosen(id);
+            };
+            into.enabled = from.get_boolean("enabled"_sv).value_or(true);
+            into.checked = from.get_boolean("checked"_sv).value_or(false);
+            into.shortcut_text = copy(from.get_string("shortcut"_sv).value_or(StringView {}));
+            if (auto const* parts = from.get_array("picture"_sv)) {
+                for (size_t at = 0; at + 3 < parts->size(); at += 4)
+                    into.picture.append({ static_cast<float>(parts->at(at).as_number()), static_cast<float>(parts->at(at + 1).as_number()), static_cast<float>(parts->at(at + 2).as_number()), static_cast<float>(parts->at(at + 3).as_number()) });
+                into.palette = from.get_boolean("palette"_sv).value_or(false);
+            }
+        };
+        auto& added = menu->add(title);
+        fill(added, item);
+        if (auto const* alternate = item.get_object("alternate"_sv)) {
+            auto& other = UI::Menu::add_alternate(added, alternate->get_string("title"_sv).value_or(StringView {}), nullptr);
+            fill(other, *alternate);
+        }
     }
     return menu;
 }

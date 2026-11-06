@@ -33,6 +33,14 @@ struct MenuItem {
     bool separator { false };
     bool enabled { true };
     bool checked { false };
+    // A section's heading, as AppKit's section header item: small and grey, never chosen.
+    bool heading { false };
+    // A picture of the screen, with the parts of it this would fill, in fractions of it, the window's own first. Before
+    // its title; or, in a palette, instead of it, in a row with those next to it.
+    Vector<Gfx::FloatRect> picture;
+    bool palette { false };
+    // Shown, and chosen, in its place while Option is held.
+    OwnPtr<MenuItem> alternate;
 };
 
 // A list of items, kept in place: an item's address is what its menu's published form
@@ -94,6 +102,10 @@ public:
     MenuItem& add(StringView title, Function<void()> action = nullptr);
     MenuItem& add_with_shortcut(StringView title, u16 code, StringView shown, Function<void()> action, u32 modifiers = WS::ModifierCommand);
     void add_separator();
+    MenuItem& add_heading(StringView title);
+    MenuItem& add_picture(StringView title, Vector<Gfx::FloatRect> picture, Function<void()> action);
+    // What `item` becomes while Option is held: the same kind of item, with its own title and action.
+    static MenuItem& add_alternate(MenuItem& item, StringView title, Function<void()> action);
     Menu& add_submenu(StringView title);
     [[nodiscard]] MenuItems& items() { return m_items; }
 
@@ -124,12 +136,25 @@ public:
     void set_highlight(int index);
     [[nodiscard]] int highlight() const { return m_highlight; }
     bool key(KeyEvent const&);
+    // Option, held or not: what its alternates need.
+    void set_option(bool);
+    // The item at this place, as it is now (its alternate, with Option held).
+    [[nodiscard]] MenuItem& shown(size_t index);
+    [[nodiscard]] MenuItem const& shown(size_t index) const;
 
 private:
     friend class MenuView;
 
     [[nodiscard]] int item_at(Gfx::FloatPoint in_window) const;
     [[nodiscard]] Gfx::FloatRect item_rect(int index) const;
+    struct Layout {
+        Vector<Gfx::FloatRect> rects;
+        float height { 0 };
+        float palette_width { 0 };
+    };
+    [[nodiscard]] Layout layout(float width) const;
+    // Whether titles make room for pictures before them.
+    [[nodiscard]] bool has_pictures() const;
     void open_submenu(int index);
     void close_submenu();
     [[nodiscard]] Menu* deepest();
@@ -144,11 +169,17 @@ private:
     Menu* m_parent { nullptr };
     Menu* m_open_child { nullptr };
     int m_highlight { -1 };
+    bool m_option { false };
     bool m_chosen { false };
     // Let go soon after opening stays open; let go after dragging onto an item chooses.
     double m_opened_at { 0 };
     bool m_dragged { false };
 };
+
+// The picture for a window arrangement: the screen, and the parts of it each window takes.
+[[nodiscard]] Vector<Gfx::FloatRect> picture_of_arrangement(WS::WindowArrangement);
+// For Full Screen Tile's: the window's own half, and the other's.
+[[nodiscard]] Vector<Gfx::FloatRect> picture_of_split_view(bool on_left);
 
 // A choice of items, shown as a menu when pressed.
 class PopUpButton : public Control {

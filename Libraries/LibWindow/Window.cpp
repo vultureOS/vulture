@@ -213,6 +213,24 @@ void Connection::recorded_frame(IPC::Sender const&, i32 width, i32 height, u64 t
         on_recorded_frame(width, height, time);
 }
 
+void Connection::full_screen_changed(IPC::Sender const&, u32 window, bool full)
+{
+    if (on_full_screen_change)
+        on_full_screen_change(window, full);
+}
+
+void Connection::hot_corner_fired(IPC::Sender const&, i32 action)
+{
+    if (on_hot_corner)
+        on_hot_corner(static_cast<HotCornerAction>(action));
+}
+
+void Connection::window_menu_wanted(IPC::Sender const&, u32 window, i32 x, i32 y)
+{
+    if (on_window_menu_wanted)
+        on_window_menu_wanted(window, { x, y });
+}
+
 void Connection::ping(IPC::Sender const&, u32 serial)
 {
     (void)m_server.pong(serial);
@@ -534,6 +552,26 @@ void Window::set_title_bar_height(int height)
 void Window::set_input_region(Gfx::IntRect region)
 {
     (void)m_connection.server().set_input_region(m_id, region.x, region.y, region.width, region.height);
+}
+
+void Window::take_place_of(u32 other)
+{
+    (void)m_connection.server().take_place_of(m_id, other);
+}
+
+void Window::toggle_full_screen()
+{
+    (void)m_connection.server().toggle_full_screen(m_id);
+}
+
+void Window::tile_in_split_view(bool on_left)
+{
+    (void)m_connection.server().tile_in_split_view(m_id, on_left);
+}
+
+void Window::arrange(WindowArrangement arrangement)
+{
+    (void)m_connection.server().arrange_window(m_id, static_cast<i32>(arrangement));
 }
 
 void Window::minimize()

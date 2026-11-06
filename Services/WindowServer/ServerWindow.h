@@ -46,8 +46,20 @@ struct ServerWindow {
     int space { 0 };
     // Where it is drawn differs from its frame by this, in pixels, as spaces slide.
     int slide_x { 0 };
+    int slide_y { 0 };
+    // And while it is, it isn't seen outside this, in pixels; if there's more than one display it could end up on.
+    Gfx::IntRect slide_clip;
+    // A Space to itself.
+    bool full_screen { false };
+    Gfx::IntRect full_screen_restore;
+    int full_screen_from { -1 };
+    // Moved over to make room for Stage's strip.
+    Gfx::IntRect stage_restore;
     // What it was before it was zoomed.
     Gfx::IntRect zoom_restore;
+    // Tiled: how, and what it was before.
+    int tile { -1 };
+    Gfx::IntRect tile_restore;
     // Where clicks land, in points from its top-left; the whole of it, if empty.
     Gfx::IntRect input_region;
     bool active { false };
@@ -110,6 +122,8 @@ struct ServerWindow {
     WindowButton pressed_button { WindowButton::None };
 
     [[nodiscard]] bool is_bare() const { return flags & Window::WindowBare; }
+    // Nothing around it: no corners and no shadow.
+    [[nodiscard]] bool is_square() const { return is_bare() || full_screen; }
     [[nodiscard]] bool is_titled() const { return flags & Window::WindowTitled; }
     [[nodiscard]] bool is_resizable() const { return flags & Window::WindowResizable; }
     [[nodiscard]] bool is_popup() const { return flags & Window::WindowPopup; }

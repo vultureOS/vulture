@@ -265,13 +265,13 @@ IntRect Compositor::device_frame(ServerWindow const& window) const
 {
     int scale = m_screen.scale();
     auto const origin = m_screen.origin();
-    return { (window.frame.x + origin.x) * scale + window.slide_x, (window.frame.y + origin.y) * scale, window.frame.width * scale, window.frame.height * scale };
+    return { (window.frame.x + origin.x) * scale + window.slide_x, (window.frame.y + origin.y) * scale + window.slide_y, window.frame.width * scale, window.frame.height * scale };
 }
 
 IntRect Compositor::window_bounds(ServerWindow const& window) const
 {
     auto frame = device_frame(window);
-    if (window.is_bare())
+    if (window.is_square())
         return frame;
     auto const& style = shadow_style_of(window);
     auto const& slice = shadow_slice_of(window);
@@ -388,7 +388,7 @@ bool Compositor::covers_tile(ServerWindow const& window, IntRect frame, IntRect 
     if (surface && (tile.right() - frame.x > surface->width() || tile.bottom() - frame.y > surface->height()))
         return false;
     // The rounded corners show what's behind them.
-    if (!window.is_bare() && window.shape) {
+    if (!window.is_square() && window.shape) {
         int const extent = window.shape->corner_extent;
         bool const near_an_end = tile.y < frame.y + extent || tile.bottom() > frame.bottom() - extent;
         bool const near_a_side = tile.x < frame.x + extent || tile.right() > frame.right() - extent;
@@ -428,13 +428,15 @@ void Compositor::find_what_shows()
         if (!is_drawn(window))
             continue;
         auto const frame = device_frame(window);
-        auto const on_screen = frame.intersected(m_screen.framebuffer().rect());
+        auto on_screen = frame.intersected(m_screen.framebuffer().rect());
+        if (!window.slide_clip.is_empty())
+            on_screen = on_screen.intersected(window.slide_clip);
         if (on_screen.is_empty())
             continue;
         for (int down = on_screen.y / tile_size; down <= (on_screen.bottom() - 1) / tile_size; ++down) {
             auto* row = m_lowest_shown.data() + static_cast<size_t>(down) * static_cast<size_t>(m_tiles_across);
             for (int across = on_screen.x / tile_size; across <= (on_screen.right() - 1) / tile_size; ++across) {
-                if (row[across] < 0 && covers_tile(window, frame, tile_rect(across, down)))
+                if (row[across] < 0 && covers_tile(window, frame, tile_rect(across, down)) && (window.slide_clip.is_empty() || window.slide_clip.intersected(tile_rect(across, down)) == tile_rect(across, down)))
                     row[across] = static_cast<i16>(index - 1);
             }
         }
@@ -497,7 +499,7 @@ void Compositor::find_what_shows()
         for (size_t material_index = 0; material_index < window.materials.size(); ++material_index) {
             auto const& material = window.materials[material_index];
             IntRect region { frame.x + material.rect.x * scale, frame.y + material.rect.y * scale, material.rect.width * scale, material.rect.height * scale };
-            look_at_material(index - 1, material_index, region.intersected(frame), m_theme.materials[static_cast<int>(material.material)], at - 1, {});
+            look_at_material(index - 1, material_index, window.slide_clip.is_empty() ? region.intersected(frame) : region.intersected(frame).intersected(window.slide_clip), m_theme.materials[static_cast<int>(material.material)], at - 1, {});
         }
     }
 }
@@ -569,11 +571,11 @@ void Compositor::draw_steps(Vector<Step> const& steps, size_t end, Vector<Piece*
             case StepKind::Shadow:
                 // Under the window it's of, if that covers this.
                 if (step.index > piece.lowest)
-                    job.compositor->draw_shadow(*step.window, piece.rect);
+                    job.compositor->draw_shadow(*step.window, step.window->slide_clip.is_empty() ? piece.rect : piece.rect.intersected(step.window->slide_clip));
                 break;
             case StepKind::Body:
                 if (step.index >= piece.lowest)
-                    job.compositor->draw_body(*step.window, piece.rect, step.index == piece.lowest);
+                    job.compositor->draw_body(*step.window, step.window->slide_clip.is_empty() ? piece.rect : piece.rect.intersected(step.window->slide_clip), step.index == piece.lowest);
                 break;
             case StepKind::Layer:
                 if (step.index >= piece.lowest)
@@ -708,7 +710,7 @@ IntRect Compositor::device_rect_of_layer_surface(ServerWindow const& window, Lay
 void Compositor::collect_layer_contents(Layer const& layer, AffineTransform const& to_device, IntRect clip, u32 opacity, float radius, IntRect rounded, int window_index, ServerWindow const& window, IntPoint frame_origin, Vector<LayerDraw>& out)
 {
     float const scale = static_cast<float>(m_screen.scale());
-    auto const* shape = window.is_bare() ? nullptr : window.shape;
+    auto const* shape = window.is_square() ? nullptr : window.shape;
     IntRect const window_frame { frame_origin.x, frame_origin.y, device_frame(window).width, device_frame(window).height };
     auto add = [&](LayerDraw draw) {
         draw.window_index = window_index;
@@ -808,7 +810,7 @@ void Compositor::collect_layer(Layer const& layer, AffineTransform const& parent
     LayerDraw draw;
     draw.kind = LayerDraw::Kind::Image;
     draw.window_index = window_index;
-    draw.shape = window.is_bare() ? nullptr : window.shape;
+    draw.shape = window.is_square() ? nullptr : window.shape;
     draw.window_frame = { frame_origin.x, frame_origin.y, device_frame(window).width, device_frame(window).height };
     draw.image = picture.ptr();
     draw.picture = picture;
@@ -1034,7 +1036,7 @@ void Compositor::draw_nine_slice(NineSlice const& slice, IntRect target, Color c
 
 void Compositor::draw_shadow(ServerWindow const& window, IntRect clip)
 {
-    if (window.is_bare())
+    if (window.is_square())
         return;
     auto const& style = shadow_style_of(window);
     auto const& slice = shadow_slice_of(window);
@@ -1081,7 +1083,7 @@ void Compositor::draw_body(ServerWindow const& window, IntRect clip, bool covers
     auto area = frame.intersected(clip);
     if (area.is_empty())
         return;
-    auto const* shape = window.is_bare() ? nullptr : window.shape;
+    auto const* shape = window.is_square() ? nullptr : window.shape;
     IntSize frame_size = frame.size();
     auto const* surface = window.shown_surface();
     Pixel background = m_theme.window_background.to_pixel();
@@ -1220,7 +1222,7 @@ void Compositor::place_material_row(MaterialJob const& job, int y, Pixel const* 
     int const radius = job.radius;
     auto frame = device_frame(window);
     if (radius <= 0) {
-        blend_row_in_window(framebuffer.scanline(y) + area.x, source, area.x - frame.x, y - frame.y, area.width, frame.size(), window.is_bare() ? nullptr : window.shape);
+        blend_row_in_window(framebuffer.scanline(y) + area.x, source, area.x - frame.x, y - frame.y, area.width, frame.size(), window.is_square() ? nullptr : window.shape);
         return;
     }
     // Its own rounded corners: rows near the top and bottom start and end further in,
@@ -1323,6 +1325,58 @@ void Compositor::set_overlays(Vector<Overlay> overlays)
     m_overlays = move(overlays);
 }
 
+ErrorOr<NonnullRefPtr<Bitmap>> Compositor::miniature_of_wallpaper(IntRect points, IntSize size, float radius) const
+{
+    int const scale = m_screen.scale();
+    auto const origin = m_screen.origin();
+    if (!m_wallpaper)
+        return Bitmap::create({ size.width * scale, size.height * scale });
+    return miniature_of(*m_wallpaper, { (points.x + origin.x) * scale, (points.y + origin.y) * scale, points.width * scale, points.height * scale }, size, radius);
+}
+
+ErrorOr<NonnullRefPtr<Bitmap>> Compositor::miniature_of(Bitmap const& source, IntRect part, IntSize size, float radius) const
+{
+    int const scale = m_screen.scale();
+    auto picture = TRY(Bitmap::create({ size.width * scale, size.height * scale }));
+    float const corner = radius * static_cast<float>(scale);
+    int const width = picture->width();
+    int const height = picture->height();
+    for (int y = 0; y < height; ++y) {
+        auto* row = picture->scanline(y);
+        int const source_y = clamp(part.y + part.height * y / height, 0, source.height() - 1);
+        auto const* from = source.scanline(source_y);
+        for (int x = 0; x < width; ++x) {
+            int const source_x = clamp(part.x + part.width * x / width, 0, source.width() - 1);
+            Pixel pixel = from[source_x];
+            // Its corners.
+            float const dx = corner - (min(x, width - 1 - x) + 0.5f);
+            float const dy = corner - (min(y, height - 1 - y) + 0.5f);
+            if (dx > 0 && dy > 0) {
+                float const distance = __builtin_sqrtf(dx * dx + dy * dy);
+                float const coverage = clamp(corner - distance + 0.5f, 0.0f, 1.0f);
+                if (coverage < 1)
+                    pixel = scale_pixel(pixel, static_cast<u8>(coverage * 255));
+            }
+            row[x] = pixel;
+        }
+    }
+    return picture;
+}
+
+void Compositor::set_tile_preview(FloatRect rect)
+{
+    int const scale = m_screen.scale();
+    auto const origin = m_screen.origin();
+    auto device = [&](FloatRect const& points) {
+        return FloatRect { (points.x + static_cast<float>(origin.x)) * static_cast<float>(scale), (points.y + static_cast<float>(origin.y)) * static_cast<float>(scale), points.width * static_cast<float>(scale), points.height * static_cast<float>(scale) }.enclosing_int_rect().inflated(2);
+    };
+    if (m_tile_preview.width > 0)
+        invalidate(device(m_tile_preview));
+    m_tile_preview = rect;
+    if (rect.width > 0)
+        invalidate(device(rect));
+}
+
 void Compositor::set_dim(Color color)
 {
     m_dim = color;
@@ -1342,7 +1396,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> Compositor::snapshot(ServerWindow const& window) 
     auto const* surface = window.shown_surface();
     Pixel background = m_theme.window_background.to_pixel();
     auto const* chrome = window.is_titled() ? window.chrome.ptr() : nullptr;
-    auto const* shape = window.is_bare() ? nullptr : window.shape;
+    auto const* shape = window.is_square() ? nullptr : window.shape;
     Vector<Pixel> fill;
     MUST(fill.try_resize(static_cast<size_t>(frame.width)));
     for (auto& pixel : fill)
@@ -1368,6 +1422,23 @@ ErrorOr<NonnullRefPtr<Bitmap>> Compositor::snapshot(ServerWindow const& window) 
     return picture;
 }
 
+void Compositor::draw_tile_preview(Vector<IntRect> const& rects)
+{
+    auto& framebuffer = m_screen.framebuffer();
+    float const scale = static_cast<float>(m_screen.scale());
+    FloatRect const shape { (m_tile_preview.x + static_cast<float>(m_screen.origin().x)) * scale, (m_tile_preview.y + static_cast<float>(m_screen.origin().y)) * scale, m_tile_preview.width * scale, m_tile_preview.height * scale };
+    float const radius = static_cast<float>(m_theme.corner_radius) * scale;
+    for (auto const& rect : rects) {
+        Painter painter(framebuffer);
+        painter.clip_rect(rect.to<float>());
+        painter.fill_rounded_rect(shape, radius, m_theme.tile_preview);
+        Path edge;
+        edge.add_rounded_rect(shape, radius);
+        edge.add_rounded_rect(shape.inflated(-scale), radius - scale);
+        painter.fill_path(edge, m_theme.tile_preview_border, FillRule::EvenOdd);
+    }
+}
+
 void Compositor::draw_overlays(Vector<IntRect> const& rects)
 {
     auto& framebuffer = m_screen.framebuffer();
@@ -1385,10 +1456,11 @@ void Compositor::draw_overlays(Vector<IntRect> const& rects)
                 FloatRect shape { (overlay.rect.x + origin_x) * scale, (overlay.rect.y + origin_y) * scale, overlay.rect.width * scale, overlay.rect.height * scale };
                 painter.fill_rounded_rect(shape, overlay.radius * scale, overlay.color);
                 if (!overlay.label.is_empty() && m_overlay_font) {
-                    float text_width = m_overlay_font->width_of(overlay.label.view());
+                    auto* label_font = overlay.small_label && m_overlay_small_font ? m_overlay_small_font : m_overlay_font;
+                    float text_width = label_font->width_of(overlay.label.view());
                     FloatPoint at { shape.x + (shape.width - text_width) / 2, shape.y + shape.height / 2 + m_overlay_font->cap_height() / 2 };
                     at.y = static_cast<float>(Math::round(static_cast<double>(at.y)));
-                    m_overlay_font->draw(painter, at, overlay.label.view(), Color { 255, 255, 255, 255 });
+                    label_font->draw(painter, at, overlay.label.view(), Color { 255, 255, 255, 255 });
                 }
                 break;
             }
@@ -1516,6 +1588,12 @@ void Compositor::render()
         auto const* window = m_windows[index];
         if (!overlays_drawn && window->level >= Window::LevelDock)
             draw_overlays_now();
+        // It's the one on top of its level that's being dragged.
+        if (m_tile_preview.width > 0 && window->level == Window::LevelNormal && (index + 1 == m_windows.size() || m_windows[index + 1]->level != Window::LevelNormal)) {
+            // (What's drawn stays in the list: each piece knows how far along it is.)
+            draw_steps(steps, steps.size(), every_piece);
+            draw_tile_preview(rects);
+        }
         if (!is_drawn(*window))
             continue;
         steps.append(Step { StepKind::Shadow, window, static_cast<int>(index) });

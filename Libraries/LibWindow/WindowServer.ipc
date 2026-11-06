@@ -71,6 +71,28 @@ endpoint WindowServer
     activate_application(i32 pid) =|
     hide_application(i32 pid, bool hidden) =|
     quit_application(i32 pid) =|
+    // Its own, or if this is the desktop, anyone's.
+    arrange_window(u32 window, i32 arrangement) =|
+    // Everyone else out of the way, or everyone back.
+    hide_others(bool hidden) =|
+    // A Space to itself, or back. Its own, or if this is the desktop, anyone's.
+    set_full_screen(u32 window, bool full) =|
+    toggle_full_screen(u32 window) =|
+    // Full screen on one side, and a choice of what's to go on the other.
+    tile_in_split_view(u32 window, bool on_left) =|
+    // Whether a window goes to where it's dragged, with Option or without, and has margins when it gets there.
+    set_tiling(bool by_edges, bool to_menu_bar, bool with_option, bool margins) =|
+    // Another window takes over where this one is: a tab being chosen. All of it: frame, Space, tile, full screen.
+    take_place_of(u32 window, u32 other) =|
+    set_hot_corners(i32 top_left, i32 top_right, i32 bottom_left, i32 bottom_right) =|
+    // Clicking the wallpaper uncovers the desktop, or only does in Stage.
+    set_click_wallpaper(bool reveals) =|
+    // From the desktop's own window: a press on it that wasn't on anything there, as one on the wallpaper is.
+    wallpaper_clicked() =|
+    // One application's windows at a time, with the others in a strip down the side.
+    set_stage(bool on) =|
+    // This client's the one to show the green button's menu: see `window_menu_wanted`.
+    show_window_menus() =|
     // Its own: as the yellow and green lights do.
     minimize(u32 window) =|
     zoom(u32 window) =|
@@ -155,6 +177,11 @@ endpoint WindowClient
     layer_animation_finished(u32 window, u32 layer, u32 tag) =|
     appearance_changed(String name) =|
     motion_changed(bool reduced) =|
+    full_screen_changed(u32 window, bool full) =|
+    // One that's not for the server to do: see HotCornerAction.
+    hot_corner_fired(i32 action) =|
+    // The pointer has been waiting over a window's green button. On the screen, in points, where its menu would go.
+    window_menu_wanted(u32 window, i32 x, i32 y) =|
     // Asked for by nobody in particular: see `displays`. The main one's size is what `connect` said it was, if it's changed.
     displays_changed(i32 main_width, i32 main_height) =|
     // phase: see <LibWindow/Protocol.h>. The data comes only with Dropped.

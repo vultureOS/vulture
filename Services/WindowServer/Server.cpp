@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <sys/sysctl.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 namespace {
@@ -73,12 +74,15 @@ Server::Server(Core::EventLoop& loop, Screen& screen, Theme& theme, Compositor& 
 {
     m_title_font = adopt_own(*new Text::Font(m_title_face, theme.title_font_size, static_cast<float>(screen.scale()), m_atlas));
     m_compositor.set_overlay_font(m_title_font.ptr());
+    m_small_label_font = adopt_own(*new Text::Font(m_title_face, 11.0f, static_cast<float>(screen.scale()), m_atlas));
+    m_compositor.set_overlay_small_font(m_small_label_font.ptr());
     auto points = screen.main_display().points.size();
     m_pointer = { points.width / 2, points.height / 2 };
 }
 
 void Server::start()
 {
+    sync_display_spaces();
     apply_wallpaper();
     schedule_frame();
 }
@@ -101,7 +105,9 @@ void Server::update_cursor()
     using Window::CursorShape;
     CursorShape wanted = CursorShape::Arrow;
     int edges = 0;
-    if (m_drag) {
+    if (m_dragging_divider || (!window_at(m_pointer) && split_divider_at(m_pointer).has_value())) {
+        wanted = CursorShape::ResizeLeftRight;
+    } else if (m_drag) {
         wanted = CursorShape::ClosedHand;
     } else if (m_gesture == Gesture::Resizing) {
         edges = m_gesture_edges;
@@ -252,6 +258,20 @@ void Server::render_frame()
             ++m_resize_mismatches;
     }
     m_compositor.render();
+    // The application switcher's panel, there for the first time since its key: how long that took.
+    if (m_switch_asked_at != 0) {
+        for (auto const* window : m_windows) {
+            if (!window->visible || !window->present_pending || !window->client || !window->client->is_shell || window->title.view() != "Switcher"_sv)
+                continue;
+            u64 const took = now_microseconds() - m_switch_asked_at;
+            m_switch_asked_at = 0;
+            // (On standard error, which the test sessions send to the console.)
+            fprintf(stderr, "budget: Cmd-Tab appears: %llu.%llu ms\n", static_cast<unsigned long long>(took / 1000), static_cast<unsigned long long>(took % 1000 / 100));
+            break;
+        }
+        if (!m_switching)
+            m_switch_asked_at = 0;
+    }
     if (m_latency_started != 0) {
         u64 const took = now_microseconds() - m_latency_started;
         m_latency_started = 0;
@@ -360,6 +380,14 @@ void Server::remove_client(Client& client)
     m_hotkeys.remove_all_matching([&](auto const& hotkey) { return hotkey.client == &client; });
     if (m_active_application == &client)
         m_active_application = nullptr;
+    m_recent_applications.remove_all_matching([&](auto* one) { return one == &client; });
+    m_stage_strip.remove_all_matching([&](auto const& item) { return item.client == &client; });
+    if (m_stage_shown == &client)
+        m_stage_shown = nullptr;
+    if (m_stage) {
+        layout_stage_strip();
+        refresh_lasting_overlays();
+    }
     m_clients.remove_all_matching([&](auto const& owned) { return owned.ptr() == &client; });
     shell_state_changed();
     schedule_frame();
@@ -378,6 +406,8 @@ void Server::release_surface(ServerWindow& window)
 
 void Server::remove_window(ServerWindow& window)
 {
+    if (window.full_screen)
+        leave_full_screen(window, true);
     m_compositor.invalidate_window(window);
     release_surface(window);
     if (window.waiting_memory)
@@ -393,6 +423,9 @@ void Server::remove_window(ServerWindow& window)
         m_gesture_window = nullptr;
         m_gesture = Gesture::None;
     }
+    m_tile_neighbors.remove_all_matching([&](auto const& neighbor) { return neighbor.window == &window; });
+    if (m_window_menu_window == &window)
+        disarm_window_menu();
     if (m_grab == &window)
         m_grab = nullptr;
     if (m_drag) {
@@ -445,7 +478,7 @@ WindowServerEndpoint::CreateWindowAnswer Server::create_window(IPC::Sender const
     window->flags = flags;
     window->shape = m_compositor.default_shape();
     window->level = (flags & Window::WindowPopup) ? Window::LevelPopup : Window::LevelNormal;
-    window->space = m_space;
+    window->space = space_for_new_window(*window);
     insert_by_level(*window);
     answer.window = window->id;
     if (!(flags & Window::WindowHidden)) {
@@ -595,6 +628,7 @@ IntRect Server::work_area_of(Display const& display) const
 
 void Server::displays_changed()
 {
+    sync_display_spaces();
     MUST(m_compositor.screen_changed());
     // What's now off every display comes back on to the nearest.
     for (auto* window : m_windows) {
@@ -753,9 +787,14 @@ void Server::show(IPC::Sender const& sender, u32 id, bool visible)
         return;
     window->shown_by_client = visible;
     window->minimized = false;
+    if (visible && !window->is_on_every_space() && !window->full_screen)
+        window->space = space_for_new_window(*window);
     if (visible)
-        window->space = window->is_on_every_space() ? window->space : m_space;
+        reveal_desktop(false, true);
     update_visibility(*window);
+    // A new window on a display that's showing someone's full screen: over to it.
+    if (visible && window->can_become_key())
+        show_space_of(*window);
     m_compositor.invalidate_window(*window);
     if (visible) {
         // The session's first window ends the boot screen.
@@ -1544,6 +1583,79 @@ WindowServerEndpoint::AccessibilityAnswer Server::accessibility(IPC::Sender cons
         // As it came: this server doesn't need to know what's in it.
         MUST(answers.append(MUST(JSON::Value::string(client->accessibility.view()))));
     }
+    // Overview, over everything: told as the server's own, one "window" for each display (ids no window has).
+    if (m_overview && !m_overview_leaving) {
+        auto own = JSON::Value::array();
+        auto const& displays = m_screen.displays();
+        for (size_t i = 0; i < displays.size(); ++i) {
+            auto const& display = displays[i];
+            i64 const id = -1 - static_cast<i64>(i);
+            auto one = JSON::Value::object();
+            MUST(one.set("id"_sv, JSON::Value(id)));
+            MUST(one.set("pid"_sv, JSON::Value(static_cast<i64>(0))));
+            MUST(one.set("application"_sv, MUST(JSON::Value::string("WindowServer"_sv))));
+            MUST(one.set("title"_sv, MUST(JSON::Value::string("Overview"_sv))));
+            MUST(one.set("x"_sv, JSON::Value(display.points.x)));
+            MUST(one.set("y"_sv, JSON::Value(display.points.y)));
+            MUST(one.set("width"_sv, JSON::Value(display.points.width)));
+            MUST(one.set("height"_sv, JSON::Value(display.points.height)));
+            MUST(one.set("active"_sv, JSON::Value(false)));
+            MUST(windows.append(move(one)));
+            auto tree = JSON::Value::object();
+            MUST(tree.set("window"_sv, JSON::Value(id)));
+            MUST(tree.set("tree"_sv, overview_accessibility(display)));
+            MUST(own.append(move(tree)));
+        }
+        MUST(answers.append(MUST(JSON::Value::string(MUST(own.serialize()).view()))));
+    }
+    // Stage's strip of other applications, along the left: the server's own too.
+    if (m_stage && !stage_strip_is_covered() && !m_stage_strip.is_empty()) {
+        auto const& display = m_screen.main_display();
+        i64 const id = -100;
+        auto one = JSON::Value::object();
+        MUST(one.set("id"_sv, JSON::Value(id)));
+        MUST(one.set("pid"_sv, JSON::Value(static_cast<i64>(0))));
+        MUST(one.set("application"_sv, MUST(JSON::Value::string("WindowServer"_sv))));
+        MUST(one.set("title"_sv, MUST(JSON::Value::string("Stage"_sv))));
+        MUST(one.set("x"_sv, JSON::Value(display.points.x)));
+        MUST(one.set("y"_sv, JSON::Value(display.points.y)));
+        MUST(one.set("width"_sv, JSON::Value(display.points.width)));
+        MUST(one.set("height"_sv, JSON::Value(display.points.height)));
+        MUST(one.set("active"_sv, JSON::Value(false)));
+        MUST(windows.append(move(one)));
+        auto children = JSON::Value::array();
+        for (auto const& item : m_stage_strip) {
+            auto button = JSON::Value::object();
+            MUST(button.set("role"_sv, MUST(JSON::Value::string("button"_sv))));
+            MUST(button.set("label"_sv, MUST(JSON::Value::string(item.client ? item.client->application_name.view() : StringView {}))));
+            MUST(button.set("value"_sv, MUST(JSON::Value::string(StringView {}))));
+            MUST(button.set("x"_sv, JSON::Value(static_cast<double>(item.rect.x - static_cast<float>(display.points.x)))));
+            MUST(button.set("y"_sv, JSON::Value(static_cast<double>(item.rect.y - static_cast<float>(display.points.y)))));
+            MUST(button.set("width"_sv, JSON::Value(static_cast<double>(item.rect.width))));
+            MUST(button.set("height"_sv, JSON::Value(static_cast<double>(item.rect.height))));
+            MUST(button.set("enabled"_sv, JSON::Value(true)));
+            MUST(button.set("focused"_sv, JSON::Value(false)));
+            MUST(button.set("children"_sv, JSON::Value::array()));
+            MUST(children.append(move(button)));
+        }
+        auto group = JSON::Value::object();
+        MUST(group.set("role"_sv, MUST(JSON::Value::string("group"_sv))));
+        MUST(group.set("label"_sv, MUST(JSON::Value::string("Stage"_sv))));
+        MUST(group.set("value"_sv, MUST(JSON::Value::string(StringView {}))));
+        MUST(group.set("x"_sv, JSON::Value(0.0)));
+        MUST(group.set("y"_sv, JSON::Value(0.0)));
+        MUST(group.set("width"_sv, JSON::Value(static_cast<double>(display.points.width))));
+        MUST(group.set("height"_sv, JSON::Value(static_cast<double>(display.points.height))));
+        MUST(group.set("enabled"_sv, JSON::Value(true)));
+        MUST(group.set("focused"_sv, JSON::Value(false)));
+        MUST(group.set("children"_sv, move(children)));
+        auto own = JSON::Value::array();
+        auto tree = JSON::Value::object();
+        MUST(tree.set("window"_sv, JSON::Value(id)));
+        MUST(tree.set("tree"_sv, move(group)));
+        MUST(own.append(move(tree)));
+        MUST(answers.append(MUST(JSON::Value::string(MUST(own.serialize()).view()))));
+    }
     // m_windows is back to front.
     for (size_t i = m_windows.size(); i > 0; --i) {
         auto const* window = m_windows[i - 1];
@@ -1604,7 +1716,9 @@ void Server::activate(ServerWindow* window)
         raise(*window);
         m_compositor.invalidate_window(*window);
         if (window->client && !window->client->application_name.is_empty() && m_active_application != window->client) {
+            auto* previous_application = m_active_application;
             m_active_application = window->client;
+            application_became_active(previous_application);
             shell_state_changed();
         }
         if (window->client) {
@@ -1661,6 +1775,327 @@ void Server::send_resized(ServerWindow& window)
 int Server::title_bar_height(ServerWindow const& window) const
 {
     return window.title_bar_override > 0 ? window.title_bar_override : m_theme.title_bar_height;
+}
+
+IntRect Server::frame_for_arrangement(ServerWindow const& window, Window::WindowArrangement arrangement) const
+{
+    using Window::WindowArrangement;
+    auto const area = work_area_of(m_screen.display_at(window.frame.center()));
+    int const gap = m_tile_margins ? static_cast<int>(m_theme.tile_margin) : 0;
+    IntRect const inner { area.x + gap, area.y + gap, area.width - gap * 2, area.height - gap * 2 };
+    int const half_width = (inner.width - gap) / 2;
+    int const half_height = (inner.height - gap) / 2;
+    switch (arrangement) {
+    case WindowArrangement::Left:
+        return { inner.x, inner.y, half_width, inner.height };
+    case WindowArrangement::Right:
+        return { inner.right() - half_width, inner.y, half_width, inner.height };
+    case WindowArrangement::Top:
+        return { inner.x, inner.y, inner.width, half_height };
+    case WindowArrangement::Bottom:
+        return { inner.x, inner.bottom() - half_height, inner.width, half_height };
+    case WindowArrangement::TopLeft:
+        return { inner.x, inner.y, half_width, half_height };
+    case WindowArrangement::TopRight:
+        return { inner.right() - half_width, inner.y, half_width, half_height };
+    case WindowArrangement::BottomLeft:
+        return { inner.x, inner.bottom() - half_height, half_width, half_height };
+    case WindowArrangement::BottomRight:
+        return { inner.right() - half_width, inner.bottom() - half_height, half_width, half_height };
+    case WindowArrangement::Fill:
+        return inner;
+    case WindowArrangement::Center:
+        return { area.x + (area.width - window.frame.width) / 2, area.y + (area.height - window.frame.height) / 2, window.frame.width, window.frame.height };
+    case WindowArrangement::Previous:
+    default:
+        break;
+    }
+    return window.tile_restore;
+}
+
+Vector<Window::WindowArrangement> Server::places_of(Window::WindowArrangement arrangement)
+{
+    using Window::WindowArrangement;
+    Vector<WindowArrangement> places;
+    auto add = [&](WindowArrangement a, WindowArrangement b, Optional<WindowArrangement> c = {}, Optional<WindowArrangement> d = {}) {
+        places.append(a);
+        places.append(b);
+        if (c.has_value())
+            places.append(*c);
+        if (d.has_value())
+            places.append(*d);
+    };
+    switch (arrangement) {
+    case WindowArrangement::LeftAndRight:
+        add(WindowArrangement::Left, WindowArrangement::Right);
+        break;
+    case WindowArrangement::RightAndLeft:
+        add(WindowArrangement::Right, WindowArrangement::Left);
+        break;
+    case WindowArrangement::TopAndBottom:
+        add(WindowArrangement::Top, WindowArrangement::Bottom);
+        break;
+    case WindowArrangement::BottomAndTop:
+        add(WindowArrangement::Bottom, WindowArrangement::Top);
+        break;
+    case WindowArrangement::Quarters:
+        add(WindowArrangement::TopLeft, WindowArrangement::TopRight, WindowArrangement::BottomLeft, WindowArrangement::BottomRight);
+        break;
+    case WindowArrangement::LeftAndQuarters:
+        add(WindowArrangement::Left, WindowArrangement::TopRight, WindowArrangement::BottomRight);
+        break;
+    case WindowArrangement::RightAndQuarters:
+        add(WindowArrangement::Right, WindowArrangement::TopLeft, WindowArrangement::BottomLeft);
+        break;
+    case WindowArrangement::TopAndQuarters:
+        add(WindowArrangement::Top, WindowArrangement::BottomLeft, WindowArrangement::BottomRight);
+        break;
+    case WindowArrangement::BottomAndQuarters:
+        add(WindowArrangement::Bottom, WindowArrangement::TopLeft, WindowArrangement::TopRight);
+        break;
+    default:
+        break;
+    }
+    return places;
+}
+
+void Server::arrange(ServerWindow& window, Window::WindowArrangement arrangement)
+{
+    using Window::WindowArrangement;
+    // Several together: this one, and those under it on the same display and Space, as they're stacked.
+    if (auto places = places_of(arrangement); !places.is_empty()) {
+        Vector<ServerWindow*> chosen;
+        chosen.append(&window);
+        auto const display = m_screen.display_at(window.frame.center()).points;
+        for (size_t i = m_windows.size(); i > 0 && chosen.size() < places.size(); --i) {
+            auto* other = m_windows[i - 1];
+            if (other == &window || other->level != Window::LevelNormal || !other->visible || other->minimized || other->full_screen)
+                continue;
+            if (!other->is_resizable() || !other->is_document_window() || other->space != window.space || !display.contains(other->frame.center()))
+                continue;
+            chosen.append(other);
+        }
+        // From the bottom up, so this one ends on top.
+        for (size_t i = chosen.size(); i > 0; --i)
+            arrange(*chosen[i - 1], places[i - 1]);
+        return;
+    }
+    if (!window.is_resizable() && arrangement != WindowArrangement::Center)
+        return;
+    if (arrangement == WindowArrangement::Previous && window.tile_restore.is_empty())
+        return;
+    auto const frame = frame_for_arrangement(window, arrangement);
+    if (arrangement == WindowArrangement::Previous) {
+        window.tile = -1;
+        window.tile_restore = {};
+    } else if (arrangement != WindowArrangement::Center) {
+        if (window.tile < 0)
+            window.tile_restore = window.frame;
+        window.tile = static_cast<int>(arrangement);
+    }
+    resize_live(window, frame);
+    raise(window);
+    schedule_frame();
+}
+
+int Server::tile_zone_at(IntPoint point, ServerWindow const& window) const
+{
+    using Window::WindowArrangement;
+    if (!window.is_resizable())
+        return -1;
+    auto const display = m_screen.display_at(point).points;
+    int const from_left = point.x - display.x;
+    int const from_right = display.right() - 1 - point.x;
+    int const from_top = point.y - display.y;
+    int const from_bottom = display.bottom() - 1 - point.y;
+    // How near the end of an edge is a corner.
+    int constexpr corner = 64;
+    int constexpr edge = 2;
+    // Held down, the zones are out in the open, rather than only at the very edge.
+    if ((m_modifiers & Window::ModifierOption) && !m_tile_with_option)
+        return -1;
+    if (m_modifiers & Window::ModifierOption) {
+        bool const left = from_left < display.width / 4;
+        bool const right = from_right < display.width / 4;
+        bool const top = from_top < display.height / 4;
+        bool const bottom = from_bottom < display.height / 4;
+        if (left)
+            return static_cast<int>(top ? WindowArrangement::TopLeft : (bottom ? WindowArrangement::BottomLeft : WindowArrangement::Left));
+        if (right)
+            return static_cast<int>(top ? WindowArrangement::TopRight : (bottom ? WindowArrangement::BottomRight : WindowArrangement::Right));
+        if (top)
+            return static_cast<int>(WindowArrangement::Top);
+        if (bottom)
+            return static_cast<int>(WindowArrangement::Bottom);
+        return -1;
+    }
+    // Going over to another display isn't going to an edge.
+    auto has_neighbor = [&](int dx, int dy) { return m_screen.nearest_point_on_a_display({ point.x + dx, point.y + dy }) == IntPoint { point.x + dx, point.y + dy }; };
+    if (m_tile_by_edges && from_left <= edge && !has_neighbor(-edge - 2, 0))
+        return static_cast<int>(from_top < corner ? WindowArrangement::TopLeft : (from_bottom < corner ? WindowArrangement::BottomLeft : WindowArrangement::Left));
+    if (m_tile_by_edges && from_right <= edge && !has_neighbor(edge + 2, 0))
+        return static_cast<int>(from_top < corner ? WindowArrangement::TopRight : (from_bottom < corner ? WindowArrangement::BottomRight : WindowArrangement::Right));
+    if (from_top <= edge && !has_neighbor(0, -edge - 2)) {
+        // The top's corners are the edges' to tile; between them, it's the menu bar, which fills.
+        if (from_left < corner || from_right < corner)
+            return m_tile_by_edges ? static_cast<int>(from_left < corner ? WindowArrangement::TopLeft : WindowArrangement::TopRight) : -1;
+        return m_tile_to_menu_bar ? static_cast<int>(WindowArrangement::Fill) : -1;
+    }
+    return -1;
+}
+
+void Server::show_tile_preview(int zone, ServerWindow const& window)
+{
+    if (zone == m_tile_zone)
+        return;
+    m_tile_zone = zone;
+    if (zone < 0) {
+        m_compositor.set_tile_preview({});
+        return;
+    }
+    // Where it would be on the display under the pointer, which it hasn't got to yet.
+    auto const moved_there = window.frame;
+    ServerWindow probe;
+    probe.frame = { m_pointer.x, m_pointer.y, moved_there.width, moved_there.height };
+    probe.frame.x -= moved_there.width / 2;
+    probe.frame.y -= moved_there.height / 2;
+    auto const frame = frame_for_arrangement(probe, static_cast<Window::WindowArrangement>(zone));
+    m_compositor.set_tile_preview(frame.to<float>());
+}
+
+void Server::find_tile_neighbors(ServerWindow& window, int edges)
+{
+    m_tile_neighbors.clear();
+    if (window.tile < 0)
+        return;
+    int const near = static_cast<int>(m_theme.tile_margin) * 2 + 2;
+    auto const& me = window.frame;
+    for (auto* other : m_windows) {
+        if (other == &window || !other->visible || other->tile < 0)
+            continue;
+        auto const& them = other->frame;
+        bool const overlap_down = them.y < me.bottom() && me.y < them.bottom();
+        bool const overlap_across = them.x < me.right() && me.x < them.right();
+        int follows = 0;
+        if ((edges & edge_right) && overlap_down && abs(them.x - me.right()) <= near)
+            follows |= edge_left;
+        if ((edges & edge_left) && overlap_down && abs(me.x - them.right()) <= near)
+            follows |= edge_right;
+        if ((edges & edge_bottom) && overlap_across && abs(them.y - me.bottom()) <= near)
+            follows |= edge_top;
+        if ((edges & edge_top) && overlap_across && abs(me.y - them.bottom()) <= near)
+            follows |= edge_bottom;
+        if (follows)
+            m_tile_neighbors.append(TileNeighbor { other, them, follows });
+    }
+}
+
+void Server::arm_window_menu(ServerWindow& window)
+{
+    if (m_window_menu_window == &window)
+        return;
+    disarm_window_menu();
+    m_window_menu_window = &window;
+    m_window_menu_timer = m_loop.add_timer(800, false, [this] {
+        m_window_menu_timer = -1;
+        auto* window = m_window_menu_window;
+        if (!window)
+            return;
+        for (auto& client : m_clients) {
+            if (!client->shows_window_menus)
+                continue;
+            IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::WindowMenuWanted));
+            encoder.encode(window->id);
+            encoder.encode(static_cast<i32>(m_pointer.x));
+            encoder.encode(static_cast<i32>(m_pointer.y + 8));
+            send_to(*client, encoder);
+            break;
+        }
+    });
+}
+
+void Server::disarm_window_menu()
+{
+    if (m_window_menu_timer >= 0)
+        m_loop.cancel_timer(m_window_menu_timer);
+    m_window_menu_timer = -1;
+    m_window_menu_window = nullptr;
+}
+
+void Server::arrange_window(IPC::Sender const& sender, u32 id, i32 arrangement)
+{
+    if (arrangement < 0 || arrangement >= static_cast<i32>(Window::WindowArrangement::Count))
+        return;
+    auto* window = window_of(sender, id);
+    if (!window) {
+        // The desktop can do it for anyone: it's what shows the green button's menu.
+        auto* client = client_of(sender);
+        if (!client || !client->shows_window_menus)
+            return;
+        for (auto* other : m_windows) {
+            if (other->id == id)
+                window = other;
+        }
+    }
+    if (window)
+        arrange(*window, static_cast<Window::WindowArrangement>(arrangement));
+}
+
+void Server::set_tiling(IPC::Sender const&, bool by_edges, bool to_menu_bar, bool with_option, bool margins)
+{
+    m_tile_by_edges = by_edges;
+    m_tile_to_menu_bar = to_menu_bar;
+    m_tile_with_option = with_option;
+    m_tile_margins = margins;
+}
+
+void Server::take_place_of(IPC::Sender const& sender, u32 id, u32 other_id)
+{
+    auto* window = window_of(sender, id);
+    auto* other = window_of(sender, other_id);
+    if (!window || !other || window == other)
+        return;
+    window->space = other->space;
+    window->tile = other->tile;
+    window->tile_restore = other->tile_restore;
+    window->zoom_restore = other->zoom_restore;
+    if (other->full_screen) {
+        window->full_screen = true;
+        window->full_screen_restore = other->full_screen_restore;
+        window->full_screen_from = other->full_screen_from;
+        other->full_screen = false;
+        other->space = other->full_screen_from;
+        if (auto* space = space_with_id(window->space)) {
+            if (space->full == other)
+                space->full = window;
+            if (space->beside == other)
+                space->beside = window;
+        }
+    }
+    if (window->frame != other->frame) {
+        move_window_to(*window, other->frame);
+        send_moved(*window);
+        send_resized(*window);
+    }
+    update_visibility(*window);
+}
+
+void Server::show_window_menus(IPC::Sender const& sender)
+{
+    if (auto* client = client_of(sender))
+        client->shows_window_menus = true;
+}
+
+void Server::hide_others(IPC::Sender const& sender, bool hidden)
+{
+    auto* me = client_of(sender);
+    for (auto& client : m_clients) {
+        if (client.ptr() == me || client->application_name.is_empty())
+            continue;
+        client->hidden = hidden;
+    }
+    update_all_visibility();
+    shell_state_changed();
 }
 
 void Server::resize_live(ServerWindow& window, IntRect frame)
@@ -1775,7 +2210,10 @@ ServerWindow* Server::window_at(IntPoint point)
             continue;
         if (m_drag && m_drag->image == window)
             continue;
-        auto bounds = window->is_resizable() ? window->frame.inflated(resize_grab) : window->frame;
+        // With the desktop uncovered, windows only look like they're there.
+        if (m_desktop_revealed && window->level == Window::LevelNormal)
+            continue;
+        auto bounds = window->is_resizable() && !window->full_screen ? window->frame.inflated(resize_grab) : window->frame;
         if (bounds.contains(point) && takes_pointer(*window))
             return window;
     }
@@ -1803,7 +2241,7 @@ WindowButton Server::button_at(ServerWindow const& window, IntPoint point) const
 
 int Server::resize_edges_at(ServerWindow const& window, IntPoint point) const
 {
-    if (!window.is_resizable())
+    if (!window.is_resizable() || window.full_screen)
         return 0;
     auto const& frame = window.frame;
     int edges = 0;
@@ -2038,7 +2476,11 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
         schedule_frame();
         return;
     }
-    if (m_overview && overview_pointer(point, pressed)) {
+    if (moved && !m_grab) {
+        check_full_screen_edges(point);
+        check_hot_corner(point);
+    }
+    if (m_overview && overview_pointer(point, pressed, released)) {
         update_cursor();
         schedule_frame();
         return;
@@ -2059,11 +2501,24 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
     switch (m_gesture) {
     case Gesture::Moving:
         if (m_gesture_window && moved) {
+            // A tiled window, taken away, goes back to the size it was, with the same part of it under the pointer.
+            if (m_gesture_window->tile >= 0 && !m_gesture_window->tile_restore.is_empty() && (abs(point.x - m_gesture_start.x) > 4 || abs(point.y - m_gesture_start.y) > 4)) {
+                auto const restore = m_gesture_window->tile_restore;
+                float const along = static_cast<float>(m_gesture_start.x - m_gesture_frame.x) / static_cast<float>(max(m_gesture_frame.width, 1));
+                m_gesture_frame = { point.x - static_cast<int>(along * static_cast<float>(restore.width)), point.y - (m_gesture_start.y - m_gesture_frame.y), restore.width, restore.height };
+                m_gesture_start = point;
+                m_gesture_window->tile = -1;
+                m_gesture_window->tile_restore = {};
+                resize_live(*m_gesture_window, m_gesture_frame);
+            }
             auto frame = m_gesture_frame.translated(point.x - m_gesture_start.x, point.y - m_gesture_start.y);
             // The title bar stays reachable.
-            frame.y = max(frame.y, 0);
-            move_window_to(*m_gesture_window, frame);
-            send_moved(*m_gesture_window);
+            frame.y = max(frame.y, m_screen.display_at(point).points.y);
+            if (frame.size() == m_gesture_window->frame.size()) {
+                move_window_to(*m_gesture_window, frame);
+                send_moved(*m_gesture_window);
+            }
+            show_tile_preview(tile_zone_at(point, *m_gesture_window), *m_gesture_window);
         }
         break;
     case Gesture::Resizing:
@@ -2086,6 +2541,28 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
                 frame.height = max(frame.height + dy, minimum_height);
             }
             resize_live(*m_gesture_window, frame);
+            // Those tiled next to it give way, or fill in.
+            int const moved_right = frame.right() - m_gesture_frame.right();
+            int const moved_left = frame.x - m_gesture_frame.x;
+            int const moved_bottom = frame.bottom() - m_gesture_frame.bottom();
+            int const moved_top = frame.y - m_gesture_frame.y;
+            for (auto const& neighbor : m_tile_neighbors) {
+                auto next = neighbor.start;
+                if (neighbor.edges & edge_left) {
+                    next.x += moved_right;
+                    next.width -= moved_right;
+                }
+                if (neighbor.edges & edge_right)
+                    next.width += moved_left;
+                if (neighbor.edges & edge_top) {
+                    next.y += moved_bottom;
+                    next.height -= moved_bottom;
+                }
+                if (neighbor.edges & edge_bottom)
+                    next.height += moved_top;
+                if (next.width >= minimum_width && next.height >= minimum_height)
+                    resize_live(*neighbor.window, next);
+            }
         }
         break;
     case Gesture::ContentPress:
@@ -2097,6 +2574,20 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
     }
 
     if (released) {
+        if (m_gesture == Gesture::Moving && m_tile_zone >= 0 && m_gesture_window) {
+            arrange(*m_gesture_window, static_cast<Window::WindowArrangement>(m_tile_zone));
+            // Its previous size is where it was before this, not where it was let go.
+            if (!m_gesture_restore.is_empty())
+                m_gesture_window->tile_restore = m_gesture_restore;
+        }
+        if (m_tile_zone >= 0) {
+            m_tile_zone = -1;
+            m_compositor.set_tile_preview({});
+        }
+        if (m_gesture == Gesture::Moving && m_gesture_window)
+            settle_on_display(*m_gesture_window);
+        m_dragging_divider = false;
+        m_tile_neighbors.clear();
         if (m_gesture_window) {
             if (m_gesture == Gesture::ButtonPress) {
                 auto button = button_at(*m_gesture_window, point);
@@ -2111,7 +2602,13 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
                     } else if (button == WindowButton::Minimize) {
                         minimize_window(*m_gesture_window);
                     } else if (button == WindowButton::Zoom) {
-                        zoom_window(*m_gesture_window);
+                        // With Option it only gets as big as it can, as it used to.
+                        if (m_gesture_window->full_screen)
+                            leave_full_screen(*m_gesture_window, false);
+                        else if ((m_modifiers & Window::ModifierOption) || !m_gesture_window->is_resizable())
+                            zoom_window(*m_gesture_window);
+                        else
+                            enter_full_screen(*m_gesture_window);
                     }
                 }
             } else if (m_gesture == Gesture::ContentPress) {
@@ -2124,19 +2621,34 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
         }
     }
 
+    if (m_dragging_divider && moved)
+        drag_divider(point);
     if (pressed && m_gesture == Gesture::None) {
         auto* window = window_at(point);
+        // What the server draws over the desktop (the line between two halves of a Space, Stage's strip) comes before
+        // the desktop's own window, under it.
+        bool const over_desktop = !window || window->level == Window::LevelDesktop;
+        if (over_desktop && split_divider_at(point).has_value()) {
+            m_dragging_divider = true;
+            window = nullptr;
+        } else if (over_desktop && stage_strip_pointer(point)) {
+            update_cursor();
+            schedule_frame();
+            return;
+        } else if (!window) {
+            // The wallpaper. (Where the desktop has a window of its own, it's what says, as only it knows what's an icon.)
+            press_on_wallpaper(point, true);
+        }
         if (window && window->can_become_key())
             activate(window);
-        else if (!window)
-            activate(nullptr);
         if (window) {
             m_gesture_window = window;
             m_gesture_start = point;
             m_gesture_frame = window->frame;
+            m_gesture_restore = window->tile >= 0 && !window->tile_restore.is_empty() ? window->tile_restore : window->frame;
             auto button = button_at(*window, point);
             int edges = resize_edges_at(*window, point);
-            bool in_title_bar = window->is_titled() && !window->is_unified() && point.y < window->frame.y + title_bar_height(*window);
+            bool in_title_bar = !window->full_screen && window->is_titled() && !window->is_unified() && point.y < window->frame.y + title_bar_height(*window);
             if (button != WindowButton::None) {
                 m_gesture = Gesture::ButtonPress;
                 window->pressed_button = button;
@@ -2144,6 +2656,7 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
             } else if (edges) {
                 m_gesture = Gesture::Resizing;
                 m_gesture_edges = edges;
+                find_tile_neighbors(*window, edges);
             } else if (in_title_bar) {
                 m_gesture = Gesture::Moving;
             } else {
@@ -2170,6 +2683,8 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
         } else if (window && moved) {
             send_mouse(*window, MouseKind::Moved, point, buttons);
         }
+        if (!window || !window->is_titled())
+            disarm_window_menu();
         if (window && window->is_titled()) {
             // Any of the three lights lights up the glyphs on all.
             float top = static_cast<float>(window->frame.y);
@@ -2182,6 +2697,10 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
                 window->lights_hovered = over;
                 invalidate_title_bar(*window);
             }
+            if (button_at(*window, point) == WindowButton::Zoom)
+                arm_window_menu(*window);
+            else
+                disarm_window_menu();
         }
     }
     update_cursor();
@@ -2387,6 +2906,9 @@ void Server::key_changed(u16 code, int value)
     }
     if (modifier)
         m_modifiers = value ? (m_modifiers | modifier) : (m_modifiers & ~modifier);
+    // Cmd let go: wherever Cmd-Tab had got to.
+    if (modifier == Window::ModifierCommand && !value)
+        finish_switching(true);
     if (code == VULTURE_KEY_CAPSLOCK && value == 1)
         m_modifiers ^= Window::ModifierCapsLock;
     // Keys repeat because this says so, as on a Mac, however long the machine that's showing this holds them down for, and whatever it says about it.

@@ -453,6 +453,9 @@ public:
             clear_selection();
             if (on_changed)
                 on_changed();
+            // On the desktop, that's the wallpaper.
+            if (m_on_desktop && !event.modifiers)
+                (void)Application::the().connection().server().wallpaper_clicked();
             return true;
         }
         auto& item = m_items[static_cast<size_t>(hit)];
@@ -765,6 +768,13 @@ public:
 
 class FilesWindow {
 public:
+    ~FilesWindow()
+    {
+        // Its timer would go on calling a window that's gone.
+        if (m_volumes_timer >= 0)
+            Application::the().cancel_timer(m_volumes_timer);
+    }
+
     FilesWindow(FilesController& controller, StringView path, IntPoint at)
         : m_controller(controller)
     {
@@ -874,21 +884,27 @@ private:
     // What's under /Volumes, after the start-up disk: as they're plugged in and taken out.
     void refresh_volumes()
     {
+        // Each by name, and which mount of it: one erased and put back has the same name, and is another volume.
         Vector<String> now;
+        Vector<u64> now_ids;
         if (DIR* directory = opendir("/Volumes")) {
             while (auto* entry = readdir(directory)) {
                 StringView const name { entry->d_name, strlen(entry->d_name) };
                 // (That one's for the machine, and nobody's business.)
                 if (name == "."_sv || name == ".."_sv || name == "EFI"_sv || name.starts_with('.'))
                     continue;
+                auto const path = joined("/Volumes"_sv, name);
+                struct stat root {};
+                u64 const id = stat(path.characters(), &root) == 0 ? static_cast<u64>(root.st_dev) : 0;
                 now.append(MUST(String::from_view(name)));
+                now_ids.append(id);
             }
             closedir(directory);
         }
         for (size_t row = m_shown_volumes.size(); row > 0; --row) {
             bool still_there = false;
-            for (auto const& name : now)
-                still_there = still_there || name.view() == m_shown_volumes[row - 1].view();
+            for (size_t i = 0; i < now.size(); ++i)
+                still_there = still_there || (now[i].view() == m_shown_volumes[row - 1].view() && now_ids[i] == m_shown_volume_ids[row - 1]);
             if (still_there)
                 continue;
             size_t const sidebar_row = m_system_row + row;
@@ -897,10 +913,12 @@ private:
             m_sidebar->remove_row(sidebar_row);
             m_places.remove(sidebar_row);
             m_shown_volumes.remove(row - 1);
+            m_shown_volume_ids.remove(row - 1);
             if (was_here)
                 navigate(Desktop::home_directory().view(), false);
         }
-        for (auto const& name : now) {
+        for (size_t index = 0; index < now.size(); ++index) {
+            auto const& name = now[index];
             bool shown = false;
             for (auto const& known : m_shown_volumes)
                 shown = shown || known.view() == name.view();
@@ -911,6 +929,7 @@ private:
             size_t const row = m_sidebar->insert_row_after(after, name.view(), Symbol::Drive);
             m_places.insert(row, MUST(String::from_view(path.view())));
             m_shown_volumes.append(MUST(String::from_view(name.view())));
+            m_shown_volume_ids.append(now_ids[index]);
             StringBuilder label;
             label.appendff("Eject {}", name.view());
             m_sidebar->set_row_accessory(row, Symbol::Eject, label.view(), [path = MUST(String::from_view(path.view()))] {
@@ -1004,6 +1023,7 @@ private:
     Vector<String> m_places;
     size_t m_system_row { 0 };
     Vector<String> m_shown_volumes;
+    Vector<u64> m_shown_volume_ids;
     int m_volumes_timer { -1 };
     Vector<String> m_back_stack;
     Vector<String> m_forward_stack;
