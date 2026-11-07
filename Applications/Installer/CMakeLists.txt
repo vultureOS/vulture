@@ -11,4 +11,5 @@ vulture_add_application(Installer
     SANDBOX installer
     ICON Installer
     KIND "Put vultureOS on a Disk"
+    CATEGORY utilities
     LIBRARIES LibDesktop LibPackage LibJSON)

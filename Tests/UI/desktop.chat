@@ -74,31 +74,31 @@ button left down
 pause 0.2
 button left up
 pause 1
-# A notification, and where they are kept.
+# A notification, and where they are kept: Settings' pane for them, and one posted from Terminal.
 click row "Notifications"
 expect settings: Notifications
 pause 0.5
-pointer 26112 7618
-pause 0.3
-button left down
-pause 0.2
-button left up
+screenshot settings-notifications.png
+click button "Terminal"
+expect terminal: ready
+pause 1
+type notification -a Settings -t "It works" -m "This is how notifications look."\r
 expect notification: It works
-pause 0.5
+pointer 16000 9000
+pause 0.8
 screenshot notification.png
 pointer 30900 491
 pause 0.3
 button left down
 pause 0.2
 button left up
+expect notifications: center shown
 pause 0.6
 screenshot notification-list.png
-pointer 16000 24000
-pause 0.2
-button left down
-pause 0.2
-button left up
-pause 0.6
+key esc
+pause 0.5
+key meta_l-q
+pause 1
 # Quick Settings.
 pointer 28800 491
 pause 0.3
@@ -205,11 +205,7 @@ pause 0.2
 button left up
 pause 0.6
 screenshot before-log-out.png
-pointer 3000 6595
-pause 0.3
-button left down
-pause 0.2
-button left up
+click menuitem "Log Out vulture…"
 expect loginwindow: ready
 pause 1
 screenshot logged-out.png

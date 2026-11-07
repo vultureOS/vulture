@@ -21,6 +21,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <notify.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -272,10 +273,22 @@ public:
     Function<void(StringView)> on_open_folder;
     Function<void()> on_changed;
 
+    ~FolderView() override
+    {
+        if (m_watch_timer >= 0)
+            Application::the().cancel_timer(m_watch_timer);
+    }
+
     void set_folder(StringView path)
     {
         m_path = MUST(String::from_view(path));
         reload();
+        // What's put in it by anyone else (a screenshot on the desktop, a download) shows up: as its folder changes.
+        if (m_watch_timer < 0)
+            m_watch_timer = Application::the().add_timer(500, true, [this] {
+                if (folder_stamp() != m_stamp)
+                    reload();
+            });
     }
 
     [[nodiscard]] StringView path() const { return m_path.view(); }
@@ -283,6 +296,7 @@ public:
 
     void reload()
     {
+        m_stamp = folder_stamp();
         m_items = list_folder(m_path.view(), m_path.view().ends_with("/.Trash"_sv));
         if (parent())
             parent()->set_needs_layout();
@@ -690,13 +704,35 @@ private:
             m_menu->add("New Folder"_sv, [this] { new_folder(); });
             auto& paste_item = m_menu->add("Paste"_sv, [this] { paste(); });
             paste_item.enabled = !s_copied_paths.is_empty();
+            // The desktop's own, as Sonoma's Finder has them: its wallpaper, and its widgets (the shell's).
+            if (m_on_desktop) {
+                m_menu->add_separator();
+                m_menu->add("Change Wallpaper\xE2\x80\xA6"_sv, [] {
+                    auto bundle = Desktop::read_bundle("/System/Applications/Settings.app"_sv);
+                    StringView arguments[1] = { "Wallpaper"_sv };
+                    if (!bundle.is_error())
+                        (void)Desktop::launch(bundle.value(), Span<StringView const>(arguments, 1));
+                });
+                m_menu->add("Edit Widgets\xE2\x80\xA6"_sv, [] { notify_post("com.vulture.widgets.edit"); });
+            }
         }
         auto origin = window()->frame().origin();
         m_menu->open(*window(), { origin.x + static_cast<int>(event.window_position.x), origin.y + static_cast<int>(event.window_position.y) });
     }
 
     bool m_on_desktop;
+    // When the folder last changed, as far as it's been seen: when its entries did.
+    [[nodiscard]] u64 folder_stamp() const
+    {
+        struct stat information {};
+        if (stat(m_path.characters(), &information) != 0)
+            return 0;
+        return static_cast<u64>(information.st_mtime) * 1'000'000'000ull + static_cast<u64>(information.st_mtim.tv_nsec) + static_cast<u64>(information.st_size);
+    }
+
     String m_path;
+    u64 m_stamp { 0 };
+    int m_watch_timer { -1 };
     Vector<FileItem> m_items;
     RenameField* m_rename_field { nullptr };
     int m_rename_index { -1 };

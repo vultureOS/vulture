@@ -8,6 +8,7 @@
 #include <LibUI/Application.h>
 #include <LibUI/Motion.h>
 #include <LibUI/ScrollView.h>
+#include <LibUI/WindowRegistry.h>
 #include <LibVT/Terminal.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -97,6 +98,31 @@ int control_byte(u16 code)
     }
 }
 
+// The bell: heard, and, while Terminal's in the background, counted on its icon in the Dock until it's come back to.
+int s_unseen_bells = 0;
+
+void ring_bell()
+{
+    Application::the().play_sound("alert"_sv);
+    bool in_front = false;
+    for (auto* window : WindowRegistry::windows())
+        in_front = in_front || window->is_key();
+    if (in_front)
+        return;
+    ++s_unseen_bells;
+    StringBuilder count;
+    count.appendff("{}", s_unseen_bells);
+    Application::the().set_badge(count.view());
+}
+
+void bells_seen()
+{
+    if (s_unseen_bells == 0)
+        return;
+    s_unseen_bells = 0;
+    Application::the().set_badge({});
+}
+
 class TerminalView final : public View {
 public:
     TerminalView()
@@ -116,7 +142,7 @@ public:
             if (on_title_change)
                 on_title_change();
         };
-        m_terminal.on_bell = [] { };
+        m_terminal.on_bell = [] { ring_bell(); };
     }
 
     ~TerminalView() override
@@ -841,7 +867,11 @@ public:
         view.on_title_change = [this] { update_title(); };
         update_title();
         make_first_responder(&view);
-        on_key_change = [this](bool) { m_view->set_needs_display(); };
+        on_key_change = [this](bool key) {
+            if (key)
+                bells_seen();
+            m_view->set_needs_display();
+        };
         if (!view.start_shell())
             fprintf(stderr, "Terminal: cannot start a shell\n");
     }

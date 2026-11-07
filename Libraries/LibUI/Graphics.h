@@ -63,6 +63,10 @@ enum class Symbol : u8 {
     Display,
     Mouse,
     Trackpad,
+    // Two switches, one on: Control Center's.
+    Toggles,
+    // A crescent: Focus, and Do Not Disturb.
+    Moon,
 };
 
 // A control's face: a shape with shadows outside it, a fill, shading inside it.

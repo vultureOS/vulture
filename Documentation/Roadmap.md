@@ -103,7 +103,7 @@ Sizes are rough estimates of new lines, scaled from the reference figures above.
 | | M21 | [Layers](#m21-layers) | Done | See animations stay smooth even when an app hangs, with the spinning cursor | 18k |
 | | M22 | [Displays and gestures](#m22-displays-and-gestures) | Done | Use two displays, swipe between Spaces, record the screen | 8k |
 | **2 Mac feel** | M23 | [Windows and Spaces](#m23-windows-and-spaces) | Done, but for timing against the VM (waiting on a decision) | Tile, go full screen, use App Exposé and Stage | 10k |
-| | M24 | [The desktop](#m24-the-desktop) | | Use the full Dock, menu bar, Control Center, widgets and screenshots | 12k |
+| | M24 | [The desktop](#m24-the-desktop) | Done, but for sizes, colours and timings against the VM (waiting on a decision) | Use the full Dock, menu bar, Control Center, widgets and screenshots | 12k |
 | | M25 | [Sessions](#m25-sessions) | | Set up a new machine, lock it, switch between users | 8k |
 | | M26 | [Documents and Search](#m26-documents-and-search) | | Have autosave, default apps, Quick View, and fast Search that lasts across reboots | 20k |
 | | M27 | [Files](#m27-files) | | Use a real Finder: columns, gallery, tabs, tags, Empty Trash | 12k |
@@ -557,7 +557,7 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on. M15 me
 | Window drag at 2560×1600 | 60 fps | 111 fps (M21: 10 windows, 5 with blur; about 4 ms of composing and 0.7 ms of flushing per frame; 120 fps is the most it asks for). With all of the screen drawn for every frame, 12 windows and blur: 119 fps. At M23, at a load of 5: 101 fps and 112 to 115 fps, with a frame's work the same (3.9 ms composing, 0.8 ms flushing) |
 | Input to photon | ≤ 1 frame | 12.5 ms at the 99th percentile from the event to the flush, worst 14.2 ms; 9.5 ms with all of the screen drawn for every frame (M21, on a machine with little else going on). Measured at M22 with a game taking 3 of this Mac's 10 cores, on the same binary: 13 to 21 ms, and 18 to 26 ms, going up with the load average from 7 to 10, though a frame's work hadn't changed (4.4 ms composing, 0.8 ms flushing). It was 23.5 ms at M19, measured from when the event was read rather than when it happened. At M23, at a load of 5 to 6: 14.0 to 14.5 ms, and 13.5 to 18.5 ms with all of the screen drawn. QEMU shows no photon, so this is as far as it can be measured |
 | Text Editor cold launch | < 300 ms | 33 ms, 32 to 37 ms warm (M23) |
-| Cmd-Tab appears | ≤ 1 frame | 9.7 to 20.8 ms from the key to the flush that shows the panel, usually 10 to 12 ms (M23, five in a row, with macOS's own background work keeping this Mac's load at 5 to 6); on a quieter run all five were under 16.4 ms. The shell draws the panel, so it's a round trip to another process and back |
+| Cmd-Tab appears | ≤ 1 frame | 9.7 to 20.8 ms from the key to the flush that shows the panel, usually 10 to 12 ms (M23, five in a row, with macOS's own background work keeping this Mac's load at 5 to 6); on a quieter run all five were under 16.4 ms. At M24, at a load of 2: 8.6 to 24.5 ms, the slowest of five 19.5 to 24.5 ms, after taking away a cause of a 55.8 ms one (see M24's findings). The shell draws the panel, so it's a round trip to another process and back |
 | Search, per keystroke | ≤ 50 ms | |
 | Application launch | < 300 ms | 24 ms (M19, Calculator, cold) |
 | Clone of a 1 GiB file | < 50 ms | Under 1 ms (M19): it takes the same for any size |
@@ -599,6 +599,52 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **Testing inside a copy of the system.** With a `dd` of its own at last, a test that changes to a copy of the system and runs `dd` ran that one, for the wrong processor, if `PATH` had a relative entry in it. The seal tests then found nothing to catch, and said so as if the kernel had let a tampered file by.
 - **Tests that click by position go stale.** One new row in Settings moved everything under it, and each walkthrough that clicked one of those by coordinates went wrong, as M15 said it would. They go by name now.
 - **What a Mac does that's wrong.** Nine of POSIX's checks and seven of the commands are different on purpose. Each is written down in `Tests/Parity`, with why.
+
+### M24
+
+- **A daemon for everyone refused everyone.** `notificationd` is one of the system's daemons, run as root for the whole
+  machine, so the first version, which only took posts from its own user, took none, and read its settings from root's
+  home. Each user's notifications are kept apart now, by who posted them, and each one's settings are read from their own
+  home. Root's `getpwuid` reads the file with the password hashes in it, which the daemon's sandbox rightly refuses, so it
+  reads homes from `/etc/passwd` itself.
+- **Two programs, one work area.** The menu bar and the Dock both keep part of the screen from windows, and whichever said
+  so last was the only one heard, and windows could go under the other. The server keeps what each one asks for and gives
+  windows what's left of all of them.
+- **A drag picture in the wrong place.** What's dragged out of the Dock was drawn where the pointer was in the Dock's
+  window, taken as a place on the screen: a corner away from the pointer. It's put where the pointer is on the screen.
+- **A sheet's buttons were found second.** The accessibility tree listed a window's own controls before its sheet's, so a
+  test that clicked "Cancel" got the one behind the sheet, as a screen reader would have. A sheet comes first now, as it's
+  in front.
+- **Help with no window in front.** Help's search had the menus of the application whose window was key, and a panel
+  being key left it with none. AppKit's main window is in the toolkit now: the key window, or else the last document
+  window, so Help has its commands.
+- **Widgets under a window.** A test's click on a desktop widget went to the Files window over it. That's right: widgets
+  are the desktop's, under every window, at a level of their own just above its icons, and gone where a Space is full
+  screen. The test closes the window first, as a person would.
+- **A folder target that moved away.** In Launcher, held over another application, the gap where the dragged one had been
+  closed as soon as a folder was offered, so the other one slid out from under the pointer. The gap stays until it's let
+  go.
+- **Tests by name catch a rename.** Sequoia's system menu says "Log Out vulture…", and About This Computer is a window of
+  its own now. The Monday test and M15's walkthrough looked for the old names and failed, as they should.
+- **A widget nobody could see slowed Cmd-Tab.** The Usage widget's sampler looked at every process every two seconds, with
+  no Usage widget anywhere, and a Cmd-Tab that came while it did waited for it: 55.8 ms once, where a frame is 16.7. It
+  only samples while there's one placed now, and Cmd-Tab is back to what it was at M23.
+- **A screenshot is what was on the screen.** Shift-Command-3's file is taken off the machine on a USB stick and compared
+  with QEMU's own picture of the same moment, pixel for pixel, and they're the same.
+- **Limit: everything new is estimated.** The Dock's, the banners', the widgets', Launcher folders' and the gallery's sizes,
+  colours and timings are estimates until there's a Sequoia VM to measure (waiting on a decision), as M28 will.
+- **Limit: Calendar's and Clock's widgets are the shell's own** until those applications come with M31, and none can be
+  set up ("Edit Clock"). Widgets are added from the gallery by a click, not dragged out of it; on the desktop they don't
+  move icons aside, and Stage's setting for them isn't there.
+- **Limit: notifications aren't kept across a restart** (M26), can't be swiped away, and an action can't ask for text, as
+  a reply does. With no lock screen until M25, "When Unlocked" shows previews always, and the settings for a sleeping
+  display and a locked screen are kept without anything to apply them to; mirroring isn't looked at yet.
+- **Limit: Control Center has two modules,** Focus and Sound; Focus has only Do Not Disturb. Wi-Fi, Bluetooth, Display
+  and Now Playing come with what they control. Sound's "Show When Active" isn't there: it's always or never.
+- **Limit: Screenshot can't record** until M35, and Open at Login, Lock Screen, Sleep and Recent Items are shown but off
+  until M25, M45 and M26. A window's picture has its shadow, with its materials drawn flat.
+- **Limit: Launcher blurs the windows behind it,** where Launchpad shows only the wallpaper, and moves the others without
+  animating them. Applications can't be deleted from it, and a folder has one page.
 
 ### M23
 

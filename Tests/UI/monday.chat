@@ -123,10 +123,27 @@ pause 1
 ax-expect window "vulture" at 644 32 628 686
 key meta_l-q
 ax-gone window "vulture — vsh — 86×40"
+# ---- A reminder, answered from its banner without leaving what's open; then the day, in Notification Center.
+click button "Terminal"
+expect terminal: ready
+pause 1
+type notification -t "Stand-up" -m "In five minutes" -o "Snooze" -w\r
+expect notification: Stand-up
+pointer 28109 2867
+ax-expect button "Snooze"
+click button "Snooze"
+ax-expect textarea "Terminal" ~ Snooze
+click button "Notifications"
+expect notifications: center shown
+ax-expect group "Date"
+ax-expect button "Edit Widgets"
+key esc
+key meta_l-q
+ax-gone textarea "Terminal"
 
 # ---- And leave.
 click menuitem "Logo"
-click menuitem "Log Out"
+click menuitem "Log Out vulture…"
 expect loginwindow: ready
 # Still to come, each with its milestone: read the mail (M33), open a PDF (M30), add a meeting to the calendar (M31), browse
 # (M40), play music (M34).

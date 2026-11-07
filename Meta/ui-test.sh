@@ -101,7 +101,8 @@ for walkthrough in "${walkthroughs[@]}"; do
     "$build_dir/host/Tests/LibForeignFS/foreignfs-exercise" make "$stick" 64 exfat STICK > /dev/null
     # As many displays as it says it wants ("# displays: 2"), and fingers.
     outputs="$(sed -n 's/^# displays: //p' "$walkthrough" | head -n 1)"
-    if ! VULTURE_GPU_OUTPUTS="${outputs:-1}" VULTURE_GPU_WIDTH=2560 VULTURE_GPU_HEIGHT=1600 VULTURE_SCREENSHOT_DEVICE=gpu0 VULTURE_SCREENSHOT_PREFIX="$out_dir/$name-" \
+    # (VULTURE_STICK: for a walkthrough's host steps, to look at what the guest wrote on it.)
+    if ! VULTURE_STICK="$stick" VULTURE_GPU_OUTPUTS="${outputs:-1}" VULTURE_GPU_WIDTH=2560 VULTURE_GPU_HEIGHT=1600 VULTURE_SCREENSHOT_DEVICE=gpu0 VULTURE_SCREENSHOT_PREFIX="$out_dir/$name-" \
         "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --fresh-disk --boot-args uidesktop \
         --chat "$walkthrough" --timeout 300 -- -device virtio-multitouch-pci -device qemu-xhci,id=usb0 -drive "if=none,id=stick,format=raw,file=$stick" > "$out_dir/$name.log" 2>&1; then
         echo "ui-test: $name: it did not get through; see $out_dir/$name.log" >&2

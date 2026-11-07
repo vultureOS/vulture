@@ -57,6 +57,10 @@ struct KeyEvent {
 enum Key : u16 {
     KeyEscape = 1,
     Key1 = 2,
+    Key2 = 3,
+    Key3 = 4,
+    Key4 = 5,
+    Key5 = 6,
     KeyMinus = 12,
     KeyEqual = 13,
     KeyBackspace = 14,

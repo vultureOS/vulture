@@ -83,7 +83,7 @@ ax-gone group "Stage"
 # ---- Hot corners: the top right one, to uncover the desktop. (Further down the pane.)
 pointer 20000 16000
 pause 0.3
-wheel -12
+wheel -60
 pause 1
 screenshot desktop-and-dock-scrolled.png
 click button "Hot Corners…"

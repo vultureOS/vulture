@@ -1,0 +1,212 @@
+# M24: notifications, widgets and Launcher. Notifications that say what can be done about them and tell the program
+# that posted them what was chosen; Notification Center with each program's together; each program's settings in
+# Settings; widgets on the desktop and in Notification Center, from a gallery; and folders in Launcher, made by dropping
+# one application on another.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 2
+# ---- A banner, with what can be done about it under the pointer, and the answer back in the program that posted it.
+click button "Terminal"
+expect terminal: ready
+pause 1
+type notification -t "Lunch" -m "Meet at noon by the fountain" -o "Mark as Read" -o "Reply" -w\r
+expect notification: Lunch
+pause 0.6
+screenshot banner.png
+pointer 28109 2867
+pause 0.5
+ax-expect button "Options"
+ax-expect button "Clear"
+screenshot banner-hover.png
+click button "Options"
+ax-expect menuitem "Reply"
+pause 0.4
+screenshot banner-options.png
+click menuitem "Mark as Read"
+expect notification: responded
+ax-expect textarea "Terminal" ~ Mark as Read
+# ---- Notification Center: each program's together, in a stack that opens; then cleared, all of one program's.
+type notification -t "Build finished" -m "vultureOS built in 4 minutes"\r
+expect notification: Build finished
+type notification -t "Tests passed" -m "All 600 checks passed"\r
+expect notification: Tests passed
+type notification -a Settings -t "It works" -m "This is how notifications look."\r
+expect notification: It works
+pause 0.5
+screenshot banners.png
+click button "Notifications"
+expect notifications: center shown
+ax-expect group "Terminal" = 2 notifications
+ax-expect group "It works"
+ax-expect group "Date"
+ax-expect group "City"
+ax-expect button "Edit Widgets"
+pause 0.6
+screenshot center.png
+click group "Terminal"
+ax-expect button "Show Less"
+ax-expect group "Tests passed"
+ax-expect group "Build finished"
+pause 0.4
+screenshot center-expanded.png
+click button "Show Less"
+ax-expect group "Terminal" = 2 notifications
+click group "Terminal"
+ax-expect button "Clear All"
+click button "Clear All"
+ax-gone group "Terminal"
+ax-expect group "It works"
+# ---- Its widgets: Edit Widgets, the gallery, one more chosen, and one taken away.
+click button "Edit Widgets"
+expect widgets: editing Notification Center
+ax-expect row "All Widgets" = selected
+ax-expect cell "Calendar Month (Medium)"
+pause 0.8
+screenshot gallery.png
+click row "Monitor"
+ax-expect row "Monitor" = selected
+ax-gone cell "Calendar Date (Small)"
+click cell "Monitor Usage (Small)"
+expect widgets: added com.vulture.widget.monitor.usage, small
+ax-expect group "Usage" ~ CPU
+ax-expect button "Remove Widget"
+pause 0.5
+screenshot center-editing.png
+click button "Done"
+expect widgets: done
+ax-gone button "Remove Widget"
+ax-expect group "Usage"
+key esc
+pause 0.5
+# ---- On the desktop: from its own menu, Edit Widgets..., and one put there. (Terminal hidden, and Files' window
+# closed: nothing in front of it.)
+key meta_l-h
+pause 0.8
+key meta_l-w
+pause 0.8
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"ctrl"}}}]}}
+pointer 1536 28672
+pause 0.3
+button left down
+pause 0.1
+button left up
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"ctrl"}}}]}}
+ax-expect menuitem "Change Wallpaper…"
+click menuitem "Edit Widgets…"
+expect widgets: editing
+click row "Calendar"
+click cell "Calendar Month (Medium)"
+expect widgets: added com.vulture.widget.calendar.month, medium
+click button "Done"
+expect widgets: done
+ax-expect group "Month" ~ January 2026
+pointer 31500 25000
+pause 0.8
+screenshot desktop-widget.png
+# Its menu: another size, and taken away.
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click group "Month"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"ctrl"}}}]}}
+ax-expect menuitem "Medium"
+ax-gone menuitem "Large"
+ax-expect menuitem "Edit Widgets…"
+pause 0.4
+screenshot widget-menu.png
+click menuitem "Small"
+pause 0.5
+ax-expect group "Month"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click group "Month"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click menuitem "Remove Widget"
+expect widgets: removed
+ax-gone group "Month"
+# ---- Each program's settings in Settings: its alert style, and whether it may post at all.
+click button "Settings"
+expect settings: Appearance
+click row "Notifications"
+expect settings: Notifications
+ax-expect row "Terminal" = Badges, Sounds, Banners
+ax-expect row "Settings"
+pause 0.5
+screenshot settings-notifications.png
+click row "Terminal"
+expect settings: Terminal
+ax-expect button "Back" enabled
+ax-expect radio "Temporary" = on
+click radio "Persistent"
+ax-expect radio "Persistent" = on
+pause 0.5
+screenshot settings-terminal.png
+# An alert stays, with Close, until it's answered.
+click button "Terminal"
+type notification -t "Backup" -m "Your files were saved"\r
+expect notification: Backup
+ax-expect button "Close"
+pointer 31500 25000
+pause 6
+ax-expect button "Close"
+screenshot alert.png
+click button "Close"
+ax-gone button "Close"
+# Not allowed: nothing is shown, and the program is told.
+click button "Settings"
+click switch "Allow notifications"
+ax-expect radio "Persistent" disabled
+click button "Terminal"
+type notification -t "Hidden" -m "Not shown"\r
+ax-expect textarea "Terminal" ~ not allowed for Terminal
+click button "Settings"
+click button "Back"
+expect settings: Notifications
+ax-expect row "Terminal" = Off
+ax-expect button "Forward" enabled
+click switch "Allow notifications when the screen is locked"
+pause 0.5
+# ---- Launcher: one application dropped on another makes a folder, named by what kind they are; renamed; and the
+# order changed by dragging, kept for next time.
+key meta_l-q
+pause 1
+click button "Launcher"
+expect launcher: shown
+ax-expect cell "Disks"
+grab cell "Console"
+pointer 16000 5898
+pause 0.2
+pointer 16384 5898
+pause 1
+screenshot launcher-merging.png
+button left up
+expect launcher: into folder Utilities
+ax-expect cell "Utilities" = folder
+pause 0.3
+click cell "Utilities"
+expect launcher: folder Utilities
+ax-expect cell "Console"
+ax-expect cell "Disks"
+pause 0.5
+screenshot launcher-folder.png
+click text "Utilities"
+key meta_l-a
+type Tools\r
+expect launcher: renamed Tools
+key esc
+ax-expect cell "Tools" = folder
+grab cell "Viewer"
+pointer 4000 9011
+pause 0.2
+pointer 3328 9011
+pause 0.3
+button left up
+expect launcher: moved to 0
+pause 0.5
+screenshot launcher-moved.png
+key esc
+pause 1
+click button "Launcher"
+expect launcher: shown
+ax-expect cell "Tools" = folder
+ax-expect cell "Viewer" at 45 100 170 150
+key esc

@@ -408,6 +408,9 @@ void Server::remove_window(ServerWindow& window)
 {
     if (window.full_screen)
         leave_full_screen(window, true);
+    // A menu extra gone: the rest close up.
+    if (m_menu_extras.remove_all_matching([&](auto* extra) { return extra == &window; }))
+        m_loop.deferred_invoke([this] { layout_menu_extras(); });
     m_compositor.invalidate_window(window);
     release_surface(window);
     if (window.waiting_memory)
@@ -1429,6 +1432,58 @@ ErrorOr<Vector<u8>> Server::png_of_area(IntRect points)
     for (int y = 0; y < pixels.height; ++y)
         __builtin_memcpy(part->scanline(y), m_screen.framebuffer().scanline(pixels.y + y) + pixels.x, static_cast<size_t>(pixels.width) * sizeof(Pixel));
     return Image::encode_png(*part);
+}
+
+WindowServerEndpoint::CaptureWindowAnswer Server::capture_window(IPC::Sender const& sender, u32 id)
+{
+    WindowServerEndpoint::CaptureWindowAnswer answer {};
+    if (!may_look_at_screen(sender, "a picture of a window")) {
+        answer.error = EPERM;
+        return answer;
+    }
+    ServerWindow* found = nullptr;
+    for (auto* window : m_windows) {
+        if (window->id == id && window->visible)
+            found = window;
+    }
+    if (!found) {
+        answer.error = ENOENT;
+        return answer;
+    }
+    if (found->chrome_is_stale && found->is_titled())
+        render_chrome(*found);
+    auto picture = m_compositor.snapshot_with_shadow(*found);
+    if (picture.is_error()) {
+        answer.error = ENOMEM;
+        return answer;
+    }
+    auto encoded = Image::encode_png(*picture.value());
+    if (encoded.is_error()) {
+        answer.error = ENOMEM;
+        return answer;
+    }
+    answer.png = encoded.release_value();
+    return answer;
+}
+
+WindowServerEndpoint::WindowUnderAnswer Server::window_under(IPC::Sender const& sender, i32 x, i32 y)
+{
+    WindowServerEndpoint::WindowUnderAnswer answer {};
+    auto const* asker = client_of(sender);
+    for (size_t i = m_windows.size(); i > 0; --i) {
+        auto const* window = m_windows[i - 1];
+        if (!window->visible || window->client == asker || is_desktop_level(window->level) || window->level >= Window::LevelPopup)
+            continue;
+        if (!window->frame.contains(IntPoint { x, y }))
+            continue;
+        answer.window = window->id;
+        answer.x = window->frame.x;
+        answer.y = window->frame.y;
+        answer.width = window->frame.width;
+        answer.height = window->frame.height;
+        break;
+    }
+    return answer;
 }
 
 WindowServerEndpoint::CaptureAnswer Server::capture(IPC::Sender const& sender)
@@ -2627,7 +2682,7 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
         auto* window = window_at(point);
         // What the server draws over the desktop (the line between two halves of a Space, Stage's strip) comes before
         // the desktop's own window, under it.
-        bool const over_desktop = !window || window->level == Window::LevelDesktop;
+        bool const over_desktop = !window || is_desktop_level(window->level);
         if (over_desktop && split_divider_at(point).has_value()) {
             m_dragging_divider = true;
             window = nullptr;

@@ -11,4 +11,5 @@ vulture_add_application(Software
     SANDBOX software
     ICON Software
     KIND "Applications"
+    CATEGORY utilities
     LIBRARIES LibDesktop LibPackage)

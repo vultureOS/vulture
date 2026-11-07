@@ -91,6 +91,8 @@ public:
     void copy_text(StringView) override;
     [[nodiscard]] ErrorOr<String> paste_text() override;
     void play_sound(StringView) override;
+    // What the Dock shows on this application's icon (a count, a word), or nothing, when it's empty.
+    void set_badge(StringView);
 
 private:
     Application();

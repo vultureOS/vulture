@@ -34,8 +34,10 @@ ax-gone radio "Light"
 # And through it to something that happens.
 click menuitem "Logo"
 click menuitem "About This Computer"
+ax-expect group "About This Computer"
+click button "More Info…"
 expect settings: About
-ax-gone menuitem "Log Out"
+ax-gone menuitem "Log Out vulture…"
 pause 0.5
 screenshot about.png
 key meta_l-q

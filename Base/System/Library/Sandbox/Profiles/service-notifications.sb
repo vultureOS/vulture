@@ -1,2 +1,6 @@
-# Keeps what was posted, in memory.
+# Keeps what was posted, in memory; reads each user's settings for their applications'
+# notifications, and keeps which applications have posted, by user, for Settings to list.
 include system
+read /Users
+write /Library/Preferences/com.vulture.notificationd.json
+write /Library/Preferences/com.vulture.notificationd.json.new

@@ -115,6 +115,8 @@ public:
     void set_overlay_small_font(Text::Font* font) { m_overlay_small_font = font; }
     // A picture of a window as it now is, title bar and all.
     [[nodiscard]] ErrorOr<NonnullRefPtr<Gfx::Bitmap>> snapshot(ServerWindow const&) const;
+    // As a screenshot of a window has it: with its outline, and its shadow round it, on nothing.
+    [[nodiscard]] ErrorOr<NonnullRefPtr<Gfx::Bitmap>> snapshot_with_shadow(ServerWindow const&) const;
     // Hides the windows below the Dock's level, for Overview.
     void set_hides_normal_windows(bool hides) { m_hides_normal_windows = hides; }
     // A wallpaper by its colors.
@@ -264,7 +266,8 @@ private:
     void draw_shadow(ServerWindow const&, Gfx::IntRect clip);
     // `covers_it`: every pixel it has here is opaque, and it's on none of its corners.
     void draw_body(ServerWindow const&, Gfx::IntRect clip, bool covers_it);
-    void draw_nine_slice(NineSlice const&, Gfx::IntRect target, Gfx::Color, Gfx::IntRect clip, Gfx::IntRect hole, int hole_corner);
+    // Into the framebuffer, or into this picture instead.
+    void draw_nine_slice(NineSlice const&, Gfx::IntRect target, Gfx::Color, Gfx::IntRect clip, Gfx::IntRect hole, int hole_corner, Gfx::Bitmap* into = nullptr);
     // What shows through a material here: reading the screen into a small picture, blurring that, and bringing it back up.
     void read_material_rows(MaterialJob const&, int first, int end);
     void blur_material(MaterialJob const&);

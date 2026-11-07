@@ -11,5 +11,6 @@ vulture_add_application(Archiver
     SANDBOX document-editor
     ICON Archiver
     KIND "Compress and Expand"
+    CATEGORY utilities
     EXTENSIONS tar gz tgz
     LIBRARIES LibDesktop LibArchive LibCompress)

@@ -207,6 +207,54 @@ void Server::hide_application(IPC::Sender const&, i32 pid, bool hidden)
     schedule_frame();
 }
 
+void Server::add_menu_extra(IPC::Sender const& sender, u32 id)
+{
+    auto* window = window_of(sender, id);
+    if (!window)
+        return;
+    for (auto const* known : m_menu_extras) {
+        if (known == window)
+            return;
+    }
+    window->level = Window::LevelMenuBar;
+    m_windows.remove_all_matching([&](auto* other) { return other == window; });
+    insert_by_level(*window);
+    m_menu_extras.append(window);
+    layout_menu_extras();
+}
+
+void Server::set_menu_extras_edge(IPC::Sender const&, i32 x, i32 gap)
+{
+    m_menu_extras_edge = x;
+    m_menu_extras_gap = max(gap, 0);
+    layout_menu_extras();
+}
+
+void Server::layout_menu_extras()
+{
+    // From the shell's own leftwards, along the main display's menu bar.
+    auto const& display = m_screen.main_display().points;
+    int right = display.x + m_menu_extras_edge;
+    for (auto* extra : m_menu_extras) {
+        right -= extra->frame.width + m_menu_extras_gap;
+        IntRect const frame { right, display.y, extra->frame.width, extra->frame.height };
+        if (frame != extra->frame) {
+            move_window_to(*extra, frame);
+            send_moved(*extra);
+        }
+    }
+    shell_state_changed();
+}
+
+void Server::show_windows_of(IPC::Sender const&, i32 pid)
+{
+    auto* client = client_with_pid(pid);
+    if (!client)
+        return;
+    activate_client(*client);
+    enter_overview(OverviewMode::OneApplication);
+}
+
 void Server::quit_application(IPC::Sender const&, i32 pid)
 {
     auto* client = client_with_pid(pid);
@@ -248,17 +296,44 @@ void Server::zoom(IPC::Sender const& sender, u32 id)
         zoom_window(*window);
 }
 
+void Server::set_dock_edge(IPC::Sender const&, i32 edge, i32 thickness)
+{
+    m_dock_edge = clamp(edge, 0, 2);
+    m_dock_thickness = max(thickness, 0);
+}
+
+void Server::set_badge(IPC::Sender const& sender, String text)
+{
+    auto* client = client_of(sender);
+    if (!client || client->badge.view() == text.view())
+        return;
+    client->badge = move(text);
+    shell_state_changed();
+}
+
 void Server::set_minimize_target(IPC::Sender const&, i32 x, i32 y)
 {
     m_minimize_target = { x, y };
 }
 
-void Server::set_work_area(IPC::Sender const&, i32 top, i32 left, i32 bottom, i32 right)
+void Server::set_work_area(IPC::Sender const& sender, i32 top, i32 left, i32 bottom, i32 right)
 {
-    m_work_top = max(top, 0);
-    m_work_left = max(left, 0);
-    m_work_bottom = max(bottom, 0);
-    m_work_right = max(right, 0);
+    // Each says what it keeps clear (the shell the menu bar's, the Dock its own edge): the most at each edge goes.
+    if (auto* client = client_of(sender)) {
+        client->work_area_reserved[0] = max(top, 0);
+        client->work_area_reserved[1] = max(left, 0);
+        client->work_area_reserved[2] = max(bottom, 0);
+        client->work_area_reserved[3] = max(right, 0);
+    }
+    int most[4] {};
+    for (auto const& client : m_clients) {
+        for (int edge = 0; edge < 4; ++edge)
+            most[edge] = max(most[edge], client->work_area_reserved[edge]);
+    }
+    m_work_top = most[0];
+    m_work_left = most[1];
+    m_work_bottom = most[2];
+    m_work_right = most[3];
 }
 
 void Server::register_hotkey(IPC::Sender const& sender, u16 code, u32 modifiers)
@@ -360,6 +435,7 @@ void Server::send_shell_state()
         MUST(application.set("identifier"_sv, MUST(JSON::Value::string(client->application_identifier.view()))));
         MUST(application.set("hidden"_sv, JSON::Value(client->hidden)));
         MUST(application.set("notResponding"_sv, JSON::Value(client->not_responding)));
+        MUST(application.set("badge"_sv, MUST(JSON::Value::string(client->badge.view()))));
         auto windows = JSON::Value::array();
         for (auto const* window : m_windows) {
             if (window->client != client.ptr() || !window->is_document_window() || !window->shown_by_client)

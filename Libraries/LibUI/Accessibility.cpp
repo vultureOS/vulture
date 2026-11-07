@@ -162,7 +162,17 @@ Node tree_of(Window& window)
     node.frame = window.root_view().frame();
     Vector<Node> found;
     collect(window.root_view(), found);
-    node.children = move(found);
+    // A sheet is in front of the rest of its window, and what's asked of now: it comes first.
+    Vector<Node> ordered;
+    for (auto& child : found) {
+        if (child.role == Role::Sheet)
+            ordered.append(move(child));
+    }
+    for (auto& child : found) {
+        if (child.role != Role::Sheet)
+            ordered.append(move(child));
+    }
+    node.children = move(ordered);
     return node;
 }
 

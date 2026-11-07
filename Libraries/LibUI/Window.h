@@ -150,13 +150,14 @@ public:
 
     [[nodiscard]] Responder* next_responder() const override { return nullptr; }
     bool key_down(KeyEvent const&) override;
+    // The pointer's shape again, from the view it's over: for one whose shape changed without the pointer moving.
+    void update_cursor();
 
 private:
     class RootView;
 
     void set_hovered(View*);
     [[nodiscard]] View* view_at(Gfx::FloatPoint);
-    void update_cursor();
     void arm_tooltip();
     void hide_tooltip();
     [[nodiscard]] Vector<View*> focusable_views() const;

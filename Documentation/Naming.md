@@ -11,8 +11,11 @@ has to learn a new word to find it.
 | **Search** | Search, from anywhere |
 | **Launcher** | Every application, in a grid |
 | **Overview** | All windows and desktops at once |
-| **Quick Settings** | The panel in the menu bar |
-| **Notifications** | Banners, and the list of them |
+| **Quick Settings** | The panel in the menu bar; which of its modules are in the menu bar too is Settings' **Control Center** pane |
+| **Notification Center** | Banners and alerts, the list of them, each application's together, and widgets |
+| **Widgets** | What applications show of themselves, on the desktop and in Notification Center |
+| **Screenshot** | Shift-Command-3, 4 and 5 |
+| **Force Quit** | Programs that are running, to be made to stop |
 | **Settings** | System settings |
 | **Terminal** | The command line |
 | **Text Editor** | Plain text |
@@ -29,9 +32,10 @@ Words like Terminal, Calculator, Console and Dock are the ordinary names for the
 everywhere, and stay. An application's `KIND` (in its `CMakeLists.txt`) is what else Search
 and Launcher find it by, and what Software shows under its name.
 
-Services that show up in Monitor follow suit: `DesktopShell` (the menu bar, Search and
-notification banners), `indexd` (Search's index), `notificationd`, `clipboardd`, `privacyd`
-(what people have said applications may have).
+Services that show up in Monitor follow suit: `DesktopShell` (the menu bar, Search,
+notifications, widgets and screenshots), `SoundMenu` (the menu bar's sound), `indexd`
+(Search's index), `notificationd`, `clipboardd`, `privacyd` (what people have said
+applications may have).
 
 ## What is deliberately left alone
 

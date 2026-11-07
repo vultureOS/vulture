@@ -243,7 +243,7 @@ Window* Application::key_window() const
         if (window->is_key())
             return window;
     }
-    return nullptr;
+    return WindowRegistry::main_window();
 }
 
 bool Application::send_command(StringView command)
@@ -335,6 +335,11 @@ AudioProxy* Application::audio()
         m_audio = adopt_own(*new AudioProxy(port.release_value()));
     }
     return m_audio.ptr();
+}
+
+void Application::set_badge(StringView text)
+{
+    (void)m_connection->server().set_badge(text);
 }
 
 void Application::play_sound(StringView name)

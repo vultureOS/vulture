@@ -10,4 +10,5 @@ vulture_add_application(Terminal
     IDENTIFIER com.vulture.Terminal
     ICON Terminal
     KIND "Command Line"
+    CATEGORY utilities
     LIBRARIES LibDesktop LibVT)

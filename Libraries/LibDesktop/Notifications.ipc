@@ -1,16 +1,39 @@
 // The notification center (com.vulture.notificationd): programs post, and whoever shows
-// them hears. Keeps what was posted, for the list in Notifications.
+// them hears. Keeps what was posted, for the list in Notifications, as each application's
+// settings say.
 endpoint NotificationService
 {
-    post(String application, String title, String body) =|
+    // From an application: what it says, and the titles of what can be done about it, the
+    // first being the one shown when there's room for one. What it's known by comes back:
+    // 0 when its application isn't allowed to post.
+    post(String application, String title, String body, Vector<String> actions) => (u32 id)
     // Everything still kept, as JSON: newest first.
     all() => (String json)
+    // Gone from Notification Center: one, all of an application's, or every one.
+    remove(u32 id) =|
+    clear_application(String application) =|
     clear() =|
     // Where to hear of new ones.
     subscribe(Port events) =|
+    // An application, hearing what's done with what it posted.
+    listen(String application, Port responses) =|
+    // From whoever shows them: what was chosen on one. An empty action is the notification
+    // itself, clicked.
+    respond(u32 id, String action) =|
+    // Every application that has posted, as JSON: for Settings to list.
+    applications() => (String json)
 }
 
 endpoint NotificationEvents
 {
-    posted(String application, String title, String body) =|
+    // How it's to be shown, as its application's settings say: style is "none", "temporary"
+    // or "persistent", and sound whether it makes one.
+    posted(u32 id, String application, String title, String body, Vector<String> actions, String style, bool sound) =|
+    // What's kept has changed.
+    changed() =|
+}
+
+endpoint NotificationResponses
+{
+    responded(u32 id, String action) =|
 }

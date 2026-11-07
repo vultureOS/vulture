@@ -10,5 +10,6 @@ vulture_add_application(Files
     IDENTIFIER com.vulture.Files
     ICON Files
     KIND "File Manager"
+    CATEGORY utilities
     DESTINATION System/Library/CoreServices
     LIBRARIES LibDesktop LibDiskManagement)

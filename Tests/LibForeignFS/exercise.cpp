@@ -255,6 +255,50 @@ int main(int argc, char** argv)
         fclose(file);
         return 0;
     }
-    format_to(error, "usage: foreignfs-exercise make IMAGE SIZE_MIB fat12|fat16|fat32|exfat LABEL | list IMAGE | add IMAGE\n");
+    // A file in the top folder, out to one here: for what the guest wrote on a stick, to be looked at.
+    if (argc == 5 && StringView(argv[1]) == "get"_sv) {
+        FILE* file = fopen(argv[2], "rb");
+        if (!file)
+            return 1;
+        fseeko(file, 0, 2);
+        FileStore store(file, static_cast<u64>(ftello(file)) / Store::sector_size);
+        auto volume = open_volume(store, clock_now, false);
+        if (volume.is_error()) {
+            format_to(error, "exercise: open: {}\n", volume.error());
+            return 1;
+        }
+        StringView const wanted { argv[3] };
+        Optional<NodeInfo> found;
+        auto looked = volume.value()->for_each_entry(volume.value()->root(), [&](StringView name, NodeInfo const& info) {
+            if (name == wanted && !info.is_directory) {
+                found = info;
+                return Iteration::Stop;
+            }
+            return Iteration::Continue;
+        });
+        if (looked.is_error() || !found.has_value()) {
+            format_to(error, "exercise: get: there's no {}\n", wanted);
+            return 1;
+        }
+        FILE* out = fopen(argv[4], "wb");
+        if (!out)
+            return 1;
+        u8 bytes[65536];
+        for (u64 at = 0; at < found->size;) {
+            auto const part = volume.value()->read(found->index, at, { bytes, sizeof(bytes) });
+            if (part.is_error() || part.value() == 0) {
+                format_to(error, "exercise: get: reading failed\n");
+                return 1;
+            }
+            if (fwrite(bytes, 1, part.value(), out) != part.value())
+                return 1;
+            at += part.value();
+        }
+        fclose(out);
+        fclose(file);
+        say("exercise: got {} ({} bytes)\n", wanted, found->size);
+        return 0;
+    }
+    format_to(error, "usage: foreignfs-exercise make IMAGE SIZE_MIB fat12|fat16|fat32|exfat LABEL | list IMAGE | add IMAGE | get IMAGE NAME OUT\n");
     return 2;
 }

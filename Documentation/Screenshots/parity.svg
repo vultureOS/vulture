@@ -10,8 +10,8 @@
       .track { fill: #3d444d; }
     }
   </style>
-  <text x="320" y="24" font-size="24" font-weight="600">47.3%</text>
+  <text x="320" y="24" font-size="24" font-weight="600">51.2%</text>
   <rect class="track" x="0" y="36" width="640" height="12" rx="6"/>
-  <rect class="fill" x="0" y="36" width="303" height="12" rx="6"/>
-  <text class="note" x="320" y="70" font-size="13">of 451 features, by the last test results</text>
+  <rect class="fill" x="0" y="36" width="328" height="12" rx="6"/>
+  <text class="note" x="320" y="70" font-size="13">of 458 features, by the last test results</text>
 </svg>

@@ -72,6 +72,8 @@
         "separator" : "#00000019",
         "focus" : "#0067f47f",
         "textBackground" : "#ffffff",
+        "systemRed" : "#ff3b30",
+        "systemOrange" : "#ff9500",
         "controlBackground" : "#ffffff",
         "text" : "#000000",
         "selectedText" : "#b3d7ff",
@@ -209,6 +211,9 @@
         "switcher" : { "padding" : 10, "cell" : 104, "icon" : 88, "label" : 26, "radius" : 12, "panelRadius" : 22, "selected" : "#00000026" },
         "tabBar" : { "height" : 28, "closeSize" : 16, "background" : "#e4e4e4", "selected" : "#fafafa", "hover" : "#d8d8d8", "separator" : "#00000022" },
         "tabs" : { "fill" : "#00000004", "border" : "#00000010" },
+        "about" : { "logoBackground" : "#1c1c1e", "logoMark" : "#ffffff" },
+        "soundMenu" : { "hover" : "#0000001a", "onAccent" : "#ffffff" },
+        "screenshot" : { "label" : "#ffffff", "labelShadow" : "#00000099", "window" : "#3d8bff4d", "selection" : "#80808040", "selectionBorder" : "#ffffffb3", "toolbarSymbol" : "#ffffffe6", "toolbarDisabled" : "#ffffff59", "toolbarChosen" : "#ffffff33", "toolbarPressed" : "#ffffff1f", "toolbarLine" : "#ffffff33", "captureFill" : "#ffffff26", "captureText" : "#ffffff", "thumbnailBorder" : "#ffffff80" },
         "menu" : {
             "tint" : "#f6f6f6e0",
             "text" : "#000000d8",
@@ -264,7 +269,7 @@
             "soft" : 0.12
         },
         "menubar" : { "text" : "#000000d8", "highlight" : "#00000024" },
-        "dock" : {
+        "dock" : { "badge" : "#ff3b30", "badgeText" : "#ffffff", "folderMark" : "#1f6fd1b3", "fanArrowFill" : "#00000099", "fanArrow" : "#ffffff", "fanLabelHovered" : "#007affd9", "gridHover" : "#0000001a",
             "border" : "#ffffff66",
             "dot" : "#000000b3",
             "labelBackground" : "#f6f6f6e6",
@@ -272,7 +277,8 @@
             "separator" : "#00000026"
         },
         "searchPanel" : { "fill" : "#f6f6f6e6", "selection" : "#0a84ff", "selectionText" : "#ffffff", "border" : "#00000014" },
-        "notifications" : { "fill" : "#f6f6f6e6", "secondary" : "#00000099", "center" : "#f2f2f2e6" },
+        "notifications" : { "fill" : "#f6f6f6e6", "secondary" : "#00000099", "under" : "#ebebebd9", "underMore" : "#e3e3e3c7", "clear" : "#f6f6f6f2", "clearMark" : "#000000a6", "divider" : "#0000001f", "button" : "#0000000f", "heading" : "#000000d9", "headerButton" : "#f6f6f6d9", "widget" : "#f6f6f6e6", "edit" : "#f6f6f6cc", "editHover" : "#ffffffe6" },
+        "widgets" : { "fill" : "#ffffffeb", "dimmedFill" : "#ffffff38", "dimmedText" : "#ffffffd9", "dimmedToday" : "#000000a6", "accent" : "#007aff", "track" : "#0000001a", "today" : "#ffffff", "clockFace" : "#f4f4f6", "clockNumeral" : "#000000", "clockHand" : "#000000", "dimmedFace" : "#ffffff1f", "badge" : "#e6e6e6", "badgeMark" : "#000000b3", "gallery" : "#f2f2f2cc", "galleryEdge" : "#0000001f", "gallerySelection" : "#0000001a", "galleryOutline" : "#0000001a", "iconPaper" : "#ffffff", "iconInk" : "#1c1c1e", "addBadge" : "#34c759", "addMark" : "#ffffff" },
         "quickSettings" : { "fill" : "#f6f6f6e6", "tile" : "#00000012", "tileOn" : "#0a84ff" },
         "loginwindow" : {
             "text" : "#ffffff",
@@ -286,9 +292,9 @@
         "calculator" : { "background" : "#3a3a3c", "text" : "#ffffff", "digit" : "#656567", "digitPressed" : "#8f8f91", "function" : "#4d4d4f", "functionPressed" : "#6e6e70", "operator" : "#ff9f0a", "operatorPressed" : "#c97d08", "operatorActive" : "#ffc266", "gap" : "#00000059" },
         "monitor" : { "graph" : "#0a84ff", "graphFill" : "#0a84ff40", "graphGrid" : "#00000014", "statsBackground" : "#ffffff" },
         "disks" : { "used" : "#0a84ff", "free" : "#00000014" },
-        "launcher" : { "text" : "#ffffff", "fill" : "#00000040" },
+        "launcher" : { "text" : "#ffffff", "fill" : "#00000040", "selection" : "#00000040", "folder" : "#ffffff4d", "mergeTarget" : "#ffffff59", "dim" : "#00000059", "folderPanel" : "#ffffff26" },
         "files" : { "desktopText" : "#ffffff", "selection" : "#00000024", "renameFill" : "#ffffff" },
-        "settings" : { "group" : "#ffffff", "groupBorder" : "#00000014" }
+        "settings" : { "group" : "#ffffff", "groupBorder" : "#00000014", "alertScreen" : "#c9d6e8", "alertCard" : "#ffffffe6", "alertCardLine" : "#00000033" }
     },
     "desktop" : {
         "minimizeSeconds" : 0.45,

@@ -10,4 +10,5 @@ vulture_add_application(Monitor
     IDENTIFIER com.vulture.Monitor
     ICON Monitor
     KIND "Processes and Activity"
+    CATEGORY utilities
     LIBRARIES LibDesktop)

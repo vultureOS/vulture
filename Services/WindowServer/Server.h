@@ -21,6 +21,12 @@
 
 namespace WindowServer {
 
+// The desktop's own window, and what sits on it (widgets): under every other, and gone where a Space is full screen.
+[[nodiscard]] constexpr bool is_desktop_level(i32 level)
+{
+    return level >= Window::LevelDesktop && level < Window::LevelNormal;
+}
+
 struct Client {
     pid_t pid { 0 };
     IPC::Port events;
@@ -28,6 +34,10 @@ struct Client {
     // An application, if it said so: the Dock and menu bar show those.
     String application_name;
     String application_identifier;
+    // On its icon in the Dock.
+    String badge;
+    // What it keeps clear of windows at each edge (the menu bar's, the Dock's): top, left, bottom, right.
+    int work_area_reserved[4] {};
     String menus;
     bool hidden { false };
     // Hears of everything (the Dock, the menu bar).
@@ -118,6 +128,12 @@ private:
     void minimize(IPC::Sender const&, u32 window) override;
     void zoom(IPC::Sender const&, u32 window) override;
     void set_minimize_target(IPC::Sender const&, i32 x, i32 y) override;
+    void set_dock_edge(IPC::Sender const&, i32 edge, i32 thickness) override;
+    void set_badge(IPC::Sender const&, String text) override;
+    void show_windows_of(IPC::Sender const&, i32 pid) override;
+    void add_menu_extra(IPC::Sender const&, u32 window) override;
+    void set_menu_extras_edge(IPC::Sender const&, i32 x, i32 gap) override;
+    void layout_menu_extras();
     void set_work_area(IPC::Sender const&, i32 top, i32 left, i32 bottom, i32 right) override;
     void register_hotkey(IPC::Sender const&, u16 code, u32 modifiers) override;
     i32 set_wallpaper(IPC::Sender const&, String name) override;
@@ -151,6 +167,8 @@ private:
     void damage_everything(IPC::Sender const&) override;
     WindowServerEndpoint::CaptureAnswer capture(IPC::Sender const&) override;
     WindowServerEndpoint::CaptureAreaAnswer capture_area(IPC::Sender const&, i32 x, i32 y, i32 width, i32 height) override;
+    WindowServerEndpoint::CaptureWindowAnswer capture_window(IPC::Sender const&, u32 window) override;
+    WindowServerEndpoint::WindowUnderAnswer window_under(IPC::Sender const&, i32 x, i32 y) override;
     i32 start_recording(IPC::Sender const&, IPC::Port memory, i32 x, i32 y, i32 width, i32 height) override;
     void recording_ready(IPC::Sender const&) override;
     void stop_recording(IPC::Sender const&) override;
@@ -465,6 +483,13 @@ private:
     Gfx::IntPoint m_minimize_target { 0, 0 };
     int m_work_top { 0 };
     int m_work_left { 0 };
+    // Menu extras, in the order they came, and where they go up to.
+    Vector<ServerWindow*> m_menu_extras;
+    int m_menu_extras_edge { 0 };
+    int m_menu_extras_gap { 0 };
+    // Where the Dock is, and how far it comes out.
+    int m_dock_edge { 0 };
+    int m_dock_thickness { 0 };
     int m_work_bottom { 0 };
     int m_work_right { 0 };
     String m_wallpaper_name;

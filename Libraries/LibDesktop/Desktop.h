@@ -8,13 +8,24 @@
 
 #include <LibBase/Error.h>
 #include <LibBase/Function.h>
+#include <LibBase/OwnPtr.h>
+#include <LibBase/Span.h>
 #include <LibBase/RefPtr.h>
 #include <LibBase/String.h>
 #include <LibBase/Vector.h>
 #include <LibGfx/Bitmap.h>
 #include <LibJSON/JSON.h>
 #include <LibUI/Menu.h>
+#include <LibUI/Window.h>
 #include <sys/types.h>
+
+namespace Core {
+class EventLoop;
+}
+
+namespace IPC {
+class Listener;
+}
 
 namespace Desktop {
 
@@ -29,6 +40,8 @@ struct AppInfo {
     // What it is, in plain words ("Terminal", for Terminal): shown beside its name, and
     // what searching for that finds it by.
     String kind;
+    // What kind of application, as a Mac's LSApplicationCategoryType says: public.app-category.utilities.
+    String category;
     // What it runs in: a profile in /System/Library/Sandbox/Profiles. Empty: it isn't.
     String sandbox;
     // File extensions it opens.
@@ -47,6 +60,10 @@ ErrorOr<pid_t> launch(AppInfo const&);
 ErrorOr<pid_t> open_application(AppInfo const&);
 // Opens a file or a folder with what handles it, or an application bundle.
 ErrorOr<void> open_path(StringView path);
+// With this application, whatever would open it otherwise.
+ErrorOr<void> open_path_with(StringView path, StringView application_bundle);
+// In Files: the folder it's in.
+ErrorOr<void> reveal_in_files(StringView path);
 
 // An icon of /System/Library/Icons, at a size, for this display. Cached.
 [[nodiscard]] RefPtr<Gfx::Bitmap> icon_named(StringView name, int points, int scale);
@@ -67,6 +84,7 @@ struct ApplicationEntry {
     String identifier;
     bool hidden { false };
     bool not_responding { false };
+    String badge;
     Vector<WindowEntry> windows;
 };
 
@@ -98,6 +116,8 @@ public:
     [[nodiscard]] Optional<StringView> string(StringView key) const { return m_values.get_string(key); }
     [[nodiscard]] Optional<double> number(StringView key) const { return m_values.get_number(key); }
     [[nodiscard]] Optional<bool> boolean(StringView key) const { return m_values.get_boolean(key); }
+    [[nodiscard]] JSON::Value const* array(StringView key) const { return m_values.get_array(key); }
+    [[nodiscard]] JSON::Value const* object(StringView key) const { return m_values.get_object(key); }
     void set(StringView key, JSON::Value);
     void save();
 
@@ -106,10 +126,48 @@ private:
     JSON::Value m_values;
 };
 
+// A menu extra: a program's own place in the menu bar, as a Mac's are, put there by the window server to the left of the
+// shell's. It draws its symbol, and says when it's pressed, with where it is on the screen, for what it opens to go under.
+class MenuExtra {
+public:
+    MenuExtra(StringView name, float width, Function<void(UI::Graphics&, Gfx::FloatRect, Gfx::Color)> draw);
+    ~MenuExtra();
+
+    void show();
+    void hide();
+    // Lit, as a menu's title is, while what it opened is open.
+    void set_highlighted(bool);
+    [[nodiscard]] Gfx::IntRect screen_rect() const;
+    Function<void(Gfx::IntRect)> on_press;
+
+private:
+    class ExtraView;
+    OwnPtr<UI::Window> m_window;
+    ExtraView* m_view { nullptr };
+};
+
 // The home of whoever this is.
 [[nodiscard]] String home_directory();
 
-void post_notification(StringView application, StringView title, StringView body);
+// Posting a notification, as an application does: it's shown as that application's settings in Settings > Notifications
+// say. What it's known by comes back, for what's done with it: 0 when it wasn't let through. Its actions are what can be
+// done about it, the first being the one shown when there's room for only one.
+u32 post_notification(StringView application, StringView title, StringView body, Span<StringView const> actions = {});
+
+// What's done with an application's notifications: one of its actions chosen, or (with an empty action) the notification
+// itself clicked. The newest of an application's to listen is the one that hears.
+class NotificationResponses {
+public:
+    NotificationResponses(Core::EventLoop&, StringView application);
+    ~NotificationResponses();
+
+    Function<void(u32 id, StringView action)> on_response;
+
+private:
+    class Stub;
+    OwnPtr<Stub> m_stub;
+    OwnPtr<IPC::Listener> m_listener;
+};
 
 // The system's mark, in a square.
 void draw_logo(UI::Graphics&, Gfx::FloatRect const&, Gfx::Color);

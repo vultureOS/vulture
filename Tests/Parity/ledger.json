@@ -408,11 +408,15 @@
                     "feature": "Not Responding, in Force Quit",
                     "milestone": "M24",
                     "claim": "partial",
-                    "missing": "Force Quit itself (M24). It's said in the Dock and in Monitor until then",
+                    "missing": "Force Quit's “(not responding)”, in red, isn't held to a test: only the server's saying so is",
                     "proof": [
                         {
                             "suite": "test-userland",
                             "output": "ok: and it's said to be not responding"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-menubar-force-quit.png"
                         }
                     ]
                 },
@@ -675,31 +679,134 @@
                 },
                 {
                     "feature": "Hide automatically",
-                    "milestone": "M24"
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-dock.chat",
+                                "key alt-meta_l-d"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-dock.chat",
+                                "ax-expect group \"Dock, hidden\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-dock-hidden.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "On the left or the right",
-                    "milestone": "M24"
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-dock.chat",
+                                "click menuitem \"Left\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-dock-left.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-dock-right.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Folder stacks",
-                    "milestone": "M24"
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-dock-fan.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-dock-grid.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Recent applications",
-                    "milestone": "M24"
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-dock-recents.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Menus from a tile",
-                    "milestone": "M24"
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-dock.chat",
+                                "click menuitem \"Options\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-dock-menu-kept.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Drag in and out",
-                    "milestone": "M24"
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-dock.chat",
+                                "drop button \"Calculator\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-dock-removing.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-dock-put-back.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Badges",
-                    "milestone": "M24"
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-dock.chat",
+                                "ax-expect button \"Terminal\" = 1"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-dock-badge.png"
+                        }
+                    ]
                 }
             ]
         },
@@ -741,32 +848,80 @@
                 },
                 {
                     "feature": "Menu extras, as programs of their own",
-                    "milestone": "M24"
-                },
-                {
-                    "feature": "Force Quit Applications",
-                    "milestone": "M24"
-                },
-                {
-                    "feature": "Help menu search over commands",
-                    "milestone": "M24"
-                },
-                {
-                    "feature": "Move menu extras about",
-                    "milestone": "M24"
-                },
-                {
-                    "feature": "About This Computer",
-                    "claim": "partial",
-                    "missing": "it starts another Settings if one's open: an application should run once (M26)",
                     "milestone": "M24",
+                    "claim": "present",
                     "proof": [
                         {
                             "suite": "test-ui",
                             "chat": [
-                                "Milestones/m15-rulers.chat",
-                                "click menuitem \"About This Computer\""
+                                "Milestones/m24-menubar.chat",
+                                "expect soundmenu: ready"
                             ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-menubar-sound-menu.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Force Quit Applications",
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-menubar.chat",
+                                "key alt-meta_l-esc"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-menubar-force-quit.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-menubar-force-quit-asking.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Help menu search over commands",
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-menubar.chat",
+                                "ax-expect menuitem \"Fill\" = Window"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-menubar-help.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Move menu extras about",
+                    "milestone": "M44"
+                },
+                {
+                    "feature": "About This Computer",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-menubar.chat",
+                                "ax-expect group \"About This Computer\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-menubar-about.png"
                         }
                     ]
                 },
@@ -786,20 +941,27 @@
                 {
                     "feature": "Quick Settings",
                     "claim": "partial",
-                    "missing": "Wi-Fi, Bluetooth, Display, Focus and Now Playing; customizing it",
-                    "milestone": "M24",
+                    "missing": "Wi-Fi, Bluetooth, Display and Now Playing modules (M32, H3, M34); its own customization beyond which modules show in the menu bar",
+                    "milestone": "M34",
                     "proof": [
                         {
                             "suite": "test-ui",
                             "golden": "desktop-2x-quick-settings.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-menubar.chat",
+                                "click switch \"Focus\""
+                            ]
                         }
                     ]
                 },
                 {
                     "feature": "Notifications: banners and a list",
                     "claim": "partial",
-                    "missing": "grouping, actions, per-application settings, and keeping them across a reboot",
-                    "milestone": "M24",
+                    "missing": "kept across a reboot (M26); swiped away",
+                    "milestone": "M26",
                     "proof": [
                         {
                             "suite": "test-ui",
@@ -808,20 +970,169 @@
                         {
                             "suite": "test-ui",
                             "golden": "desktop-2x-notification-list.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-banner.png"
                         }
                     ]
                 },
                 {
                     "feature": "Do Not Disturb and other Focus modes",
-                    "milestone": "M24"
+                    "milestone": "M31",
+                    "claim": "partial",
+                    "missing": "Focus modes other than Do Not Disturb, and schedules for them",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-menubar.chat",
+                                "ax-expect button \"Focus\" = Do Not Disturb"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-menubar-focus-on.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Widgets on the desktop",
-                    "milestone": "M24"
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-panels.chat",
+                                "click menuitem \"Edit Widgets…\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-desktop-widget.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-widget-menu.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Widgets in Notification Center",
-                    "milestone": "M24"
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-panels.chat",
+                                "click cell \"Monitor Usage (Small)\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-gallery.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-center-editing.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Notification actions, answered back to the program",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-panels.chat",
+                                "click menuitem \"Mark as Read\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-panels.chat",
+                                "ax-expect textarea \"Terminal\" ~ Mark as Read"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-banner-options.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Alerts that stay until answered",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-panels.chat",
+                                "ax-expect button \"Close\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-alert.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Notifications grouped by application",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-panels.chat",
+                                "ax-expect group \"Terminal\" = 2 notifications"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-center.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-center-expanded.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Each application's notification settings",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-panels.chat",
+                                "ax-expect textarea \"Terminal\" ~ not allowed for Terminal"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-panels.chat",
+                                "ax-expect row \"Terminal\" = Off"
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "feature": "Control Center's modules in the menu bar",
+                    "claim": "partial",
+                    "missing": "only Focus and Sound are modules so far",
+                    "milestone": "M34",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-menubar-control-center-settings.png"
+                        }
+                    ]
                 }
             ]
         },
@@ -854,7 +1165,7 @@
                             "suite": "test-ui",
                             "chat": [
                                 "monday.chat",
-                                "click menuitem \"Log Out\""
+                                "click menuitem \"Log Out vulture…\""
                             ]
                         }
                     ]
@@ -1906,12 +2217,22 @@
                 },
                 {
                     "feature": "Notifications",
-                    "claim": "partial",
-                    "missing": "only a button to test them (M24)",
-                    "milestone": "M24",
+                    "claim": "present",
                     "proof": [
                         {
-                            "suite": "test-ui"
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-panels.chat",
+                                "click radio \"Persistent\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-settings-notifications.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-settings-terminal.png"
                         }
                     ]
                 },
@@ -1939,16 +2260,13 @@
                 },
                 {
                     "feature": "Desktop & Dock",
-                    "milestone": "M24",
+                    "milestone": "M27",
                     "claim": "partial",
-                    "missing": "the Dock's position, hiding and the rest of its settings (M24); widgets; Overview's settings other than hot corners",
+                    "missing": "Overview's settings other than hot corners; Stage's other than on and off",
                     "proof": [
                         {
                             "suite": "test-ui",
-                            "chat": [
-                                "Milestones/m23-stage.chat",
-                                "ax-expect switch \"Drag windows to menu bar to fill screen\" = on"
-                            ]
+                            "golden": "m24-dock-settings.png"
                         },
                         {
                             "suite": "test-ui",
@@ -2221,7 +2539,25 @@
                 },
                 {
                     "feature": "Screenshot",
-                    "milestone": "M24"
+                    "milestone": "M24",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-screenshots.chat",
+                                "expect screenshot: saved"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-screenshots-thumbnail.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-screenshots-toolbar.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Mail",
@@ -2258,6 +2594,40 @@
                 {
                     "feature": "Help",
                     "milestone": "M29"
+                },
+                {
+                    "feature": "Launcher folders, made by dropping one on another",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-panels.chat",
+                                "expect launcher: into folder Utilities"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-launcher-folder.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "Launcher order, kept",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m24-panels.chat",
+                                "ax-expect cell \"Viewer\" at 45 100 170 150"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m24-panels-launcher-moved.png"
+                        }
+                    ]
                 }
             ]
         },

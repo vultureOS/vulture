@@ -623,6 +623,33 @@ void Graphics::draw_symbol(Symbol symbol, FloatRect const& rect, Color color, fl
         m_painter.fill_path(shape, color, FillRule::EvenOdd);
         return;
     }
+    case Symbol::Toggles: {
+        // Two capsules, the knob at the right of one and the left of the other.
+        Path shape;
+        auto const top = at(1.6f, 3.2f);
+        shape.add_rounded_rect({ top.x, top.y, 12.8f * unit, 4 * unit }, 2 * unit);
+        auto const bottom = at(1.6f, 8.8f);
+        shape.add_rounded_rect({ bottom.x, bottom.y, 12.8f * unit, 4 * unit }, 2 * unit);
+        m_painter.fill_path(shape, color, FillRule::NonZero);
+        Path knobs;
+        auto const right = at(10.4f, 3.8f);
+        knobs.add_ellipse({ right.x, right.y, 2.8f * unit, 2.8f * unit });
+        auto const left = at(2.8f, 9.4f);
+        knobs.add_ellipse({ left.x, left.y, 2.8f * unit, 2.8f * unit });
+        m_painter.fill_path(knobs, Gfx::Color { 255, 255, 255, color.alpha }, FillRule::NonZero);
+        return;
+    }
+    case Symbol::Moon: {
+        // A circle with a bite out of it, up and to the right: the circle (centred at 8,8, radius 6) the long way round from
+        // where the bite (centred at 11.2,4.8, radius 5.4) meets it, then back along the bite's edge. (The angles are where the
+        // two circles cross, worked out once.)
+        Path shape;
+        shape.arc_to(at(8, 8), 6 * unit, 0.2582f, 4.4542f);
+        shape.arc_to(at(11.2f, 4.8f), 5.4f * unit, 3.6442f, 1.0682f);
+        shape.close();
+        m_painter.fill_path(shape, color, FillRule::NonZero);
+        return;
+    }
     case Symbol::Trackpad: {
         // A rounded pad, and where a press goes.
         Path shape;

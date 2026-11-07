@@ -985,9 +985,9 @@ void Compositor::draw_wallpaper(IntRect clip)
         memcpy(framebuffer.scanline(y) + clip.x, m_wallpaper->scanline(y) + clip.x, static_cast<size_t>(clip.width) * sizeof(Pixel));
 }
 
-void Compositor::draw_nine_slice(NineSlice const& slice, IntRect target, Color color, IntRect clip, IntRect hole, int hole_corner)
+void Compositor::draw_nine_slice(NineSlice const& slice, IntRect target, Color color, IntRect clip, IntRect hole, int hole_corner, Bitmap* into)
 {
-    auto& framebuffer = m_screen.framebuffer();
+    auto& framebuffer = into ? *into : m_screen.framebuffer();
     auto area = target.intersected(clip);
     if (area.is_empty() || !slice.mask)
         return;
@@ -1387,6 +1387,25 @@ void Compositor::set_wallpaper_colors(Vector<Color> colors)
     m_wallpaper_colors = move(colors);
     if (!render_wallpaper().is_error())
         invalidate_all();
+}
+
+ErrorOr<NonnullRefPtr<Bitmap>> Compositor::snapshot_with_shadow(ServerWindow const& window) const
+{
+    auto body = TRY(snapshot(window));
+    if (window.is_square() || !window.shape)
+        return body;
+    auto const& style = shadow_style_of(window);
+    auto const& slice = shadow_slice_of(window);
+    int const offset = static_cast<int>(style.offset_y * static_cast<float>(m_screen.scale()));
+    int const margin = slice.margin;
+    auto picture = TRY(Bitmap::create({ body->width() + margin * 2, body->height() + margin * 2 + max(offset, 0) }));
+    IntRect const hole { margin, margin, body->width(), body->height() };
+    auto* self = const_cast<Compositor*>(this);
+    self->draw_nine_slice(slice, hole.inflated(margin).translated(0, offset), style.color, picture->rect(), hole, window.shape->corner_extent, picture.ptr());
+    for (int y = 0; y < body->height(); ++y)
+        blend_row(picture->scanline(margin + y) + margin, body->scanline(y), body->width());
+    self->draw_nine_slice(window.shape->outline, hole, m_theme.outline, picture->rect(), hole.inflated(-1), window.shape->corner_extent, picture.ptr());
+    return picture;
 }
 
 ErrorOr<NonnullRefPtr<Bitmap>> Compositor::snapshot(ServerWindow const& window) const

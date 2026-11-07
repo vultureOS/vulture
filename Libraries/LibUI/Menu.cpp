@@ -477,6 +477,12 @@ void Menu::open(Window& owner, IntPoint screen_point, int aligned)
         // bar's, they come to the menu's own, the one with the pointer.
         m_window->set_key_interceptor(m_key_forwarder.ptr());
         owner.forget_press();
+    } else {
+        // A submenu has the pointer, and so the keys, while it's open: they go to the one menu that handles them all.
+        auto* root = this;
+        while (root->m_parent)
+            root = root->m_parent;
+        m_window->set_key_interceptor(root->m_key_forwarder.ptr());
     }
 }
 

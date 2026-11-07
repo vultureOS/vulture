@@ -8,6 +8,7 @@
 #include <os/log.h>
 #include "Desktop.h"
 #include <LibIPC/Bootstrap.h>
+#include <LibIPC/Listener.h>
 #include <LibImage/Image.h>
 #include <LibUI/Application.h>
 #include <FilesEndpoint.h>
@@ -142,6 +143,7 @@ ErrorOr<AppInfo> read_bundle(StringView bundle_path)
     info.executable_path = MUST(path.to_string());
     info.icon = copy(json.get_string("CFBundleIconFile"_sv).value_or("GenericApplication"_sv));
     info.kind = copy(json.get_string("VultureKind"_sv).value_or(StringView {}));
+    info.category = copy(json.get_string("LSApplicationCategoryType"_sv).value_or(StringView {}));
     info.sandbox = copy(json.get_string("VultureSandbox"_sv).value_or(StringView {}));
     if (auto const* extensions = json.get_array("CFBundleDocumentExtensions"_sv)) {
         for (size_t i = 0; i < extensions->size(); ++i) {
@@ -246,6 +248,28 @@ ErrorOr<pid_t> open_application(AppInfo const& application)
     return static_cast<pid_t>(reply.pid);
 }
 
+ErrorOr<void> open_path_with(StringView path, StringView application_bundle)
+{
+    auto bundle = TRY(read_bundle(application_bundle));
+    StringView arguments[1] = { path };
+    (void)TRY(launch(bundle, Span<StringView const>(arguments, 1)));
+    return {};
+}
+
+ErrorOr<void> reveal_in_files(StringView path)
+{
+    size_t at = path.length();
+    while (at > 1 && path[at - 1] != '/')
+        --at;
+    // (A bundle's folder, not the bundle: that would run it.)
+    auto folder = path.substring_view(0, at > 1 ? at - 1 : 1);
+    auto port = IPC::look_up("com.vulture.Files"_sv);
+    if (port.is_error())
+        return Error::from_errno(ENOENT);
+    (void)FilesProxy(port.release_value()).open_folder(folder);
+    return {};
+}
+
 ErrorOr<void> open_path(StringView path)
 {
     if (path.ends_with(".app"_sv)) {
@@ -347,6 +371,7 @@ ErrorOr<ShellState> parse_shell_state(StringView text)
             application.identifier = copy(one.get_string("identifier"_sv).value_or(StringView {}));
             application.hidden = one.get_boolean("hidden"_sv).value_or(false);
             application.not_responding = one.get_boolean("notResponding"_sv).value_or(false);
+            application.badge = copy(one.get_string("badge"_sv).value_or(StringView {}));
             if (auto const* windows = one.get_array("windows"_sv)) {
                 for (size_t j = 0; j < windows->size(); ++j) {
                     auto const& window = windows->at(j);
@@ -480,14 +505,51 @@ void draw_logo(UI::Graphics& graphics, FloatRect const& shape, Color color)
     graphics.painter().fill_path(path, color);
 }
 
-void post_notification(StringView application, StringView title, StringView body)
+u32 post_notification(StringView application, StringView title, StringView body, Span<StringView const> actions)
+{
+    auto port = IPC::look_up("com.vulture.notificationd"_sv);
+    if (port.is_error())
+        return 0;
+    NotificationServiceProxy center(port.release_value());
+    Vector<String> titles;
+    for (auto action : actions)
+        titles.append(copy(action));
+    auto id = center.post(application, title, body, titles);
+    return id.is_error() ? 0 : id.value();
+}
+
+class NotificationResponses::Stub final : public NotificationResponsesStub {
+public:
+    explicit Stub(NotificationResponses& owner)
+        : m_owner(owner)
+    {
+    }
+
+    void responded(IPC::Sender const&, u32 id, String action) override
+    {
+        if (m_owner.on_response)
+            m_owner.on_response(id, action.view());
+    }
+
+private:
+    NotificationResponses& m_owner;
+};
+
+NotificationResponses::NotificationResponses(Core::EventLoop& loop, StringView application)
+    : m_stub(adopt_own(*new Stub(*this)))
 {
     auto port = IPC::look_up("com.vulture.notificationd"_sv);
     if (port.is_error())
         return;
-    NotificationServiceProxy center(port.release_value());
-    (void)center.post(application, title, body);
+    auto pair = IPC::create_port();
+    if (pair.is_error())
+        return;
+    auto ports = pair.release_value();
+    m_listener = adopt_own(*new IPC::Listener(loop, move(ports.receive), [this](IPC::ReceivedMessage& message) { (void)m_stub->handle(message); }));
+    (void)NotificationServiceProxy(port.release_value()).listen(application, move(ports.send));
 }
+
+NotificationResponses::~NotificationResponses() = default;
 
 void log_out()
 {
@@ -508,6 +570,86 @@ void shut_down()
     auto port = IPC::look_up("com.vulture.loginwindow"_sv);
     if (!port.is_error())
         (void)SessionProxy(port.release_value()).shut_down();
+}
+
+class MenuExtra::ExtraView final : public UI::View {
+public:
+    ExtraView(MenuExtra& owner, String name, Function<void(UI::Graphics&, Gfx::FloatRect, Gfx::Color)> draw)
+        : m_owner(owner)
+        , m_name(move(name))
+        , m_draw(move(draw))
+    {
+    }
+
+    void set_highlighted(bool highlighted)
+    {
+        m_highlighted = highlighted;
+        set_needs_display();
+    }
+
+    void draw(UI::Graphics& graphics) override
+    {
+        auto const& t = UI::Appearance::the();
+        Gfx::FloatRect const all { 0, 0, width(), height() };
+        if (m_highlighted) {
+            float const inset = t.metric("menubar.highlightInset"_sv);
+            graphics.fill_rounded({ 0, inset / 2, width(), height() - inset }, t.metric("menubar.highlightRadius"_sv), t.color("menubar.highlight"_sv));
+        }
+        if (m_draw)
+            m_draw(graphics, all, t.color("menubar.text"_sv));
+    }
+
+    bool mouse_down(UI::MouseEvent const& event) override
+    {
+        if (event.button != UI::WS::ButtonLeft)
+            return false;
+        if (m_owner.on_press)
+            m_owner.on_press(m_owner.screen_rect());
+        return false;
+    }
+
+    [[nodiscard]] UI::Accessibility::Role accessibility_role() const override { return UI::Accessibility::Role::Button; }
+    [[nodiscard]] String accessibility_label() const override { return MUST(String::from_view(m_name.view())); }
+
+private:
+    MenuExtra& m_owner;
+    String m_name;
+    Function<void(UI::Graphics&, Gfx::FloatRect, Gfx::Color)> m_draw;
+    bool m_highlighted { false };
+};
+
+MenuExtra::MenuExtra(StringView name, float width, Function<void(UI::Graphics&, Gfx::FloatRect, Gfx::Color)> draw)
+{
+    auto const& t = UI::Appearance::the();
+    int const height = static_cast<int>(t.metric("menubar.height"_sv));
+    m_window = adopt_own(*new UI::Window(name, { 0, 0, static_cast<int>(width), height }, UI::WS::WindowBare | UI::WS::WindowSticky));
+    m_window->set_transparent(true);
+    m_window->backend().set_level(UI::WS::LevelMenuBar);
+    m_view = &m_window->root_view().add<ExtraView>(*this, MUST(String::from_view(name)), move(draw));
+    m_view->set_frame({ 0, 0, width, static_cast<float>(height) });
+}
+
+MenuExtra::~MenuExtra() = default;
+
+void MenuExtra::show()
+{
+    m_window->show();
+    (void)UI::Application::the().connection().server().add_menu_extra(m_window->backend().system_id());
+}
+
+void MenuExtra::hide()
+{
+    m_window->hide();
+}
+
+void MenuExtra::set_highlighted(bool highlighted)
+{
+    m_view->set_highlighted(highlighted);
+}
+
+Gfx::IntRect MenuExtra::screen_rect() const
+{
+    return m_window->frame();
 }
 
 }

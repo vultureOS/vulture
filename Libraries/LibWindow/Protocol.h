@@ -41,6 +41,8 @@ enum WindowFlags : u32 {
 // at Popup; the rest, at Normal.
 enum WindowLevel : i32 {
     LevelDesktop = -100,
+    // What sits on the desktop, over its icons: widgets. Part of the desktop, all the same.
+    LevelDesktopItems = -90,
     LevelNormal = 0,
     LevelDock = 50,
     LevelMenuBar = 60,

@@ -19,6 +19,7 @@ using namespace Gfx;
 namespace {
 
 Vector<Window*> s_windows;
+Window* s_main_window = nullptr;
 
 View* dynamic_view_of(Responder* responder)
 {
@@ -67,6 +68,18 @@ void WindowRegistry::add(Window& window)
 void WindowRegistry::remove(Window& window)
 {
     s_windows.remove_all_matching([&](auto* other) { return other == &window; });
+    if (s_main_window == &window)
+        s_main_window = nullptr;
+}
+
+void WindowRegistry::became_key(Window& window)
+{
+    s_main_window = &window;
+}
+
+Window* WindowRegistry::main_window()
+{
+    return s_main_window && s_main_window->is_shown() ? s_main_window : nullptr;
 }
 
 Span<Window* const> WindowRegistry::windows()
@@ -1164,7 +1177,9 @@ void Window::move_by_pointer()
 void Window::begin_drag(StringView type, ReadonlyBytes data, FloatSize size, Function<void(Graphics&)> draw)
 {
     forget_press();
-    IntRect image_frame { static_cast<int>(m_pointer.x), static_cast<int>(m_pointer.y), static_cast<int>(size.width + 0.999f), static_cast<int>(size.height + 0.999f) };
+    // Under the pointer, on the screen (the pointer's known in this window's points), wherever this window is.
+    auto const origin = frame().origin();
+    IntRect image_frame { origin.x + static_cast<int>(m_pointer.x - size.width / 2), origin.y + static_cast<int>(m_pointer.y - size.height / 2), static_cast<int>(size.width + 0.999f), static_cast<int>(size.height + 0.999f) };
     m_drag_image = adopt_own(*new Window("drag"_sv, image_frame, WS::WindowBare | WS::WindowPopup));
     m_drag_image->set_transparent(true);
     m_drag_image->root_view().add<PictureView>(move(draw)).set_frame({ 0, 0, size.width, size.height });
@@ -1195,13 +1210,17 @@ void Window::handle_drag(WS::DragPhase phase, FloatPoint position, StringView ty
     case WS::DragPhase::Entered:
     case WS::DragPhase::Moved:
         set_target(target_at(position));
+        if (m_drop_target)
+            m_drop_target->drag_moved(m_drop_target->from_window(position));
         break;
     case WS::DragPhase::Left:
         set_target(nullptr);
         break;
     case WS::DragPhase::Dropped:
-        if (auto* target = target_at(position))
+        if (auto* target = target_at(position)) {
+            target->drag_moved(target->from_window(position));
             target->perform_drop(type, data);
+        }
         set_target(nullptr);
         break;
     }
@@ -1439,6 +1458,8 @@ void Window::handle_activation(bool active)
     if (active == m_key)
         return;
     m_key = active;
+    if (active)
+        WindowRegistry::became_key(*this);
     // Controls draw differently in a window in the background.
     add_damage({ 0, 0, m_root->width(), m_root->height() });
     if (on_key_change)

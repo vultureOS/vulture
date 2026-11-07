@@ -1,0 +1,105 @@
+# M24: the menu bar. The system's menu as Sequoia's is, About This Computer, Force Quit, menu extras that are programs of
+# their own, and Help that finds a menu's command by what it's called.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 2
+# ---- The system's menu.
+click menuitem "Logo"
+ax-expect menuitem "About This Computer"
+ax-expect menuitem "Force Quit…"
+ax-expect menuitem "Lock Screen" disabled
+pause 0.5
+screenshot system-menu.png
+click menuitem "About This Computer"
+ax-expect group "About This Computer"
+ax-expect text "Memory"
+pointer 31500 25000
+pause 1
+screenshot about.png
+key meta_l-w
+pause 0.5
+# ---- Force Quit: Command-Option-Escape, a program that's stopped answering, said so in red, chosen, and gone.
+click button "Text Editor"
+expect texteditor: ready
+pause 1
+click button "Terminal"
+expect terminal: ready
+pause 1
+type killall -STOP TextEditor\r
+pause 1
+key meta_l-q
+pause 1
+# Its window, as the Dock's button may already say it isn't answering, and be called that.
+pointer 16384 14049
+pause 0.2
+button left down
+pause 0.1
+button left up
+pause 0.5
+type x
+pause 3
+key alt-meta_l-esc
+ax-expect table "Applications"
+ax-expect button "Force Quit" disabled
+ax-expect row "Text Editor" = not responding
+click row "Text Editor"
+ax-expect row "Text Editor" = selected, not responding
+ax-expect button "Force Quit" enabled
+pointer 31500 25000
+pause 0.5
+screenshot force-quit.png
+click button "Force Quit"
+ax-expect button "Cancel"
+pause 0.5
+screenshot force-quit-asking.png
+click button "Force Quit"
+ax-gone row "Text Editor"
+pause 0.5
+key meta_l-w
+# ---- Help: a command found by what it's called, and done from there.
+pause 1
+click menuitem "Help"
+expect help: shown
+type fill
+ax-expect menuitem "Fill" = Window
+pause 0.5
+screenshot help.png
+key ret
+ax-expect window "vulture" at 8 32 1264 686
+pause 1
+# ---- A menu extra, a program of its own: Sound, from Control Center's settings.
+click button "Settings"
+expect settings: Appearance
+click row "Control Center"
+expect settings: Control Center
+click popup "Sound"
+click menuitem "Always Show in Menu Bar"
+expect soundmenu: ready
+ax-expect button "Sound"
+pause 0.5
+pointer 31500 25000
+pause 0.5
+screenshot control-center-settings.png
+click button "Sound"
+ax-expect slider "Volume"
+ax-expect menuitem "Sound Settings…"
+pause 0.5
+screenshot sound-menu.png
+pointer 16000 20000
+pause 0.2
+button left down
+pause 0.1
+button left up
+ax-gone slider "Volume"
+# ---- Focus, from Control Center: the moon in the menu bar while it's on.
+click button "Quick Settings"
+ax-expect switch "Focus" = off
+click switch "Focus"
+ax-expect switch "Focus" = on
+ax-expect button "Focus" = Do Not Disturb
+pause 0.5
+screenshot focus-on.png
+click switch "Focus"
+ax-gone button "Focus"

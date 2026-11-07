@@ -11,5 +11,6 @@ vulture_add_application(Viewer
     SANDBOX viewer
     ICON Viewer
     KIND "Pictures and Images"
+    CATEGORY productivity
     EXTENSIONS png jpg jpeg
     LIBRARIES LibDesktop)

@@ -11,5 +11,6 @@ vulture_add_application(TextEditor
     SANDBOX document-editor
     ICON TextEditor
     KIND "Plain Text and Notes"
+    CATEGORY productivity
     EXTENSIONS txt text md log json cpp h conf plist
     LIBRARIES LibDesktop)

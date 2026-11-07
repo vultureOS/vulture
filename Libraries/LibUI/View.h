@@ -225,6 +225,8 @@ public:
     }
     virtual void drag_entered() { }
     virtual void drag_exited() { }
+    // Where what's being dragged is over it, as it moves, and once more just before it's dropped.
+    virtual void drag_moved(Gfx::FloatPoint) { }
     virtual void perform_drop(StringView type, ReadonlyBytes data)
     {
         (void)type;

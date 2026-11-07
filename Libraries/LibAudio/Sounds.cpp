@@ -108,7 +108,7 @@ private:
 
 Span<StringView const> named_sounds()
 {
-    static StringView const names[] = { "notification"_sv, "alert"_sv, "trash"_sv, "login"_sv, "volume"_sv };
+    static StringView const names[] = { "notification"_sv, "alert"_sv, "trash"_sv, "login"_sv, "volume"_sv, "screenshot"_sv };
     return { names, array_size(names) };
 }
 
@@ -127,6 +127,13 @@ RefPtr<Sound const> make_named_sound(StringView name)
         canvas.add_note(0, 392, 1, 14);
         canvas.add_note(0, 587.33, 0.6, 18);
         return canvas.finish(0.5f);
+    }
+    if (name == "screenshot"_sv) {
+        // A shutter: open and shut, two quick bright clicks.
+        Canvas canvas(0.22);
+        canvas.add_noise(0, 0.9, 60, 0.85);
+        canvas.add_noise(0.085, 0.7, 70, 0.9);
+        return canvas.finish(0.45f);
     }
     if (name == "trash"_sv) {
         // Paper, crumpling: three scrunches, each duller.

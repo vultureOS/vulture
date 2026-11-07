@@ -11,4 +11,5 @@ vulture_add_application(Console
     SANDBOX console
     ICON Console
     KIND "System Log"
+    CATEGORY utilities
     LIBRARIES LibDesktop LibServices)

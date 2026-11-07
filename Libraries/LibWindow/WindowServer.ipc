@@ -71,6 +71,8 @@ endpoint WindowServer
     activate_application(i32 pid) =|
     hide_application(i32 pid, bool hidden) =|
     quit_application(i32 pid) =|
+    // App Exposé, for this one: its windows, spread out.
+    show_windows_of(i32 pid) =|
     // Its own, or if this is the desktop, anyone's.
     arrange_window(u32 window, i32 arrangement) =|
     // Everyone else out of the way, or everyone back.
@@ -100,6 +102,15 @@ endpoint WindowServer
     activate_window(u32 window) =|
     // Where minimized windows go to (points on the screen): where the Dock has them.
     set_minimize_target(i32 x, i32 y) =|
+    // Which edge the Dock is on (0 the bottom, 1 the left, 2 the right) and how far it comes out from it: for what comes
+    // into view at the edges of a full screen Space.
+    set_dock_edge(i32 edge, i32 thickness) =|
+    // What the Dock shows on the asker's icon: a count, or a word; empty for nothing.
+    set_badge(String text) =|
+    // A menu extra: this window, a program's own, put in the menu bar, to the left of those the shell has (whose left edge it
+    // says, with the gap between them), the first added nearest them.
+    add_menu_extra(u32 window) =|
+    set_menu_extras_edge(i32 x, i32 gap) =|
     // What a zoomed window must leave clear, in points from each edge.
     set_work_area(i32 top, i32 left, i32 bottom, i32 right) =|
     // The system-wide keys: this client hears them, and nobody else.
@@ -148,6 +159,10 @@ endpoint WindowServer
     // been allowed to, as `Connection::capture_screen` sees to: others get EPERM, and a line in the log.
     capture() => (i32 error, ByteBuffer png)
     capture_area(i32 x, i32 y, i32 width, i32 height) => (i32 error, ByteBuffer png)
+    // One window by itself, as a PNG, whatever's over it, with its shadow round it on nothing; and which window is at a
+    // point, not counting the asker's own (for a screenshot of a window, chosen with the asker's window over everything).
+    capture_window(u32 window) => (i32 error, ByteBuffer png)
+    window_under(i32 x, i32 y) => (u32 window, i32 x, i32 y, i32 width, i32 height)
     // Frames of the screen, in this memory, for as long as it goes on: `recorded_frame` says when there's another, and it has to say
     // `recording_ready` before it's given the next. Only for one that's been allowed to.
     start_recording(Port memory, i32 x, i32 y, i32 width, i32 height) => (i32 error)

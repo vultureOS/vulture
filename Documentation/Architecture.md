@@ -132,7 +132,7 @@ header dependency tracking.
 
 ```
  Apps         Files · Terminal · Text Editor · Viewer · Settings · Monitor · Software …
- Desktop      LoginWindow · DesktopShell (menu bar, Search, notifications) · Dock · Overview · Quick Settings
+ Desktop      LoginWindow · DesktopShell (menu bar, Search, notifications, widgets) · Dock · SoundMenu · Overview · Control Center
  Frameworks   pranaUI (AppKit-like) · LibAnimation · LibGfx (Quartz-2D-like) · LibText (CoreText-like) · LibImage
               LibUnicode (the Unicode Character Database, as code) · LibLocale (CLDR)
  Core libs    LibCore (run loop, JSON plists) · LibIPC (+ipcc IDL) · LibCrypto/TLS/HTTP · LibVT · LibAudio
@@ -362,6 +362,19 @@ macOS-style at the top, real Unix underneath:
   a client describes its views, so that they can be found and pressed by name. Uncovering the desktop slides each window
   aside without moving it. The desktop's own window (Files') says when a click on it was on no icon, which is what clicking
   the wallpaper means. Tabs are the toolkit's: windows of one program, one showing in another's place.
+- **The desktop (M24).** The Dock keeps what it shows in `com.vulture.dock`, with a Mac's names (`persistent-apps`,
+  `orientation`, `autohide`, `tilesize` and the rest), so `defaults` reads and changes it, and hears through `notifyd` that
+  someone has. The menu bar and the Dock each keep part of the screen from windows; the server keeps what each client
+  asks for and gives windows what's left of them all. A menu extra is a program of its own (`Desktop::MenuExtra`), which
+  the server puts in the menu bar to the left of the shell's, as Serenity's applets are; SoundMenu is the first.
+  Notifications go through `notificationd`, one for the machine, which keeps everyone's apart by who posted them and
+  reads each one's settings for each application from their own `com.vulture.notifications`. A notification has actions,
+  and what's chosen goes back to the program that posted it (`Desktop::NotificationResponses`); `notification` posts one
+  from the command line, and can wait for the answer. The shell shows banners and alerts and Notification Center, each
+  application's together. Widgets are the shell's (`Widgets.cpp`): a kind draws itself at each size it comes in, in full
+  colour or in the desktop's one tint, and is placed on the desktop, in a window at a level just above the desktop's own
+  (`LevelDesktopItems`, part of the desktop to the server), or in Notification Center. Help's search is over the menus
+  the active application publishes. Screenshots are the shell's, taken through the same `capture` as M22's.
 - **Not responding (M21).** A program is pinged when input is sent to it, and its event loop
   answers. After two seconds with no answer, the cursor over its windows spins, and the shell
   state says so, for the Dock and Monitor. The server still moves and resizes its windows.

@@ -7,6 +7,7 @@
 #include <Kernel/API/POSIX/privacy.h>
 #include <LibIPC/Bootstrap.h>
 #include <LibJSON/JSON.h>
+#include <NotificationsEndpoint.h>
 #include <PrivacyEndpoint.h>
 #include <Desktop.h>
 #include <Kernel/API/POSIX/sysctl.h>
@@ -19,6 +20,7 @@
 #include <LibUI/Layout.h>
 #include <LibUI/Motion.h>
 #include <LibUI/ScrollView.h>
+#include <notify.h>
 #include <Kernel/API/POSIX/socket.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -328,14 +330,94 @@ void show_hot_corners(UI::Window& window)
     Sheet::present(window, adopt_own(*new HotCornersSheet(window)), { 420, 260 });
 }
 
+// Control Center: which of its modules are in the menu bar too, as Sequoia's pane has it.
+void build_control_center(Page& page)
+{
+    Desktop::Preferences control_center("com.vulture.controlcenter"_sv);
+    auto saved = [](StringView key, StringView value) {
+        Desktop::Preferences preferences("com.vulture.controlcenter"_sv);
+        preferences.set(key, MUST(JSON::Value::string(value)));
+        preferences.save();
+        notify_post("com.vulture.controlcenter.preferences");
+    };
+    auto& modules = page.add_group("Control Center Modules"_sv);
+    auto& focus_row = modules.rows().add<Row>("Focus"_sv);
+    auto& focus = focus_row.add<PopUpButton>();
+    focus.set_accessibility_label("Focus"_sv);
+    focus.add_item("Show When Active"_sv);
+    focus.add_item("Don\xE2\x80\x99t Show in Menu Bar"_sv);
+    focus.set_selected_index(control_center.string("focus"_sv).value_or("whenActive"_sv) == "never"_sv ? 1 : 0);
+    focus.on_change = [saved](int index) { saved("focus"_sv, index == 1 ? "never"_sv : "whenActive"_sv); };
+    auto& sound_row = modules.rows().add<Row>("Sound"_sv);
+    auto& sound = sound_row.add<PopUpButton>();
+    sound.set_accessibility_label("Sound"_sv);
+    sound.add_item("Always Show in Menu Bar"_sv);
+    sound.add_item("Don\xE2\x80\x99t Show in Menu Bar"_sv);
+    sound.set_selected_index(control_center.string("sound"_sv).value_or("whenActive"_sv) == "always"_sv ? 0 : 1);
+    sound.on_change = [saved](int index) { saved("sound"_sv, index == 0 ? "always"_sv : "whenActive"_sv); };
+    page.finish();
+}
+
+// Focus: what's held back while it's on. Do Not Disturb, for now: banners wait, and are in Notification Center.
+void build_focus(Page& page)
+{
+    Desktop::Preferences focus("com.vulture.focus"_sv);
+    auto& group = page.add_group(""_sv);
+    auto& row = group.rows().add<Row>("Do Not Disturb"_sv);
+    auto& toggle = row.add<Switch>(!focus.string("mode"_sv).value_or(StringView {}).is_empty());
+    toggle.set_accessibility_label("Do Not Disturb"_sv);
+    toggle.on_action = [&toggle] {
+        Desktop::Preferences preferences("com.vulture.focus"_sv);
+        preferences.set("mode"_sv, MUST(JSON::Value::string(toggle.is_on() ? "Do Not Disturb"_sv : ""_sv)));
+        preferences.save();
+        notify_post("com.vulture.focus.preferences");
+    };
+    (void)group.rows().add<Row>("While it\xE2\x80\x99s on"_sv, "Notifications are silenced, and wait in Notification Center"_sv);
+    page.finish();
+}
+
 void build_dock(Page& page)
 {
+    // The Dock's, kept where the Dock keeps them, with a Mac's names: it hears they've changed at once.
+    auto dock_saved = [](StringView key, JSON::Value value) {
+        Desktop::Preferences dock("com.vulture.dock"_sv);
+        dock.set(key, move(value));
+        dock.save();
+        notify_post("com.vulture.dock.preferences");
+    };
+    Desktop::Preferences dock("com.vulture.dock"_sv);
     auto& group = page.add_group("Dock"_sv);
     auto& size_row = group.rows().add<Row>("Size"_sv);
-    auto& size = size_row.add<Slider>(32.0f, 96.0f, tokens().metric("dock.iconSize"_sv));
+    auto& size = size_row.add<Slider>(16.0f, 128.0f, static_cast<float>(dock.number("tilesize"_sv).value_or(static_cast<double>(tokens().metric("dock.iconSize"_sv)))));
     size.set_fixed_width(220);
+    size.set_accessibility_label("Size"_sv);
+    size.on_action = [dock_saved, &size] { dock_saved("tilesize"_sv, JSON::Value(static_cast<double>(size.value()))); };
     auto& magnification_row = group.rows().add<Row>("Magnification"_sv);
-    (void)magnification_row.add<Switch>(true);
+    auto& magnification = magnification_row.add<Switch>(dock.boolean("magnification"_sv).value_or(true));
+    magnification.set_accessibility_label("Magnification"_sv);
+    magnification.on_action = [dock_saved, &magnification] { dock_saved("magnification"_sv, JSON::Value(magnification.is_on())); };
+    auto& position_row = group.rows().add<Row>("Position on screen"_sv);
+    auto& position = position_row.add<PopUpButton>();
+    position.set_accessibility_label("Position on screen"_sv);
+    position.add_item("Left"_sv);
+    position.add_item("Bottom"_sv);
+    position.add_item("Right"_sv);
+    auto const orientation = dock.string("orientation"_sv).value_or("bottom"_sv);
+    position.set_selected_index(orientation == "left"_sv ? 0 : (orientation == "right"_sv ? 2 : 1));
+    position.on_change = [dock_saved](int index) {
+        dock_saved("orientation"_sv, MUST(JSON::Value::string(index == 0 ? "left"_sv : (index == 2 ? "right"_sv : "bottom"_sv))));
+    };
+    auto dock_switch = [&](StringView title, StringView key, bool fallback) {
+        auto& row = group.rows().add<Row>(title);
+        auto& toggle = row.add<Switch>(dock.boolean(key).value_or(fallback));
+        toggle.set_accessibility_label(title);
+        auto const key_string = MUST(String::from_view(key));
+        toggle.on_action = [dock_saved, key_string, &toggle] { dock_saved(key_string.view(), JSON::Value(toggle.is_on())); };
+    };
+    dock_switch("Automatically hide and show the Dock"_sv, "autohide"_sv, false);
+    dock_switch("Animate opening applications"_sv, "launchanim"_sv, true);
+    dock_switch("Show indicators for open applications"_sv, "show-process-indicators"_sv, true);
+    dock_switch("Show suggested and recent apps in Dock"_sv, "show-recents"_sv, true);
 
     auto saved = [](StringView key, JSON::Value value) {
         Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
@@ -364,6 +446,32 @@ void build_dock(Page& page)
         saved("stage"_sv, JSON::Value(on));
         (void)server().set_stage(on);
     };
+
+    // Widgets: on the desktop or not, and in what colours, as the desktop's own settings are.
+    auto widgets_saved = [](StringView key, JSON::Value value) {
+        Desktop::Preferences widgets("com.vulture.widgets"_sv);
+        widgets.set(key, move(value));
+        widgets.save();
+        notify_post("com.vulture.widgets.preferences");
+    };
+    Desktop::Preferences widgets("com.vulture.widgets"_sv);
+    auto& widgets_group = page.add_group("Widgets"_sv);
+    auto& show_row = widgets_group.rows().add<Row>("Show Widgets"_sv);
+    auto& on_desktop = show_row.add<Checkbox>("On Desktop"_sv, widgets.boolean("onDesktop"_sv).value_or(true) ? ToggleState::On : ToggleState::Off);
+    on_desktop.on_action = [widgets_saved, &on_desktop] { widgets_saved("onDesktop"_sv, JSON::Value(on_desktop.is_on())); };
+    auto& style_row = widgets_group.rows().add<Row>("Widget style"_sv);
+    auto& style = style_row.add<PopUpButton>();
+    style.set_accessibility_label("Widget style"_sv);
+    style.add_item("Automatic"_sv);
+    style.add_item("Monochrome"_sv);
+    style.add_item("Full-color"_sv);
+    static constexpr StringView styles[] { "automatic"_sv, "monochrome"_sv, "fullColor"_sv };
+    auto const style_now = widgets.string("style"_sv).value_or("automatic"_sv);
+    for (int i = 0; i < 3; ++i) {
+        if (style_now == styles[i])
+            style.set_selected_index(i);
+    }
+    style.on_change = [widgets_saved](int index) { widgets_saved("style"_sv, MUST(JSON::Value::string(styles[index]))); };
 
     auto& windows_group = page.add_group("Windows"_sv);
     struct Tiling {
@@ -1018,12 +1126,405 @@ void build_accessibility(Page& page)
     page.finish();
 }
 
+// ---- Notifications: as Sequoia's pane has it. Kept in com.vulture.notifications, which notificationd, the menu bar and
+// the Dock read again when they hear it's changed.
+
+constexpr char const* notifications_changed = "com.vulture.notifications.preferences";
+
+struct ApplicationRules {
+    bool allow { true };
+    // "none", "temporary" or "persistent".
+    String style;
+    bool lock_screen { true };
+    bool center { true };
+    bool badge { true };
+    bool sound { true };
+    // "default", "always", "whenUnlocked" or "never".
+    String previews;
+    // "automatic", "byApplication" or "off".
+    String grouping;
+};
+
+ApplicationRules rules_of(StringView application)
+{
+    ApplicationRules rules;
+    rules.style = MUST(String::from_view("temporary"_sv));
+    rules.previews = MUST(String::from_view("default"_sv));
+    rules.grouping = MUST(String::from_view("automatic"_sv));
+    Desktop::Preferences preferences("com.vulture.notifications"_sv);
+    auto const* all = preferences.object("applications"_sv);
+    auto const* mine = all ? all->get_object(application) : nullptr;
+    if (!mine)
+        return rules;
+    rules.allow = mine->get_boolean("allow"_sv).value_or(true);
+    rules.style = MUST(String::from_view(mine->get_string("style"_sv).value_or("temporary"_sv)));
+    rules.lock_screen = mine->get_boolean("lockScreen"_sv).value_or(true);
+    rules.center = mine->get_boolean("center"_sv).value_or(true);
+    rules.badge = mine->get_boolean("badge"_sv).value_or(true);
+    rules.sound = mine->get_boolean("sound"_sv).value_or(true);
+    rules.previews = MUST(String::from_view(mine->get_string("previews"_sv).value_or("default"_sv)));
+    rules.grouping = MUST(String::from_view(mine->get_string("grouping"_sv).value_or("automatic"_sv)));
+    return rules;
+}
+
+void save_rules(StringView application, ApplicationRules const& rules)
+{
+    Desktop::Preferences preferences("com.vulture.notifications"_sv);
+    // The other applications' as they were.
+    auto all = JSON::Value::object();
+    if (auto const* existing = preferences.object("applications"_sv)) {
+        auto text = existing->serialize();
+        if (!text.is_error()) {
+            auto parsed = JSON::parse(text.value().view());
+            if (!parsed.is_error() && parsed.value().is_object())
+                all = parsed.release_value();
+        }
+    }
+    auto mine = JSON::Value::object();
+    MUST(mine.set("allow"_sv, JSON::Value(rules.allow)));
+    MUST(mine.set("style"_sv, MUST(JSON::Value::string(rules.style.view()))));
+    MUST(mine.set("lockScreen"_sv, JSON::Value(rules.lock_screen)));
+    MUST(mine.set("center"_sv, JSON::Value(rules.center)));
+    MUST(mine.set("badge"_sv, JSON::Value(rules.badge)));
+    MUST(mine.set("sound"_sv, JSON::Value(rules.sound)));
+    MUST(mine.set("previews"_sv, MUST(JSON::Value::string(rules.previews.view()))));
+    MUST(mine.set("grouping"_sv, MUST(JSON::Value::string(rules.grouping.view()))));
+    MUST(all.set(application, move(mine)));
+    preferences.set("applications"_sv, move(all));
+    preferences.save();
+    notify_post(notifications_changed);
+}
+
+// What an application's notifications do, in a few words, as the list says under its name.
+String rules_summary(ApplicationRules const& rules)
+{
+    if (!rules.allow)
+        return MUST(String::from_view("Off"_sv));
+    StringBuilder builder;
+    auto add = [&](StringView part) {
+        if (builder.length() != 0)
+            builder.append(", "_sv);
+        builder.append(part);
+    };
+    if (rules.badge)
+        add("Badges"_sv);
+    if (rules.sound)
+        add("Sounds"_sv);
+    if (rules.style.view() == "temporary"_sv)
+        add("Banners"_sv);
+    else if (rules.style.view() == "persistent"_sv)
+        add("Alerts"_sv);
+    if (builder.length() == 0)
+        builder.append("Notification Center"_sv);
+    return MUST(builder.to_string());
+}
+
+// Every application that has posted, as notificationd remembers them, in the order of their names.
+Vector<String> notifying_applications()
+{
+    Vector<String> names;
+    auto port = IPC::look_up("com.vulture.notificationd"_sv);
+    if (port.is_error())
+        return names;
+    NotificationServiceProxy center(port.release_value());
+    auto answer = center.applications();
+    if (answer.is_error())
+        return names;
+    auto json = JSON::parse(answer.value().view());
+    if (json.is_error() || !json.value().is_array())
+        return names;
+    for (size_t i = 0; i < json.value().size(); ++i) {
+        if (json.value().at(i).is_string())
+            names.append(MUST(String::from_view(json.value().at(i).as_string())));
+    }
+    for (size_t i = 0; i < names.size(); ++i) {
+        for (size_t j = i + 1; j < names.size(); ++j) {
+            if (names[j].view() < names[i].view())
+                swap(names[i], names[j]);
+        }
+    }
+    return names;
+}
+
+StringView icon_of_application(StringView name)
+{
+    static Vector<Desktop::AppInfo> s_applications = Desktop::installed_applications();
+    for (auto const& info : s_applications) {
+        if (info.name.view() == name)
+            return info.icon.view();
+    }
+    return "GenericApplication"_sv;
+}
+
+// One application in the list: its icon, its name, what its notifications do, and a chevron. Chosen, its own page opens.
+class ApplicationRow final : public View {
+public:
+    explicit ApplicationRow(StringView name)
+        : m_name(MUST(String::from_view(name)))
+    {
+        set_fixed_height(tokens().metric("settings.applicationRowHeight"_sv));
+    }
+
+    Function<void()> on_choose;
+
+    void draw(Graphics& graphics) override
+    {
+        auto const& t = tokens();
+        float const icon = t.metric("settings.applicationIcon"_sv);
+        if (auto picture = Desktop::icon_named(icon_of_application(m_name.view()), static_cast<int>(icon), static_cast<int>(graphics.scale())))
+            graphics.painter().draw_bitmap(*picture, FloatRect { 0, (height() - icon) / 2, icon, icon });
+        float const x = icon + 10;
+        auto const summary = rules_summary(rules_of(m_name.view()));
+        graphics.draw_text(m_name.view(), t.named_font("body"_sv), { x, height() / 2 - 2 }, t.color("label"_sv));
+        graphics.draw_text_truncated(summary.view(), t.named_font("small"_sv), { x, height() / 2 + 13 }, width() - x - 24, t.color("secondaryLabel"_sv));
+        graphics.draw_symbol(Symbol::ChevronRight, { width() - 12, (height() - 12) / 2, 8, 12 }, t.color("tertiaryLabel"_sv), 1.6f);
+    }
+
+    void mouse_up(MouseEvent const& event) override
+    {
+        if (FloatRect { 0, 0, width(), height() }.contains(event.position) && on_choose)
+            on_choose();
+    }
+    bool mouse_down(MouseEvent const&) override { return true; }
+
+    Accessibility::Role accessibility_role() const override { return Accessibility::Role::Row; }
+    String accessibility_label() const override { return m_name; }
+    String accessibility_value() const override { return rules_summary(rules_of(m_name.view())); }
+    bool accessibility_press() override
+    {
+        if (on_choose)
+            on_choose();
+        return true;
+    }
+
+private:
+    String m_name;
+};
+
+// None, Temporary or Persistent, each as a picture of a screen with what it shows in the corner.
+class AlertStylePicker final : public Control {
+public:
+    explicit AlertStylePicker(int chosen)
+        : m_chosen(chosen)
+    {
+    }
+
+    Function<void(int)> on_change;
+
+    void set_chosen(int chosen)
+    {
+        m_chosen = chosen;
+        set_needs_display();
+    }
+
+    FloatSize intrinsic_size() const override
+    {
+        auto const& t = tokens();
+        return { (t.metric("settings.alertPictureWidth"_sv) + t.metric("settings.alertPictureSpacing"_sv)) * 3, t.metric("settings.alertPictureHeight"_sv) + 22 };
+    }
+
+    void draw(Graphics& graphics) override
+    {
+        auto const& t = tokens();
+        static constexpr StringView names[] { "None"_sv, "Temporary"_sv, "Persistent"_sv };
+        for (int i = 0; i < 3; ++i) {
+            auto const picture = picture_rect(i);
+            graphics.fill_rounded(picture, 6, t.color("settings.alertScreen"_sv));
+            if (i > 0) {
+                // The notification, at the top right.
+                FloatRect const card { picture.x + picture.width * 0.45f, picture.y + 6, picture.width * 0.5f, 12 };
+                graphics.fill_rounded(card, 3, t.color("settings.alertCard"_sv));
+                if (i == 2)
+                    graphics.fill({ card.x + card.width * 0.72f, card.y + 2, graphics.pixel(), card.height - 4 }, t.color("settings.alertCardLine"_sv));
+            }
+            if (i == m_chosen)
+                graphics.stroke_rounded({ picture.x - 3, picture.y - 3, picture.width + 6, picture.height + 6 }, 8, 3, t.color("accent"_sv));
+            graphics.draw_text_centered(names[i], t.named_font("small"_sv), { picture.x - 8, picture.y + picture.height + 4, picture.width + 16, 16 }, t.color("label"_sv));
+        }
+    }
+
+    bool mouse_down(MouseEvent const& event) override
+    {
+        for (int i = 0; i < 3; ++i) {
+            auto const picture = picture_rect(i);
+            if (FloatRect { picture.x - 4, picture.y - 4, picture.width + 8, picture.height + 24 }.contains(event.position)) {
+                choose(i);
+                return true;
+            }
+        }
+        return true;
+    }
+
+    Accessibility::Role accessibility_role() const override { return Accessibility::Role::Group; }
+    String accessibility_label() const override { return MUST(String::from_view("Alert style"_sv)); }
+    void accessibility_parts(Vector<Accessibility::Node>& parts) override
+    {
+        static constexpr StringView names[] { "None"_sv, "Temporary"_sv, "Persistent"_sv };
+        for (int i = 0; i < 3; ++i)
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::RadioButton, names[i], picture_rect(i), i == m_chosen ? "on"_sv : "off"_sv, is_enabled()));
+    }
+
+private:
+    [[nodiscard]] FloatRect picture_rect(int index) const
+    {
+        auto const& t = tokens();
+        float const width = t.metric("settings.alertPictureWidth"_sv);
+        float const spacing = t.metric("settings.alertPictureSpacing"_sv);
+        return { spacing / 2 + (width + spacing) * static_cast<float>(index), 4, width, t.metric("settings.alertPictureHeight"_sv) };
+    }
+
+    void choose(int index)
+    {
+        if (!is_enabled() || index == m_chosen)
+            return;
+        m_chosen = index;
+        set_needs_display();
+        if (on_change)
+            on_change(index);
+    }
+
+    int m_chosen { 1 };
+};
+
+// Opening a page under the pane that's showing, with Back in the toolbar: an application's notifications.
+Function<void(StringView title, Function<void(Page&)>& build)> s_push_page;
+
+void build_application_notifications(Page& page, String const& application)
+{
+    auto rules = adopt_own(*new ApplicationRules(rules_of(application.view())));
+    auto* shared = rules.leak_ptr();
+    auto const name = MUST(String::from_view(application.view()));
+    auto save = [shared, name] { save_rules(name.view(), *shared); };
+
+    auto& group = page.add_group();
+    auto& allow_row = group.rows().add<Row>("Allow notifications"_sv);
+    auto& allow = allow_row.add<Switch>(shared->allow);
+    allow.set_accessibility_label("Allow notifications"_sv);
+
+    StringBuilder style_title;
+    style_title.appendff("{} alert style", application.view());
+    auto& style_row = group.rows().add<Row>(style_title.view());
+    style_row.set_fixed_height(tokens().metric("settings.alertRowHeight"_sv));
+    int const chosen = shared->style.view() == "none"_sv ? 0 : (shared->style.view() == "persistent"_sv ? 2 : 1);
+    auto& style = style_row.add<AlertStylePicker>(chosen);
+    style.on_change = [shared, save](int index) {
+        static constexpr StringView styles[] { "none"_sv, "temporary"_sv, "persistent"_sv };
+        shared->style = MUST(String::from_view(styles[index]));
+        save();
+    };
+
+    Vector<Control*> dependents;
+    dependents.append(&style);
+    auto add_switch = [&](StringView title, bool ApplicationRules::* field) {
+        auto& row = group.rows().add<Row>(title);
+        auto& toggle = row.add<Switch>(shared->*field);
+        toggle.set_accessibility_label(title);
+        toggle.on_action = [shared, save, field, &toggle] {
+            shared->*field = toggle.is_on();
+            save();
+        };
+        dependents.append(&toggle);
+    };
+    add_switch("Show notifications on lock screen"_sv, &ApplicationRules::lock_screen);
+    add_switch("Show in Notification Center"_sv, &ApplicationRules::center);
+    add_switch("Badge application icon"_sv, &ApplicationRules::badge);
+    add_switch("Play sound for notification"_sv, &ApplicationRules::sound);
+
+    auto& more = page.add_group();
+    auto& previews_row = more.rows().add<Row>("Show previews"_sv);
+    auto& previews = previews_row.add<PopUpButton>();
+    previews.set_accessibility_label("Show previews"_sv);
+    previews.add_item("Default (Always)"_sv);
+    previews.add_item("Always"_sv);
+    previews.add_item("When Unlocked"_sv);
+    previews.add_item("Never"_sv);
+    static constexpr StringView preview_values[] { "default"_sv, "always"_sv, "whenUnlocked"_sv, "never"_sv };
+    for (int i = 0; i < 4; ++i) {
+        if (shared->previews.view() == preview_values[i])
+            previews.set_selected_index(i);
+    }
+    previews.on_change = [shared, save](int index) {
+        shared->previews = MUST(String::from_view(preview_values[index]));
+        save();
+    };
+    auto& grouping_row = more.rows().add<Row>("Notification grouping"_sv);
+    auto& grouping = grouping_row.add<PopUpButton>();
+    grouping.set_accessibility_label("Notification grouping"_sv);
+    grouping.add_item("Automatic"_sv);
+    grouping.add_item("By Application"_sv);
+    grouping.add_item("Off"_sv);
+    static constexpr StringView grouping_values[] { "automatic"_sv, "byApplication"_sv, "off"_sv };
+    for (int i = 0; i < 3; ++i) {
+        if (shared->grouping.view() == grouping_values[i])
+            grouping.set_selected_index(i);
+    }
+    grouping.on_change = [shared, save](int index) {
+        shared->grouping = MUST(String::from_view(grouping_values[index]));
+        save();
+    };
+    dependents.append(&previews);
+    dependents.append(&grouping);
+
+    // With notifications off, the rest have nothing to say.
+    auto* held = adopt_own(*new Vector<Control*>(move(dependents))).leak_ptr();
+    for (auto* control : *held)
+        control->set_enabled(shared->allow);
+    allow.on_action = [shared, save, held, &allow] {
+        shared->allow = allow.is_on();
+        for (auto* control : *held)
+            control->set_enabled(shared->allow);
+        save();
+    };
+    page.finish();
+}
+
 void build_notifications(Page& page)
 {
-    auto& group = page.add_group();
-    auto& row = group.rows().add<Row>("Test notification"_sv);
-    auto& send = row.add<Button>("Send"_sv);
-    send.on_action = [] { Desktop::post_notification("Settings"_sv, "It works"_sv, "This is how notifications look."_sv); };
+    Desktop::Preferences preferences("com.vulture.notifications"_sv);
+    auto saved = [](StringView key, JSON::Value value) {
+        Desktop::Preferences again("com.vulture.notifications"_sv);
+        again.set(key, move(value));
+        again.save();
+        notify_post(notifications_changed);
+    };
+    auto& center = page.add_group("Notification Center"_sv);
+    auto& previews_row = center.rows().add<Row>("Show previews"_sv);
+    auto& previews = previews_row.add<PopUpButton>();
+    previews.set_accessibility_label("Show previews"_sv);
+    previews.add_item("Always"_sv);
+    previews.add_item("When Unlocked"_sv);
+    previews.add_item("Never"_sv);
+    static constexpr StringView preview_values[] { "always"_sv, "whenUnlocked"_sv, "never"_sv };
+    auto const previews_now = preferences.string("previews"_sv).value_or("always"_sv);
+    for (int i = 0; i < 3; ++i) {
+        if (previews_now == preview_values[i])
+            previews.set_selected_index(i);
+    }
+    previews.on_change = [saved](int index) { saved("previews"_sv, MUST(JSON::Value::string(preview_values[index]))); };
+    auto add_switch = [&](StringView title, StringView key) {
+        auto& row = center.rows().add<Row>(title);
+        auto& toggle = row.add<Switch>(preferences.boolean(key).value_or(key == "whenMirroring"_sv ? false : true));
+        toggle.set_accessibility_label(title);
+        auto const key_string = MUST(String::from_view(key));
+        toggle.on_action = [saved, key_string, &toggle] { saved(key_string.view(), JSON::Value(toggle.is_on())); };
+    };
+    add_switch("Allow notifications when the display is sleeping"_sv, "whenSleeping"_sv);
+    add_switch("Allow notifications when the screen is locked"_sv, "whenLocked"_sv);
+    add_switch("Allow notifications when mirroring or sharing the display"_sv, "whenMirroring"_sv);
+
+    auto names = notifying_applications();
+    auto& applications = page.add_group("Application Notifications"_sv);
+    if (names.is_empty())
+        (void)applications.rows().add<Row>("No applications have sent notifications"_sv);
+    for (auto const& name : names) {
+        auto& row = applications.rows().add<ApplicationRow>(name.view());
+        auto const captured = MUST(String::from_view(name.view()));
+        row.on_choose = [captured] {
+            Function<void(Page&)> build = [captured](Page& detail) { build_application_notifications(detail, captured); };
+            if (s_push_page)
+                s_push_page(captured.view(), build);
+        };
+    }
     page.finish();
 }
 
@@ -1128,7 +1629,13 @@ public:
         auto& right = split.add_pane<StackView>(0, 300, Axis::Vertical);
         m_toolbar = &right.add<Toolbar>();
         m_toolbar->set_left_padding(t.metric("toolbar.paddingRight"_sv));
+        // Back and forward, before the title, as Sequoia's has them: back from an application's notifications, and there again.
+        m_back = &m_toolbar->add_button(Symbol::ChevronLeft, [this] { go_back(); }, "Back"_sv);
+        m_forward = &m_toolbar->add_button(Symbol::ChevronRight, [this] { go_forward(); }, "Forward"_sv);
+        m_back->set_enabled(false);
+        m_forward->set_enabled(false);
         m_title = &m_toolbar->add_item<Label>("Settings"_sv, t.named_font("headline"_sv));
+        s_push_page = [this](StringView title, Function<void(Page&)>& build) { push_page(title, move(build)); };
         m_pages = &right.add<View>();
         m_pages->set_stretch(0, 1);
         split.set_frame({ 0, 0, 880, 600 });
@@ -1137,6 +1644,7 @@ public:
 
         add_pane("Appearance"_sv, Symbol::Contrast, build_appearance);
         add_pane("Accessibility"_sv, Symbol::Accessibility, build_accessibility);
+        add_pane("Control Center"_sv, Symbol::Toggles, build_control_center);
         add_pane("Wallpaper"_sv, Symbol::Photo, build_wallpaper);
         add_pane("Desktop & Dock"_sv, Symbol::Sidebar, build_dock);
         add_pane("Displays"_sv, Symbol::Display, build_displays);
@@ -1146,13 +1654,20 @@ public:
         add_pane("Mouse"_sv, Symbol::Mouse, build_mouse);
         add_pane("Trackpad"_sv, Symbol::Trackpad, build_trackpad);
         add_pane("Language & Region"_sv, Symbol::Globe, build_language_region);
-        add_pane("Notifications"_sv, Symbol::Bell, build_notifications);
+        add_pane("Notifications"_sv, Symbol::Bell, build_notifications, true);
+        add_pane("Focus"_sv, Symbol::Moon, build_focus);
         add_pane("Privacy & Security"_sv, Symbol::Lock, build_privacy);
         add_pane("Users"_sv, Symbol::Person, build_users);
         add_pane("Storage"_sv, Symbol::Drive, build_storage);
         add_pane("Startup Disk"_sv, Symbol::Drive, build_startup_disk);
         add_pane("About"_sv, Symbol::Information, build_about);
-        m_sidebar->on_select = [this](size_t row) { show_page(row); };
+        m_sidebar->on_select = [this](size_t row) {
+            drop_detail();
+            m_forward_title = {};
+            m_forward_build = nullptr;
+            m_forward->set_enabled(false);
+            show_page(row);
+        };
         size_t first = 0;
         for (size_t i = 0; i < m_names.size(); ++i) {
             if (m_names[i].view() == first_pane)
@@ -1161,6 +1676,14 @@ public:
         m_sidebar->select_row(first);
         show_page(first);
         m_window->on_closed = [] { Application::the().quit(); };
+        // Back in front, a pane that says what's changed says it again.
+        m_window->on_key_change = [this](bool key) {
+            if (!key || m_detail || !m_made_when_shown[m_current])
+                return;
+            make_again(m_current);
+            m_pages->children()[m_current]->set_hidden(false);
+            m_pages->set_needs_layout();
+        };
         m_window->show();
     }
 
@@ -1185,9 +1708,13 @@ private:
         [[nodiscard]] FloatSize preferred_size(View const&) const override { return { 0, 0 }; }
     };
 
-    void add_pane(StringView name, Symbol symbol, void (*build)(Page&))
+    // A pane that's made again each time it's shown says what's changed since: which applications have posted, for
+    // Notifications.
+    void add_pane(StringView name, Symbol symbol, void (*build)(Page&), bool made_when_shown = false)
     {
         m_names.append(MUST(String::from_view(name)));
+        m_builds.append(build);
+        m_made_when_shown.append(made_when_shown);
         m_sidebar->add_row(name, symbol);
         // Longer than the window, some of them: they scroll, under the title.
         auto& scroll = m_pages->add<ScrollView>();
@@ -1199,8 +1726,76 @@ private:
             m_pages->set_layout<PagesLayout>();
     }
 
+    void make_again(size_t index)
+    {
+        auto* old = m_pages->children()[index].ptr();
+        auto taken = m_pages->take_child(*old);
+        auto* gone = taken.leak_ptr();
+        Platform::the().defer([gone] { delete gone; });
+        auto scroll = adopt_own(*new ScrollView);
+        scroll->set_scrolls_horizontally(false);
+        auto& page = scroll->make_document<Page>();
+        m_builds[index](page);
+        m_pages->adopt_child_at(index, move(scroll));
+    }
+
+    void push_page(StringView title, Function<void(Page&)> build)
+    {
+        drop_detail();
+        auto& scroll = m_pages->add<ScrollView>();
+        scroll.set_scrolls_horizontally(false);
+        auto& page = scroll.make_document<Page>();
+        build(page);
+        m_detail = &scroll;
+        m_detail_title = MUST(String::from_view(title));
+        m_detail_build = move(build);
+        for (auto& child : m_pages->children())
+            child->set_hidden(child.ptr() != m_detail);
+        m_title->set_text(title);
+        m_window->set_title(title);
+        m_pages->set_needs_layout();
+        m_back->set_enabled(true);
+        m_forward->set_enabled(false);
+        printf("settings: %s\n", m_detail_title.characters());
+        fflush(stdout);
+    }
+
+    void drop_detail()
+    {
+        if (!m_detail)
+            return;
+        auto owned = m_pages->take_child(*m_detail);
+        m_detail = nullptr;
+        auto* old = owned.leak_ptr();
+        Platform::the().defer([old] { delete old; });
+    }
+
+    void go_back()
+    {
+        if (!m_detail)
+            return;
+        m_forward_title = move(m_detail_title);
+        m_forward_build = move(m_detail_build);
+        drop_detail();
+        m_back->set_enabled(false);
+        m_forward->set_enabled(true);
+        show_page(m_current);
+    }
+
+    void go_forward()
+    {
+        if (!m_forward_build)
+            return;
+        auto title = move(m_forward_title);
+        auto build = move(m_forward_build);
+        push_page(title.view(), move(build));
+    }
+
     void show_page(size_t index)
     {
+        m_current = index;
+        if (m_made_when_shown[index])
+            make_again(index);
         for (size_t i = 0; i < m_pages->children().size(); ++i)
             m_pages->children()[i]->set_hidden(i != index);
         m_title->set_text(m_names[index].view());
@@ -1216,6 +1811,16 @@ private:
     Label* m_title { nullptr };
     View* m_pages { nullptr };
     Vector<String> m_names;
+    Vector<void (*)(Page&)> m_builds;
+    Vector<bool> m_made_when_shown;
+    ToolbarButton* m_back { nullptr };
+    ToolbarButton* m_forward { nullptr };
+    size_t m_current { 0 };
+    View* m_detail { nullptr };
+    String m_detail_title;
+    Function<void(Page&)> m_detail_build;
+    String m_forward_title;
+    Function<void(Page&)> m_forward_build;
 };
 
 }

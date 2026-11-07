@@ -617,7 +617,7 @@ void Server::tile_in_split_view(IPC::Sender const& sender, u32 id, bool on_left)
 
 bool Server::is_kept_out_of_the_way(ServerWindow const& window) const
 {
-    if (window.level != Window::LevelMenuBar && window.level != Window::LevelDock && window.level != Window::LevelDesktop)
+    if (window.level != Window::LevelMenuBar && window.level != Window::LevelDock && !is_desktop_level(window.level))
         return false;
     auto const& display = m_screen.display_at(window.frame.center());
     for (auto const& one : m_display_spaces) {
@@ -626,7 +626,7 @@ bool Server::is_kept_out_of_the_way(ServerWindow const& window) const
         if (!one.spaces[static_cast<size_t>(one.current)].full)
             return false;
         // A full screen Space has no desktop: nothing of it shows there, icons included.
-        if (window.level == Window::LevelDesktop)
+        if (is_desktop_level(window.level))
             return true;
         if (window.level == Window::LevelMenuBar)
             return !(m_reveal > 0 && m_reveal_output == display.output);
@@ -681,10 +681,15 @@ void Server::check_full_screen_edges(IntPoint point)
         set_menu_reveal(-1, false);
     if (&display != &m_screen.main_display())
         return;
+    // The Dock, from whichever edge it's on.
     int const from_bottom = display.points.bottom() - 1 - point.y;
-    if (!m_dock_wanted && from_bottom <= 1)
+    int const from_left = point.x - display.points.x;
+    int const from_right = display.points.right() - 1 - point.x;
+    int const from_edge = m_dock_edge == 1 ? from_left : (m_dock_edge == 2 ? from_right : from_bottom);
+    int const reach = m_dock_thickness > 0 ? m_dock_thickness : m_work_bottom;
+    if (!m_dock_wanted && from_edge <= 1)
         set_dock_reveal(true);
-    else if (m_dock_wanted && from_bottom > m_work_bottom + 16)
+    else if (m_dock_wanted && from_edge > reach + 16)
         set_dock_reveal(false);
 }
 
@@ -732,7 +737,9 @@ bool Server::advance_reveals(double now)
         if (window->level == Window::LevelMenuBar && menu_moved) {
             window->slide_y = -static_cast<int>((1 - m_reveal) * static_cast<float>(window->frame.height * scale));
         } else if (window->level == Window::LevelDock && dock_moved) {
-            window->slide_y = static_cast<int>((1 - m_dock_reveal) * static_cast<float>(window->frame.height * scale));
+            float const away = 1 - m_dock_reveal;
+            window->slide_x = m_dock_edge == 1 ? -static_cast<int>(away * static_cast<float>(window->frame.width * scale)) : (m_dock_edge == 2 ? static_cast<int>(away * static_cast<float>(window->frame.width * scale)) : 0);
+            window->slide_y = m_dock_edge == 0 ? static_cast<int>(away * static_cast<float>(window->frame.height * scale)) : 0;
         }
     }
     update_all_visibility();
@@ -744,8 +751,11 @@ bool Server::advance_reveals(double now)
     }
     if (m_reveal == 0 && m_dock_reveal == 0) {
         for (auto* window : m_windows) {
-            if (window->level == Window::LevelMenuBar || window->level == Window::LevelDock)
+            if (window->level == Window::LevelMenuBar || window->level == Window::LevelDock) {
                 window->slide_y = 0;
+                if (window->level == Window::LevelDock)
+                    window->slide_x = 0;
+            }
         }
     }
     still_going = m_reveal != (m_reveal_wanted ? 1.0f : 0.0f) || m_dock_reveal != (m_dock_wanted ? 1.0f : 0.0f);

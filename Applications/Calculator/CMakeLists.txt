@@ -11,4 +11,5 @@ vulture_add_application(Calculator
     SANDBOX calculator
     ICON Calculator
     KIND "Arithmetic"
+    CATEGORY utilities
     LIBRARIES LibDesktop)

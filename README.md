@@ -24,7 +24,7 @@ Every line of it is right here in this repository.
 
 ## You already know how to use it
 
-Sit down at vultureOS and your hands know what to do. The menu bar is at the top, the Dock is at the bottom, and windows have traffic lights. Command-Space finds things. Control-Up spreads your windows out. Drag a window to the side of the screen and it takes half; rest on the green button for the rest. Press and hold a key for its accents.
+Sit down at vultureOS and your hands know what to do. The menu bar is at the top, the Dock is at the bottom, and windows have traffic lights. Command-Space finds things. Control-Up spreads your windows out. Drag a window to the side of the screen and it takes half; rest on the green button for the rest. Shift-Command-4 takes a picture of part of the screen. Press and hold a key for its accents.
 
 It comes with what you'd reach for first: Files, Settings, Terminal, Text Editor, Viewer, Calculator, Monitor, Console, Disks, Archiver and Software. Log in as `vulture`, password `vulture`.
 
@@ -187,7 +187,8 @@ We keep a [scoreboard](Documentation/Parity.md). It lists what macOS does, featu
       Plug in a USB stick, and erase or repair it<br>
       Keep moving when an app stops answering<br>
       Use two displays, and swipe between Spaces<br>
-      Tile windows, go full screen, or work in Stage
+      Tile windows, go full screen, or work in Stage<br>
+      Take screenshots, answer notifications, and put widgets on the desktop
     </td>
     <td valign="top">
       Browse the web<br>

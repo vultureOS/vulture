@@ -11,4 +11,5 @@ vulture_add_application(Disks
     SANDBOX disks
     ICON Disks
     KIND "Volumes and Storage"
+    CATEGORY utilities
     LIBRARIES LibDesktop LibDiskManagement)

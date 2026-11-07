@@ -1,0 +1,92 @@
+# M24: screenshots as on a Mac. Shift-Command-3, 4 and 5, a thumbnail in the corner, and a file on the desktop that is,
+# pixel for pixel, what was on the screen.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 2
+pointer 31500 25000
+pause 0.5
+# ---- Shift-Command-3: all of it. What QEMU sees first, for the file to be held against.
+screenshot on-screen.png
+key shift-meta_l-3
+ax-expect image "Screenshot"
+pause 0.5
+screenshot thumbnail.png
+expect screenshot: saved
+ax-gone image "Screenshot"
+# ---- Off the machine on a stick, and compared with what QEMU saw, every pixel of it.
+plug stick usb-storage bus=usb0.0,drive=stick
+expect at /Volumes/STICK
+click button "Terminal"
+expect terminal: ready
+pointer 31500 25000
+pause 1
+type cp ~/Desktop/Screenshot*.png /Volumes/STICK/SHOT.PNG && diskutil eject /Volumes/STICK\r
+ax-expect textarea "Terminal" ~ ejected
+host "$VULTURE_BUILD_DIR/host/Tests/LibForeignFS/foreignfs-exercise" get "$VULTURE_STICK" SHOT.PNG "$VULTURE_RUN_DIR/shot.png" && "$VULTURE_BUILD_DIR/host/Tools/imgdiff/imgdiff" --max-channel 0 --max-percent 0 "${VULTURE_SCREENSHOT_PREFIX}on-screen.png" "$VULTURE_RUN_DIR/shot.png"
+# ---- Shift-Command-4: a part of it, dragged out.
+key shift-meta_l-4
+ax-expect group "Choose an area"
+pointer 6000 6000
+pause 0.3
+button left down
+pause 0.2
+pointer 10000 10000
+pause 0.2
+pointer 14000 13000
+pause 0.5
+screenshot area-choosing.png
+button left up
+ax-expect image "Screenshot"
+pause 0.5
+screenshot area-thumbnail.png
+expect screenshot: saved
+# ---- Space, and it's a window instead: the one under the pointer, with its shadow.
+key shift-meta_l-4
+ax-expect group "Choose an area"
+key spc
+ax-expect group "Choose a window"
+pointer 16384 13762
+pause 0.8
+screenshot window-choosing.png
+button left down
+pause 0.1
+button left up
+ax-expect image "Screenshot"
+pause 0.5
+screenshot window-thumbnail.png
+# ---- Pressed, the thumbnail opens what it's of.
+click image "Screenshot"
+expect screenshot: saved
+expect viewer: ready
+pause 1.5
+pointer 31500 25000
+pause 0.5
+screenshot window-opened.png
+key meta_l-q
+pause 1
+# ---- Shift-Command-5: the toolbar, its options, and all of the screen from it.
+key shift-meta_l-5
+ax-expect toolbar "Screenshot"
+ax-expect button "Capture Selected Portion" = chosen
+ax-expect button "Record Entire Screen" disabled
+pause 0.5
+screenshot toolbar.png
+click button "Options"
+ax-expect menuitem "Show Floating Thumbnail" = on
+ax-expect text "Timer"
+pause 0.5
+screenshot toolbar-options.png
+key esc
+pause 0.3
+click button "Capture Entire Screen"
+ax-expect button "Capture Entire Screen" = chosen
+click button "Capture"
+ax-gone toolbar "Screenshot"
+ax-expect image "Screenshot"
+expect screenshot: saved
+pause 1
+pointer 31500 25000
+pause 0.5
+screenshot desktop-with-screenshots.png

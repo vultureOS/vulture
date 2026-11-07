@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "HelpSearch.h"
+#include "Notifications.h"
+#include "Screenshots.h"
+#include "SystemWindows.h"
+#include "Widgets.h"
 #include <WorkspaceEndpoint.h>
 #include <Kernel/API/POSIX/privacy.h>
 #include <PrivacyEndpoint.h>
@@ -22,6 +27,8 @@
 #include <NotificationsEndpoint.h>
 #include <SearchEndpoint.h>
 #include <fcntl.h>
+#include <notify.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -366,49 +373,6 @@ private:
     int m_full_height { 0 };
 };
 
-// ---- Notifications
-
-class Banner final : public View {
-public:
-    void set_note(StringView application, StringView title, StringView body)
-    {
-        m_application = MUST(String::from_view(application));
-        m_title = MUST(String::from_view(title));
-        m_body = MUST(String::from_view(body));
-        set_needs_display();
-    }
-
-    Function<void()> on_click;
-
-    void draw(Graphics& graphics) override
-    {
-        auto const& t = tokens();
-        float radius = t.metric("notifications.radius"_sv);
-        graphics.fill_rounded({ 0, 0, width(), height() }, radius, t.color("notifications.fill"_sv));
-        float icon = t.metric("notifications.iconSize"_sv);
-        auto picture = Desktop::icon_named("Settings"_sv, static_cast<int>(icon), static_cast<int>(graphics.scale()));
-        if (picture)
-            graphics.painter().draw_bitmap(*picture, FloatRect { 12, (height() - icon) / 2, icon, icon });
-        float x = 12 + icon + 10;
-        auto bold = t.named_font("headline"_sv);
-        auto body = t.named_font("callout"_sv);
-        graphics.draw_text_truncated(m_title.view(), bold, { x, 28 }, width() - x - 12, t.color("label"_sv));
-        graphics.draw_text_truncated(m_body.view(), body, { x, 46 }, width() - x - 12, t.color("notifications.secondary"_sv));
-    }
-
-    bool mouse_down(MouseEvent const&) override
-    {
-        if (on_click)
-            on_click();
-        return true;
-    }
-
-private:
-    String m_application;
-    String m_title;
-    String m_body;
-};
-
 // ---- Privacy: someone's question, on its own above everything.
 
 class ConsentPanel final : public PrivacyPromptsStub {
@@ -638,116 +602,6 @@ private:
     OwnPtr<IPC::Listener> m_listener;
 };
 
-class NotificationListener final : public NotificationEventsStub {
-public:
-    Function<void(StringView, StringView, StringView)> on_posted;
-
-    void posted(IPC::Sender const&, String application, String title, String body) override
-    {
-        if (on_posted)
-            on_posted(application.view(), title.view(), body.view());
-    }
-};
-
-class NotificationServicePanel {
-public:
-    NotificationServicePanel()
-    {
-        auto const& t = tokens();
-        auto screen = Platform::the().screen_size();
-        auto width = static_cast<int>(t.metric("notifications.centerWidth"_sv));
-        float bar = t.metric("menubar.height"_sv);
-        auto top = static_cast<int>(bar) + 4;
-        m_window = adopt_own(*new UI::Window("Notifications"_sv, { screen.width - width - 8, top, width, screen.height - top - 8 }, WS::WindowBare | WS::WindowCanBecomeKey | WS::WindowSticky));
-        m_window->set_transparent(true);
-        m_window->backend().set_level(WS::LevelPopup);
-        auto& content = m_window->root_view().add<Content>();
-        content.set_frame({ 0, 0, static_cast<float>(width), static_cast<float>(screen.height - top - 8) });
-        m_content = &content;
-        MaterialRegion material { { 0, 0, width, screen.height - top - 8 }, WS::Material::Popover, static_cast<int>(t.metric("notifications.radius"_sv)) };
-        m_window->set_materials(Span<MaterialRegion const>(&material, 1));
-        m_window->on_key_change = [this](bool active) {
-            if (!active && m_shown) {
-                m_shown = false;
-                m_window->hide();
-            }
-        };
-    }
-
-    void toggle()
-    {
-        if (m_shown) {
-            m_shown = false;
-            m_window->hide();
-            return;
-        }
-        m_shown = true;
-        reload();
-        m_window->show();
-    }
-
-    void reload()
-    {
-        m_content->notes.clear();
-        auto port = IPC::look_up("com.vulture.notificationd"_sv);
-        if (port.is_error())
-            return;
-        NotificationServiceProxy center(port.release_value());
-        auto answer = center.all();
-        if (answer.is_error())
-            return;
-        auto json = JSON::parse(answer.value().view());
-        if (json.is_error())
-            return;
-        for (size_t i = 0; i < json.value().size(); ++i) {
-            auto const& one = json.value().at(i);
-            m_content->notes.append(Note { MUST(String::from_view(one.get_string("title"_sv).value_or(StringView {}))), MUST(String::from_view(one.get_string("body"_sv).value_or(StringView {}))) });
-        }
-        m_content->set_needs_display();
-    }
-
-private:
-    struct Note {
-        String title;
-        String body;
-    };
-
-    class Content final : public View {
-    public:
-        void draw(Graphics& graphics) override
-        {
-            auto const& t = tokens();
-            graphics.fill_rounded({ 0, 0, width(), height() }, t.metric("notifications.radius"_sv), t.color("notifications.center"_sv));
-            auto date = clock_text();
-            FontSpec big { t.metric("notifications.dateSize"_sv), FontWeight::Medium, false };
-            graphics.draw_text(date.view(), big, { 16, 40 }, t.color("label"_sv));
-            float y = 60;
-            auto bold = t.named_font("headline"_sv);
-            auto small = t.named_font("callout"_sv);
-            if (notes.is_empty()) {
-                graphics.draw_text("No Notifications"_sv, t.named_font("body"_sv), { 16, y + 20 }, t.color("secondaryLabel"_sv));
-                return;
-            }
-            float card = t.metric("notifications.height"_sv);
-            for (auto const& note : notes) {
-                FloatRect place { 8, y, width() - 16, card };
-                graphics.fill_rounded(place, t.metric("notifications.radius"_sv), t.color("notifications.fill"_sv));
-                graphics.draw_text_truncated(note.title.view(), bold, { place.x + 14, y + 28 }, place.width - 28, t.color("label"_sv));
-                graphics.draw_text_truncated(note.body.view(), small, { place.x + 14, y + 46 }, place.width - 28, t.color("notifications.secondary"_sv));
-                y += card + 8;
-                if (y > height())
-                    break;
-            }
-        }
-
-        Vector<Note> notes;
-    };
-
-    OwnPtr<UI::Window> m_window;
-    Content* m_content { nullptr };
-    bool m_shown { false };
-};
-
 // ---- Quick Settings
 
 class Tile final : public Control {
@@ -782,6 +636,7 @@ public:
 
     [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::Switch; }
     [[nodiscard]] String accessibility_label() const override { return MUST(String::from_view(m_title.view())); }
+    [[nodiscard]] String accessibility_value() const override { return MUST(String::from_view(m_on ? "on"_sv : "off"_sv)); }
 
 private:
     String m_title;
@@ -981,10 +836,12 @@ public:
             preferences.set("appearance"_sv, MUST(JSON::Value::string(to_dark ? "Dark"_sv : "Light"_sv)));
             preferences.save();
         };
-        auto& quiet = stack.add<Tile>("Do Not Disturb"_sv, Symbol::Minus, false);
+        // Focus, as Sequoia's module is: Do Not Disturb, kept across logins, and said in the menu bar while it's on.
+        Desktop::Preferences focus("com.vulture.focus"_sv);
+        auto& quiet = stack.add<Tile>("Focus"_sv, Symbol::Moon, !focus.string("mode"_sv).value_or(StringView {}).is_empty());
         quiet.set_fixed_height(tile_height);
         m_quiet = &quiet;
-        quiet.on_action = [&quiet] { quiet.set_on(!quiet.is_on()); };
+        quiet.on_action = [this, &quiet] { set_focus(!quiet.is_on()); };
         auto& sound = stack.add<SliderTile>("Sound"_sv);
         sound.set_fixed_height(t.metric("quickSettings.sliderTileHeight"_sv));
         m_volume = &sound.slider();
@@ -1020,6 +877,25 @@ public:
 
     [[nodiscard]] bool is_quiet() const { return m_quiet->is_on(); }
 
+    // From here, or from Settings: Do Not Disturb, or nothing.
+    void set_focus(bool on)
+    {
+        m_quiet->set_on(on);
+        Desktop::Preferences focus("com.vulture.focus"_sv);
+        focus.set("mode"_sv, MUST(JSON::Value::string(on ? "Do Not Disturb"_sv : ""_sv)));
+        focus.save();
+        if (on_focus_change)
+            on_focus_change();
+    }
+    void reload_focus()
+    {
+        Desktop::Preferences focus("com.vulture.focus"_sv);
+        m_quiet->set_on(!focus.string("mode"_sv).value_or(StringView {}).is_empty());
+        if (on_focus_change)
+            on_focus_change();
+    }
+    Function<void()> on_focus_change;
+
 private:
     class Face final : public View {
     public:
@@ -1042,26 +918,44 @@ class MenuBarView final : public View {
 public:
     // Banners give way to what opens from here.
     Function<void()> on_panel_opening;
+    // The system menu's own windows.
+    Function<void()> on_about;
+    Function<void()> on_force_quit;
 
-    MenuBarView(SearchPanel& search_panel, NotificationServicePanel& center, QuickSettingsPanel& control)
+    MenuBarView(SearchPanel& search_panel, DesktopShell::Notifications& center, QuickSettingsPanel& control)
         : m_search_panel(search_panel)
         , m_center(center)
         , m_control(control)
     {
+        // Sequoia's, in its order. (Recent Items, Sleep and Lock Screen come with M26, M45 and M25.)
         m_system_menu = adopt_own(*new Menu);
-        m_system_menu->add("About This Computer"_sv, [] {
-            auto bundle = Desktop::read_bundle("/System/Applications/Settings.app"_sv);
-            StringView arguments[1] = { "About"_sv };
-            if (!bundle.is_error())
-                (void)Desktop::launch(bundle.value(), Span<StringView const>(arguments, 1));
+        m_system_menu->add("About This Computer"_sv, [this] {
+            if (on_about)
+                on_about();
         });
         m_system_menu->add_separator();
         m_system_menu->add("Settings…"_sv, [] { (void)Desktop::open_path("/System/Applications/Settings.app"_sv); });
+        m_system_menu->add("Software…"_sv, [] { (void)Desktop::open_path("/System/Applications/Software.app"_sv); });
         m_system_menu->add_separator();
+        m_system_menu->add_submenu("Recent Items"_sv);
+        m_system_menu->items()[m_system_menu->items().size() - 1].enabled = false;
+        m_system_menu->add_separator();
+        m_system_menu->add("Force Quit…"_sv, [this] {
+            if (on_force_quit)
+                on_force_quit();
+        }).shortcut_text = MUST(String::from_view("\xE2\x8C\xA5\xE2\x8C\x98\xE2\x8E\x8B"_sv));
+        m_system_menu->add_separator();
+        m_system_menu->add("Sleep"_sv).enabled = false;
         m_system_menu->add("Restart…"_sv, [] { Desktop::restart(); });
         m_system_menu->add("Shut Down…"_sv, [] { Desktop::shut_down(); });
         m_system_menu->add_separator();
-        m_system_menu->add("Log Out"_sv, [] { Desktop::log_out(); });
+        auto& lock = m_system_menu->add("Lock Screen"_sv);
+        lock.enabled = false;
+        lock.shortcut_text = MUST(String::from_view("\xE2\x8C\x83\xE2\x8C\x98Q"_sv));
+        struct passwd const* account = getpwuid(getuid());
+        StringBuilder log_out;
+        log_out.appendff("Log Out {}…", account ? StringView { account->pw_name, strlen(account->pw_name) } : "vulture"_sv);
+        m_system_menu->add(log_out.view(), [] { Desktop::log_out(); }).shortcut_text = MUST(String::from_view("\xE2\x87\xA7\xE2\x8C\x98Q"_sv));
     }
 
     void set_state(Desktop::ShellState state)
@@ -1080,6 +974,8 @@ public:
         for (auto const& item : m_items)
             parts.append(Accessibility::part_of(*this, Accessibility::Role::MenuItem, item.is_logo ? "Logo"_sv : item.title.view(), { item.left, 0, item.width, height() }));
         parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, "Search"_sv, m_search_rect));
+        if (!m_focus_rect.is_empty())
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, "Focus"_sv, m_focus_rect, "Do Not Disturb"_sv));
         parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, "Quick Settings"_sv, m_control_rect));
         parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, "Notifications"_sv, m_clock_rect, m_clock.view()));
     }
@@ -1131,6 +1027,21 @@ public:
         right -= symbol + t.metric("menubar.statusGap"_sv);
         m_search_rect = { right - symbol - 4, 0, symbol + 8, height() };
         graphics.draw_symbol(Symbol::Magnifier, { right - symbol, (height() - symbol) / 2, symbol, symbol }, text, 1.5f);
+        // A Focus that's on, to the left of Search.
+        m_focus_rect = {};
+        if (m_control.is_quiet() && m_shows_focus) {
+            right -= symbol + t.metric("menubar.statusGap"_sv);
+            m_focus_rect = { right - symbol - 4, 0, symbol + 8, height() };
+            graphics.draw_symbol(Symbol::Moon, { right - symbol, (height() - symbol) / 2, symbol, symbol }, text);
+            m_search_rect = { m_search_rect.x, 0, m_search_rect.width, height() };
+        }
+        float const leftmost = m_focus_rect.is_empty() ? m_search_rect.x : m_focus_rect.x;
+        // Programs' own menu extras go to the left of these.
+        int const extras_edge = static_cast<int>(leftmost);
+        if (extras_edge != m_extras_edge && m_tells_extras) {
+            m_extras_edge = extras_edge;
+            (void)Application::the().connection().server().set_menu_extras_edge(extras_edge, static_cast<int>(t.metric("menubar.statusGap"_sv)) - 8);
+        }
     }
 
     bool mouse_down(MouseEvent const& event) override
@@ -1140,7 +1051,7 @@ public:
         if (m_clock_rect.contains(event.position)) {
             if (on_panel_opening)
                 on_panel_opening();
-            m_center.toggle();
+            m_center.toggle_center();
             return false;
         }
         if (m_control_rect.contains(event.position)) {
@@ -1171,6 +1082,15 @@ public:
         auto const& item = m_items[static_cast<size_t>(index)];
         m_open = index;
         set_needs_display();
+        if (item.is_help) {
+            auto const origin = window()->frame().origin();
+            auto const pid = m_state.active_pid;
+            m_help.open({ origin.x + static_cast<int>(item.left), origin.y + static_cast<int>(height()) + 1 }, [pid](u32 id) { (void)Application::the().connection().server().choose_menu_item(pid, id); }, [this] {
+                m_open = -1;
+                set_needs_display();
+            });
+            return;
+        }
         auto* menu = item.menu;
         if (!menu)
             return;
@@ -1206,10 +1126,13 @@ private:
         Menu* menu { nullptr };
         bool bold { false };
         bool is_logo { false };
+        // Every application's last: searched, rather than a list.
+        bool is_help { false };
     };
 
     void close_open_menu()
     {
+        m_help.close();
         if (m_open < 0)
             return;
         auto* menu = m_items[static_cast<size_t>(m_open)].menu;
@@ -1246,6 +1169,10 @@ private:
                 auto title = description.get_string("title"_sv).value_or(StringView {});
                 add_item(i == 0 ? (m_state.active_name.is_empty() ? title : m_state.active_name.view()) : title, m_menus[i].ptr(), i == 0, false);
             }
+            // Help, at the end, as every Mac application has it: it finds the others' commands.
+            m_help.set_menus(json.value());
+            add_item("Help"_sv, nullptr, false, false);
+            m_items.last().is_help = true;
         } else if (!m_state.active_name.is_empty()) {
             add_item(m_state.active_name.view(), nullptr, true, false);
         }
@@ -1269,7 +1196,7 @@ private:
     }
 
     SearchPanel& m_search_panel;
-    NotificationServicePanel& m_center;
+    DesktopShell::Notifications& m_center;
     QuickSettingsPanel& m_control;
     Desktop::ShellState m_state;
     OwnPtr<Menu> m_system_menu;
@@ -1281,6 +1208,15 @@ private:
     FloatRect m_clock_rect;
     FloatRect m_control_rect;
     FloatRect m_search_rect;
+    FloatRect m_focus_rect;
+    int m_extras_edge { -1 };
+    DesktopShell::HelpSearch m_help;
+
+public:
+    // Only the main display's says where menu extras go.
+    bool m_tells_extras { false };
+    // Control Center's setting: the moon while a Focus is on, or not.
+    bool m_shows_focus { true };
 };
 
 }
@@ -1360,8 +1296,13 @@ int main(int argc, char** argv)
         (void)server.set_keyboard_layout(saved.value());
 
     SearchPanel search_panel;
-    NotificationServicePanel center;
+    // Widgets, on the desktop and in Notification Center, and notifications.
+    DesktopShell::set_widgets_still(s_still);
+    DesktopShell::set_notifications_still(s_still);
+    DesktopShell::Widgets widgets;
+    DesktopShell::Notifications center(widgets);
     QuickSettingsPanel control;
+    center.is_quiet = [&control] { return control.is_quiet(); };
 
     auto screen = Platform::the().screen_size();
     auto bar_height = static_cast<int>(tokens().metric("menubar.height"_sv));
@@ -1371,6 +1312,9 @@ int main(int argc, char** argv)
     MaterialRegion material { { 0, 0, screen.width, bar_height }, WS::Material::MenuBar };
     window->set_materials(Span<MaterialRegion const>(&material, 1));
     auto& bar = window->root_view().add<MenuBarView>(search_panel, center, control);
+    bar.m_tells_extras = true;
+    DesktopShell::AboutWindow about;
+    DesktopShell::ForceQuitWindow force_quit;
     bar.set_frame({ 0, 0, static_cast<float>(screen.width), static_cast<float>(bar_height) });
     bar.tick_clock();
     window->show();
@@ -1465,7 +1409,7 @@ int main(int argc, char** argv)
     (void)server.show_window_menus();
     application->connection().on_hot_corner = [&](WS::HotCornerAction action) {
         if (action == WS::HotCornerAction::NotificationCenter)
-            center.toggle();
+            center.toggle_center();
         else if (action == WS::HotCornerAction::Launcher)
             (void)Desktop::open_path("/System/Applications/Launcher.app"_sv);
     };
@@ -1476,6 +1420,21 @@ int main(int argc, char** argv)
         auto state = Desktop::parse_shell_state(json);
         if (!state.is_error()) {
             switcher.update(state.value());
+            force_quit.set_state(state.value());
+            // The desktop is what's in front when it's been clicked, or the Files that owns it has no window: widgets on it
+            // in full colour.
+            bool desktop_active = state.value().desktop_revealed;
+            if (state.value().active_identifier.view() == "com.vulture.Files"_sv) {
+                bool any = false;
+                for (auto const& entry : state.value().applications) {
+                    if (entry.pid == state.value().active_pid && !entry.hidden) {
+                        for (auto const& one : entry.windows)
+                            any = any || (!one.minimized && one.space == state.value().space);
+                    }
+                }
+                desktop_active = desktop_active || !any;
+            }
+            widgets.set_desktop_active(desktop_active);
             bar.set_state(state.release_value());
         }
         for (auto& other : other_bars) {
@@ -1486,7 +1445,60 @@ int main(int argc, char** argv)
     };
     place_bars();
     (void)server.subscribe_shell();
-    application->connection().on_hotkey = [&search_panel](u16 code, u32) {
+    // Shift-Command-3, 4 and 5.
+    DesktopShell::set_screenshots_still(s_still);
+    DesktopShell::Screenshots screenshots;
+    screenshots.register_keys();
+    // Focus, from Control Center or Settings: said in the menu bar.
+    control.on_focus_change = [&bar] { bar.set_needs_display(); };
+    // Menu extras: programs of their own, started as Control Center's settings say. (Sound's, for now.)
+    pid_t sound_menu = 0;
+    auto update_menu_extras = [&sound_menu, &bar] {
+        Desktop::Preferences control_center("com.vulture.controlcenter"_sv);
+        bar.m_shows_focus = control_center.string("focus"_sv).value_or("whenActive"_sv) != "never"_sv;
+        bar.set_needs_display();
+        bool const wanted = control_center.string("sound"_sv).value_or("whenActive"_sv) == "always"_sv;
+        if (wanted && sound_menu == 0) {
+            pid_t const child = fork();
+            if (child == 0) {
+                execl("/System/Library/CoreServices/SoundMenu", "/System/Library/CoreServices/SoundMenu", nullptr);
+                _exit(127);
+            }
+            if (child > 0)
+                sound_menu = child;
+        } else if (!wanted && sound_menu != 0) {
+            (void)kill(sound_menu, SIGTERM);
+            sound_menu = 0;
+        }
+    };
+    update_menu_extras();
+    auto listen = [&](char const* name, Function<void()> heard) {
+        int fd = -1;
+        int token = -1;
+        if (notify_register_file_descriptor(name, &fd, 0, &token) != NOTIFY_STATUS_OK)
+            return;
+        auto shared = adopt_own(*new Function<void()>(move(heard)));
+        auto* raw = shared.leak_ptr();
+        (void)application->event_loop().watch(fd, Core::EventLoop::Interest::Read, [fd, raw] {
+            u8 bytes[4];
+            (void)read(fd, bytes, sizeof(bytes));
+            (*raw)();
+        });
+    };
+    listen("com.vulture.controlcenter.preferences", [&update_menu_extras] { update_menu_extras(); });
+    listen("com.vulture.focus.preferences", [&control] { control.reload_focus(); });
+
+    // About This Computer, and Force Quit (Command-Option-Escape too).
+    bar.on_about = [&about] { about.show(); };
+    bar.on_force_quit = [&force_quit] { force_quit.show(); };
+    (void)server.register_hotkey(KeyEscape, WS::ModifierCommand | WS::ModifierOption);
+    application->connection().on_hotkey = [&search_panel, &screenshots, &force_quit](u16 code, u32 modifiers) {
+        if ((modifiers & WS::ModifierShift) && screenshots.hotkey(code, modifiers))
+            return;
+        if (code == KeyEscape && (modifiers & WS::ModifierOption)) {
+            force_quit.show();
+            return;
+        }
         if (code == KeySpace)
             search_panel.toggle();
     };
@@ -1498,55 +1510,7 @@ int main(int argc, char** argv)
                 other.view->tick_clock();
         });
 
-    // Banners.
-    auto const& t = tokens();
-    auto banner_width = static_cast<int>(t.metric("notifications.width"_sv));
-    auto banner_height = static_cast<int>(t.metric("notifications.height"_sv));
-    auto margin = static_cast<int>(t.metric("notifications.margin"_sv));
-    auto banner_window = adopt_own(*new UI::Window("Notification"_sv, { screen.width - banner_width - margin, bar_height + margin, banner_width, banner_height }, WS::WindowBare | WS::WindowPopup | WS::WindowSticky));
-    banner_window->set_transparent(true);
-    MaterialRegion banner_material { { 0, 0, banner_width, banner_height }, WS::Material::Popover, static_cast<int>(t.metric("notifications.radius"_sv)) };
-    banner_window->set_materials(Span<MaterialRegion const>(&banner_material, 1));
-    auto& banner = banner_window->root_view().add<Banner>();
-    banner.set_frame({ 0, 0, static_cast<float>(banner_width), static_cast<float>(banner_height) });
-    int banner_timer = -1;
-    banner.on_click = [&] {
-        banner_window->hide();
-        center.toggle();
-    };
-    bar.on_panel_opening = [&] { banner_window->hide(); };
-    NotificationListener listener;
-    listener.on_posted = [&](StringView application_name, StringView title, StringView body) {
-        if (control.is_quiet())
-            return;
-        banner.set_note(application_name, title, body);
-        banner_window->show();
-        application->play_sound("notification"_sv);
-        printf("notification: %.*s\n", static_cast<int>(title.length()), title.characters_without_null_termination());
-        fflush(stdout);
-        if (banner_timer >= 0)
-            application->cancel_timer(banner_timer);
-        // (When nothing moves, it stays until something makes it go.)
-        if (motion_enabled()) {
-            auto seconds = static_cast<u64>(tokens().metric("notifications.seconds"_sv));
-            banner_timer = application->add_timer(seconds * 1000, false, [&] {
-                banner_timer = -1;
-                banner_window->hide();
-            });
-        }
-    };
-    int events[2];
-    OwnPtr<IPC::Listener> notifications_listener;
-    auto center_port = IPC::look_up("com.vulture.notificationd"_sv);
-    if (!center_port.is_error()) {
-        auto pair = IPC::create_port();
-        if (!pair.is_error()) {
-            auto ports = pair.release_value();
-            notifications_listener = adopt_own(*new IPC::Listener(application->event_loop(), move(ports.receive), [&](IPC::ReceivedMessage& message) { (void)listener.handle(message); }));
-            (void)NotificationServiceProxy(center_port.release_value()).subscribe(move(ports.send));
-        }
-    }
-    (void)events;
+    bar.on_panel_opening = [&center] { center.hide_banners(); };
     ConsentPanel consent;
     WorkspaceService workspace;
     printf("desktopshell: ready\n");

@@ -1,0 +1,145 @@
+# M24: the Dock, all of it. Down a side or along the bottom, hidden until wanted, a stack, badges, its menus, and what's
+# dragged on to it and off it.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 2
+pointer 31500 25000
+pause 0.5
+screenshot at-rest.png
+# ---- Its menu, for one kept there and not running: Options, and Open.
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click button "Terminal"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"ctrl"}}}]}}
+ax-expect menuitem "Open"
+click menuitem "Options"
+ax-expect menuitem "Remove from Dock"
+ax-expect menuitem "Open at Login" disabled
+pause 0.5
+screenshot menu-kept.png
+key esc
+pause 0.5
+# ---- A bell rung in the background: counted on its icon, until it's come back to.
+click button "Terminal"
+expect terminal: ready
+pointer 31500 25000
+pause 1
+type sleep 3; printf '\a'\r
+pointer 600 16000
+pause 0.2
+button left down
+pause 0.1
+button left up
+ax-expect button "Terminal" = 1
+pointer 31500 25000
+pause 0.5
+screenshot badge.png
+click button "Terminal"
+pause 1
+# ---- Used lately: after a line of their own, even once they've quit.
+key meta_l-spc
+expect search: shown
+pause 0.3
+type disks
+pause 1
+type \r
+expect disks: ready
+pause 1
+ax-expect button "Disks"
+key meta_l-q
+pause 1.5
+ax-expect button "Disks"
+pointer 31500 25000
+pause 0.5
+screenshot recents.png
+# ---- A stack: what's in Downloads, fanned out above it.
+click button "Terminal"
+pause 1
+type touch ~/Downloads/Notes.txt ~/Downloads/Report.txt ~/Downloads/Summary.txt\r
+pause 1
+click button "Downloads"
+ax-expect button "Open in Files"
+ax-expect button "Summary.txt"
+pause 0.5
+screenshot fan.png
+pointer 4000 4000
+pause 0.2
+button left down
+pause 0.1
+button left up
+ax-gone button "Open in Files"
+# ---- Or as a grid.
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click button "Downloads"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click menuitem "View content as"
+click menuitem "Grid"
+pause 0.5
+click button "Downloads"
+ax-expect button "Open in Files"
+pause 0.5
+screenshot grid.png
+click button "Open in Files"
+ax-gone button "Open in Files"
+pause 1
+# ---- Taken off it: dragged away, "Remove" over it, and let go.
+grab button "Viewer"
+pointer 20000 22000
+pause 0.3
+pointer 20000 18000
+pause 0.5
+screenshot removing.png
+button left up
+pause 1
+ax-gone button "Viewer"
+# ---- And put back, from Files: on to the Dock, before Calculator.
+click button "Terminal"
+pause 0.5
+type open /System/Applications\r
+pause 2
+grab cell "Viewer.app"
+drop button "Calculator"
+pause 1
+ax-expect button "Viewer"
+pointer 31500 25000
+pause 0.5
+screenshot put-back.png
+# ---- Down the left, then the right, from Settings.
+click button "Settings"
+expect settings: Appearance
+click row "Desktop & Dock"
+expect settings: Desktop & Dock
+ax-expect popup "Position on screen" = Bottom
+pause 0.5
+screenshot settings.png
+click popup "Position on screen"
+click menuitem "Left"
+pause 1.5
+pointer 31500 25000
+pause 0.5
+screenshot left.png
+click popup "Position on screen"
+click menuitem "Right"
+pause 1.5
+pointer 16000 25000
+pause 0.5
+screenshot right.png
+click popup "Position on screen"
+click menuitem "Bottom"
+pause 1.5
+# ---- Hidden, until the pointer comes to its edge: Option-Command-D.
+key alt-meta_l-d
+ax-expect group "Dock, hidden"
+pointer 16000 16000
+pause 1
+screenshot hidden.png
+pointer 16000 32767
+pause 1
+ax-expect group "Dock"
+screenshot shown.png
+pointer 16000 16000
+pause 1
+ax-expect group "Dock, hidden"
+key alt-meta_l-d
+ax-expect group "Dock"
