@@ -5,4 +5,4 @@
 #
 
 # Who is using this computer: asks, and starts their session.
-vulture_add_program(LoginWindow SOURCES main.cpp DESTINATION System/Library/CoreServices LIBRARIES LibDesktop)
+vulture_add_program(LoginWindow SOURCES main.cpp Setup.cpp Views.cpp DESTINATION System/Library/CoreServices LIBRARIES LibDesktop LibCore LibLocale LibJSON)

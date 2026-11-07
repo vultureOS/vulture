@@ -13,6 +13,7 @@
 #include <Kernel/API/POSIX/privacy.h>
 #include <PrivacyEndpoint.h>
 #include <Desktop.h>
+#include <LibCore/AccountDatabase.h>
 #include <LibIPC/Bootstrap.h>
 #include <LibIPC/Listener.h>
 #include <LibJSON/JSON.h>
@@ -927,7 +928,7 @@ public:
         , m_center(center)
         , m_control(control)
     {
-        // Sequoia's, in its order. (Recent Items, Sleep and Lock Screen come with M26, M45 and M25.)
+        // Sequoia's, in its order. (Recent Items and Sleep come with M26 and M45.)
         m_system_menu = adopt_own(*new Menu);
         m_system_menu->add("About This Computer"_sv, [this] {
             if (on_about)
@@ -949,12 +950,11 @@ public:
         m_system_menu->add("Restart…"_sv, [] { Desktop::restart(); });
         m_system_menu->add("Shut Down…"_sv, [] { Desktop::shut_down(); });
         m_system_menu->add_separator();
-        auto& lock = m_system_menu->add("Lock Screen"_sv);
-        lock.enabled = false;
+        auto& lock = m_system_menu->add("Lock Screen"_sv, [] { Desktop::lock_screen(); });
         lock.shortcut_text = MUST(String::from_view("\xE2\x8C\x83\xE2\x8C\x98Q"_sv));
-        struct passwd const* account = getpwuid(getuid());
+        // By the full name, as Sequoia's says it.
         StringBuilder log_out;
-        log_out.appendff("Log Out {}…", account ? StringView { account->pw_name, strlen(account->pw_name) } : "vulture"_sv);
+        log_out.appendff("Log Out {}…", user_name().view());
         m_system_menu->add(log_out.view(), [] { Desktop::log_out(); }).shortcut_text = MUST(String::from_view("\xE2\x87\xA7\xE2\x8C\x98Q"_sv));
     }
 
@@ -976,6 +976,8 @@ public:
         parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, "Search"_sv, m_search_rect));
         if (!m_focus_rect.is_empty())
             parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, "Focus"_sv, m_focus_rect, "Do Not Disturb"_sv));
+        if (!m_user_rect.is_empty())
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, user_name().view(), m_user_rect, "Fast User Switching"_sv));
         parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, "Quick Settings"_sv, m_control_rect));
         parts.append(Accessibility::part_of(*this, Accessibility::Role::Button, "Notifications"_sv, m_clock_rect, m_clock.view()));
     }
@@ -1035,7 +1037,18 @@ public:
             graphics.draw_symbol(Symbol::Moon, { right - symbol, (height() - symbol) / 2, symbol, symbol }, text);
             m_search_rect = { m_search_rect.x, 0, m_search_rect.width, height() };
         }
-        float const leftmost = m_focus_rect.is_empty() ? m_search_rect.x : m_focus_rect.x;
+        // Fast user switching, by this person's full name, left of those.
+        m_user_rect = {};
+        if (m_shows_user) {
+            auto const name = user_name();
+            float const name_width = Appearance::text_width(font, name.view());
+            right = (m_focus_rect.is_empty() ? m_search_rect.x : m_focus_rect.x) - t.metric("menubar.statusGap"_sv) + 4;
+            m_user_rect = { right - name_width - 6, 0, name_width + 12, height() };
+            if (m_user_menu_open)
+                graphics.fill_rounded({ m_user_rect.x, inset / 2, m_user_rect.width, height() - inset }, radius, t.color("menubar.highlight"_sv));
+            graphics.draw_text(name.view(), font, { right - name_width, baseline }, text);
+        }
+        float const leftmost = !m_user_rect.is_empty() ? m_user_rect.x : m_focus_rect.is_empty() ? m_search_rect.x : m_focus_rect.x;
         // Programs' own menu extras go to the left of these.
         int const extras_edge = static_cast<int>(leftmost);
         if (extras_edge != m_extras_edge && m_tells_extras) {
@@ -1062,6 +1075,10 @@ public:
         }
         if (m_search_rect.contains(event.position)) {
             m_search_panel.toggle();
+            return false;
+        }
+        if (m_user_rect.contains(event.position)) {
+            open_user_menu();
             return false;
         }
         layout_items();
@@ -1212,9 +1229,54 @@ private:
     int m_extras_edge { -1 };
     DesktopShell::HelpSearch m_help;
 
+    // Fast user switching's menu: everyone, the logged in ticked; the login window; and where to set it up.
+    void open_user_menu()
+    {
+        close_open_menu();
+        m_user_menu = adopt_own(*new Menu);
+        auto const logged_in = Desktop::logged_in_users();
+        auto const me = getuid();
+        for (auto const& person : Core::AccountDatabase::people()) {
+            bool in = false;
+            for (auto const& name : logged_in)
+                in = in || name.view() == person.name.view();
+            auto name = person.name;
+            auto& item = person.uid == me ? m_user_menu->add(person.full_name.view()) : m_user_menu->add(person.full_name.view(), [name] { Desktop::switch_to_user(name.view()); });
+            item.checked = in;
+        }
+        m_user_menu->add_separator();
+        m_user_menu->add("Login Window\xE2\x80\xA6"_sv, [] { Desktop::switch_to_user({}); });
+        m_user_menu->add("Users & Groups Settings\xE2\x80\xA6"_sv, [] { (void)Desktop::open_path("/System/Applications/Settings.app"_sv); });
+        m_user_menu->on_close = [this] {
+            m_user_menu_open = false;
+            set_needs_display();
+        };
+        m_user_menu_open = true;
+        set_needs_display();
+        float bar = tokens().metric("menubar.height"_sv);
+        m_user_menu->open(*window(), { static_cast<int>(m_user_rect.x), static_cast<int>(bar) });
+    }
+
+    static String user_name()
+    {
+        auto person = Core::AccountDatabase::people();
+        for (auto const& each : person) {
+            if (each.uid == getuid())
+                return each.full_name;
+        }
+        struct passwd const* account = getpwuid(getuid());
+        return MUST(String::from_view(account ? StringView { account->pw_name, strlen(account->pw_name) } : "vulture"_sv));
+    }
+
+    FloatRect m_user_rect;
+    OwnPtr<Menu> m_user_menu;
+    bool m_user_menu_open { false };
+
 public:
     // Only the main display's says where menu extras go.
     bool m_tells_extras { false };
+    // Control Center's setting: this person's name, for switching to another's session, or not.
+    bool m_shows_user { false };
     // Control Center's setting: the moon while a Focus is on, or not.
     bool m_shows_focus { true };
 };
@@ -1239,24 +1301,27 @@ int main(int argc, char** argv)
         set_motion_enabled(false);
     auto& server = application->connection().server();
 
+    // This person's: the window server keeps one of each for everyone, so they're said again whenever this session's back on
+    // the screen after another's, each to what it is when not set.
+    auto apply_preferences = [&server](bool again) {
+        Desktop::Preferences preferences("com.vulture.desktop"_sv);
+        (void)server.set_appearance(preferences.string("appearance"_sv).value_or("Light"_sv));
+        (void)server.set_reduce_motion(preferences.boolean("reduceMotion"_sv).value_or(false));
+        (void)server.set_natural_scrolling(preferences.boolean("naturalScrolling"_sv).value_or(true));
+        (void)server.set_tap_to_click(preferences.boolean("tapToClick"_sv).value_or(true));
+        (void)server.set_pointer_speed(static_cast<i32>(preferences.number("pointerSpeed"_sv).value_or(100)));
+        (void)server.set_warmth(static_cast<i32>(preferences.number("nightShift"_sv).value_or(0)));
+        (void)server.set_tiling(preferences.boolean("tileByEdges"_sv).value_or(true), preferences.boolean("tileToMenuBar"_sv).value_or(true), preferences.boolean("tileWithOption"_sv).value_or(true), preferences.boolean("tileMargins"_sv).value_or(true));
+        (void)server.set_click_wallpaper(preferences.boolean("clickWallpaperReveals"_sv).value_or(true));
+        (void)server.set_hot_corners(static_cast<i32>(preferences.number("hotCornerTopLeft"_sv).value_or(0)), static_cast<i32>(preferences.number("hotCornerTopRight"_sv).value_or(0)), static_cast<i32>(preferences.number("hotCornerBottomLeft"_sv).value_or(0)), static_cast<i32>(preferences.number("hotCornerBottomRight"_sv).value_or(0)));
+        (void)server.set_stage(preferences.boolean("stage"_sv).value_or(false));
+        (void)server.set_wallpaper(preferences.string("wallpaper"_sv).value_or(""_sv));
+        if (auto saved = preferences.string("keyboardLayout"_sv); saved.has_value())
+            (void)server.set_keyboard_layout(saved.value());
+        (void)again;
+    };
+    apply_preferences(false);
     Desktop::Preferences preferences("com.vulture.desktop"_sv);
-    if (auto saved = preferences.string("appearance"_sv); saved.has_value())
-        (void)server.set_appearance(saved.value());
-    if (preferences.boolean("reduceMotion"_sv).value_or(false))
-        (void)server.set_reduce_motion(true);
-    if (auto saved = preferences.boolean("naturalScrolling"_sv); saved.has_value())
-        (void)server.set_natural_scrolling(saved.value());
-    if (auto saved = preferences.boolean("tapToClick"_sv); saved.has_value())
-        (void)server.set_tap_to_click(saved.value());
-    if (auto saved = preferences.number("pointerSpeed"_sv); saved.has_value())
-        (void)server.set_pointer_speed(static_cast<i32>(saved.value()));
-    if (auto saved = preferences.number("nightShift"_sv); saved.has_value() && saved.value() > 0)
-        (void)server.set_warmth(static_cast<i32>(saved.value()));
-    (void)server.set_tiling(preferences.boolean("tileByEdges"_sv).value_or(true), preferences.boolean("tileToMenuBar"_sv).value_or(true), preferences.boolean("tileWithOption"_sv).value_or(true), preferences.boolean("tileMargins"_sv).value_or(true));
-    (void)server.set_click_wallpaper(preferences.boolean("clickWallpaperReveals"_sv).value_or(true));
-    (void)server.set_hot_corners(static_cast<i32>(preferences.number("hotCornerTopLeft"_sv).value_or(0)), static_cast<i32>(preferences.number("hotCornerTopRight"_sv).value_or(0)), static_cast<i32>(preferences.number("hotCornerBottomLeft"_sv).value_or(0)), static_cast<i32>(preferences.number("hotCornerBottomRight"_sv).value_or(0)));
-    if (preferences.boolean("stage"_sv).value_or(false))
-        (void)server.set_stage(true);
     if (preferences.boolean("mirrorDisplays"_sv).value_or(false))
         (void)server.set_mirroring(true);
     // Where each display goes, and how big it's to look: "output x y width height" and so on.
@@ -1290,10 +1355,6 @@ int main(int argc, char** argv)
         }
         finish_number();
     }
-    if (auto saved = preferences.string("wallpaper"_sv); saved.has_value())
-        (void)server.set_wallpaper(saved.value());
-    if (auto saved = preferences.string("keyboardLayout"_sv); saved.has_value())
-        (void)server.set_keyboard_layout(saved.value());
 
     SearchPanel search_panel;
     // Widgets, on the desktop and in Notification Center, and notifications.
@@ -1412,6 +1473,15 @@ int main(int argc, char** argv)
             center.toggle_center();
         else if (action == WS::HotCornerAction::Launcher)
             (void)Desktop::open_path("/System/Applications/Launcher.app"_sv);
+        else if (action == WS::HotCornerAction::StartScreenSaver)
+            Desktop::start_screen_saver();
+        else if (action == WS::HotCornerAction::LockScreen)
+            Desktop::lock_screen();
+    };
+    // Back on the screen after someone else's session: this person's settings again.
+    application->connection().on_session_changed = [&apply_preferences](bool active) {
+        if (active)
+            apply_preferences(true);
     };
 
     Switcher switcher;
@@ -1456,6 +1526,7 @@ int main(int argc, char** argv)
     auto update_menu_extras = [&sound_menu, &bar] {
         Desktop::Preferences control_center("com.vulture.controlcenter"_sv);
         bar.m_shows_focus = control_center.string("focus"_sv).value_or("whenActive"_sv) != "never"_sv;
+        bar.m_shows_user = control_center.string("fastUserSwitching"_sv).value_or("never"_sv) == "always"_sv;
         bar.set_needs_display();
         bool const wanted = control_center.string("sound"_sv).value_or("whenActive"_sv) == "always"_sv;
         if (wanted && sound_menu == 0) {
@@ -1492,9 +1563,15 @@ int main(int argc, char** argv)
     bar.on_about = [&about] { about.show(); };
     bar.on_force_quit = [&force_quit] { force_quit.show(); };
     (void)server.register_hotkey(KeyEscape, WS::ModifierCommand | WS::ModifierOption);
+    // Control-Command-Q: Lock Screen.
+    (void)server.register_hotkey(KeyQ, WS::ModifierCommand | WS::ModifierControl);
     application->connection().on_hotkey = [&search_panel, &screenshots, &force_quit](u16 code, u32 modifiers) {
         if ((modifiers & WS::ModifierShift) && screenshots.hotkey(code, modifiers))
             return;
+        if (code == KeyQ && (modifiers & WS::ModifierControl)) {
+            Desktop::lock_screen();
+            return;
+        }
         if (code == KeyEscape && (modifiers & WS::ModifierOption)) {
             force_quit.show();
             return;
@@ -1515,5 +1592,13 @@ int main(int argc, char** argv)
     WorkspaceService workspace;
     printf("desktopshell: ready\n");
     fflush(stdout);
+    // Login Items, once the rest of the session's there to open them.
+    application->event_loop().add_timer(s_still ? 300 : 800, false, [] {
+        for (auto const& item : Desktop::login_items()) {
+            if (!Desktop::open_path(item.view()).is_error())
+                printf("desktopshell: opened %s at login\n", item.characters());
+        }
+        fflush(stdout);
+    });
     return application->exec();
 }

@@ -137,7 +137,7 @@ header dependency tracking.
               LibUnicode (the Unicode Character Database, as code) · LibLocale (CLDR)
  Core libs    LibCore (run loop, JSON plists) · LibIPC (+ipcc IDL) · LibCrypto/TLS/HTTP · LibVT · LibAudio
  Runtime      LibC (math included) · LibCxxRT · LibSystem (syscalls; libSystem.B.dylib) · dyld · LibBase (shared with kernel)
- Services     vlaunchd (PID 1) · logd · notifyd · configd · PranaWindowServer · AudioServer · indexd · clipboardd
+ Services     vlaunchd (PID 1) · logd · notifyd · configd · PranaWindowServer · AudioServer · indexd · clipboardd · directoryd
  ─────────────────────────────── syscalls (SVC) + Mach-style ports ───────────────────────────────
  Kernel       Hybrid (XNU-style): monolithic core for speed + port IPC for services
               Memory · Tasks/Scheduler · VFS (vultureFS, FAT32, tmpfs, devfs) · Net (TCP/IP) · Security · Devices
@@ -375,6 +375,20 @@ macOS-style at the top, real Unix underneath:
   colour or in the desktop's one tint, and is placed on the desktop, in a window at a level just above the desktop's own
   (`LevelDesktopItems`, part of the desktop to the server), or in Notification Center. Help's search is over the menus
   the active application publishes. Screenshots are the shell's, taken through the same `capture` as M22's.
+- **Sessions (M25).** People's accounts are `/etc/master.passwd`, `/etc/passwd` and `/etc/group`, changed together by
+  `Core::AccountDatabase` while it holds `/etc/ptmp`; only root can. Settings asks `directoryd` (one for the machine,
+  sandboxed to those files, the password hints in `/private/var/db/hints` and the homes in `/Users`), with an
+  administrator's name and password, which it checks; `sysadminctl` does too, or changes them itself as root. A new
+  disk has nobody on it, and LoginWindow shows Setup, until `/private/var/db/.VultureSetupDone`; `vlaunchd` makes the
+  developer's account first unless the boot arguments say `setup`. LoginWindow, root's, starts each person's session as
+  them (their DesktopShell, Dock and Files), several at once, and tells the window server whose is on the screen and
+  whether it's locked (`set_session`, root's alone): the server shows only that session's windows and root's, or only
+  root's when locked, and gives input and its shell state to those. Names a person's programs register with `vlaunchd`
+  are theirs alone. The lock screen and the screen saver are LoginWindow's windows, over everything
+  (`LevelShield`, `LevelScreenSaver`); it starts the saver when the server says nobody has done anything for long enough
+  (`idle_time`) or a hot corner asks. A session's shell says its person's settings to the server again when it comes back
+  to the screen (`session_changed`). Login Items are opened by the shell. AudioServer plays the sound at power-on, when the
+  launch daemon starts it with `--startup`, unless it's been turned off.
 - **Not responding (M21).** A program is pinged when input is sent to it, and its event loop
   answers. After two seconds with no answer, the cursor over its windows spins, and the shell
   state says so, for the Dock and Monitor. The server still moves and resizes its windows.

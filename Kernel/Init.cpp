@@ -599,6 +599,7 @@ extern "C" [[noreturn, gnu::no_stack_protector]] void kernel_main(API::BootInfo 
     Symbols::initialize(boot_info.kernel_file, boot_info.kernel_slide);
 
     BootArguments arguments { StringView(boot_info.command_line) };
+    BootArguments::remember(arguments.text());
     bool verbose = arguments.has_flag("-v"_sv);
 
     auto& framebuffer = boot_framebuffer();

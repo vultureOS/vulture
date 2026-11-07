@@ -140,6 +140,13 @@ endpoint WindowServer
     set_overview(bool shown) =|
     switch_space(i32 space) =|
 
+    // For the login window: only root may. Whose session is on the screen: their windows are shown and have the keyboard
+    // and pointer, with root's (the login window's own); everyone else's are kept, but not shown. Locked, only root's are.
+    // Until it's first said, everyone's are, as there's no login window to say.
+    set_session(u32 uid, bool locked) =|
+    // How long since the keyboard, the pointer or a finger was last used, in milliseconds: for the screen saver.
+    idle_time() => (u64 milliseconds)
+
     // For tests and tools: only root may. As if the pointer moved here (points), at this time on the monotonic clock in
     // microseconds, or 0 for now.
     inject_pointer(i32 x, i32 y, u32 buttons, u64 sent_at) =|
@@ -195,6 +202,8 @@ endpoint WindowClient
     full_screen_changed(u32 window, bool full) =|
     // One that's not for the server to do: see HotCornerAction.
     hot_corner_fired(i32 action) =|
+    // To a session's own programs, when it's on the screen (true) or another's is (false).
+    session_changed(bool active) =|
     // The pointer has been waiting over a window's green button. On the screen, in points, where its menu would go.
     window_menu_wanted(u32 window, i32 x, i32 y) =|
     // Asked for by nobody in particular: see `displays`. The main one's size is what `connect` said it was, if it's changed.

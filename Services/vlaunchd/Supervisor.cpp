@@ -64,9 +64,11 @@ void describe_end(int status, char* text, size_t size)
     }
     umask(job.umask.value_or(022));
 
+    // A job's own session has no terminal from these: one whose output goes to /dev/console would otherwise take the
+    // console from the login that's on it (as AudioServer did, started first). A job that wants a terminal opens it.
     auto open_standard = [](Optional<String> const& path, int target, int flags) {
         char const* name = path.has_value() ? path->characters() : "/dev/null";
-        int fd = open(name, flags, 0644);
+        int fd = open(name, flags | O_NOCTTY, 0644);
         if (fd < 0)
             fd = open("/dev/null", O_RDWR);
         if (fd >= 0 && fd != target) {
@@ -152,8 +154,28 @@ Supervisor::Supervisor(Core::EventLoop& loop)
 Supervisor::Service* Supervisor::find_service(StringView name)
 {
     for (auto& service : m_services) {
-        if (service->name.view() == name)
+        if (service->name.view() == name && service->owner == 0)
             return service.ptr();
+    }
+    return nullptr;
+}
+
+Supervisor::Service* Supervisor::find_service_for(StringView name, uid_t uid)
+{
+    if (uid != 0) {
+        for (auto& service : m_services) {
+            if (service->name.view() == name && service->owner == uid)
+                return service.ptr();
+        }
+    }
+    if (auto* machine = find_service(name))
+        return machine;
+    // Root (the login window, a test) looking for a person's: the newest.
+    if (uid == 0) {
+        for (size_t i = m_services.size(); i > 0; --i) {
+            if (m_services[i - 1]->name.view() == name)
+                return m_services[i - 1].ptr();
+        }
     }
     return nullptr;
 }
@@ -193,7 +215,7 @@ void Supervisor::stop_watching(Job& job)
 
 BootstrapEndpoint::LookUpAnswer Supervisor::look_up(IPC::Sender const& sender, String name)
 {
-    auto* service = find_service(name.view());
+    auto* service = find_service_for(name.view(), sender.uid);
     if (!service)
         return { ENOENT, {} };
     // A sandbox says which services it may reach.
@@ -226,11 +248,17 @@ BootstrapEndpoint::CheckInAnswer Supervisor::check_in(IPC::Sender const& sender,
     return { 0, copy.release_value() };
 }
 
-i32 Supervisor::register_service(IPC::Sender const&, String name, IPC::Port service_port)
+i32 Supervisor::register_service(IPC::Sender const& sender, String name, IPC::Port service_port)
 {
-    if (find_service(name.view())) {
+    // A person's own, or the machine's for root; a person can't take a name a job of the machine's has.
+    auto const owner = sender.uid;
+    Supervisor::Service* existing = nullptr;
+    for (auto& service : m_services) {
+        if (service->name.view() == name.view() && (service->owner == owner || (service->owner == 0 && service->job)))
+            existing = service.ptr();
+    }
+    if (existing) {
         // Taken, unless by a registered service that is gone.
-        Supervisor::Service* existing = find_service(name.view());
         struct pollfd poller { existing->send.fd(), POLLOUT, 0 };
         if (existing->job || !(poll(&poller, 1, 0) == 1 && (poller.revents & POLLHUP)))
             return EEXIST;
@@ -238,7 +266,7 @@ i32 Supervisor::register_service(IPC::Sender const&, String name, IPC::Port serv
     }
     if (!service_port.is_valid())
         return EINVAL;
-    auto* service = new (Base::nothrow) Service { move(name), {}, move(service_port), nullptr, 0 };
+    auto* service = new (Base::nothrow) Service { move(name), {}, move(service_port), nullptr, 0, owner };
     if (!service)
         return ENOMEM;
     m_services.append(adopt_own(*service));

@@ -7,12 +7,14 @@
 #include "Log.h"
 #include "Supervisor.h"
 #include "TestRunner.h"
+#include <LibCore/AccountDatabase.h>
 #include <LibCore/EventLoop.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/reboot.h>
+#include <sys/sysctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -98,10 +100,37 @@ int run_as_supervisor(int argc, char** argv)
 
 }
 
+// A new disk has nobody on it, as a new Mac hasn't, and Setup asks for the first person. A build being worked on has
+// someone already, to log in as straight away: "vulture", whose password is "vulture", an administrator. Unless the boot
+// arguments say "setup", for Setup itself to be tried.
+static void make_developer_account()
+{
+    char arguments[256] = {};
+    size_t length = sizeof(arguments) - 1;
+    if (sysctlbyname("kern.bootargs", arguments, &length, nullptr, 0) == 0) {
+        bool setup = false;
+        StringView(arguments, strnlen(arguments, sizeof(arguments))).for_each_split_view(' ', SplitBehavior::SkipEmpty, [&](StringView word) {
+            setup = setup || word == "setup"_sv;
+        });
+        if (setup)
+            return;
+    }
+    if (Core::AccountDatabase::setup_done())
+        return;
+    auto made = Core::AccountDatabase::create({ "vulture"_sv, "Vulture User"_sv, "vulture"_sv, {}, true });
+    if (made.is_error()) {
+        printf("vlaunchd: couldn't make the developer's account: %s\n", strerror(made.error().code()));
+        return;
+    }
+    (void)Core::AccountDatabase::mark_setup_done();
+    printf("vlaunchd: made the developer's account, vulture\n");
+}
+
 int main(int argc, char** argv)
 {
     if (getpid() != 1)
         return run_as_supervisor(argc, argv);
+    make_developer_account();
     // From the kernel's "debug" flag: last on the line, whatever else there is.
     if (argc > 1 && strcmp(argv[argc - 1], "--debug") == 0) {
         Launchd::set_debug_logging(true);

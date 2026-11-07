@@ -282,6 +282,10 @@
         "quickSettings" : { "fill" : "#f6f6f6e6", "tile" : "#00000012", "tileOn" : "#0a84ff" },
         "loginwindow" : {
             "text" : "#ffffff",
+            "clock" : "#ffffffe6",
+            "monogramTop" : "#a5a9b0",
+            "monogramBottom" : "#858a93",
+            "badge" : "#00000080",
             "fieldFill" : "#ffffff33",
             "fieldText" : "#ffffff",
             "scrim" : "#00000033",

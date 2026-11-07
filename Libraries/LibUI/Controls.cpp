@@ -421,6 +421,9 @@ void Button::draw(Graphics& graphics)
 
 String Button::accessibility_label() const
 {
+    // One with only a symbol says what it's been told it's called.
+    if (m_title.is_empty())
+        return View::accessibility_label();
     return MUST(String::from_view(m_title.view()));
 }
 

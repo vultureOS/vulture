@@ -573,7 +573,7 @@ void Server::set_full_screen(IPC::Sender const& sender, u32 id, bool full)
     auto* window = window_of(sender, id);
     if (!window) {
         auto* client = client_of(sender);
-        if (!client || !client->shows_window_menus)
+        if (!client || !client->shows_window_menus || !is_in_session(client))
             return;
         for (auto* other : m_windows) {
             if (other->id == id)
@@ -604,7 +604,7 @@ void Server::tile_in_split_view(IPC::Sender const& sender, u32 id, bool on_left)
     auto* window = window_of(sender, id);
     if (!window) {
         auto* client = client_of(sender);
-        if (!client || !client->shows_window_menus)
+        if (!client || !client->shows_window_menus || !is_in_session(client))
             return;
         for (auto* other : m_windows) {
             if (other->id == id)
@@ -861,6 +861,9 @@ void Server::set_hot_corners(IPC::Sender const&, i32 top_left, i32 top_right, i3
 
 void Server::check_hot_corner(IntPoint point)
 {
+    // Not at the login window or over a locked screen.
+    if (m_sessions_managed && (m_session_locked || m_session_uid == 0))
+        return;
     auto const area = m_screen.display_at(point).points;
     bool const left = point.x <= area.x + 1;
     bool const right = point.x >= area.right() - 2;
@@ -914,7 +917,7 @@ void Server::fire_hot_corner(int action)
         break;
     }
     for (auto& client : m_clients) {
-        if (!client->shows_window_menus)
+        if (!client->shows_window_menus || !is_in_session(client.ptr()))
             continue;
         IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::HotCornerFired));
         encoder.encode(action);

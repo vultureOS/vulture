@@ -40,4 +40,12 @@ VULTURE_AUDIO_WAV="$wav" "$source_dir/Meta/run.sh" --build-dir "$build_dir" --he
     --wait-for-exit --timeout 60
 
 "$wavcheck" "$wav" --tone 440 --seconds 0.9
+
+# And the sound at power-on, from a boot to the desktop: its bell is a D (587 Hz).
+startup="$out_dir/startup.wav"
+rm -f "$startup"
+VULTURE_AUDIO_WAV="$startup" "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --gui \
+    --expect "audioserver: played the startup sound" \
+    --timeout 60
+"$wavcheck" "$startup" --tone 587 --seconds 0.3
 echo "sound-test: PASS"

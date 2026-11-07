@@ -57,9 +57,15 @@ private:
         IPC::Port send;
         Job* job { nullptr };
         int watch { 0 };
+        // Registered by a person's program (not root's): theirs alone, as each logged in person has their own Files
+        // and shell under the same names.
+        uid_t owner { 0 };
     };
 
+    // The machine's: jobs', and what root registered.
     Service* find_service(StringView name);
+    // What `uid` would get by this name: their own registration, or else the machine's.
+    Service* find_service_for(StringView name, uid_t);
     // Starts the service's job when a message waits for it.
     void watch_for_demand(Service&);
     void stop_watching(Job&);

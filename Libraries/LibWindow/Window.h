@@ -46,6 +46,8 @@ public:
     Function<void(u32 window, Gfx::IntPoint)> on_window_menu_wanted;
     Function<void(u32 window, bool full)> on_full_screen_change;
     Function<void(HotCornerAction)> on_hot_corner;
+    // This program's session is on the screen (true), or another's is (false).
+    Function<void(bool)> on_session_changed;
     Function<void()> on_displays_change;
     Function<void(u32)> on_menu_item_chosen;
     Function<void()> on_quit_requested;
@@ -66,6 +68,7 @@ private:
     void window_menu_wanted(IPC::Sender const&, u32 window, i32 x, i32 y) override;
     void full_screen_changed(IPC::Sender const&, u32 window, bool full) override;
     void hot_corner_fired(IPC::Sender const&, i32 action) override;
+    void session_changed(IPC::Sender const&, bool active) override;
     void displays_changed(IPC::Sender const&, i32 main_width, i32 main_height) override;
     void drag(IPC::Sender const&, u32 window, u8 phase, i32 x, i32 y, String type, Vector<u8> data) override;
     void drag_finished(IPC::Sender const&, u32 window, bool accepted) override;

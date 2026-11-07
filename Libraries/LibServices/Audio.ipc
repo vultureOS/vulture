@@ -10,4 +10,7 @@ endpoint Audio
     // 0 to 100, for everything; kept between boots.
     set_volume(u32 percent) =|
     volume() => (u32 percent)
+    // The sound at power-on: on, unless it's been turned off (Settings > Sound). Kept between boots.
+    set_startup_sound(bool plays) =|
+    startup_sound() => (bool plays)
 }

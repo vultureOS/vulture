@@ -3,5 +3,11 @@
     "Ridge" : { "light" : [ "#0f4c5c", "#2c7a7b", "#7fb685", "#e9c46a" ], "dark" : [ "#06181c", "#0f3136", "#1d4a3f", "#3a4a2a" ] },
     "Ember" : { "light" : [ "#6a1b4d", "#b23a48", "#e76f51", "#f4a261" ], "dark" : [ "#1c0a16", "#3b1020", "#552016", "#4a2a12" ] },
     "Glacier" : { "light" : [ "#a8c0d8", "#cfdfe9", "#e8eef2", "#f7f7f7" ], "dark" : [ "#141c24", "#1e2a36", "#26323c", "#2c3640" ] },
-    "Graphite" : { "light" : [ "#4b4f54", "#6d7278", "#8e9399", "#b0b4b8" ], "dark" : [ "#15171a", "#1f2226", "#292d31", "#33373c" ] }
+    "Graphite" : { "light" : [ "#4b4f54", "#6d7278", "#8e9399", "#b0b4b8" ], "dark" : [ "#15171a", "#1f2226", "#292d31", "#33373c" ] },
+    "Horizon" : { "light" : [ "#1c7ed6", "#4dabf7", "#a5d8ff", "#e7f5ff" ], "dark" : [ "#05070f", "#0c1630", "#1b2550", "#2e3a6e" ],
+        "times" : [ { "from" : 6, "colors" : [ "#2b3a67", "#6c5b7b", "#c06c84", "#f8b195" ] }, { "from" : 10, "colors" : [ "#1c7ed6", "#4dabf7", "#a5d8ff", "#e7f5ff" ] },
+            { "from" : 17, "colors" : [ "#3d1e6d", "#8e3b7a", "#e0607e", "#ffb26b" ] }, { "from" : 20, "colors" : [ "#05070f", "#0c1630", "#1b2550", "#2e3a6e" ] } ] },
+    "Dunes" : { "light" : [ "#c9773e", "#e3a564", "#f2cf8f", "#fbeac2" ], "dark" : [ "#140d0a", "#2a1a12", "#43291b", "#5c3a24" ],
+        "times" : [ { "from" : 6, "colors" : [ "#5a3d5c", "#a5607a", "#e5946a", "#f7d0a0" ] }, { "from" : 10, "colors" : [ "#c9773e", "#e3a564", "#f2cf8f", "#fbeac2" ] },
+            { "from" : 17, "colors" : [ "#6b2e3a", "#b44d3c", "#e07a3c", "#f5b25c" ] }, { "from" : 20, "colors" : [ "#140d0a", "#2a1a12", "#43291b", "#5c3a24" ] } ] }
 }

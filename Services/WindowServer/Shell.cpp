@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
+#include <stdio.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -236,6 +237,9 @@ void Server::layout_menu_extras()
     auto const& display = m_screen.main_display().points;
     int right = display.x + m_menu_extras_edge;
     for (auto* extra : m_menu_extras) {
+        // Another session's are where they were, not shown.
+        if (!is_in_session(extra->client))
+            continue;
         right -= extra->frame.width + m_menu_extras_gap;
         IntRect const frame { right, display.y, extra->frame.width, extra->frame.height };
         if (frame != extra->frame) {
@@ -325,8 +329,16 @@ void Server::set_work_area(IPC::Sender const& sender, i32 top, i32 left, i32 bot
         client->work_area_reserved[2] = max(bottom, 0);
         client->work_area_reserved[3] = max(right, 0);
     }
+    recompute_work_area();
+}
+
+void Server::recompute_work_area()
+{
+    // Only the session on the screen's: another's Dock is somewhere else, or nowhere.
     int most[4] {};
     for (auto const& client : m_clients) {
+        if (!is_in_session(client.ptr()))
+            continue;
         for (int edge = 0; edge < 4; ++edge)
             most[edge] = max(most[edge], client->work_area_reserved[edge]);
     }
@@ -351,11 +363,35 @@ i32 Server::set_wallpaper(IPC::Sender const&, String name)
     return 0;
 }
 
+namespace {
+
+bool s_still;
+
+}
+
+void Server::set_still(bool still)
+{
+    s_still = still;
+}
+
+// The hour here, or 9 when still (9:41, every screenshot's moment).
+static int hour_now()
+{
+    if (s_still)
+        return 9;
+    time_t const seconds = time(nullptr);
+    struct tm parts {};
+    localtime_r(&seconds, &parts);
+    return parts.tm_hour;
+}
+
 void Server::apply_wallpaper()
 {
     // The name's colors in this appearance. Without a name, the theme's own.
-    if (m_wallpaper_name.is_empty())
+    if (m_wallpaper_name.is_empty()) {
+        m_compositor.set_wallpaper_colors({});
         return;
+    }
     auto bytes = read_whole_file("/System/Library/Themes/Wallpapers.json");
     if (bytes.is_error())
         return;
@@ -366,6 +402,35 @@ void Server::apply_wallpaper()
     if (!entry)
         return;
     auto const* colors = entry->get_array(m_appearance.view() == "Dark"_sv ? "dark"_sv : "light"_sv);
+    // A dynamic one: its colours by the time of day, each from the hour it says, the last going on round midnight to the
+    // first. It's looked at again each minute.
+    m_wallpaper_period = -1;
+    if (auto const* times = entry->get_array("times"_sv); times && times->size() > 0) {
+        int const hour = hour_now();
+        size_t chosen = times->size() - 1;
+        for (size_t i = 0; i < times->size(); ++i) {
+            auto const from = times->at(i).get_number("from"_sv);
+            if (from.has_value() && static_cast<int>(from.value()) <= hour)
+                chosen = i;
+        }
+        m_wallpaper_period = static_cast<int>(chosen);
+        colors = times->at(chosen).get_array("colors"_sv);
+        if (m_wallpaper_timer < 0) {
+            m_wallpaper_timer = m_loop.add_timer(60'000, true, [this] {
+                int const before = m_wallpaper_period;
+                if (before < 0)
+                    return;
+                apply_wallpaper();
+                if (m_wallpaper_period != before)
+                    schedule_frame();
+            });
+        }
+        static int s_said = -1;
+        if (s_said != m_wallpaper_period) {
+            s_said = m_wallpaper_period;
+            fprintf(stderr, "WindowServer: wallpaper %s, part %d of the day\n", m_wallpaper_name.characters(), m_wallpaper_period);
+        }
+    }
     if (!colors)
         return;
     Vector<Color> parsed;
@@ -402,8 +467,34 @@ void Server::shell_state_changed()
 
 void Server::send_shell_state()
 {
+    // Each session's shell hears of its own person's applications only.
+    Vector<uid_t> told;
+    for (auto& client : m_clients) {
+        if (!client->is_shell)
+            continue;
+        bool already = false;
+        for (auto uid : told)
+            already = already || uid == client->uid;
+        if (already)
+            continue;
+        told.append(client->uid);
+        auto text = shell_state_for(client->uid);
+        for (auto& shell : m_clients) {
+            if (!shell->is_shell || shell->uid != client->uid)
+                continue;
+            IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::ShellState));
+            encoder.encode(text.view());
+            send_to(*shell, encoder);
+        }
+    }
+}
+
+String Server::shell_state_for(uid_t uid)
+{
+    // Root's (the login window's, tests') hears of everyone.
+    auto const mine = [uid](Client const* client) { return uid == 0 || (client && client->uid == uid); };
     auto state = JSON::Value::object();
-    auto* active = m_active_application;
+    auto* active = mine(m_active_application) ? m_active_application : nullptr;
     MUST(state.set("active"_sv, JSON::Value(static_cast<int>(active ? active->pid : 0))));
     if (active) {
         MUST(state.set("activeName"_sv, MUST(JSON::Value::string(active->application_name.view()))));
@@ -419,15 +510,17 @@ void Server::send_shell_state()
     MUST(state.set("desktopRevealed"_sv, JSON::Value(m_desktop_revealed)));
     if (m_switching) {
         auto switcher = JSON::Value::array();
-        for (auto* one : applications_most_recent_first())
-            MUST(switcher.append(JSON::Value(static_cast<i64>(one->pid))));
+        for (auto* one : applications_most_recent_first()) {
+            if (mine(one))
+                MUST(switcher.append(JSON::Value(static_cast<i64>(one->pid))));
+        }
         MUST(state.set("switcher"_sv, move(switcher)));
         MUST(state.set("switcherSelected"_sv, JSON::Value(m_switch_selected)));
     }
     MUST(state.set("overview"_sv, JSON::Value(m_overview)));
     auto applications = JSON::Value::array();
     for (auto const& client : m_clients) {
-        if (client->application_name.is_empty())
+        if (client->application_name.is_empty() || !mine(client.ptr()))
             continue;
         auto application = JSON::Value::object();
         MUST(application.set("pid"_sv, JSON::Value(static_cast<int>(client->pid))));
@@ -452,14 +545,7 @@ void Server::send_shell_state()
         MUST(applications.append(move(application)));
     }
     MUST(state.set("applications"_sv, move(applications)));
-    auto text = MUST(state.serialize());
-    for (auto& client : m_clients) {
-        if (!client->is_shell)
-            continue;
-        IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::ShellState));
-        encoder.encode(text.view());
-        send_to(*client, encoder);
-    }
+    return MUST(state.serialize());
 }
 
 // ---- Visibility
@@ -473,7 +559,7 @@ void Server::update_visibility(ServerWindow& window)
     if (m_stage && window.level == Window::LevelNormal && window.is_document_window() && window.client != m_stage_shown)
         on_this_space = false;
     bool hidden_with_application = window.client && window.client->hidden && window.can_become_key();
-    bool should = window.shown_by_client && !window.minimized && !hidden_with_application && on_this_space;
+    bool should = window.shown_by_client && !window.minimized && !hidden_with_application && on_this_space && is_in_session(window.client);
     if (window.visible == should)
         return;
     m_compositor.invalidate_window(window);
@@ -587,7 +673,8 @@ bool Server::handle_hotkey(u16 code)
 {
     u32 pressed = m_modifiers & (Window::ModifierShift | Window::ModifierControl | Window::ModifierOption | Window::ModifierCommand);
     for (auto const& hotkey : m_hotkeys) {
-        if (hotkey.code == code && hotkey.modifiers == pressed && hotkey.client) {
+        // Two sessions' shells both ask for the same keys: the one on the screen has them, and a locked one, none.
+        if (hotkey.code == code && hotkey.modifiers == pressed && hotkey.client && is_in_session(hotkey.client)) {
             IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::Hotkey));
             encoder.encode(code);
             encoder.encode(pressed);
@@ -595,6 +682,9 @@ bool Server::handle_hotkey(u16 code)
             return true;
         }
     }
+    // At the login window or a locked screen, the desktop's own keys (Overview, Spaces, Cmd-Tab) are nobody's.
+    if (m_sessions_managed && (m_session_locked || m_session_uid == 0))
+        return false;
     if (m_overview && code == VULTURE_KEY_ESC) {
         leave_overview(nullptr);
         return true;

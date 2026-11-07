@@ -5,6 +5,7 @@
  */
 
 #include "Test.h"
+#include <errno.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <string.h>
@@ -82,5 +83,15 @@ int main()
     CHECK(kill(pid, SIGTERM) == 0);
     CHECK(waitpid(pid, &status, 0) == pid && WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM);
     CHECK(kill(99999, SIGTERM) == -1);
+
+    // Ignoring SIGCHLD says nobody will wait: no zombie is left, and waitpid, once the child has gone, finds no child
+    // (POSIX's XSI rule, as a Mac has it).
+    signal(SIGCHLD, SIG_IGN);
+    pid = fork();
+    if (pid == 0)
+        _exit(3);
+    errno = 0;
+    CHECK(waitpid(pid, &status, 0) == -1 && errno == ECHILD);
+    signal(SIGCHLD, SIG_DFL);
     return finish();
 }

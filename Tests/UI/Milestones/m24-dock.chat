@@ -15,7 +15,7 @@ qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"
 ax-expect menuitem "Open"
 click menuitem "Options"
 ax-expect menuitem "Remove from Dock"
-ax-expect menuitem "Open at Login" disabled
+ax-expect menuitem "Open at Login" enabled
 pause 0.5
 screenshot menu-kept.png
 key esc

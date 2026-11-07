@@ -1,0 +1,7 @@
+{
+    "Label" : "com.vulture.directoryd",
+    "SandboxProfile" : "service-directory",
+    "ProgramArguments" : [ "/usr/libexec/directoryd" ],
+    "MachServices" : { "com.vulture.directory" : true },
+    "ThrottleInterval" : 1
+}

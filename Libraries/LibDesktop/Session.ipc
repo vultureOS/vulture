@@ -1,7 +1,15 @@
-// The login session (com.vulture.loginwindow), for what ends it.
+// The login window (com.vulture.loginwindow): what ends a session, locks it, or hands the screen to another person's.
 endpoint Session
 {
     log_out() =|
     restart() =|
     shut_down() =|
+    // The screen locked, the login window over it asking for the password.
+    lock_screen() =|
+    start_screen_saver() =|
+    // Another person's turn (fast user switching): the login window, with them chosen, or the list for "". This session
+    // stays as it is, under it.
+    switch_to(String name) =|
+    // Who's logged in, by short name, a line each: for the fast user switching menu.
+    logged_in() => (String names)
 }

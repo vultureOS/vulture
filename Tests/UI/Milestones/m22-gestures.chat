@@ -66,8 +66,8 @@ pause 1
 click button "Settings"
 expect settings: Appearance
 pause 1
-click row "About"
-expect settings: About
+click row "Sound"
+expect settings: Sound
 fingers begin 0 6656 5816
 pause 0.05
 fingers end 0 6656 5816

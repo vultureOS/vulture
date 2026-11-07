@@ -1,2 +1,3 @@
-# This login window isn't told to hold still, so its caret blinks.
-ignore 539 384 6 21 the password field's caret
+# This login window isn't told to hold still: its caret blinks, and its clock says the real date and time.
+ignore 547 627 9 26 the password field's caret
+ignore 480 40 320 130 the date and the time

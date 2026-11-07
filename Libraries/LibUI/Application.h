@@ -76,6 +76,9 @@ public:
     // plays a tick once the change has settled, to hear the new level by.
     [[nodiscard]] Optional<u32> output_volume();
     void set_output_volume(u32 percent);
+    // The sound at power-on: whether it plays (nothing, if the sound server isn't there).
+    [[nodiscard]] Optional<bool> startup_sound();
+    void set_startup_sound(bool);
 
     // Platform.
     [[nodiscard]] ErrorOr<NonnullOwnPtr<WindowBackend>> create_window(Window& owner, StringView title, Gfx::IntRect frame, u32 flags) override;

@@ -9,7 +9,7 @@ pause 2
 click menuitem "Logo"
 ax-expect menuitem "About This Computer"
 ax-expect menuitem "Force Quit…"
-ax-expect menuitem "Lock Screen" disabled
+ax-expect menuitem "Lock Screen" enabled
 pause 0.5
 screenshot system-menu.png
 click menuitem "About This Computer"

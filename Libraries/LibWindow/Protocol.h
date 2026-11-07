@@ -48,6 +48,9 @@ enum WindowLevel : i32 {
     LevelMenuBar = 60,
     LevelPopup = 100,
     LevelDragImage = 200,
+    // The login window and the lock screen: over everything a session has (CGShieldingWindowLevel's place).
+    LevelShield = 1000,
+    LevelScreenSaver = 1010,
 };
 
 enum class CursorShape : i32 {
@@ -101,6 +104,8 @@ enum class HotCornerAction : i32 {
     Desktop,
     Launcher,
     NotificationCenter,
+    StartScreenSaver,
+    LockScreen,
     Count,
 };
 

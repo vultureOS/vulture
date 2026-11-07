@@ -1,7 +1,8 @@
 {
     "Label" : "com.vulture.audioserver",
     "SandboxProfile" : "service-audio",
-    "ProgramArguments" : [ "/usr/libexec/AudioServer" ],
+    "ProgramArguments" : [ "/usr/libexec/AudioServer", "--startup" ],
+    "StandardOutPath" : "/dev/console",
     "MachServices" : { "com.vulture.audioserver" : true },
     "KeepAlive" : true,
     "RunAtLoad" : true,

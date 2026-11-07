@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 
 // com.vulture.audioserver: everyone's sound goes through here. The device takes a period
@@ -87,6 +88,35 @@ public:
     }
 
     u32 volume(IPC::Sender const&) override { return m_percent; }
+
+    void set_startup_sound(IPC::Sender const& sender, bool plays) override
+    {
+        if (sender.uid != 0 && sender.uid < 501)
+            return;
+        os_log_info(m_log, "Process %d turns the startup sound %s", static_cast<int>(sender.pid), plays ? "on" : "off");
+        m_startup_sound = plays;
+        save_volume();
+    }
+
+    bool startup_sound(IPC::Sender const&) override { return m_startup_sound; }
+
+    // At power-on, once: not when it's started again later.
+    void play_startup_sound()
+    {
+        u64 uptime = 0;
+        size_t length = sizeof(uptime);
+        if (!m_startup_sound || sysctlbyname("kern.uptime_ns", &uptime, &length, nullptr, 0) != 0 || uptime > 60'000'000'000ull)
+            return;
+        auto sound = named_sound("startup"_sv);
+        if (!sound)
+            return;
+        m_mixer.play(sound.release_nonnull());
+        pump();
+        m_loop.add_timer(2200, false, [] {
+            printf("audioserver: played the startup sound\n");
+            fflush(stdout);
+        });
+    }
 
 private:
     RefPtr<Audio::Sound const> named_sound(StringView name)
@@ -171,6 +201,7 @@ private:
                 if (!parsed.is_error()) {
                     if (auto value = parsed.value().get_number("volume"_sv); value.has_value() && value.value() >= 0 && value.value() <= 100)
                         percent = static_cast<u32>(value.value());
+                    m_startup_sound = parsed.value().get_boolean("startupSound"_sv).value_or(true);
                 }
             }
         }
@@ -182,6 +213,7 @@ private:
     {
         auto object = JSON::Value::object();
         MUST(object.set("volume"_sv, JSON::Value(static_cast<i64>(m_percent))));
+        MUST(object.set("startupSound"_sv, JSON::Value(m_startup_sound)));
         auto text = MUST(object.serialize());
         // The whole file or none of it, however the machine stops.
         char const* temporary = "/Library/Preferences/com.vulture.audio.json.new";
@@ -205,6 +237,7 @@ private:
     // While it has something to play and the device has no room.
     int m_watch { -1 };
     u32 m_percent { default_volume_percent };
+    bool m_startup_sound { true };
     Audio::Mixer m_mixer;
     HashMap<String, NonnullRefPtr<Audio::Sound const>> m_sounds;
     i16 m_period[frames_per_period * VULTURE_AUDIO_CHANNELS];
@@ -213,7 +246,7 @@ private:
 
 }
 
-int main()
+int main(int argc, char** argv)
 {
     signal(SIGPIPE, SIG_IGN);
     auto port = IPC::check_in("com.vulture.audioserver"_sv);
@@ -224,5 +257,10 @@ int main()
     Core::EventLoop loop;
     Server server(loop);
     IPC::Listener listener(loop, port.release_value(), [&](IPC::ReceivedMessage& message) { (void)server.handle(message); });
+    // The machine's own, at power-on (the launch daemon says so; tests' don't).
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--startup") == 0)
+            server.play_startup_sound();
+    }
     return loop.exec();
 }

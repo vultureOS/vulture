@@ -219,6 +219,12 @@ void Connection::full_screen_changed(IPC::Sender const&, u32 window, bool full)
         on_full_screen_change(window, full);
 }
 
+void Connection::session_changed(IPC::Sender const&, bool active)
+{
+    if (on_session_changed)
+        on_session_changed(active);
+}
+
 void Connection::hot_corner_fired(IPC::Sender const&, i32 action)
 {
     if (on_hot_corner)

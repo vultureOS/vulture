@@ -37,7 +37,7 @@ click menuitem "About This Computer"
 ax-expect group "About This Computer"
 click button "More Info…"
 expect settings: About
-ax-gone menuitem "Log Out vulture…"
+ax-gone menuitem "Log Out Vulture User…"
 pause 0.5
 screenshot about.png
 key meta_l-q

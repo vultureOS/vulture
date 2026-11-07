@@ -7,7 +7,8 @@
 # What the programs of the desktop share: applications and how to open things, icons,
 # what the window server says of the session, preferences, and notifications.
 add_library(LibDesktop STATIC
-    Desktop.cpp)
-vulture_compile_ipc(LibDesktop Files.ipc Notifications.ipc Search.ipc Session.ipc Workspace.ipc)
-target_link_libraries(LibDesktop PUBLIC LibUI LibImage LibJSON LibIPC LibCore LibServices)
+    Desktop.cpp
+    ScreenSaver.cpp)
+vulture_compile_ipc(LibDesktop Directory.ipc Files.ipc Notifications.ipc Search.ipc Session.ipc Workspace.ipc)
+target_link_libraries(LibDesktop PUBLIC LibUI LibImage LibJSON LibIPC LibCore LibServices LibLocale)
 target_include_directories(LibDesktop PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

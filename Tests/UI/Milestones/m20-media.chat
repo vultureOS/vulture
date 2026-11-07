@@ -75,6 +75,10 @@ click row "Storage"
 pause 0.5
 ax-expect text "Used"
 ax-expect text "Available"
+# Under the bottom of the sidebar now, as on a Mac with more panes than fit: scrolled to.
+pointer 7680 16384
+wheel -60
+pause 0.5
 click row "Startup Disk"
 pause 0.5
 pointer 16000 3000

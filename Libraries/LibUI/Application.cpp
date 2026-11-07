@@ -363,6 +363,25 @@ Optional<u32> Application::output_volume()
     return answer.value();
 }
 
+Optional<bool> Application::startup_sound()
+{
+    auto* server = audio();
+    if (!server)
+        return {};
+    auto answer = server->startup_sound();
+    if (answer.is_error()) {
+        m_audio = nullptr;
+        return {};
+    }
+    return answer.value();
+}
+
+void Application::set_startup_sound(bool plays)
+{
+    if (auto* server = audio(); server && server->set_startup_sound(plays).is_error())
+        m_audio = nullptr;
+}
+
 void Application::set_output_volume(u32 percent)
 {
     auto* server = audio();

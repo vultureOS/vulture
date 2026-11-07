@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/privacy.h>
+#include <Kernel/BootArguments.h>
 #include <Kernel/Security/Privacy.h>
 #include <Kernel/Memory/Compressor.h>
 #include <Kernel/Security/CodeSigning.h>
@@ -244,6 +245,8 @@ ErrorOr<FlatPtr> Process::sys_sysctl(TrapFrame&, SyscallArguments const& argumen
             __builtin_memcpy(hostname, s_hostname, sizeof(hostname));
         }
         set_string(StringView(hostname));
+    } else if (name == "kern.bootargs"_sv) {
+        set_string(BootArguments::remembered());
     } else if (name == "kern.boottime"_sv) {
         u64 uptime_ns = Time::nanoseconds_from_ticks(Time::now());
         set_number(static_cast<i64>((Time::wall_clock_nanoseconds() - uptime_ns) / 1'000'000'000));

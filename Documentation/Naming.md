@@ -16,6 +16,11 @@ has to learn a new word to find it.
 | **Widgets** | What applications show of themselves, on the desktop and in Notification Center |
 | **Screenshot** | Shift-Command-3, 4 and 5 |
 | **Force Quit** | Programs that are running, to be made to stop |
+| **Setup** | A new computer's first questions, and its first account (Setup Assistant) |
+| **Lock Screen** | The login window over a session, until its password's given |
+| **Screen Saver** | What covers the screen while nobody's using it: ours are **Drift** and **Clock** |
+| **Fast User Switching** | Another person's session on the screen, with the first's kept |
+| **Users & Groups**, **Login Items** | Settings' panes for the people who use the computer, and what opens when they log in |
 | **Settings** | System settings |
 | **Terminal** | The command line |
 | **Text Editor** | Plain text |
@@ -35,7 +40,8 @@ and Launcher find it by, and what Software shows under its name.
 Services that show up in Monitor follow suit: `DesktopShell` (the menu bar, Search,
 notifications, widgets and screenshots), `SoundMenu` (the menu bar's sound), `indexd`
 (Search's index), `notificationd`, `clipboardd`, `privacyd` (what people have said
-applications may have).
+applications may have), `directoryd` (people's accounts, for Settings: Open Directory's job here). `sysadminctl` keeps
+macOS's name, as a command people type.
 
 ## What is deliberately left alone
 

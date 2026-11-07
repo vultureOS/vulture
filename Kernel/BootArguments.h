@@ -23,6 +23,10 @@ public:
     [[nodiscard]] bool has_flag(StringView flag) const;
     [[nodiscard]] Optional<StringView> value(StringView key) const;
 
+    // Kept for the rest of the kernel's life, for sysctl's kern.bootargs, as a Mac has it.
+    static void remember(StringView command_line);
+    [[nodiscard]] static StringView remembered();
+
 private:
     StringView m_command_line;
 };

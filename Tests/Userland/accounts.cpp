@@ -169,5 +169,48 @@ int main()
         terminal.type("exit\r");
         terminal.wait_for_exit();
     }
+    {
+        // A new person, as an administrator makes one at a Mac's command line: the next user ID, staff and admin, a home with
+        // a Mac's folders, and their password; then taken away, home and all.
+        PseudoTerminal terminal;
+        char const* argv[] = { "sh", nullptr };
+        CHECK(terminal.start("/bin/sh", argv, s_environment));
+        terminal.type("sysadminctl -addUser tester -fullName 'Test Person' -password secret -admin; echo made $?\r");
+        CHECK(terminal.expect("Assigning UID: 502\r\n"));
+        CHECK(terminal.expect("made 0\r\n"));
+        terminal.type("id tester; ls -1 /Users/tester; stat -f '%Su %Sg' /Users/tester\r");
+        CHECK(terminal.expect("uid=502(tester) gid=20(staff) groups=20(staff),80(admin)\r\n"));
+        CHECK(terminal.expect("Desktop\r\nDocuments\r\nDownloads\r\nLibrary\r\nMovies\r\nMusic\r\nPictures\r\nPublic\r\n"));
+        CHECK(terminal.expect("tester staff\r\n"));
+        // Taken already.
+        terminal.type("sysadminctl -addUser tester; echo again $?\r");
+        CHECK(terminal.expect("a user with that name already exists\r\n"));
+        CHECK(terminal.expect("again 1\r\n"));
+        terminal.type("exit\r");
+        terminal.wait_for_exit();
+    }
+    {
+        // Their password works.
+        PseudoTerminal terminal;
+        char const* argv[] = { "login", nullptr };
+        CHECK(terminal.start("/usr/bin/login", argv, s_environment));
+        CHECK(terminal.expect("login: "));
+        terminal.type("tester\r");
+        CHECK(terminal.expect("Password:"));
+        terminal.type("secret\r");
+        CHECK(terminal.expect("tester@vulture ~ % "));
+        terminal.type("exit\r");
+        terminal.wait_for_exit();
+    }
+    {
+        PseudoTerminal terminal;
+        char const* argv[] = { "sh", nullptr };
+        CHECK(terminal.start("/bin/sh", argv, s_environment));
+        terminal.type("sysadminctl -deleteUser tester; echo gone $?; id tester; test -e /Users/tester || echo no home\r");
+        CHECK(terminal.expect("gone 0\r\n"));
+        CHECK(terminal.expect("no home\r\n"));
+        terminal.type("exit\r");
+        terminal.wait_for_exit();
+    }
     return finish();
 }

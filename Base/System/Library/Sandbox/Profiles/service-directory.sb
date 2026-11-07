@@ -1,0 +1,13 @@
+# Makes and takes away people's accounts, for Settings: the account files (held by /etc/ptmp while they change), the
+# password hints, and the homes in /Users. Nothing else.
+include system
+write /private/etc/master.passwd
+write /private/etc/master.passwd.new
+write /private/etc/passwd
+write /private/etc/passwd.new
+write /private/etc/group
+write /private/etc/group.new
+write /private/etc/ptmp
+write /private/var/db/hints
+write /private/var/db/hints.new
+write /Users

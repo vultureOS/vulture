@@ -136,10 +136,10 @@ int main()
         return 1;
     }
     auto application = application_or_error.release_value();
-    auto const& t = tokens();
+    // (The theme is looked up each time: a change of appearance replaces it.)
 
     // The speaker, with as many waves as it's loud.
-    Desktop::MenuExtra extra("Sound"_sv, t.metric("soundMenu.extraWidth"_sv), [](Graphics& graphics, FloatRect all, Color color) {
+    Desktop::MenuExtra extra("Sound"_sv, tokens().metric("soundMenu.extraWidth"_sv), [](Graphics& graphics, FloatRect all, Color color) {
         float const size = 16;
         graphics.draw_symbol(Symbol::Speaker, { all.x + (all.width - size) / 2, all.y + (all.height - size) / 2, size, size }, color, 1.6f);
     });
@@ -158,15 +158,15 @@ int main()
             close();
             return;
         }
-        int const width = static_cast<int>(t.metric("soundMenu.width"_sv));
-        int const height = static_cast<int>(t.metric("soundMenu.height"_sv));
+        int const width = static_cast<int>(tokens().metric("soundMenu.width"_sv));
+        int const height = static_cast<int>(tokens().metric("soundMenu.height"_sv));
         auto const screen = Platform::the().screen_size();
         IntRect const frame { min(at.x, screen.width - width - 8), at.bottom() + 4, width, height };
         if (!panel) {
             panel = adopt_own(*new UI::Window("Sound"_sv, frame, WS::WindowBare | WS::WindowPopup));
             panel->set_transparent(true);
             panel->backend().set_level(WS::LevelPopup);
-            int const radius = static_cast<int>(t.metric("soundMenu.radius"_sv));
+            int const radius = static_cast<int>(tokens().metric("soundMenu.radius"_sv));
             panel->backend().set_corner_radius(radius);
             MaterialRegion const material { { 0, 0, width, height }, WS::Material::Popover, radius };
             panel->set_materials(Span<MaterialRegion const>(&material, 1));

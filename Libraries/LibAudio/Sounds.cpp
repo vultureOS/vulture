@@ -108,7 +108,7 @@ private:
 
 Span<StringView const> named_sounds()
 {
-    static StringView const names[] = { "notification"_sv, "alert"_sv, "trash"_sv, "login"_sv, "volume"_sv, "screenshot"_sv };
+    static StringView const names[] = { "notification"_sv, "alert"_sv, "trash"_sv, "login"_sv, "volume"_sv, "screenshot"_sv, "startup"_sv };
     return { names, array_size(names) };
 }
 
@@ -151,6 +151,13 @@ RefPtr<Sound const> make_named_sound(StringView name)
         canvas.add_note(0.1, 440, 0.7, 2.4, 0.03);
         canvas.add_note(0.15, 554.37, 0.6, 2.6, 0.03);
         return canvas.finish(0.45f);
+    }
+    if (name == "startup"_sv) {
+        // At power-on: one soft bell, a D, with its fifth above it, faint, and a long fall. Our own, not a Mac's chord.
+        Canvas canvas(2.2);
+        canvas.add_note(0, 587.33, 0.9, 1.3, 0.02);
+        canvas.add_note(0.02, 880, 0.14, 1.8, 0.02);
+        return canvas.finish(0.5f);
     }
     if (name == "volume"_sv) {
         // A tick, at the level the slider has just been set to.

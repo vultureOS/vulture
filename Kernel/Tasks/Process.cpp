@@ -876,6 +876,15 @@ void Process::terminate(int status)
         parent = m_parent;
         if (parent)
             parent->ref();
+        // A parent that ignores SIGCHLD has said it won't wait: no zombie stays for it (POSIX's XSI rule, and a Mac's).
+        // Init has it, as it has orphans, and reaps it; the parent's waitpid finds no such child.
+        if (parent && parent != s_init && parent->m_signal_actions[SIGCHLD].handler == VULTURE_SIG_IGN) {
+            parent->m_children.remove(*this);
+            m_parent = s_init;
+            s_init->m_children.append(*this);
+            s_init->m_child_events.fetch_add(1);
+            parent->m_child_events.fetch_add(1);
+        }
     }
     // A kqueue somewhere may be waiting for this.
     notify_pollers();

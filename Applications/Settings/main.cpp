@@ -9,6 +9,9 @@
 #include <LibJSON/JSON.h>
 #include <NotificationsEndpoint.h>
 #include <PrivacyEndpoint.h>
+#include <DirectoryEndpoint.h>
+#include <ScreenSaver.h>
+#include <LibCore/AccountDatabase.h>
 #include <Desktop.h>
 #include <Kernel/API/POSIX/sysctl.h>
 #include <LibCore/Account.h>
@@ -170,13 +173,30 @@ private:
 
 class WallpaperPicker final : public View {
 public:
-    WallpaperPicker()
+    // One row of them; the one chosen is the same in every row.
+    explicit WallpaperPicker(Span<StringView const> names)
     {
-        StringView const names[] = { "Dusk"_sv, "Ridge"_sv, "Ember"_sv, "Glacier"_sv, "Graphite"_sv };
         for (auto name : names)
             m_names.append(MUST(String::from_view(name)));
         Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
-        m_selected = MUST(String::from_view(preferences.string("wallpaper"_sv).value_or("Dusk"_sv)));
+        s_selected = MUST(String::from_view(preferences.string("wallpaper"_sv).value_or("Dusk"_sv)));
+        s_pickers.append(this);
+    }
+
+    ~WallpaperPicker() override
+    {
+        s_pickers.remove_all_matching([this](auto* one) { return one == this; });
+    }
+
+    void accessibility_parts(Vector<Accessibility::Node>& parts) override
+    {
+        auto const& t = tokens();
+        float tile_width = t.metric("settings.wallpaperWidth"_sv);
+        float tile_height = t.metric("settings.wallpaperHeight"_sv);
+        for (size_t i = 0; i < m_names.size(); ++i) {
+            FloatRect tile { static_cast<float>(i) * (tile_width + 10) + 4, 4, tile_width, tile_height };
+            parts.append(Accessibility::part_of(*this, Accessibility::Role::RadioButton, m_names[i].view(), tile, m_names[i].view() == s_selected.view() ? "on"_sv : "off"_sv));
+        }
     }
 
     [[nodiscard]] FloatSize intrinsic_size() const override
@@ -197,7 +217,7 @@ public:
             Vector<Color> colors = colors_of(m_names[i].view());
             if (colors.size() >= 2)
                 graphics.fill_vertical_gradient(tile, 6, colors.first(), colors.last());
-            if (m_names[i].view() == m_selected.view())
+            if (m_names[i].view() == s_selected.view())
                 graphics.stroke_rounded(tile.inflated(3), 9, 3, Appearance::the().color("accent"_sv));
             auto font = t.named_font("small"_sv);
             graphics.draw_text_centered(m_names[i].view(), font, { tile.x, tile_height + 8, tile_width, 16 }, t.color("label"_sv));
@@ -211,12 +231,13 @@ public:
         auto index = static_cast<int>((event.position.x - 4) / (tile_width + 10));
         if (index < 0 || static_cast<size_t>(index) >= m_names.size())
             return false;
-        m_selected = MUST(String::from_view(m_names[static_cast<size_t>(index)].view()));
-        (void)Application::the().connection().server().set_wallpaper(m_selected.view());
+        s_selected = MUST(String::from_view(m_names[static_cast<size_t>(index)].view()));
+        (void)Application::the().connection().server().set_wallpaper(s_selected.view());
         Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
-        preferences.set("wallpaper"_sv, MUST(JSON::Value::string(m_selected.view())));
+        preferences.set("wallpaper"_sv, MUST(JSON::Value::string(s_selected.view())));
         preferences.save();
-        set_needs_display();
+        for (auto* picker : s_pickers)
+            picker->set_needs_display();
         return true;
     }
 
@@ -248,7 +269,8 @@ private:
     }
 
     Vector<String> m_names;
-    String m_selected;
+    static inline String s_selected;
+    static inline Vector<WallpaperPicker*> s_pickers;
 };
 
 void build_appearance(Page& page)
@@ -273,9 +295,15 @@ void build_appearance(Page& page)
 
 void build_wallpaper(Page& page)
 {
+    static constexpr StringView still[] = { "Dusk"_sv, "Ridge"_sv, "Ember"_sv, "Glacier"_sv, "Graphite"_sv };
+    // Their colours go with the time of day.
+    static constexpr StringView dynamic[] = { "Horizon"_sv, "Dunes"_sv };
     auto& group = page.add_group("Wallpaper"_sv);
-    auto& picker = group.rows().add<WallpaperPicker>();
+    auto& picker = group.rows().add<WallpaperPicker>(Span<StringView const>(still, array_size(still)));
     picker.set_fixed_height(picker.intrinsic_size().height + 16);
+    auto& changing = page.add_group("Dynamic Wallpapers"_sv);
+    auto& dynamic_picker = changing.rows().add<WallpaperPicker>(Span<StringView const>(dynamic, array_size(dynamic)));
+    dynamic_picker.set_fixed_height(dynamic_picker.intrinsic_size().height + 16);
     page.finish();
 }
 
@@ -298,6 +326,8 @@ public:
             popup.add_item("Desktop"_sv);
             popup.add_item("Launcher"_sv);
             popup.add_item("Notification Center"_sv);
+            popup.add_item("Start Screen Saver"_sv);
+            popup.add_item("Lock Screen"_sv);
             Desktop::Preferences preferences(StringView(s_preferences, strlen(s_preferences)));
             s_corners[index] = static_cast<i32>(preferences.number(key).value_or(0));
             popup.set_selected_index(s_corners[index]);
@@ -355,6 +385,11 @@ void build_control_center(Page& page)
     sound.add_item("Don\xE2\x80\x99t Show in Menu Bar"_sv);
     sound.set_selected_index(control_center.string("sound"_sv).value_or("whenActive"_sv) == "always"_sv ? 0 : 1);
     sound.on_change = [saved](int index) { saved("sound"_sv, index == 0 ? "always"_sv : "whenActive"_sv); };
+    auto& others = page.add_group("Other Modules"_sv);
+    auto& switching_row = others.rows().add<Row>("Fast User Switching"_sv);
+    auto& switching = switching_row.add<Switch>(control_center.string("fastUserSwitching"_sv).value_or("never"_sv) == "always"_sv);
+    switching.set_accessibility_label("Show Fast User Switching in Menu Bar"_sv);
+    switching.on_action = [saved, &switching] { saved("fastUserSwitching"_sv, switching.is_on() ? "always"_sv : "never"_sv); };
     page.finish();
 }
 
@@ -648,6 +683,13 @@ void build_sound(Page& page)
         auto sound = effect.sound;
         play.on_action = [sound] { Platform::the().play_sound(sound); };
     }
+    // The sound at power-on, as a Mac's Sound settings have it.
+    auto& startup_row = effects.rows().add<Row>("Play sound on startup"_sv);
+    auto plays = Application::the().startup_sound();
+    auto& startup = startup_row.add<Switch>(plays.value_or(false));
+    startup.set_accessibility_label("Play sound on startup"_sv);
+    startup.set_enabled(plays.has_value());
+    startup.on_action = [&startup] { Application::the().set_startup_sound(startup.is_on()); };
     page.finish();
 }
 
@@ -834,18 +876,564 @@ void build_keyboard(Page& page)
     page.finish();
 }
 
+// A page of its own, with Back to where it came from: an application's notifications, a person.
+Function<void(StringView title, Function<void(Page&)>& build)> s_push_page;
+
+// ---- Users & Groups
+
+// Once an administrator's name and password have been given, Settings may make changes until it quits, as a Mac's does.
+struct Authorization {
+    String name;
+    String password;
+    bool given { false };
+};
+Authorization s_authorization;
+// The pane shown, made again: after an account's made or taken away.
+Function<void()> s_refresh_page;
+
+OwnPtr<DirectoryProxy> directory()
+{
+    auto port = IPC::look_up("com.vulture.directory"_sv);
+    if (port.is_error())
+        return nullptr;
+    return adopt_own(*new DirectoryProxy(port.release_value()));
+}
+
+StringView why_not(i32 error)
+{
+    switch (error) {
+    case EACCES:
+        return "The name or password is incorrect."_sv;
+    case EEXIST:
+        return "That account name is already used."_sv;
+    case EINVAL:
+        return "An account name starts with a lower-case letter, and has only those, numbers, \xE2\x80\x9C-\xE2\x80\x9D, \xE2\x80\x9C_\xE2\x80\x9D and \xE2\x80\x9C.\xE2\x80\x9D"_sv;
+    case EPERM:
+        return "There has to be an administrator."_sv;
+    case EBUSY:
+        return "That can\xE2\x80\x99t be done to your own account."_sv;
+    default:
+        return "The change couldn\xE2\x80\x99t be made."_sv;
+    }
+}
+
+void refresh_soon()
+{
+    Platform::the().defer([] {
+        if (s_refresh_page)
+            s_refresh_page();
+    });
+}
+
+// A label at the left, a field at the right: in a sheet.
+TextField& add_sheet_field(StackView& form, StringView title, StringView placeholder, bool secure)
+{
+    auto& row = form.add<StackView>(Axis::Horizontal, 10, Alignment::Center);
+    auto& label = row.add<Label>(title);
+    label.set_alignment(TextAlignment::Right);
+    label.set_fixed_width(110);
+    auto& field = row.add<TextField>();
+    field.set_fixed_width(220);
+    field.set_placeholder(placeholder);
+    field.set_secure(secure);
+    field.set_accessibility_label(title);
+    return field;
+}
+
+// "Settings wants to make changes.": an administrator's name and password, asked for once.
+class AuthorizationSheet final : public StackView {
+public:
+    AuthorizationSheet(UI::Window& window, Function<void()> allowed)
+        : StackView(Axis::Vertical, 12, Alignment::Fill, Insets::all(20))
+        , m_window(window)
+        , m_allowed(move(allowed))
+    {
+        auto& heading = add<Label>("Settings wants to make changes."_sv, tokens().named_font("headline"_sv));
+        (void)heading;
+        auto& explanation = add<Label>("Enter an administrator\xE2\x80\x99s name and password to allow this."_sv);
+        explanation.set_wraps(true);
+        auto& form = add<StackView>(Axis::Vertical, 8, Alignment::Leading);
+        m_name = &add_sheet_field(form, "User Name"_sv, {}, false);
+        struct passwd const* me = getpwuid(getuid());
+        if (me)
+            m_name->set_text(StringView(me->pw_name, strlen(me->pw_name)));
+        m_password = &add_sheet_field(form, "Password"_sv, {}, true);
+        m_problem = &add<Label>(" "_sv);
+        m_problem->set_color_token("systemRed"_sv);
+        auto& buttons = add<StackView>(Axis::Horizontal, 8, Alignment::Center);
+        auto& filler = buttons.add<View>();
+        filler.set_stretch(1, 0);
+        auto& cancel = buttons.add<Button>("Cancel"_sv);
+        cancel.on_action = [this] { Sheet::dismiss(m_window); };
+        auto& allow = buttons.add<Button>("Modify Settings"_sv, ButtonStyle::Default);
+        allow.on_action = [this] { try_allowing(); };
+        window.set_default_action([this] { try_allowing(); });
+    }
+
+    [[nodiscard]] TextField& password() { return *m_password; }
+
+private:
+    void try_allowing()
+    {
+        auto proxy = directory();
+        auto answer = proxy ? proxy->check_administrator(m_name->text(), m_password->text()) : ErrorOr<i32>(Error::from_errno(ENOENT));
+        i32 const error = answer.is_error() ? answer.error().code() : answer.value();
+        if (error != 0) {
+            m_problem->set_text(why_not(error));
+            m_password->set_text({});
+            printf("settings: not allowed\n");
+            fflush(stdout);
+            return;
+        }
+        s_authorization = { MUST(String::from_view(m_name->text())), MUST(String::from_view(m_password->text())), true };
+        printf("settings: allowed\n");
+        fflush(stdout);
+        auto allowed = move(m_allowed);
+        auto& window = m_window;
+        window.set_default_action(nullptr);
+        Sheet::dismiss(window);
+        // (This sheet is gone by then.)
+        auto* raw = adopt_own(*new Function<void()>(move(allowed))).leak_ptr();
+        Platform::the().defer([raw] {
+            (*raw)();
+            delete raw;
+        });
+    }
+
+    UI::Window& m_window;
+    Function<void()> m_allowed;
+    TextField* m_name { nullptr };
+    TextField* m_password { nullptr };
+    Label* m_problem { nullptr };
+};
+
+void with_authorization(UI::Window& window, Function<void()> then)
+{
+    if (s_authorization.given) {
+        then();
+        return;
+    }
+    auto sheet = adopt_own(*new AuthorizationSheet(window, move(then)));
+    auto* field = &sheet->password();
+    Sheet::present(window, move(sheet), { 420, 250 });
+    window.make_first_responder(field);
+}
+
+// A new person: Standard or an administrator, their names, a password, and its hint.
+class NewAccountSheet final : public StackView {
+public:
+    explicit NewAccountSheet(UI::Window& window)
+        : StackView(Axis::Vertical, 10, Alignment::Fill, Insets::all(20))
+        , m_window(window)
+    {
+        auto& form = add<StackView>(Axis::Vertical, 8, Alignment::Leading);
+        auto& kind_row = form.add<StackView>(Axis::Horizontal, 10, Alignment::Center);
+        auto& kind_label = kind_row.add<Label>("New Account"_sv);
+        kind_label.set_alignment(TextAlignment::Right);
+        kind_label.set_fixed_width(110);
+        m_kind = &kind_row.add<PopUpButton>();
+        m_kind->set_accessibility_label("New Account"_sv);
+        m_kind->add_item("Standard"_sv);
+        m_kind->add_item("Administrator"_sv);
+        m_kind->set_selected_index(0);
+        m_full_name = &add_sheet_field(form, "Full Name"_sv, {}, false);
+        m_account_name = &add_sheet_field(form, "Account Name"_sv, {}, false);
+        m_password = &add_sheet_field(form, "Password"_sv, "Required"_sv, true);
+        m_verify = &add_sheet_field(form, "Verify"_sv, "Verify"_sv, true);
+        m_hint = &add_sheet_field(form, "Password Hint"_sv, "Recommended"_sv, false);
+        m_full_name->on_change = [this] {
+            if (m_name_edited)
+                return;
+            m_filling = true;
+            m_account_name->set_text(Core::AccountDatabase::name_from_full_name(m_full_name->text()).view());
+            m_filling = false;
+        };
+        m_account_name->on_change = [this] {
+            if (!m_filling)
+                m_name_edited = true;
+        };
+        m_problem = &add<Label>(" "_sv);
+        m_problem->set_color_token("systemRed"_sv);
+        m_problem->set_wraps(true);
+        auto& buttons = add<StackView>(Axis::Horizontal, 8, Alignment::Center);
+        auto& filler = buttons.add<View>();
+        filler.set_stretch(1, 0);
+        auto& cancel = buttons.add<Button>("Cancel"_sv);
+        cancel.on_action = [this] {
+            m_window.set_default_action(nullptr);
+            Sheet::dismiss(m_window);
+        };
+        auto& create = buttons.add<Button>("Create User"_sv, ButtonStyle::Default);
+        create.on_action = [this] { try_creating(); };
+        window.set_default_action([this] { try_creating(); });
+    }
+
+    [[nodiscard]] TextField& first_field() { return *m_full_name; }
+
+private:
+    void try_creating()
+    {
+        if (m_full_name->text().is_empty()) {
+            m_problem->set_text("Enter a full name."_sv);
+            return;
+        }
+        if (m_password->text() != m_verify->text()) {
+            m_problem->set_text("The passwords don\xE2\x80\x99t match."_sv);
+            return;
+        }
+        auto proxy = directory();
+        auto answer = proxy ? proxy->create_user(s_authorization.name.view(), s_authorization.password.view(), m_account_name->text(), m_full_name->text(), m_password->text(), m_hint->text(), m_kind->selected_index() == 1)
+                            : ErrorOr<i32>(Error::from_errno(ENOENT));
+        i32 const error = answer.is_error() ? answer.error().code() : answer.value();
+        if (error != 0) {
+            m_problem->set_text(why_not(error));
+            return;
+        }
+        printf("settings: made %.*s\n", static_cast<int>(m_account_name->text().length()), m_account_name->text().characters_without_null_termination());
+        fflush(stdout);
+        m_window.set_default_action(nullptr);
+        Sheet::dismiss(m_window);
+        refresh_soon();
+    }
+
+    UI::Window& m_window;
+    PopUpButton* m_kind { nullptr };
+    TextField* m_full_name { nullptr };
+    TextField* m_account_name { nullptr };
+    TextField* m_password { nullptr };
+    TextField* m_verify { nullptr };
+    TextField* m_hint { nullptr };
+    Label* m_problem { nullptr };
+    bool m_name_edited { false };
+    bool m_filling { false };
+};
+
+// Taking someone away: what's to become of their home folder, as a Mac asks.
+class DeleteUserSheet final : public StackView {
+public:
+    DeleteUserSheet(UI::Window& window, Core::AccountDatabase::Person person)
+        : StackView(Axis::Vertical, 12, Alignment::Fill, Insets::all(20))
+        , m_window(window)
+        , m_person(move(person))
+    {
+        StringBuilder question;
+        question.appendff("Are you sure you want to delete the user account \xE2\x80\x9C{}\xE2\x80\x9D?", m_person.full_name.view());
+        auto& heading = add<Label>(question.view(), tokens().named_font("headline"_sv));
+        heading.set_wraps(true);
+        m_delete_home = &add<RadioButton>("Delete the home folder"_sv, true, 7);
+        m_keep_home = &add<RadioButton>("Don\xE2\x80\x99t change the home folder"_sv, false, 7);
+        m_problem = &add<Label>(" "_sv);
+        m_problem->set_color_token("systemRed"_sv);
+        auto& buttons = add<StackView>(Axis::Horizontal, 8, Alignment::Center);
+        auto& filler = buttons.add<View>();
+        filler.set_stretch(1, 0);
+        auto& cancel = buttons.add<Button>("Cancel"_sv);
+        cancel.on_action = [this] { Sheet::dismiss(m_window); };
+        auto& remove = buttons.add<Button>("Delete User"_sv, ButtonStyle::Default);
+        remove.on_action = [this] {
+            auto proxy = directory();
+            auto answer = proxy ? proxy->delete_user(s_authorization.name.view(), s_authorization.password.view(), m_person.name.view(), m_delete_home->is_on())
+                                : ErrorOr<i32>(Error::from_errno(ENOENT));
+            i32 const error = answer.is_error() ? answer.error().code() : answer.value();
+            if (error != 0) {
+                m_problem->set_text(why_not(error));
+                return;
+            }
+            printf("settings: took away %s\n", m_person.name.characters());
+            fflush(stdout);
+            Sheet::dismiss(m_window);
+            refresh_soon();
+        };
+    }
+
+private:
+    UI::Window& m_window;
+    Core::AccountDatabase::Person m_person;
+    RadioButton* m_delete_home { nullptr };
+    RadioButton* m_keep_home { nullptr };
+    Label* m_problem { nullptr };
+};
+
+// Someone: their picture, their name, and whether they administer the computer.
+class PersonRow final : public View {
+public:
+    PersonRow(Core::AccountDatabase::Person person, bool is_me)
+        : m_person(move(person))
+        , m_is_me(is_me)
+    {
+        set_fixed_height(tokens().metric("settings.applicationRowHeight"_sv));
+    }
+
+    Function<void()> on_choose;
+
+    void draw(Graphics& graphics) override
+    {
+        auto const& t = tokens();
+        float const picture = t.metric("settings.applicationIcon"_sv);
+        Desktop::draw_monogram(graphics, { 0, (height() - picture) / 2, picture, picture }, m_person.full_name.view());
+        float const x = picture + 10;
+        graphics.draw_text(m_person.full_name.view(), t.named_font("body"_sv), { x, height() / 2 - 2 }, t.color("label"_sv));
+        graphics.draw_text(summary().view(), t.named_font("small"_sv), { x, height() / 2 + 13 }, t.color("secondaryLabel"_sv));
+        graphics.draw_symbol(Symbol::ChevronRight, { width() - 12, (height() - 12) / 2, 8, 12 }, t.color("tertiaryLabel"_sv), 1.6f);
+    }
+
+    void mouse_up(MouseEvent const& event) override
+    {
+        if (FloatRect { 0, 0, width(), height() }.contains(event.position) && on_choose)
+            on_choose();
+    }
+    bool mouse_down(MouseEvent const&) override { return true; }
+
+    Accessibility::Role accessibility_role() const override { return Accessibility::Role::Row; }
+    String accessibility_label() const override { return m_person.full_name; }
+    String accessibility_value() const override { return summary(); }
+    bool accessibility_press() override
+    {
+        if (on_choose)
+            on_choose();
+        return true;
+    }
+
+private:
+    String summary() const
+    {
+        StringBuilder text;
+        text.append(m_person.administrator ? "Admin"_sv : "Standard"_sv);
+        if (m_is_me)
+            text.append(", you"_sv);
+        return MUST(text.to_string());
+    }
+
+    Core::AccountDatabase::Person m_person;
+    bool m_is_me;
+};
+
+void build_person(Page& page, Core::AccountDatabase::Person const& person)
+{
+    bool const is_me = person.uid == getuid();
+    auto& names = page.add_group();
+    (void)names.rows().add<Row>("Full Name"_sv, person.full_name.view());
+    (void)names.rows().add<Row>("Account Name"_sv, person.name.view());
+    auto& admin_row = names.rows().add<Row>("Allow this user to administer this computer"_sv);
+    auto& admin = admin_row.add<Switch>(person.administrator);
+    admin.set_accessibility_label("Allow this user to administer this computer"_sv);
+    auto const name = person.name;
+    admin.on_action = [&admin, name] {
+        bool const wanted = admin.is_on();
+        admin.set_on(!wanted, false);
+        with_authorization(*admin.window(), [&admin, name, wanted] {
+            auto proxy = directory();
+            auto answer = proxy ? proxy->set_administrator(s_authorization.name.view(), s_authorization.password.view(), name.view(), wanted) : ErrorOr<i32>(Error::from_errno(ENOENT));
+            if (!answer.is_error() && answer.value() == 0)
+                admin.set_on(wanted);
+        });
+    };
+    if (!is_me) {
+        auto& removal = page.add_group();
+        auto& row = removal.rows().add<StackView>(Axis::Horizontal, 8, Alignment::Center);
+        row.set_fixed_height(tokens().metric("settings.rowHeight"_sv));
+        auto& filler = row.add<View>();
+        filler.set_stretch(1, 0);
+        auto& remove = row.add<Button>("Delete User\xE2\x80\xA6"_sv);
+        auto copy = person;
+        remove.on_action = [&remove, copy] {
+            auto* window = remove.window();
+            with_authorization(*window, [window, copy] { Sheet::present(*window, adopt_own(*new DeleteUserSheet(*window, copy)), { 420, 200 }); });
+        };
+    }
+    page.finish();
+}
+
 void build_users(Page& page)
 {
-    auto& group = page.add_group("Users"_sv);
-    setpwent();
-    while (auto* entry = getpwent()) {
-        if (entry->pw_uid < 500 || entry->pw_uid >= 60000)
-            continue;
-        StringView name { entry->pw_name, strlen(entry->pw_name) };
-        StringView full { entry->pw_gecos ? entry->pw_gecos : "", entry->pw_gecos ? strlen(entry->pw_gecos) : 0 };
-        (void)group.rows().add<Row>(full.is_empty() ? name : full, name);
+    auto& group = page.add_group();
+    auto people = Core::AccountDatabase::people();
+    // You first, as a Mac lists them; then everyone else.
+    auto const me = getuid();
+    for (int pass = 0; pass < 2; ++pass) {
+        for (auto const& person : people) {
+            if ((person.uid == me) != (pass == 0))
+                continue;
+            auto& row = group.rows().add<PersonRow>(person, person.uid == me);
+            auto copy = person;
+            row.on_choose = [copy] {
+                Function<void(Page&)> build = [copy](Page& detail) { build_person(detail, copy); };
+                if (s_push_page)
+                    s_push_page(copy.full_name.view(), build);
+            };
+        }
     }
-    endpwent();
+    auto& buttons = page.add<StackView>(Axis::Horizontal, 8, Alignment::Center);
+    auto& filler = buttons.add<View>();
+    filler.set_stretch(1, 0);
+    auto& add = buttons.add<Button>("Add User\xE2\x80\xA6"_sv);
+    add.on_action = [&add] {
+        auto* window = add.window();
+        with_authorization(*window, [window] {
+            auto sheet = adopt_own(*new NewAccountSheet(*window));
+            auto* field = &sheet->first_field();
+            Sheet::present(*window, move(sheet), { 440, 268 });
+            window->make_first_responder(field);
+        });
+    };
+    page.finish();
+}
+
+// ---- Lock Screen, Screen Saver, Login Items
+
+void build_lock_screen(Page& page)
+{
+    Desktop::Preferences saver("com.vulture.screensaver"_sv);
+    auto& group = page.add_group();
+    // Minutes, 0 for never: a Mac's choices.
+    static constexpr int minutes[] = { 0, 1, 2, 5, 10, 20, 30, 60 };
+    static constexpr StringView titles[] = { "Never"_sv, "For 1 minute"_sv, "For 2 minutes"_sv, "For 5 minutes"_sv, "For 10 minutes"_sv, "For 20 minutes"_sv, "For 30 minutes"_sv, "For 1 hour"_sv };
+    auto& idle_row = group.rows().add<Row>("Start Screen Saver when inactive"_sv);
+    auto& idle = idle_row.add<PopUpButton>();
+    idle.set_accessibility_label("Start Screen Saver when inactive"_sv);
+    int const chosen = static_cast<int>(saver.number("idleTime"_sv).value_or(20));
+    for (size_t i = 0; i < array_size(titles); ++i) {
+        idle.add_item(titles[i]);
+        if (minutes[i] == chosen)
+            idle.set_selected_index(static_cast<int>(i));
+    }
+    idle.on_change = [](int index) {
+        Desktop::Preferences saved("com.vulture.screensaver"_sv);
+        saved.set("idleTime"_sv, JSON::Value(static_cast<double>(minutes[index])));
+        saved.save();
+    };
+    auto& ask_row = group.rows().add<Row>("Require password after screen saver begins"_sv);
+    auto& ask = ask_row.add<PopUpButton>();
+    ask.set_accessibility_label("Require password after screen saver begins"_sv);
+    ask.add_item("Immediately"_sv);
+    ask.add_item("Never"_sv);
+    ask.set_selected_index(saver.boolean("askForPassword"_sv).value_or(true) ? 0 : 1);
+    ask.on_change = [](int index) {
+        Desktop::Preferences saved("com.vulture.screensaver"_sv);
+        saved.set("askForPassword"_sv, JSON::Value(index == 0));
+        saved.save();
+    };
+    page.finish();
+}
+
+// A screen saver, small, and its name under it: a ring round the one chosen.
+class SaverChoice final : public Control {
+public:
+    SaverChoice(StringView name, bool chosen)
+        : m_name(MUST(String::from_view(name)))
+        , m_saver(name)
+        , m_chosen(chosen)
+    {
+    }
+
+    void set_chosen(bool chosen)
+    {
+        m_chosen = chosen;
+        set_needs_display();
+    }
+    [[nodiscard]] StringView name() const { return m_name.view(); }
+
+    [[nodiscard]] FloatSize intrinsic_size() const override { return { 176, 134 }; }
+
+    void draw(Graphics& graphics) override
+    {
+        auto const& t = tokens();
+        FloatRect const picture { 2, 2, 172, 104 };
+        graphics.save();
+        graphics.clip(picture);
+        m_saver.draw_in(graphics, picture);
+        graphics.restore();
+        if (m_chosen)
+            graphics.stroke_rounded({ 0.5f, 0.5f, 175, 107 }, 6, 3, t.color("accent"_sv));
+        graphics.draw_text_centered(m_name.view(), t.named_font("body"_sv), { 0, 112, 176, 18 }, t.color("label"_sv));
+    }
+
+    Accessibility::Role accessibility_role() const override { return Accessibility::Role::RadioButton; }
+    String accessibility_label() const override { return m_name; }
+    String accessibility_value() const override { return MUST(String::from_view(m_chosen ? "on"_sv : "off"_sv)); }
+
+private:
+    String m_name;
+    Desktop::ScreenSaver m_saver;
+    bool m_chosen;
+};
+
+void build_screen_saver(Page& page)
+{
+    Desktop::Preferences saver("com.vulture.screensaver"_sv);
+    auto const chosen = saver.string("name"_sv).value_or("Drift"_sv);
+    auto& group = page.add_group("Screen Savers"_sv);
+    auto& choices = group.rows().add<StackView>(Axis::Horizontal, 16, Alignment::Center, Insets { 10, 0, 10, 0 });
+    static Vector<SaverChoice*> s_choices;
+    s_choices.clear();
+    auto* all = &s_choices;
+    for (auto name : Desktop::ScreenSaver::names()) {
+        auto& choice = choices.add<SaverChoice>(name, name == chosen);
+        all->append(&choice);
+        choice.on_action = [all, &choice] {
+            for (auto* each : *all)
+                each->set_chosen(each == &choice);
+            Desktop::Preferences saved("com.vulture.screensaver"_sv);
+            saved.set("name"_sv, MUST(JSON::Value::string(choice.name())));
+            saved.save();
+        };
+    }
+    auto& filler = choices.add<View>();
+    filler.set_stretch(1, 0);
+    page.finish();
+}
+
+void build_login_items(Page& page)
+{
+    auto& group = page.add_group("Open at Login"_sv);
+    auto const items = Desktop::login_items();
+    auto const applications = Desktop::installed_applications();
+    auto name_of = [&](StringView path) -> String {
+        for (auto const& application : applications) {
+            if (application.bundle_path.view() == path)
+                return application.name;
+        }
+        return application_name_from_path(path);
+    };
+    if (items.is_empty())
+        (void)group.rows().add<Row>("Items will open automatically when you log in."_sv);
+    for (auto const& item : items) {
+        auto const name = name_of(item.view());
+        auto& row = group.rows().add<Row>(name.view());
+        auto& remove = row.add<Button>(StringView {}, ButtonStyle::Circular);
+        remove.set_symbol(Symbol::Minus);
+        StringBuilder label;
+        label.appendff("Remove {}", name.view());
+        remove.set_accessibility_label(label.view());
+        auto path = item;
+        remove.on_action = [path] {
+            Desktop::set_login_item(path.view(), false);
+            refresh_soon();
+        };
+    }
+    auto& buttons = page.add<StackView>(Axis::Horizontal, 8, Alignment::Center);
+    auto& filler = buttons.add<View>();
+    filler.set_stretch(1, 0);
+    auto& add = buttons.add<PopUpButton>();
+    add.set_accessibility_label("Add Login Item"_sv);
+    add.add_item("Add\xE2\x80\xA6"_sv);
+    Vector<String> paths;
+    for (auto const& application : applications) {
+        bool already = false;
+        for (auto const& item : items)
+            already = already || item.view() == application.bundle_path.view();
+        if (already)
+            continue;
+        add.add_item(application.name.view());
+        paths.append(application.bundle_path);
+    }
+    add.set_selected_index(0);
+    add.on_change = [paths = move(paths)](int index) {
+        if (index <= 0 || static_cast<size_t>(index - 1) >= paths.size())
+            return;
+        Desktop::set_login_item(paths[static_cast<size_t>(index - 1)].view(), true);
+        refresh_soon();
+    };
     page.finish();
 }
 
@@ -1387,7 +1975,6 @@ private:
 };
 
 // Opening a page under the pane that's showing, with Back in the toolbar: an application's notifications.
-Function<void(StringView title, Function<void(Page&)>& build)> s_push_page;
 
 void build_application_notifications(Page& page, String const& application)
 {
@@ -1636,6 +2223,13 @@ public:
         m_forward->set_enabled(false);
         m_title = &m_toolbar->add_item<Label>("Settings"_sv, t.named_font("headline"_sv));
         s_push_page = [this](StringView title, Function<void(Page&)>& build) { push_page(title, move(build)); };
+        s_refresh_page = [this] {
+            drop_detail();
+            m_back->set_enabled(false);
+            if (!m_made_when_shown[m_current])
+                make_again(m_current);
+            show_page(m_current);
+        };
         m_pages = &right.add<View>();
         m_pages->set_stretch(0, 1);
         split.set_frame({ 0, 0, 880, 600 });
@@ -1646,6 +2240,7 @@ public:
         add_pane("Accessibility"_sv, Symbol::Accessibility, build_accessibility);
         add_pane("Control Center"_sv, Symbol::Toggles, build_control_center);
         add_pane("Wallpaper"_sv, Symbol::Photo, build_wallpaper);
+        add_pane("Screen Saver"_sv, Symbol::Display, build_screen_saver);
         add_pane("Desktop & Dock"_sv, Symbol::Sidebar, build_dock);
         add_pane("Displays"_sv, Symbol::Display, build_displays);
         add_pane("Network"_sv, Symbol::Globe, build_network);
@@ -1657,7 +2252,9 @@ public:
         add_pane("Notifications"_sv, Symbol::Bell, build_notifications, true);
         add_pane("Focus"_sv, Symbol::Moon, build_focus);
         add_pane("Privacy & Security"_sv, Symbol::Lock, build_privacy);
-        add_pane("Users"_sv, Symbol::Person, build_users);
+        add_pane("Lock Screen"_sv, Symbol::Lock, build_lock_screen);
+        add_pane("Users & Groups"_sv, Symbol::Person, build_users, true);
+        add_pane("Login Items"_sv, Symbol::Applications, build_login_items, true);
         add_pane("Storage"_sv, Symbol::Drive, build_storage);
         add_pane("Startup Disk"_sv, Symbol::Drive, build_startup_disk);
         add_pane("About"_sv, Symbol::Information, build_about);

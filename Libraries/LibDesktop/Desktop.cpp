@@ -9,6 +9,8 @@
 #include "Desktop.h"
 #include <LibIPC/Bootstrap.h>
 #include <LibIPC/Listener.h>
+#include <LibGfx/Gradient.h>
+#include <LibGfx/Path.h>
 #include <LibImage/Image.h>
 #include <LibUI/Application.h>
 #include <FilesEndpoint.h>
@@ -570,6 +572,119 @@ void shut_down()
     auto port = IPC::look_up("com.vulture.loginwindow"_sv);
     if (!port.is_error())
         (void)SessionProxy(port.release_value()).shut_down();
+}
+
+void lock_screen()
+{
+    auto port = IPC::look_up("com.vulture.loginwindow"_sv);
+    if (!port.is_error())
+        (void)SessionProxy(port.release_value()).lock_screen();
+}
+
+void start_screen_saver()
+{
+    auto port = IPC::look_up("com.vulture.loginwindow"_sv);
+    if (!port.is_error())
+        (void)SessionProxy(port.release_value()).start_screen_saver();
+}
+
+void switch_to_user(StringView name)
+{
+    auto port = IPC::look_up("com.vulture.loginwindow"_sv);
+    if (!port.is_error())
+        (void)SessionProxy(port.release_value()).switch_to(name);
+}
+
+// A word's first letter, whatever it's written in: its first character, in capitals if it has them.
+static void append_initial(StringBuilder& out, StringView word)
+{
+    if (word.is_empty())
+        return;
+    auto const first = static_cast<u8>(word[0]);
+    if (first < 0x80) {
+        out.append(first >= 'a' && first <= 'z' ? static_cast<char>(first - 'a' + 'A') : static_cast<char>(first));
+        return;
+    }
+    size_t length = first >= 0xf0 ? 4 : first >= 0xe0 ? 3 : 2;
+    out.append(word.substring_view(0, min(length, word.length())));
+}
+
+void draw_monogram(UI::Graphics& graphics, Gfx::FloatRect rect, StringView full_name)
+{
+    auto const& t = UI::Appearance::the();
+    Gfx::Path circle;
+    circle.add_circle({ rect.x + rect.width / 2, rect.y + rect.height / 2 }, rect.width / 2);
+    Gfx::GradientStop const stops[] = { { 0, t.color("loginwindow.monogramTop"_sv) }, { 1, t.color("loginwindow.monogramBottom"_sv) } };
+    graphics.painter().fill_path(circle, Gfx::Gradient::linear({ rect.x, rect.y }, { rect.x, rect.y + rect.height }, Span<Gfx::GradientStop const>(stops, 2)));
+    // The first name's initial and the last's.
+    StringView first, last;
+    full_name.for_each_split_view(' ', SplitBehavior::SkipEmpty, [&](StringView word) {
+        if (first.is_empty())
+            first = word;
+        else
+            last = word;
+    });
+    StringBuilder initials;
+    append_initial(initials, first);
+    append_initial(initials, last);
+    UI::FontSpec const font { rect.width * 0.4f, UI::FontWeight::Medium };
+    graphics.draw_text_centered(initials.view(), font, rect, Gfx::Color::from_rgb(0xffffff));
+}
+
+Vector<String> login_items()
+{
+    Vector<String> items;
+    Preferences preferences("com.vulture.loginitems"_sv);
+    if (auto const* list = preferences.array("items"_sv)) {
+        for (size_t i = 0; i < list->size(); ++i) {
+            if (list->at(i).is_string())
+                items.append(MUST(String::from_view(list->at(i).as_string())));
+        }
+    }
+    return items;
+}
+
+bool is_login_item(StringView path)
+{
+    for (auto const& item : login_items()) {
+        if (item.view() == path)
+            return true;
+    }
+    return false;
+}
+
+void set_login_item(StringView path, bool opens)
+{
+    auto items = JSON::Value::array();
+    bool there = false;
+    for (auto const& item : login_items()) {
+        if (item.view() == path) {
+            there = true;
+            if (!opens)
+                continue;
+        }
+        MUST(items.append(MUST(JSON::Value::string(item.view()))));
+    }
+    if (opens && !there)
+        MUST(items.append(MUST(JSON::Value::string(path))));
+    Preferences preferences("com.vulture.loginitems"_sv);
+    preferences.set("items"_sv, move(items));
+    preferences.save();
+}
+
+Vector<String> logged_in_users()
+{
+    Vector<String> names;
+    auto port = IPC::look_up("com.vulture.loginwindow"_sv);
+    if (port.is_error())
+        return names;
+    auto answer = SessionProxy(port.release_value()).logged_in();
+    if (answer.is_error())
+        return names;
+    answer.value().view().for_each_split_view('\n', SplitBehavior::SkipEmpty, [&](StringView name) {
+        names.append(MUST(String::from_view(name)));
+    });
+    return names;
 }
 
 class MenuExtra::ExtraView final : public UI::View {

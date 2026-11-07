@@ -1165,48 +1165,157 @@
                             "suite": "test-ui",
                             "chat": [
                                 "monday.chat",
-                                "click menuitem \"Log Out vulture…\""
+                                "click menuitem \"Log Out Vulture User…\""
                             ]
                         }
                     ]
                 },
                 {
                     "feature": "Create an account",
-                    "milestone": "M25"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m25-sessions-users.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m25-sessions.chat",
+                                "expect settings: made gracehopper"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m25-sessions-new-user.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Lock screen",
-                    "milestone": "M25"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m25-sessions-locked.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "monday.chat",
+                                "expect loginwindow: unlocked"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Screen saver",
-                    "milestone": "M25"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m25-sessions-saver.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m25-sessions.chat",
+                                "expect loginwindow: screen saver started"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Fast user switching",
-                    "milestone": "M25"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m25-sessions-switching-menu.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m25-sessions-people.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m25-sessions.chat",
+                                "expect loginwindow: switched to adalovelace"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "First-run Setup",
-                    "milestone": "M25"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m25-sessions-setup-welcome.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m25-sessions-setup-account.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m25-sessions.chat",
+                                "expect setup: made adalovelace"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Login Items",
-                    "milestone": "M25"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m25-sessions-login-items.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m25-sessions.chat",
+                                "expect desktopshell: opened /System/Applications/Text Editor.app at login"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Dynamic wallpapers",
-                    "milestone": "M25"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m25-sessions-dynamic-wallpaper.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m25-sessions.chat",
+                                "expect WindowServer: wallpaper Horizon, part 0 of the day"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Start-up sound",
-                    "milestone": "M25"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-sound",
+                            "output": "audioserver: played the startup sound"
+                        }
+                    ]
                 },
                 {
                     "feature": "Wallpapers",
                     "claim": "partial",
-                    "missing": "only five made from gradients; none that change through the day",
-                    "milestone": "M25",
+                    "missing": "seven, made from gradients, two of them changing through the day; no photographs",
+                    "milestone": "M28",
                     "proof": [
                         {
                             "suite": "test-ui",
@@ -2248,13 +2357,19 @@
                     ]
                 },
                 {
-                    "feature": "Users",
-                    "claim": "partial",
-                    "missing": "it can't change anything (M25)",
-                    "milestone": "M25",
+                    "feature": "Users & Groups",
+                    "claim": "present",
                     "proof": [
                         {
-                            "suite": "test-ui"
+                            "suite": "test-ui",
+                            "golden": "m25-sessions-users.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m25-sessions.chat",
+                                "ax-expect row \"Grace Hopper\" = Standard"
+                            ]
                         }
                     ]
                 },

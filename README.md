@@ -188,7 +188,8 @@ We keep a [scoreboard](Documentation/Parity.md). It lists what macOS does, featu
       Keep moving when an app stops answering<br>
       Use two displays, and swipe between Spaces<br>
       Tile windows, go full screen, or work in Stage<br>
-      Take screenshots, answer notifications, and put widgets on the desktop
+      Take screenshots, answer notifications, and put widgets on the desktop<br>
+      Set up a new machine, lock it, and switch between people
     </td>
     <td valign="top">
       Browse the web<br>
@@ -217,6 +218,8 @@ Meta/build.sh && Meta/run.sh
 ```
 
 A window opens. Log in as **`vulture`**, password **`vulture`**. Your files stay on a disk image that survives rebuilds.
+A build you're working on makes that account on a new disk for you; to go through Setup instead, as a new Mac would,
+start one with `Meta/run.sh --fresh-disk --boot-args setup`.
 
 Want other languages and emoji? Run `Meta/fetch-fonts.sh` before you build. Those fonts are a download of their own, and without them you get boxes where those letters would be.
 

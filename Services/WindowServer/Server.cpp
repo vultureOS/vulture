@@ -353,6 +353,7 @@ WindowServerEndpoint::ConnectAnswer Server::connect(IPC::Sender const& sender, I
         return answer;
     }
     client->pid = sender.pid;
+    client->uid = sender.uid;
     client->events = move(events);
     // When the client's end goes, so do its windows.
     int fd = client->events.fd();
@@ -1361,6 +1362,55 @@ void Server::set_materials(IPC::Sender const& sender, u32 id, Vector<i32> region
     schedule_frame();
 }
 
+bool Server::is_in_session(Client const* client) const
+{
+    if (!m_sessions_managed || !client || client->uid == 0)
+        return true;
+    return !m_session_locked && client->uid == m_session_uid;
+}
+
+void Server::set_session(IPC::Sender const& sender, u32 uid, bool locked)
+{
+    if (sender.uid != 0)
+        return;
+    bool const changed_person = !m_sessions_managed || uid != m_session_uid;
+    m_sessions_managed = true;
+    m_session_uid = uid;
+    m_session_locked = locked;
+    // What was going on in the session that's going: over.
+    if (m_overview)
+        leave_overview(nullptr);
+    if (m_switching)
+        finish_switching(false);
+    // Its desktop's owner, for what it may see of the screen.
+    if (uid != 0) {
+        m_shell_uid = uid;
+        m_has_shell_uid = true;
+    }
+    update_all_visibility();
+    recompute_work_area();
+    layout_menu_extras();
+    activate_frontmost();
+    if (changed_person) {
+        for (auto& client : m_clients) {
+            if (!client->is_shell || client->uid == 0)
+                continue;
+            IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::SessionChanged));
+            encoder.encode(client->uid == uid);
+            send_to(*client, encoder);
+        }
+    }
+    shell_state_changed();
+    m_compositor.invalidate_all();
+    schedule_frame();
+}
+
+u64 Server::idle_time(IPC::Sender const&)
+{
+    u64 const now = now_microseconds();
+    return m_last_activity_at && now > m_last_activity_at ? (now - m_last_activity_at) / 1000 : now / 1000;
+}
+
 void Server::inject_pointer(IPC::Sender const& sender, i32 x, i32 y, u32 buttons, u64 sent_at)
 {
     if (sender.uid != 0)
@@ -2057,7 +2107,7 @@ void Server::arm_window_menu(ServerWindow& window)
         if (!window)
             return;
         for (auto& client : m_clients) {
-            if (!client->shows_window_menus)
+            if (!client->shows_window_menus || !is_in_session(client.ptr()))
                 continue;
             IPC::Encoder encoder(WindowClientEndpoint::magic, static_cast<u32>(WindowClientEndpoint::Method::WindowMenuWanted));
             encoder.encode(window->id);
@@ -2085,7 +2135,7 @@ void Server::arrange_window(IPC::Sender const& sender, u32 id, i32 arrangement)
     if (!window) {
         // The desktop can do it for anyone: it's what shows the green button's menu.
         auto* client = client_of(sender);
-        if (!client || !client->shows_window_menus)
+        if (!client || !client->shows_window_menus || !is_in_session(client))
             return;
         for (auto* other : m_windows) {
             if (other->id == id)
@@ -2421,6 +2471,8 @@ void Server::read_input()
         if (got <= 0)
             return;
         size_t count = static_cast<size_t>(got) / sizeof(vulture_input_event);
+        if (count > 0)
+            m_last_activity_at = now_microseconds();
         for (size_t i = 0; i < count; ++i) {
             auto const& event = events[i];
             m_event_time = event.time;
@@ -2515,6 +2567,7 @@ void Server::pointer_changed(IntPoint point, u32 buttons)
     // When it happened, if that's known, as it may have waited here for a frame to finish.
     u64 const now = now_microseconds();
     m_pointer_moved_at = m_event_time != 0 && m_event_time <= now && now - m_event_time < 1'000'000 ? m_event_time : now;
+    m_last_activity_at = now;
     note_input();
     point = m_screen.nearest_point_on_a_display(point);
     bool moved = point != m_pointer;

@@ -1,7 +1,7 @@
 wheel:*:0:root
 daemon:*:1:root
 tty:*:4:
-staff:*:20:root,vulture
-admin:*:80:root,vulture
+staff:*:20:root
+admin:*:80:root
 everyone:*:12:
 nogroup:*:4294967294:

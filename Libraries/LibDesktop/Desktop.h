@@ -176,5 +176,20 @@ void draw_logo(UI::Graphics&, Gfx::FloatRect const&, Gfx::Color);
 void log_out();
 void restart();
 void shut_down();
+void lock_screen();
+void start_screen_saver();
+// Fast user switching: the login window, with this person chosen (or the list, for nobody in particular).
+void switch_to_user(StringView name);
+// Who's logged in, by short name.
+[[nodiscard]] Vector<String> logged_in_users();
+
+// A person's picture: their initials, white on grey, as a Mac makes one for whoever hasn't chosen a picture.
+void draw_monogram(UI::Graphics&, Gfx::FloatRect, StringView full_name);
+
+// Login Items: what opens when this person logs in, by path, as Settings > Login Items and the Dock's Options say
+// (~/Library/Preferences/com.vulture.loginitems.json).
+[[nodiscard]] Vector<String> login_items();
+[[nodiscard]] bool is_login_item(StringView path);
+void set_login_item(StringView path, bool opens);
 
 }

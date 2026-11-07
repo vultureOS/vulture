@@ -29,6 +29,8 @@ namespace WindowServer {
 
 struct Client {
     pid_t pid { 0 };
+    // Whose it is: a session's own windows are only shown while it's on the screen.
+    uid_t uid { 0 };
     IPC::Port events;
     int watch { 0 };
     // An application, if it said so: the Dock and menu bar show those.
@@ -138,6 +140,8 @@ private:
     void register_hotkey(IPC::Sender const&, u16 code, u32 modifiers) override;
     i32 set_wallpaper(IPC::Sender const&, String name) override;
     void set_overview(IPC::Sender const&, bool shown) override;
+    void set_session(IPC::Sender const&, u32 uid, bool locked) override;
+    u64 idle_time(IPC::Sender const&) override;
     void set_reduce_motion(IPC::Sender const&, bool reduced) override;
     void set_natural_scrolling(IPC::Sender const&, bool natural) override;
     void set_tap_to_click(IPC::Sender const&, bool tap) override;
@@ -224,8 +228,12 @@ private:
     [[nodiscard]] Client* client_with_pid(i32 pid);
     void update_visibility(ServerWindow&);
     void update_all_visibility();
+    // Whether this client's windows may be on the screen, and have input, with the session as it is.
+    [[nodiscard]] bool is_in_session(Client const*) const;
+    void recompute_work_area();
     void shell_state_changed();
     void send_shell_state();
+    [[nodiscard]] String shell_state_for(uid_t);
     void minimize_window(ServerWindow&);
     void restore_window(ServerWindow&);
     void zoom_window(ServerWindow&);
@@ -317,6 +325,14 @@ private:
     void start_animating();
     void animation_tick();
     void apply_wallpaper();
+    // For a wallpaper that changes through the day: which part of the day it is, by the hour, (-1 for one that doesn't).
+    int m_wallpaper_period { -1 };
+    int m_wallpaper_timer { -1 };
+
+public:
+    static void set_still(bool);
+
+private:
     void update_boot_overlays();
 
     // Input.
@@ -440,6 +456,12 @@ private:
     // Who's logged in, as far as it goes: whoever's desktop this is.
     uid_t m_shell_uid { 0 };
     bool m_has_shell_uid { false };
+    // Whose session is on the screen, and whether it's locked: see set_session. Until the login window has said, everyone's.
+    bool m_sessions_managed { false };
+    uid_t m_session_uid { 0 };
+    bool m_session_locked { false };
+    // When a key, the pointer or a finger was last used, on the monotonic clock: for idle_time.
+    u64 m_last_activity_at { 0 };
     // One at a time, and a frame at a time.
     struct Recording {
         Client* client { nullptr };

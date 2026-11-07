@@ -140,10 +140,15 @@ ax-expect button "Edit Widgets"
 key esc
 key meta_l-q
 ax-gone textarea "Terminal"
+# M25: away for a moment, the screen locked; back with the password.
+key ctrl-meta_l-q
+expect loginwindow: locked
+type vulture\r
+expect loginwindow: unlocked
 
 # ---- And leave.
 click menuitem "Logo"
-click menuitem "Log Out vulture…"
+click menuitem "Log Out Vulture User…"
 expect loginwindow: ready
 # Still to come, each with its milestone: read the mail (M33), open a PDF (M30), add a meeting to the calendar (M31), browse
 # (M40), play music (M34).

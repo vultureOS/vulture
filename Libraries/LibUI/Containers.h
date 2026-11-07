@@ -181,6 +181,8 @@ public:
     [[nodiscard]] Gfx::FloatSize intrinsic_size() const override;
     void draw(Graphics&) override;
     bool mouse_down(MouseEvent const&) override;
+    // More rows than fit: scrolled, as a Mac's sidebar is.
+    bool scroll_wheel(ScrollEvent const&) override;
     [[nodiscard]] bool accepts_first_responder() const override { return true; }
     [[nodiscard]] bool shows_focus_ring() const override { return false; }
     bool key_down(KeyEvent const&) override;
@@ -188,6 +190,12 @@ public:
     void accessibility_parts(Vector<Accessibility::Node>&) override;
 
 private:
+    [[nodiscard]] float top() const;
+    [[nodiscard]] float unscrolled_y_of(size_t entry) const;
+    void scroll_to(float);
+    void scroll_to_row(int row);
+    float m_scroll { 0 };
+
     struct Entry {
         String title;
         Symbol symbol;

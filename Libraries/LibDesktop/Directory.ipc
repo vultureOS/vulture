@@ -1,0 +1,13 @@
+// The people who use this computer (com.vulture.directory): making an account, taking one away, and who may administer
+// the computer, for Settings' Users & Groups. Each asks for an administrator's name and password, as a Mac's Settings
+// does before such a change, and they're checked here, where the password hashes can be read. Root needn't say.
+// Errors are errno values: EACCES for a wrong name or password, EEXIST for a name that's taken, EPERM for the last
+// administrator.
+endpoint Directory
+{
+    // Whether this is an administrator's name and password: Settings' lock, opened.
+    check_administrator(String administrator, String password) => (i32 error)
+    create_user(String administrator, String password, String name, String full_name, String new_password, String hint, bool admin) => (i32 error)
+    delete_user(String administrator, String password, String name, bool delete_home) => (i32 error)
+    set_administrator(String administrator, String password, String name, bool admin) => (i32 error)
+}

@@ -1382,7 +1382,7 @@ private:
                     m_settings.recents.remove_all_matching([&](auto const& one) { return one.view() == path.view(); });
                     save_kept();
                 });
-            options.add("Open at Login"_sv).enabled = false;
+            options.add("Open at Login"_sv, [path] { Desktop::set_login_item(path.view(), !Desktop::is_login_item(path.view())); }).checked = Desktop::is_login_item(path.view());
             options.add("Show in Files"_sv, [path] { (void)Desktop::reveal_in_files(path.view()); });
             m_menu->add_separator();
             if (pid) {
@@ -1508,7 +1508,7 @@ int main(int argc, char** argv)
     if (s_still)
         set_motion_enabled(false);
 
-    auto const& t = tokens();
+    // (The theme is looked up each time: a change of appearance replaces it.)
     auto window = adopt_own(*new UI::Window("Dock"_sv, { 0, 0, 100, 100 }, WS::WindowBare | WS::WindowSticky));
     window->set_transparent(true);
     window->backend().set_level(WS::LevelDock);
@@ -1518,18 +1518,18 @@ int main(int argc, char** argv)
     // Along the bottom, or down a side under the menu bar; windows kept clear of it unless it hides.
     auto place = [&] {
         auto const screen = Platform::the().screen_size();
-        int const menu_bar = static_cast<int>(t.metric("menubar.height"_sv));
+        int const menu_bar = static_cast<int>(tokens().metric("menubar.height"_sv));
         auto const& settings = dock.settings();
         IntRect frame;
         switch (settings.edge) {
         case Edge::Bottom: {
-            int const height = static_cast<int>(t.metric("dock.windowHeight"_sv));
+            int const height = static_cast<int>(tokens().metric("dock.windowHeight"_sv));
             frame = { 0, screen.height - height, screen.width, height };
             break;
         }
         case Edge::Left:
         case Edge::Right: {
-            int const width = static_cast<int>(t.metric("dock.sideWindowWidth"_sv));
+            int const width = static_cast<int>(tokens().metric("dock.sideWindowWidth"_sv));
             frame = { settings.edge == Edge::Left ? 0 : screen.width - width, menu_bar, width, screen.height - menu_bar };
             break;
         }

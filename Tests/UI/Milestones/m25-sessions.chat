@@ -1,0 +1,166 @@
+# M25: sessions. From a disk with nobody on it, Setup asks the first questions and makes the first account, which is
+# then logged in; the screen locks and unlocks; Settings adds a second person, behind an administrator's password; and
+# the two take turns at the screen, each with their own windows.
+# boot: setup
+timeout 60
+expect setup: welcome
+pause 1
+screenshot setup-welcome.png
+click button "Continue"
+expect setup: region
+ax-expect row "United States" = selected
+pause 0.5
+screenshot setup-region.png
+click button "Continue"
+expect setup: account
+type Ada Lovelace
+ax-expect textfield "Account Name" = adalovelace
+click textfield "Password"
+type analytical
+click textfield "Verify"
+type analytical
+click textfield "Hint"
+type The first program
+pause 0.5
+screenshot setup-account.png
+click button "Continue"
+expect setup: look
+pause 0.5
+screenshot setup-look.png
+click radio "Dark"
+expect setup: look Dark
+click radio "Light"
+expect setup: look Light
+click button "Continue"
+expect setup: made adalovelace
+expect loginwindow: session started
+expect files: ready
+pause 2
+screenshot desktop.png
+# ---- Locked, and back with the password.
+key ctrl-meta_l-q
+expect loginwindow: locked
+ax-expect textfield "Password"
+pause 0.5
+screenshot locked.png
+type wrong\r
+expect loginwindow: incorrect password
+type analytical\r
+expect loginwindow: unlocked
+pause 1
+# ---- A second person, from Settings, once an administrator's said so.
+click button "Settings"
+expect settings: Appearance
+click row "Users & Groups"
+expect settings: Users & Groups
+ax-expect row "Ada Lovelace" = Admin, you
+click button "Add User…"
+ax-expect text "Settings wants to make changes."
+type analytical\r
+expect settings: allowed
+ax-expect popup "New Account"
+type Grace Hopper
+ax-expect textfield "Account Name" = gracehopper
+click textfield "Password"
+type cobol
+click textfield "Verify"
+type cobol
+pause 0.5
+screenshot new-user.png
+click button "Create User"
+expect settings: made gracehopper
+ax-expect row "Grace Hopper" = Standard
+pause 0.5
+screenshot users.png
+# ---- Fast user switching: from the menu bar, to Grace, whose session starts; Ada's stays, out of sight.
+click row "Control Center"
+click switch "Show Fast User Switching in Menu Bar"
+ax-expect button "Ada Lovelace" = Fast User Switching
+click button "Ada Lovelace"
+ax-expect menuitem "Grace Hopper"
+ax-expect menuitem "Login Window…"
+pause 0.4
+screenshot switching-menu.png
+click menuitem "Grace Hopper"
+expect loginwindow: switching
+ax-expect textfield "Password"
+pause 0.5
+screenshot switching.png
+type cobol\r
+expect loginwindow: session started
+pause 3
+ax-gone window "Control Center"
+click button "Terminal"
+expect terminal: ready
+type whoami\r
+ax-expect textarea "Terminal" ~ gracehopper
+pointer 31500 16000
+pause 0.8
+screenshot grace.png
+# Back to Ada, by the lock screen's Switch User: her windows are as she left them.
+key ctrl-meta_l-q
+expect loginwindow: locked
+click button "Switch User"
+expect loginwindow: choosing
+ax-expect button "Ada Lovelace" = logged in
+ax-expect button "Grace Hopper" = logged in
+pause 0.5
+screenshot people.png
+click button "Ada Lovelace"
+expect loginwindow: chose adalovelace
+type analytical\r
+expect loginwindow: switched to adalovelace
+ax-expect window "Control Center"
+ax-gone textarea "Terminal"
+# ---- The screen saver, from a hot corner; and the password, after it, as a Mac asks for it.
+click row "Desktop & Dock"
+expect settings: Desktop & Dock
+pointer 20000 16384
+wheel -60
+pause 0.5
+click button "Hot Corners…"
+click popup "Bottom right"
+click menuitem "Start Screen Saver"
+click button "Done"
+pointer 32767 32767
+expect loginwindow: screen saver started
+pause 1
+screenshot saver.png
+pointer 16000 16000
+expect loginwindow: screen saver stopped
+expect loginwindow: locked
+type analytical\r
+expect loginwindow: unlocked
+# ---- A wallpaper that changes through the day: at 9:41, the morning's.
+click row "Wallpaper"
+expect settings: Wallpaper
+click radio "Horizon"
+expect WindowServer: wallpaper Horizon, part 0 of the day
+pause 0.8
+screenshot dynamic-wallpaper.png
+# ---- Login Items: what opens when she logs in.
+click row "Login Items"
+expect settings: Login Items
+click popup "Add Login Item"
+click menuitem "Text Editor"
+ax-expect text "Text Editor"
+ax-expect button "Remove Text Editor"
+pause 0.5
+screenshot login-items.png
+click menuitem "Logo"
+click menuitem "Log Out Ada Lovelace…"
+expect loginwindow: ready
+ax-expect button "Grace Hopper" = logged in
+click button "Ada Lovelace"
+type analytical\r
+expect loginwindow: session started
+expect desktopshell: opened /System/Applications/Text Editor.app at login
+expect texteditor: ready
+# ---- The Dock comes back if it stops, as a Mac's does.
+click button "Terminal"
+expect terminal: ready
+pause 1
+type killall Dock\r
+expect loginwindow: started Dock again
+expect dock: ready
+ax-expect button "Terminal"

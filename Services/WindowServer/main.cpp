@@ -65,6 +65,9 @@ int main(int argc, char** argv)
             theme_path = strcmp(appearance, "Dark") == 0 ? "/System/Library/Themes/Dark.json" : "/System/Library/Themes/Light.json";
         } else if (strcmp(argv[i], "--no-input") == 0) {
             with_input = false;
+        } else if (strcmp(argv[i], "--still") == 0) {
+            // Tests': the moment every screenshot has (9:41), for what changes with the time of day.
+            WindowServer::Server::set_still(true);
         } else if (strcmp(argv[i], "--boot-screen") == 0) {
             boot_screen = true;
         } else {

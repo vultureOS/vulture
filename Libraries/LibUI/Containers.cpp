@@ -463,10 +463,15 @@ void Sidebar::set_top_padding(float padding)
     set_needs_display();
 }
 
-float Sidebar::y_of(size_t index) const
+float Sidebar::top() const
+{
+    return m_top_padding >= 0 ? m_top_padding : tokens().metric("sidebar.topPadding"_sv);
+}
+
+float Sidebar::unscrolled_y_of(size_t index) const
 {
     auto const& t = tokens();
-    float y = m_top_padding >= 0 ? m_top_padding : t.metric("sidebar.topPadding"_sv);
+    float y = top();
     float row = t.metric("sidebar.rowHeight"_sv);
     float section = t.metric("sidebar.sectionHeight"_sv);
     for (size_t i = 0; i < index; ++i)
@@ -474,9 +479,50 @@ float Sidebar::y_of(size_t index) const
     return y;
 }
 
+float Sidebar::y_of(size_t index) const
+{
+    return unscrolled_y_of(index) - m_scroll;
+}
+
 FloatSize Sidebar::intrinsic_size() const
 {
-    return { tokens().metric("sidebar.width"_sv), y_of(m_entries.size()) };
+    return { tokens().metric("sidebar.width"_sv), unscrolled_y_of(m_entries.size()) };
+}
+
+void Sidebar::scroll_to(float scroll)
+{
+    // Down to the last row, and a little room under it.
+    float const most = max(0.0f, unscrolled_y_of(m_entries.size()) + 8 - height());
+    scroll = clamp(scroll, 0.0f, most);
+    if (scroll == m_scroll)
+        return;
+    m_scroll = scroll;
+    set_needs_display();
+}
+
+bool Sidebar::scroll_wheel(ScrollEvent const& event)
+{
+    float const before = m_scroll;
+    scroll_to(m_scroll + event.delta_y);
+    return m_scroll != before || event.delta_y != 0;
+}
+
+void Sidebar::scroll_to_row(int row)
+{
+    // Not laid out yet: there's nothing to see it in.
+    if (height() <= top())
+        return;
+    float const row_height = tokens().metric("sidebar.rowHeight"_sv);
+    for (size_t i = 0; i < m_entries.size(); ++i) {
+        if (m_entries[i].section || m_entries[i].row != row)
+            continue;
+        float const y = unscrolled_y_of(i);
+        if (y - m_scroll < top())
+            scroll_to(y - top());
+        else if (y + row_height - m_scroll > height())
+            scroll_to(y + row_height + 8 - height());
+        return;
+    }
 }
 
 void Sidebar::draw(Graphics& graphics)
@@ -492,9 +538,14 @@ void Sidebar::draw(Graphics& graphics)
     float icon = t.metric("sidebar.iconSize"_sv);
     float gap = t.metric("sidebar.iconGap"_sv);
     float left = t.metric("sidebar.textLeft"_sv);
+    // Rows scrolled up go under nothing: they stop where the traffic lights' room begins.
+    graphics.save();
+    graphics.clip({ 0, top(), width(), max(0.0f, height() - top()) });
     for (size_t i = 0; i < m_entries.size(); ++i) {
         auto const& entry = m_entries[i];
         float y = y_of(i);
+        if (y + row_height < top() || y > height())
+            continue;
         if (entry.section) {
             graphics.draw_text(entry.title.view(), section_font, { left + inset - 2, y + section_height - 8 }, t.color("sidebar.section"_sv));
             continue;
@@ -507,6 +558,7 @@ void Sidebar::draw(Graphics& graphics)
         if (entry.has_accessory)
             graphics.draw_symbol(entry.accessory, { width() - inset - icon - 6, y + (row_height - icon) / 2, icon, icon }, t.color("sidebar.icon"_sv));
     }
+    graphics.restore();
 }
 
 void Sidebar::select_row(size_t row)
@@ -514,6 +566,7 @@ void Sidebar::select_row(size_t row)
     if (static_cast<int>(row) == m_selected)
         return;
     m_selected = static_cast<int>(row);
+    scroll_to_row(m_selected);
     set_needs_display();
     if (on_select)
         on_select(row);
@@ -524,6 +577,8 @@ bool Sidebar::mouse_down(MouseEvent const& event)
     if (event.button != WS::ButtonLeft)
         return false;
     float row_height = tokens().metric("sidebar.rowHeight"_sv);
+    if (event.position.y < top())
+        return true;
     for (size_t i = 0; i < m_entries.size(); ++i) {
         auto const& entry = m_entries[i];
         float y = y_of(i);

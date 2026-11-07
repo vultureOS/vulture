@@ -104,7 +104,7 @@ Sizes are rough estimates of new lines, scaled from the reference figures above.
 | | M22 | [Displays and gestures](#m22-displays-and-gestures) | Done | Use two displays, swipe between Spaces, record the screen | 8k |
 | **2 Mac feel** | M23 | [Windows and Spaces](#m23-windows-and-spaces) | Done, but for timing against the VM (waiting on a decision) | Tile, go full screen, use App Exposé and Stage | 10k |
 | | M24 | [The desktop](#m24-the-desktop) | Done, but for sizes, colours and timings against the VM (waiting on a decision) | Use the full Dock, menu bar, Control Center, widgets and screenshots | 12k |
-| | M25 | [Sessions](#m25-sessions) | | Set up a new machine, lock it, switch between users | 8k |
+| | M25 | [Sessions](#m25-sessions) | Done, but for sizes, colours and timings against the VM (waiting on a decision) | Set up a new machine, lock it, switch between users | 8k |
 | | M26 | [Documents and Search](#m26-documents-and-search) | | Have autosave, default apps, Quick View, and fast Search that lasts across reboots | 20k |
 | | M27 | [Files](#m27-files) | | Use a real Finder: columns, gallery, tabs, tags, Empty Trash | 12k |
 | | M28 | [The look, measured](#m28-the-look-measured) | | Put it next to a Sequoia Mac with no estimated value left | 8k |
@@ -599,6 +599,62 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **Testing inside a copy of the system.** With a `dd` of its own at last, a test that changes to a copy of the system and runs `dd` ran that one, for the wrong processor, if `PATH` had a relative entry in it. The seal tests then found nothing to catch, and said so as if the kernel had let a tampered file by.
 - **Tests that click by position go stale.** One new row in Settings moved everything under it, and each walkthrough that clicked one of those by coordinates went wrong, as M15 said it would. They go by name now.
 - **What a Mac does that's wrong.** Nine of POSIX's checks and seven of the commands are different on purpose. Each is written down in `Tests/Parity`, with why.
+
+### M25
+
+- **A Dock that went away (reported).** In a run on a disk that had been used for a while, there was no Dock: it had
+  kept a reference to the theme it started with, which the shell's switch to Dark replaced, and so it asked for a window
+  0 points high, which can't be drawn, and stopped. SoundMenu's panel had the same mistake. Both look the theme up each
+  time now. And nothing brought it back, where a Mac's Dock is back at once: LoginWindow starts a session's Dock, shell
+  and Files again when they stop, unless one stops more than five times in a minute. The walkthrough kills the Dock to
+  see it come back.
+- **Zombies nobody would wait for.** The kernel kept a finished child for a parent that ignores SIGCHLD, which POSIX's
+  XSI rule and a Mac don't, and LoginWindow and the shell both ignore it, so every application quit left one. Init has
+  them now, as it has orphans, and reaps them; the parent's `waitpid` says ECHILD. (Which is also why LoginWindow
+  couldn't see the Dock had gone.)
+- **Every disk had someone on it.** The data volume's template came with `vulture` in `/etc/passwd`, so no disk was ever
+  new, and Setup would never have been needed. It has only the system's own accounts now, as a new Mac has; `vlaunchd`
+  makes the developer's account, `vulture`, on the first boot of a disk with nobody on it, unless the boot arguments say
+  `setup`. They can be read as a Mac's are now, as the sysctl `kern.bootargs`; the Setup walkthrough boots that way.
+- **Two people, one name.** The names programs register with `vlaunchd` were the machine's, so a second person's Files
+  couldn't have `com.vulture.Files`. What a person's programs register is theirs now, and looking a name up finds one's
+  own first, then the machine's.
+- **Whose windows.** The window server showed every program's windows. It hides those of any session but the one on the
+  screen now, and all but root's (the login window's) while it's locked, where it hides a hidden application's: so the
+  pointer, the keyboard, the work area, menu extras, hot corners, Cmd-Tab and what the shell hears follow from that one
+  place. Until the login window first says whose session it is, everyone's are shown, as the tests with no login window
+  need.
+- **One person's settings, in another's session.** The window server has one appearance, wallpaper, set of hot corners
+  and so on, and the shell only said those that had been saved, so the second person got the first's. A session's shell
+  says them all again, with the defaults for any not set, whenever its session comes back to the screen.
+- **A Mac's home.** Accounts are made with Movies and Public too, as a Mac makes them, so Files' home has 8 items where
+  it had 6 in every screenshot. (`login` on a terminal already made them; the login window didn't.)
+- **A button with only a symbol had no name.** The toolkit ignored the name it was given, so a screen reader, or a test
+  clicking by name, found nothing to call the login window's Back. It says it now.
+- **A daemon took the console.** AudioServer, its output now on the console to say the start-up sound has played, was
+  started before the console's login and so became the console's session: the shell that logged in there could never
+  write its prompt. `vlaunchd` opens a job's standard files as launchd does now, never as its controlling terminal.
+- **A sidebar that couldn't scroll.** Four new panes took Settings' sidebar past the bottom of its window, and a sidebar
+  had no way to scroll, so About and Startup Disk couldn't be reached: M20's walkthrough clicked the wallpaper instead.
+  Sidebars scroll now, as a Mac's do, and bring a row chosen from the keyboard into view.
+- **Log Out says the full name,** as Sequoia's does: "Log Out Vulture User…". M24's had the short one.
+- **A screen saver that wouldn't stop.** It took the first movement of the pointer for where the pointer had been when it
+  appeared, and a test's single jump was that one. Any movement after the first half second ends it now.
+- **Limit: everything new is estimated,** the login window, the lock screen, Setup and the screen savers, until there's a
+  Sequoia VM to measure (waiting on a decision), as M28 will. The password field is drawn as any field is, not Sequoia's
+  translucent one.
+- **Limit: Setup asks four things:** where the computer is, the first account, and Light or Dark (not Auto, as Settings
+  hasn't it either), after Welcome. Its words are English until M44. Pictures are initials, as for an account with none
+  chosen; one can't be chosen yet. There's no guest, no automatic login, and the login window is always a list of people.
+- **Limit: a session's Spaces, Stage and displays are the machine's,** not each person's, and the keyboard layout is
+  whichever was last set. Deleting someone who's logged in isn't refused yet, as a Mac refuses it; deleting oneself is.
+- **Limit: two screen savers and two dynamic wallpapers,** our own. A password after the screen saver is asked for at
+  once or never, not after a while, and nothing turns the display off. The lock screen shows no notifications, so M24's
+  settings for a locked screen still have nothing to apply to.
+- **Limit: a disk the Installer makes** still gets the developer's account at its first boot, as every build's does;
+  only one booted with `setup` starts at Setup. An image for someone else's machine should ask, as a new Mac does.
+- **Limit: the start-up sound** comes from the sound server as the system starts, after the boot screen has come up,
+  not before it as a Mac's does from its firmware.
 
 ### M24
 
