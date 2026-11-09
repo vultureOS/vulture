@@ -99,6 +99,7 @@ public:
     [[nodiscard]] bool is_signal_ignored_or_blocked(int signal) const;
     [[nodiscard]] Credentials const& credentials() const { return m_credentials; }
     [[nodiscard]] SandboxProfile const* sandbox() const { return m_sandbox.ptr(); }
+    [[nodiscard]] bool sandbox_grants_allow(SandboxOperation, StringView what);
     // What installed application this is, or was started by; nothing, if it all came with the system.
     [[nodiscard]] StringView responsible_application() const { return m_responsible_application.view(); }
     // Security/Privacy.h: what it has been told, by service, as bits.
@@ -336,6 +337,8 @@ private:
 
     Credentials m_credentials;
     RefPtr<SandboxProfile> m_sandbox;
+    Mutex m_sandbox_grants_lock;
+    Vector<SandboxGrant> m_sandbox_grants;
     String m_responsible_application;
     u8 m_privacy_allowed { 0 };
     u8 m_privacy_denied { 0 };

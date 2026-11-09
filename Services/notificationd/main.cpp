@@ -31,6 +31,8 @@ constexpr size_t kept_at_most = 64;
 constexpr size_t actions_at_most = 4;
 constexpr char const* seen_path = "/Library/Preferences/com.vulture.notificationd.json";
 constexpr char const* seen_path_new = "/Library/Preferences/com.vulture.notificationd.json.new";
+constexpr char const* notes_path = "/Library/Preferences/com.vulture.notifications.json";
+constexpr char const* notes_path_new = "/Library/Preferences/com.vulture.notifications.json.new";
 
 String copy(StringView text)
 {
@@ -142,6 +144,7 @@ class Center final : public NotificationServiceStub {
 public:
     Center()
     {
+        load_notes();
         auto seen = read_json(seen_path);
         if (!seen.has_value())
             return;
@@ -364,8 +367,69 @@ private:
             unlink(seen_path_new);
     }
 
+    // Kept, as a Mac's are, whatever happens to the machine.
+    void load_notes()
+    {
+        auto file = read_json(notes_path);
+        auto const* saved = file.has_value() ? file->get_array("notes"_sv) : nullptr;
+        if (!saved)
+            return;
+        for (size_t i = 0; i < saved->size(); ++i) {
+            auto const& one = saved->at(i);
+            Note note;
+            note.uid = static_cast<uid_t>(one.get_integer("uid"_sv).value_or(0));
+            note.id = static_cast<u32>(one.get_integer("id"_sv).value_or(0));
+            note.application = copy(one.get_string("application"_sv).value_or(StringView {}));
+            note.title = copy(one.get_string("title"_sv).value_or(StringView {}));
+            note.body = copy(one.get_string("body"_sv).value_or(StringView {}));
+            note.when = one.get_integer("when"_sv).value_or(0);
+            if (auto const* actions = one.get_array("actions"_sv)) {
+                for (size_t a = 0; a < actions->size(); ++a) {
+                    if (actions->at(a).is_string())
+                        note.actions.append(copy(actions->at(a).as_string()));
+                }
+            }
+            m_next_id = max(m_next_id, note.id + 1);
+            m_posted_by.set(note.id, Owner { note.uid, copy(note.application.view()) });
+            m_notes.append(move(note));
+        }
+    }
+
+    void save_notes()
+    {
+        auto list = JSON::Value::array();
+        for (auto const& note : m_notes) {
+            auto one = JSON::Value::object();
+            MUST(one.set("uid"_sv, JSON::Value(static_cast<i64>(note.uid))));
+            MUST(one.set("id"_sv, JSON::Value(static_cast<i64>(note.id))));
+            MUST(one.set("application"_sv, MUST(JSON::Value::string(note.application.view()))));
+            MUST(one.set("title"_sv, MUST(JSON::Value::string(note.title.view()))));
+            MUST(one.set("body"_sv, MUST(JSON::Value::string(note.body.view()))));
+            MUST(one.set("when"_sv, JSON::Value(note.when)));
+            auto actions = JSON::Value::array();
+            for (auto const& action : note.actions)
+                MUST(actions.append(MUST(JSON::Value::string(action.view()))));
+            MUST(one.set("actions"_sv, move(actions)));
+            MUST(list.append(move(one)));
+        }
+        auto file = JSON::Value::object();
+        MUST(file.set("notes"_sv, move(list)));
+        auto text = file.serialize();
+        if (text.is_error())
+            return;
+        int fd = open(notes_path_new, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+        if (fd < 0)
+            return;
+        bool const written = write(fd, text.value().characters(), text.value().length()) == static_cast<ssize_t>(text.value().length());
+        fsync(fd);
+        close(fd);
+        if (!written || rename(notes_path_new, notes_path) < 0)
+            unlink(notes_path_new);
+    }
+
     void changed(uid_t uid)
     {
+        save_notes();
         for (size_t i = 0; i < m_listeners.size();) {
             if (m_listeners[i].uid == uid && m_listeners[i].proxy->changed().is_error()) {
                 m_listeners.remove(i);

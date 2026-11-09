@@ -7,3 +7,5 @@ service com.vulture.windowserver
 service com.vulture.pasteboard
 service com.vulture.notificationd
 service com.vulture.audioserver
+service com.vulture.workspace
+service com.vulture.indexd

@@ -7,12 +7,14 @@
 #include "HelpSearch.h"
 #include "Notifications.h"
 #include "Screenshots.h"
+#include "SearchProviders.h"
 #include "SystemWindows.h"
 #include "Widgets.h"
 #include <WorkspaceEndpoint.h>
 #include <Kernel/API/POSIX/privacy.h>
 #include <PrivacyEndpoint.h>
 #include <Desktop.h>
+#include <Documents.h>
 #include <LibCore/AccountDatabase.h>
 #include <LibIPC/Bootstrap.h>
 #include <LibIPC/Listener.h>
@@ -30,7 +32,9 @@
 #include <fcntl.h>
 #include <notify.h>
 #include <pwd.h>
+#include <sandbox.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -329,6 +333,19 @@ private:
         Vector<SearchResult> results;
         auto text = m_field->text();
         size_t limit = static_cast<size_t>(tokens().metric("searchPanel.maxResults"_sv));
+        // Arithmetic, before anything that has to be looked up.
+        if (auto answer = DesktopShell::calculate(text); answer.has_value()) {
+            SearchResult result;
+            StringBuilder shown;
+            shown.appendff("{} = {}", text.trim_whitespace(), answer->view());
+            result.name = MUST(shown.to_string());
+            StringBuilder path;
+            path.appendff("calculation:{}", answer->view());
+            result.path = MUST(path.to_string());
+            result.kind = MUST(String::from_view("Calculator"_sv));
+            result.icon = MUST(String::from_view("Calculator"_sv));
+            results.append(move(result));
+        }
         if (!text.is_empty()) {
             auto port = IPC::look_up("com.vulture.indexd"_sv);
             if (!port.is_error()) {
@@ -354,6 +371,22 @@ private:
                     }
                 }
             }
+            // Settings after applications, and before what's in someone's files.
+            size_t place = 0;
+            while (place < results.size() && (results[place].kind.view() == "Application"_sv || results[place].kind.view() == "Calculator"_sv))
+                ++place;
+            for (auto pane : DesktopShell::settings_panes_matching(text)) {
+                SearchResult result;
+                result.name = MUST(String::from_view(pane));
+                StringBuilder path;
+                path.appendff("settings:{}", pane);
+                result.path = MUST(path.to_string());
+                result.kind = MUST(String::from_view("Settings"_sv));
+                result.icon = MUST(String::from_view("Settings"_sv));
+                results.insert(place++, move(result));
+            }
+            while (results.size() > limit)
+                results.remove(results.size() - 1);
         }
         m_results->set_results(move(results));
         resize_for_results();
@@ -362,7 +395,17 @@ private:
     void open(size_t index)
     {
         auto const& result = m_results->results()[index];
-        (void)Desktop::open_path(result.path.view());
+        auto path = result.path.view();
+        if (path.starts_with("calculation:"_sv)) {
+            Application::the().copy_text(path.substring_view(12));
+        } else if (path.starts_with("settings:"_sv)) {
+            auto bundle = Desktop::read_bundle("/System/Applications/Settings.app"_sv);
+            StringView arguments[1] = { path.substring_view(9) };
+            if (!bundle.is_error())
+                (void)Desktop::launch(bundle.value(), Span<StringView const>(arguments, 1));
+        } else {
+            (void)Desktop::open_path(path);
+        }
         hide();
     }
 
@@ -569,6 +612,30 @@ private:
     String m_name;
 };
 
+// ---- What to open again at the next login: what's running, kept up to date.
+
+Vector<String> s_running_applications;
+Vector<String> s_noted_applications;
+bool s_may_note_applications { false };
+
+void note_running_applications()
+{
+    if (!s_may_note_applications)
+        return;
+    bool same = s_running_applications.size() == s_noted_applications.size();
+    for (size_t i = 0; same && i < s_running_applications.size(); ++i)
+        same = s_running_applications[i].view() == s_noted_applications[i].view();
+    if (same)
+        return;
+    s_noted_applications = s_running_applications;
+    auto list = JSON::Value::array();
+    for (auto const& bundle : s_running_applications)
+        MUST(list.append(MUST(JSON::Value::string(bundle.view()))));
+    Desktop::Preferences relaunch("com.vulture.loginwindow"_sv);
+    relaunch.set("relaunch"_sv, move(list));
+    relaunch.save();
+}
+
 // ---- Starting applications for what can't have them as its own children.
 
 class WorkspaceService final : public WorkspaceStub {
@@ -598,6 +665,51 @@ public:
             return { launched.error().code(), -1 };
         return { 0, launched.value() };
     }
+
+    void note_recent(IPC::Sender const& sender, String path, bool is_application) override
+    {
+        if (sender.uid != getuid())
+            return;
+        Desktop::add_recent_item(path.view(), is_application);
+        if (on_recent_changed)
+            on_recent_changed();
+    }
+
+    // In its own window, as this isn't the program that's asking. What's chosen is what it's let at.
+    void show_file_panel(IPC::Sender const& sender, u32 request, u32 kind, String directory, String suggested, IPC::Port replies) override
+    {
+        if (sender.uid != getuid() || kind > static_cast<u32>(UI::FilePanel::Kind::OpenFolder))
+            return;
+        auto* answer = new FilePanelRepliesProxy(move(replies));
+        auto const panel_kind = static_cast<UI::FilePanel::Kind>(kind);
+        auto start = directory.view().starts_with('/') ? MUST(String::from_view(directory.view())) : Desktop::home_directory();
+        Desktop::use_search_in_file_panels();
+        printf("desktopshell: panel for %d\n", sender.pid);
+        fflush(stdout);
+        UI::FilePanel::run_in_own_window(panel_kind, start.view(), suggested.view(), [answer, request, panel_kind](StringView chosen) {
+            String token;
+            if (!chosen.is_empty()) {
+                auto terminated = MUST(String::from_view(chosen));
+                if (char* issued = sandbox_extension_issue(terminated.characters(), panel_kind == UI::FilePanel::Kind::Save)) {
+                    token = MUST(String::from_view(StringView(issued, strlen(issued))));
+                    free(issued);
+                }
+            }
+            (void)answer->chosen(request, chosen, token.view());
+            delete answer;
+        });
+    }
+
+    void perform_service(IPC::Sender const& sender, String bundle, String message, String text) override
+    {
+        if (sender.uid != getuid() || !bundle.view().ends_with(".app"_sv))
+            return;
+        auto info = Desktop::read_bundle(bundle.view());
+        if (!info.is_error())
+            Desktop::perform_service(info.value(), message.view(), text.view());
+    }
+
+    Function<void()> on_recent_changed;
 
 private:
     OwnPtr<IPC::Listener> m_listener;
@@ -938,8 +1050,8 @@ public:
         m_system_menu->add("Settings…"_sv, [] { (void)Desktop::open_path("/System/Applications/Settings.app"_sv); });
         m_system_menu->add("Software…"_sv, [] { (void)Desktop::open_path("/System/Applications/Software.app"_sv); });
         m_system_menu->add_separator();
-        m_system_menu->add_submenu("Recent Items"_sv);
-        m_system_menu->items()[m_system_menu->items().size() - 1].enabled = false;
+        m_recent_items = &m_system_menu->add_submenu("Recent Items"_sv);
+        update_recent_items();
         m_system_menu->add_separator();
         m_system_menu->add("Force Quit…"_sv, [this] {
             if (on_force_quit)
@@ -956,6 +1068,32 @@ public:
         StringBuilder log_out;
         log_out.appendff("Log Out {}…", user_name().view());
         m_system_menu->add(log_out.view(), [] { Desktop::log_out(); }).shortcut_text = MUST(String::from_view("\xE2\x87\xA7\xE2\x8C\x98Q"_sv));
+    }
+
+    // As Sequoia's, a heading for each, and a way to forget them.
+    void update_recent_items()
+    {
+        m_recent_items->items().clear();
+        auto add_section = [this](StringView heading, Vector<String> const& paths) {
+            if (paths.is_empty())
+                return;
+            m_recent_items->add_heading(heading);
+            for (auto const& path : paths) {
+                auto copy = path;
+                auto slash = path.view().find_last('/');
+                auto name = slash.has_value() ? path.view().substring_view(slash.value() + 1) : path.view();
+                if (name.ends_with(".app"_sv))
+                    name = name.substring_view(0, name.length() - 4);
+                m_recent_items->add(name, [copy = move(copy)] { (void)Desktop::open_path(copy.view()); });
+            }
+            m_recent_items->add_separator();
+        };
+        add_section("Applications"_sv, Desktop::recent_applications());
+        add_section("Documents"_sv, Desktop::recent_documents());
+        m_recent_items->add("Clear Menu"_sv, [this] {
+            Desktop::clear_recent_items();
+            update_recent_items();
+        });
     }
 
     void set_state(Desktop::ShellState state)
@@ -1217,6 +1355,7 @@ private:
     QuickSettingsPanel& m_control;
     Desktop::ShellState m_state;
     OwnPtr<Menu> m_system_menu;
+    Menu* m_recent_items { nullptr };
     Vector<NonnullOwnPtr<Menu>> m_menus;
     Function<void(u32)> m_choose;
     Vector<Item> m_items;
@@ -1485,10 +1624,19 @@ int main(int argc, char** argv)
     };
 
     Switcher switcher;
+    auto const installed = Desktop::installed_applications();
     application->connection().on_shell_state = [&](StringView json) {
         last_state = MUST(String::from_view(json));
         auto state = Desktop::parse_shell_state(json);
         if (!state.is_error()) {
+            s_running_applications.clear();
+            for (auto const& entry : state.value().applications) {
+                for (auto const& known : installed) {
+                    if (known.identifier.view() == entry.identifier.view())
+                        s_running_applications.append(known.bundle_path);
+                }
+            }
+            note_running_applications();
             switcher.update(state.value());
             force_quit.set_state(state.value());
             // The desktop is what's in front when it's been clicked, or the Files that owns it has no window: widgets on it
@@ -1590,14 +1738,32 @@ int main(int argc, char** argv)
     bar.on_panel_opening = [&center] { center.hide_banners(); };
     ConsentPanel consent;
     WorkspaceService workspace;
+    workspace.on_recent_changed = [&bar] { bar.update_recent_items(); };
     printf("desktopshell: ready\n");
     fflush(stdout);
-    // Login Items, once the rest of the session's there to open them.
+    // Login Items, once the rest of the session's there to open them; and what was open when it last ended. From then on,
+    // what's running is written down, as the end of a session comes with no warning. (If this is the shell coming back in the
+    // middle of a session, those are all still there.)
     application->event_loop().add_timer(s_still ? 300 : 800, false, [] {
         for (auto const& item : Desktop::login_items()) {
             if (!Desktop::open_path(item.view()).is_error())
                 printf("desktopshell: opened %s at login\n", item.characters());
         }
+        if (s_running_applications.is_empty()) {
+            Desktop::Preferences relaunch("com.vulture.loginwindow"_sv);
+            if (relaunch.boolean("reopenWindows"_sv).value_or(true)) {
+                if (auto const* list = relaunch.array("relaunch"_sv)) {
+                    for (size_t i = 0; i < list->size(); ++i) {
+                        if (!list->at(i).is_string())
+                            continue;
+                        if (!Desktop::open_path(list->at(i).as_string()).is_error())
+                            printf("desktopshell: reopened %.*s\n", static_cast<int>(list->at(i).as_string().length()), list->at(i).as_string().characters_without_null_termination());
+                    }
+                }
+            }
+        }
+        s_may_note_applications = true;
+        note_running_applications();
         fflush(stdout);
     });
     return application->exec();

@@ -6,7 +6,9 @@
 
 #pragma once
 
+#include <LibBase/Error.h>
 #include <LibBase/RefPtr.h>
+#include <LibBase/Span.h>
 #include <LibBase/String.h>
 #include <LibBase/StringView.h>
 #include <LibBase/Vector.h>
@@ -71,6 +73,21 @@ private:
     bool m_inbound { false };
     bool m_configure { false };
 };
+
+// A way out for one path, as when someone chooses a file in an Open panel, which is shown by something outside the sandbox.
+// Whoever's outside issues a token, the kernel's signature on the path; whoever's inside redeems it, and from then on that path
+// (and everything it holds, if it's a folder) is as if its profile had said so. A token's good until the machine next starts.
+struct SandboxGrant {
+    String path;
+    bool writable { false };
+};
+
+[[nodiscard]] ErrorOr<String> sandbox_issue_grant(StringView path, bool writable);
+[[nodiscard]] ErrorOr<SandboxGrant> sandbox_redeem_grant(StringView token);
+[[nodiscard]] bool sandbox_grants_allow(Span<SandboxGrant const>, SandboxOperation, StringView what);
+
+// The same question, for when a no isn't anything to note: what's only being filtered.
+[[nodiscard]] bool sandbox_would_allow(SandboxOperation, StringView what);
 
 // For the current process, if there is one and it is sandboxed: says no, and why, in the log.
 [[nodiscard]] ErrorOr<void> sandbox_check(SandboxOperation, StringView what);

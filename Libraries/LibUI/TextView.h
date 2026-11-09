@@ -20,6 +20,7 @@ public:
     ~TextView() override;
 
     [[nodiscard]] StringView text() const { return m_storage.text(); }
+    [[nodiscard]] StringView selected_text_for_services() const override { return m_storage.selected_text(); }
     void set_text(StringView);
     [[nodiscard]] TextStorage& storage() { return m_storage; }
     void set_font(FontSpec);

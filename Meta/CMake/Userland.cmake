@@ -77,6 +77,34 @@ function(vulture_compile_ipc target)
     target_include_directories(${target} PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 endfunction()
 
+# A plugin for Quick View: <name>.qvplugin in <dir>, loaded with dlopen() by QuickViewHelper.
+function(vulture_add_quickview_plugin name)
+    cmake_parse_arguments(PARSE_ARGV 1 arg "" "DESTINATION" "SOURCES;LIBRARIES")
+    set(target quickview-${name})
+    add_library(${target} SHARED ${arg_SOURCES})
+    set_target_properties(${target} PROPERTIES PREFIX "" OUTPUT_NAME ${name} SUFFIX ".qvplugin")
+    target_include_directories(${target} PRIVATE ${VULTURE_SOURCE_ROOT}/Services/QuickView)
+    target_link_libraries(${target} PRIVATE ${arg_LIBRARIES} System)
+    target_link_options(${target} PRIVATE
+        --ld-path=${VULTURE_LLD_ROOT}/bin/ld.lld
+        -nostdlib
+        -Wl,-Bdynamic
+        -Wl,-shared
+        -Wl,-soname,${name}.qvplugin
+        -Wl,--hash-style=sysv
+        -Wl,-z,now
+        -Wl,-z,relro
+        -Wl,-z,max-page-size=4096
+        -Wl,-z,separate-loadable-segments
+        -Wl,--build-id=none)
+    set(installed ${CMAKE_CURRENT_BINARY_DIR}/installed/${name}.qvplugin)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/installed
+        COMMAND ${CMAKE_OBJCOPY} --strip-debug $<TARGET_FILE:${target}> ${installed}
+        VERBATIM)
+    install(PROGRAMS ${installed} DESTINATION ${arg_DESTINATION})
+endfunction()
+
 # vulture_add_application(<target> SOURCES <files...> NAME <name> IDENTIFIER <id> ICON <icon>
 #                         [KIND <what it is>] [DESTINATION <dir>] [EXTENSIONS <extensions...>]
 #                         [SANDBOX <a profile in /System/Library/Sandbox/Profiles>]
@@ -85,7 +113,7 @@ endfunction()
 # An application bundle: <dir>/<name>.app, with Contents/MacOS/<target> and an Info.plist
 # saying what LibDesktop needs to know. Under Applications here, which is /System/Applications on the system, unless told otherwise.
 function(vulture_add_application target)
-    cmake_parse_arguments(PARSE_ARGV 1 arg "" "NAME;IDENTIFIER;ICON;KIND;CATEGORY;DESTINATION;SANDBOX" "SOURCES;LIBRARIES;EXTENSIONS")
+    cmake_parse_arguments(PARSE_ARGV 1 arg "" "NAME;IDENTIFIER;ICON;KIND;CATEGORY;DESTINATION;SANDBOX" "SOURCES;LIBRARIES;EXTENSIONS;SERVICES")
     if(NOT arg_DESTINATION)
         set(arg_DESTINATION Applications)
     endif()
@@ -102,7 +130,18 @@ function(vulture_add_application target)
     if(arg_CATEGORY)
         set(category "public.app-category.${arg_CATEGORY}")
     endif()
+    # What it can do with someone's text: each is its title and its message, by a bar.
+    set(services "")
+    foreach(service IN LISTS arg_SERVICES)
+        string(REPLACE "|" ";" parts "${service}")
+        list(GET parts 0 service_title)
+        list(GET parts 1 service_message)
+        if(services)
+            string(APPEND services ", ")
+        endif()
+        string(APPEND services "{ \"NSMenuItem\" : \"${service_title}\", \"NSMessage\" : \"${service_message}\" }")
+    endforeach()
     set(plist "${CMAKE_CURRENT_BINARY_DIR}/${target}-Info.plist")
-    file(WRITE "${plist}" "{\n    \"CFBundleName\" : \"${arg_NAME}\",\n    \"CFBundleIdentifier\" : \"${arg_IDENTIFIER}\",\n    \"CFBundleExecutable\" : \"${target}\",\n    \"CFBundleIconFile\" : \"${arg_ICON}\",\n    \"VultureKind\" : \"${arg_KIND}\",\n    \"LSApplicationCategoryType\" : \"${category}\",\n    \"VultureSandbox\" : \"${arg_SANDBOX}\",\n    \"CFBundleDocumentExtensions\" : [ ${extensions} ]\n}\n")
+    file(WRITE "${plist}" "{\n    \"CFBundleName\" : \"${arg_NAME}\",\n    \"CFBundleIdentifier\" : \"${arg_IDENTIFIER}\",\n    \"CFBundleExecutable\" : \"${target}\",\n    \"CFBundleIconFile\" : \"${arg_ICON}\",\n    \"VultureKind\" : \"${arg_KIND}\",\n    \"LSApplicationCategoryType\" : \"${category}\",\n    \"VultureSandbox\" : \"${arg_SANDBOX}\",\n    \"CFBundleDocumentExtensions\" : [ ${extensions} ],\n    \"NSServices\" : [ ${services} ]\n}\n")
     install(FILES "${plist}" DESTINATION "${arg_DESTINATION}/${arg_NAME}.app/Contents" RENAME Info.plist)
 endfunction()

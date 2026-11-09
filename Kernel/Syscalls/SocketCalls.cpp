@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <Kernel/FileSystem/VirtualFileSystem.h>
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/API/POSIX/files.h>
 #include <Kernel/API/POSIX/signal_numbers.h>
@@ -628,6 +629,58 @@ ErrorOr<FlatPtr> Process::sys_sandbox_apply(TrapFrame&, SyscallArguments const& 
     auto profile = TRY(SandboxProfile::parse({ reinterpret_cast<char const*>(text.data()), size }, m_sandbox));
     dmesgln("Sandbox: {}[{}] enters {}", name(), m_pid, profile->name());
     m_sandbox = move(profile);
+    return 0;
+}
+
+bool Process::sandbox_grants_allow(SandboxOperation operation, StringView what)
+{
+    MutexLocker locker(m_sandbox_grants_lock);
+    return Kernel::sandbox_grants_allow(m_sandbox_grants.span(), operation, what);
+}
+
+// A token for this path: only from outside any sandbox. The path as a sandbox would see it, whether or not there's anything
+// there yet, as there won't be for a Save panel's.
+ErrorOr<FlatPtr> Process::sys_sandbox_extension_issue(TrapFrame&, SyscallArguments const& arguments)
+{
+    if (m_sandbox)
+        return Error::from_errno(EPERM);
+    auto path = TRY(copy_path_from_user(arguments.values[0]));
+    bool const writable = arguments.values[1] != 0;
+    FlatPtr const out = arguments.values[2];
+    size_t const capacity = arguments.values[3];
+    String canonical;
+    auto resolved = VirtualFileSystem::resolve(path.view(), current_directory().view());
+    if (!resolved.is_error()) {
+        canonical = TRY(String::from_view(resolved.value().path.view()));
+    } else {
+        auto parent = TRY(VirtualFileSystem::resolve_parent(path.view(), current_directory().view()));
+        StringBuilder joined;
+        joined.append(parent.directory_path.view());
+        if (!parent.directory_path.view().ends_with('/'))
+            joined.append('/');
+        joined.append(parent.name.view());
+        canonical = TRY(joined.to_string());
+    }
+    auto token = TRY(sandbox_issue_grant(canonical.view(), writable));
+    if (token.length() + 1 > capacity)
+        return Error::from_errno(ERANGE);
+    TRY(copy_to_user(out, token.characters(), token.length() + 1));
+    return token.length();
+}
+
+ErrorOr<FlatPtr> Process::sys_sandbox_extension_consume(TrapFrame&, SyscallArguments const& arguments)
+{
+    size_t const size = arguments.values[1];
+    if (size == 0 || size > 8 * KiB)
+        return Error::from_errno(EINVAL);
+    Vector<u8> token;
+    TRY(token.try_resize(size));
+    TRY(copy_from_user(token.data(), arguments.values[0], size));
+    auto grant = TRY(sandbox_redeem_grant({ reinterpret_cast<char const*>(token.data()), size }));
+    MutexLocker locker(m_sandbox_grants_lock);
+    if (m_sandbox_grants.size() >= 1024)
+        return Error::from_errno(ENOSPC);
+    TRY(m_sandbox_grants.try_append(move(grant)));
     return 0;
 }
 

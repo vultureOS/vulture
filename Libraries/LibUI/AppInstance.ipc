@@ -1,0 +1,10 @@
+// A running application (com.vulture.app.IDENTIFIER): an application only runs once, and what would have started it asks the
+// one that's there.
+endpoint AppInstance
+{
+    // Documents to open, or whatever else it'd have been started with. Each comes with what lets a sandboxed one reach it.
+    open_arguments(Vector<String> arguments, Vector<String> tokens) =|
+    perform_service(String message, String text) =|
+    // To the front, as a click in the Dock does.
+    reopen() =|
+}

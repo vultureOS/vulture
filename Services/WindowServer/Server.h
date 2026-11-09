@@ -196,7 +196,8 @@ private:
     // The window manager.
     void activate(ServerWindow*);
     // The frontmost that can be, when the active one has gone away.
-    void activate_frontmost();
+    // Another of this application's windows first, if it has any: a window going away doesn't take the keyboard from it.
+    void activate_frontmost(Client* preferred = nullptr);
     void raise(ServerWindow&);
     void insert_by_level(ServerWindow&);
     void send_moved(ServerWindow&);

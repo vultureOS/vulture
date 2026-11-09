@@ -107,8 +107,8 @@ key 2
 type  omw 
 ax-expect textarea "Document" ~ The café On my way!
 key meta_l-q
-ax-expect button "Don’t Save"
-click button "Don’t Save"
+ax-expect button "Delete"
+click button "Delete"
 ax-gone textarea "Document"
 # ---- Two things side by side: a terminal, and the files under it.
 click button "Terminal"

@@ -68,6 +68,11 @@ ErrorOr<FlatPtr> Process::sys_fork(TrapFrame& frame, SyscallArguments const&)
     child->m_bootstrap_port = m_bootstrap_port;
     child->m_credentials = m_credentials;
     child->m_sandbox = m_sandbox;
+    {
+        MutexLocker locker(m_sandbox_grants_lock);
+        for (auto const& grant : m_sandbox_grants)
+            TRY(child->m_sandbox_grants.try_append(SandboxGrant { TRY(String::from_view(grant.path.view())), grant.writable }));
+    }
     child->m_responsible_application = m_responsible_application;
     child->m_privacy_allowed = m_privacy_allowed;
     child->m_privacy_denied = m_privacy_denied;

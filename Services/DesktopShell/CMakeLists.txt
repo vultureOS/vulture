@@ -6,4 +6,4 @@
 
 # The menu bar and what hangs off it: the system's menu, the application's menus, the
 # clock, Quick Settings, Notifications, Search.
-vulture_add_program(DesktopShell SOURCES main.cpp HelpSearch.cpp Notifications.cpp Screenshots.cpp SystemWindows.cpp Widgets.cpp DESTINATION System/Library/CoreServices LIBRARIES LibDesktop LibLocale LibImage)
+vulture_add_program(DesktopShell SOURCES main.cpp HelpSearch.cpp Notifications.cpp Screenshots.cpp SearchProviders.cpp SystemWindows.cpp Widgets.cpp DESTINATION System/Library/CoreServices LIBRARIES LibDesktop LibLocale LibImage)

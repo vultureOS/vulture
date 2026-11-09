@@ -1,0 +1,267 @@
+# M26: documents and Search. An index that notices what's changed, keeps across a restart and answers mdfind; arithmetic and
+# Settings among its results; documents that save themselves, go back to how they were, and come back after their program's
+# been killed or the session's ended; Recent Items; Open With; Quick View, and a plugin that crashes doing no harm; and a
+# sandboxed program let at exactly what's chosen for it.
+timeout 60
+expect loginwindow: ready
+type vulture\r
+expect files: ready
+pause 2
+# ---- Search: what's just been written is there to be found.
+click button "Terminal"
+expect terminal: ready
+pause 1
+type mkdir -p ~/Documents && echo zebrafinch sings at dawn > ~/Documents/birds.txt && echo the other one > ~/Documents/other.txt\r
+pause 2
+key meta_l-spc
+expect search: shown
+type zebrafin
+ax-expect row "birds.txt"
+pause 0.5
+screenshot search-a-word-in-a-file.png
+key esc
+pause 0.3
+# ---- Arithmetic, and Settings' panes, among what it finds.
+key meta_l-spc
+expect search: shown
+type 2+3*4
+ax-expect row "2+3*4 = 14"
+pause 0.5
+screenshot search-calculation.png
+key esc
+pause 0.3
+key meta_l-spc
+expect search: shown
+type keyboard
+ax-expect row "Keyboard"
+pause 0.5
+screenshot search-settings.png
+key ret
+expect settings: Keyboard
+pause 1
+key meta_l-q
+pause 1
+# ---- mdfind and mdls, as a Mac's say it.
+click button "Terminal"
+pause 1
+type clear; mdfind zebrafinch\r
+ax-expect textarea "Terminal" ~ /Users/vulture/Documents/birds.txt
+type clear; mdfind 'kMDItemFSName == "*.txt"c'\r
+ax-expect textarea "Terminal" ~ /Users/vulture/Documents/other.txt
+type clear; mdls -name kMDItemContentType ~/Documents/birds.txt\r
+ax-expect textarea "Terminal" ~ kMDItemContentType = "public.plain-text"
+pause 0.5
+screenshot mdls.png
+type clear; mdfind -count zebrafinch\r
+ax-expect textarea "Terminal" ~ 1
+# ---- One program, however many times it's asked for.
+click button "Text Editor"
+expect texteditor: ready
+pause 1
+key meta_l-w
+pause 0.5
+click button "Terminal"
+pause 1
+type open ~/Documents/birds.txt\r
+ax-expect window "birds.txt"
+pause 1
+click button "Terminal"
+pause 1
+type open ~/Documents/other.txt\r
+ax-expect window "other.txt"
+ax-expect window "birds.txt"
+pause 1
+click button "Terminal"
+pause 1
+type clear; ps -ax | grep -c '[T]extEditor' | sed 's/^/texteditors: /'\r
+ax-expect textarea "Terminal" ~ texteditors: 1
+# ---- A document saves itself, and can go back.
+click button "Text Editor"
+pause 1
+ax-expect window "other.txt"
+type changed 
+pause 3
+expect texteditor: autosaved
+ax-expect window "other.txt — Edited"
+click menuitem "File"
+pause 0.3
+click menuitem "Revert To"
+pause 0.3
+screenshot revert-to.png
+click menuitem "Last Opened"
+expect texteditor: reverted to Last Opened
+ax-expect textarea "Document" ~ the other one
+pause 0.5
+key meta_l-w
+ax-gone window "other.txt"
+pause 0.5
+# (The next one's the one that's in front now, and takes the keyboard.)
+key meta_l-w
+ax-gone window "birds.txt"
+pause 0.5
+# ---- Killed in the middle of something: nothing's lost but the last moment.
+click button "Text Editor"
+ax-expect window "Untitled"
+pause 1
+type never saved anywhere
+pause 3
+expect texteditor: autosaved
+click button "Terminal"
+pause 1
+type killall -9 TextEditor\r
+pause 2
+click button "Text Editor"
+expect texteditor: restored 1
+ax-expect textarea "Document" ~ Never saved anywhere
+pause 1
+screenshot restored-after-kill.png
+# ---- And from one session to the next.
+click menuitem "Logo"
+pause 0.3
+click menuitem "Recent Items"
+ax-expect menuitem "birds.txt"
+ax-expect menuitem "Text Editor"
+pause 0.5
+screenshot recent-items.png
+key esc
+pause 0.2
+key esc
+pause 0.5
+click menuitem "Logo"
+pause 0.3
+click menuitem "Log Out Vulture User…"
+expect loginwindow: ready
+pause 1
+type vulture\r
+expect files: ready
+expect desktopshell: reopened /System/Applications/Text Editor.app
+expect texteditor: restored 1
+ax-expect textarea "Document" ~ Never saved anywhere
+pause 1
+click button "Terminal"
+pause 1
+# ---- Quick View: what's selected, by the space bar; and what a crashing plugin comes to.
+type cp /System/Library/Pictures/Dunes.png ~/Documents/picture.png && echo anything > ~/Documents/boom.crashtest && open ~/Documents\r
+pause 3
+ax-expect cell "picture.png"
+ax-expect cell "boom.crashtest"
+pause 3
+pointer 31500 25000
+pause 0.5
+screenshot thumbnails.png
+click cell "picture.png"
+pause 0.3
+key spc
+expect files: quick view: picture of picture.png
+ax-expect image "Quick View"
+pause 1
+screenshot quick-view-picture.png
+key esc
+ax-gone image "Quick View"
+click cell "birds.txt"
+pause 0.3
+key spc
+expect files: quick view: picture of birds.txt
+pause 1
+screenshot quick-view-text.png
+key esc
+pause 0.3
+click cell "boom.crashtest"
+pause 0.3
+key spc
+expect files: quick view: no picture of boom.crashtest
+ax-expect image "Quick View"
+pause 1
+screenshot quick-view-crashed-plugin.png
+key esc
+pause 0.3
+# (And Files is still here, none the worse for it.)
+click cell "birds.txt"
+ax-expect cell "birds.txt" = selected
+# ---- Open With, by what says it can.
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click cell "birds.txt"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"ctrl"}}}]}}
+ax-expect menuitem "Open With"
+click menuitem "Open With"
+ax-expect menuitem "Text Editor (default)"
+pause 0.5
+screenshot open-with.png
+key esc
+pause 0.2
+key esc
+pause 0.5
+# ---- A sandboxed program sees nothing of anyone's, until it's chosen for it.
+click button "Terminal"
+pause 1
+key meta_l-spc
+expect search: shown
+type viewer
+pause 1
+key ret
+expect desktopshell: panel for
+ax-expect button "Cancel"
+click row "Documents"
+ax-expect row "picture.png"
+pause 0.5
+screenshot open-panel.png
+click row "picture.png"
+click button "Open"
+expect viewer: opened picture.png
+ax-expect window "picture.png"
+pause 1
+key meta_l-q
+pause 1
+# ---- The Save panel, in a program that can see for itself: its name, its sidebar, and New Folder.
+click button "Text Editor"
+pause 1
+key meta_l-n
+pause 0.5
+type to be saved
+key meta_l-s
+ax-expect textfield "Save As" = Untitled.txt
+ax-expect button "New Folder"
+ax-expect textfield "Search"
+pause 0.5
+screenshot save-panel.png
+click button "Cancel"
+pause 0.5
+# ---- The Services menu: what's selected, given to what says it can do something with it.
+key meta_l-a
+pause 0.3
+click menuitem "Text Editor"
+pause 0.3
+click menuitem "Services"
+ax-expect menuitem "New Text Editor Window Containing Selection"
+pause 0.5
+screenshot services.png
+click menuitem "New Text Editor Window Containing Selection"
+expect texteditor: a new window, from a service
+ax-expect textarea "Document" ~ To be saved
+pause 0.5
+# ---- It all lasts: the index, across a restart, without going over the disk again.
+click button "Terminal"
+pause 1
+type notification -t "Kept for later" -m "Across a restart"\r
+pause 2
+type sync\r
+pause 2
+reboot
+expect loginwindow: ready
+pause 1
+type vulture\r
+expect files from before
+pause 3
+key meta_l-spc
+expect search: shown
+type zebrafin
+ax-expect row "birds.txt"
+pause 0.5
+key esc
+pause 0.5
+# ---- As are the notifications that hadn't been dealt with.
+click button "Notifications"
+expect notifications: center shown
+ax-expect group "Kept for later"
+pause 0.5
+screenshot notifications-after-restart.png

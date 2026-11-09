@@ -60,6 +60,8 @@ public:
     virtual bool key_up(KeyEvent const&) { return false; }
     // "copy", "paste", "undo", "selectAll", ...: from a menu or a shortcut.
     virtual bool perform_command(StringView) { return false; }
+    // What's selected, as text, for the Services menu to offer to someone.
+    [[nodiscard]] virtual StringView selected_text_for_services() const { return {}; }
     [[nodiscard]] virtual bool can_perform_command(StringView) const { return false; }
 };
 

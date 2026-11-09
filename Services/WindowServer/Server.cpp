@@ -443,15 +443,25 @@ void Server::remove_window(ServerWindow& window)
     if (m_overview_chosen == &window)
         m_overview_chosen = nullptr;
     m_windows.remove_all_matching([&](auto* other) { return other == &window; });
+    auto* owner = window.client;
     delete &window;
     // The next window down takes over.
     if (!m_active)
-        activate_frontmost();
+        activate_frontmost(owner);
     shell_state_changed();
 }
 
-void Server::activate_frontmost()
+void Server::activate_frontmost(Client* preferred)
 {
+    if (preferred) {
+        for (size_t i = m_windows.size(); i > 0; --i) {
+            auto* window = m_windows[i - 1];
+            if (window->client == preferred && window->visible && window->can_become_key()) {
+                activate(window);
+                return;
+            }
+        }
+    }
     for (size_t i = m_windows.size(); i > 0; --i) {
         auto* window = m_windows[i - 1];
         if (window->visible && window->can_become_key()) {

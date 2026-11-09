@@ -461,8 +461,12 @@ void Window::close()
     m_closed = true;
     leave_tab_group();
     hide();
+    // The window server has nothing more to say to it: it isn't key, and there's nothing left to draw that shows it.
+    m_key = false;
     if (on_closed)
         on_closed();
+    if (on_discard)
+        on_discard();
 }
 
 void Window::set_title(StringView title)

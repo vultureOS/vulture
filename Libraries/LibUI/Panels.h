@@ -91,6 +91,10 @@ public:
     };
     // `then` gets the whole path chosen, or empty if cancelled.
     static void run(Window&, Kind, StringView directory, StringView suggested_name, Function<void(StringView)> then);
+    // Over nothing: for a panel shown on another program's behalf.
+    static void run_in_own_window(Kind, StringView directory, StringView suggested_name, Function<void(StringView)> then);
+    // How the field at the top finds things: the paths of them, or nothing, for only this folder's, by name.
+    static void set_search(Function<Optional<Vector<String>>(StringView)>);
 };
 
 // The system color panel: there is one, and it works on one color well at a time.

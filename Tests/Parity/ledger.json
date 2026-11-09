@@ -457,7 +457,24 @@
                 },
                 {
                     "feature": "Windows come back when an application or the session does",
-                    "milestone": "M26"
+                    "claim": "partial",
+                    "missing": "only Text Editor brings its own documents back; the rest start again empty; no box for it at Log Out",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "expect desktopshell: reopened"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "expect texteditor: restored 1"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "The pointer's tip is where it clicks, in QEMU's window on a Mac",
@@ -927,11 +944,38 @@
                 },
                 {
                     "feature": "Recent Items",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "ax-expect menuitem \"birds.txt\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m26-documents-recent-items.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "The Services menu",
-                    "milestone": "M26"
+                    "claim": "partial",
+                    "missing": "offers everything, whatever's selected; one service so far",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "click menuitem \"New Text Editor Window Containing Selection\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m26-documents-services.png"
+                        }
+                    ]
                 }
             ]
         },
@@ -960,8 +1004,7 @@
                 {
                     "feature": "Notifications: banners and a list",
                     "claim": "partial",
-                    "missing": "kept across a reboot (M26); swiped away",
-                    "milestone": "M26",
+                    "missing": "swiped away",
                     "proof": [
                         {
                             "suite": "test-ui",
@@ -974,6 +1017,13 @@
                         {
                             "suite": "test-ui",
                             "golden": "m24-panels-banner.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "ax-expect group \"Kept for later\""
+                            ]
                         }
                     ]
                 },
@@ -1496,8 +1546,7 @@
                 {
                     "feature": "Open and Save panels",
                     "claim": "partial",
-                    "missing": "tags, search and sidebars in them; access granted across the sandbox",
-                    "milestone": "M26",
+                    "missing": "tags in them (M27); a sandboxed program's is a window of its own, not a sheet",
                     "proof": [
                         {
                             "suite": "test-ui",
@@ -1505,32 +1554,127 @@
                                 "monday.chat",
                                 "ax-expect button \"Save\""
                             ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "expect desktopshell: panel for"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "ax-expect button \"New Folder\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m26-documents-open-panel.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m26-documents-save-panel.png"
                         }
                     ]
                 },
                 {
                     "feature": "A registry of types, with default applications",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "ax-expect menuitem \"Text Editor (default)\""
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Open With",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "click menuitem \"Open With\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m26-documents-open-with.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Autosave",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "expect texteditor: autosaved"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "ax-expect textarea \"Document\" ~ Never saved anywhere"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Revert To",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "click menuitem \"Last Opened\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "expect texteditor: reverted to Last Opened"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "An application only runs once",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "ax-expect textarea \"Terminal\" ~ texteditors: 1"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "An embedded database",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host",
+                            "output": "LibDatabaseOracle"
+                        },
+                        {
+                            "suite": "test-host",
+                            "output": "LibDatabase"
+                        }
+                    ]
                 },
                 {
                     "feature": "The Share menu",
@@ -1566,23 +1710,83 @@
                 },
                 {
                     "feature": "An index that lasts across reboots",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "expect files from before"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Notices changes as they happen",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "ax-expect row \"birds.txt\""
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Metadata and importers",
-                    "milestone": "M26"
+                    "claim": "partial",
+                    "missing": "the text of text files and the size of PNG and JPEG pictures so far",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "ax-expect textarea \"Terminal\" ~ kMDItemContentType"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "mdfind and mdls",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "type clear; mdfind zebrafinch"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "type clear; mdls -name"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Calculations and settings in the results",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "ax-expect row \"2+3*4 = 14\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "expect settings: Keyboard"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Definitions in the results",
@@ -1595,15 +1799,44 @@
             "rows": [
                 {
                     "feature": "Spacebar on a file shows it",
-                    "milestone": "M26"
+                    "claim": "partial",
+                    "missing": "pictures and text so far; PDF with M30, sound and video with M34 and M35",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "expect files: quick view: picture of picture.png"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m26-documents-quick-view-picture.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Thumbnails",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "m26-documents-thumbnails.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Plugins, in a sandbox",
-                    "milestone": "M26"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m26-documents.chat",
+                                "expect files: quick view: no picture of boom.crashtest"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "PDFs and images in it",

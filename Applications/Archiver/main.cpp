@@ -5,6 +5,7 @@
  */
 
 #include <Desktop.h>
+#include <Documents.h>
 #include <LibArchive/Tar.h>
 #include <LibCompress/Deflate.h>
 #include <LibUI/Application.h>
@@ -427,7 +428,7 @@ private:
     void choose_folder()
     {
         auto home = Desktop::home_directory();
-        FilePanel::run(*this, FilePanel::Kind::OpenFolder, home.view(), {}, [this](StringView chosen) {
+        Desktop::run_file_panel(*this, FilePanel::Kind::OpenFolder, home.view(), {}, [this](StringView chosen) {
             if (!chosen.is_empty())
                 compress(chosen);
         });
@@ -436,7 +437,7 @@ private:
     void choose_archive()
     {
         auto home = Desktop::home_directory();
-        FilePanel::run(*this, FilePanel::Kind::Open, home.view(), {}, [this](StringView chosen) {
+        Desktop::run_file_panel(*this, FilePanel::Kind::Open, home.view(), {}, [this](StringView chosen) {
             if (!chosen.is_empty())
                 expand(chosen);
         });

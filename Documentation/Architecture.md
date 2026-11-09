@@ -134,7 +134,7 @@ header dependency tracking.
  Apps         Files · Terminal · Text Editor · Viewer · Settings · Monitor · Software …
  Desktop      LoginWindow · DesktopShell (menu bar, Search, notifications, widgets) · Dock · SoundMenu · Overview · Control Center
  Frameworks   pranaUI (AppKit-like) · LibAnimation · LibGfx (Quartz-2D-like) · LibText (CoreText-like) · LibImage
-              LibUnicode (the Unicode Character Database, as code) · LibLocale (CLDR)
+              LibUnicode (the Unicode Character Database, as code) · LibLocale (CLDR) · LibDatabase (SQL)
  Core libs    LibCore (run loop, JSON plists) · LibIPC (+ipcc IDL) · LibCrypto/TLS/HTTP · LibVT · LibAudio
  Runtime      LibC (math included) · LibCxxRT · LibSystem (syscalls; libSystem.B.dylib) · dyld · LibBase (shared with kernel)
  Services     vlaunchd (PID 1) · logd · notifyd · configd · PranaWindowServer · AudioServer · indexd · clipboardd · directoryd
@@ -389,6 +389,7 @@ macOS-style at the top, real Unix underneath:
   (`idle_time`) or a hot corner asks. A session's shell says its person's settings to the server again when it comes back
   to the screen (`session_changed`). Login Items are opened by the shell. AudioServer plays the sound at power-on, when the
   launch daemon starts it with `--startup`, unless it's been turned off.
+- **Documents and Search (M26).** `LibDatabase` is an embedded SQL store in one file: pages with a rollback journal, B+ trees, and the language of SQLite as far as an application's data needs it, with `Tests/LibDatabase/oracle.py` holding its answers to the Mac's own `sqlite3`. `indexd` is each person's (LoginWindow starts it with their session, and it sandboxes itself): a database in `~/Library/Metadata`, walked from the disk once, kept up afterwards by `/dev/fsevents` from where it last left off, so even what happened while the machine was off is heard; a keystroke is a few index range scans, over the words of names and text. What a file *is* comes from `ContentTypes.json`, Uniform Type Identifiers by another name, with what applications say they open and what someone's chosen. An application only runs once: it registers `com.vulture.app.IDENTIFIER`, and `Desktop::launch` gives whatever it would have started it with to the one that's there. A sandbox can be widened by one path: something outside a sandbox gets a token from the kernel (`sandbox_extension_issue`, an HMAC over the path with a key made at boot), something inside redeems it, and what the Open panel chose, or what it was opened with, is as if the profile had said so. Panels for a program that can't see the folder they start in are shown by the shell (`com.vulture.workspace`), which is what can. Quick View and thumbnails are `Desktop::request_preview`: the file is opened by whoever asks, and given to `QuickViewHelper`, sandboxed before it starts, which loads whichever plugin (`*.qvplugin`, by `dlopen`) claims it and writes pixels down a pipe; if it crashes, there's a pipe with nothing in it.
 - **Not responding (M21).** A program is pinged when input is sent to it, and its event loop
   answers. After two seconds with no answer, the cursor over its windows spins, and the shell
   state says so, for the Dock and Monitor. The server still moves and resizes its windows.

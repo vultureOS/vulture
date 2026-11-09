@@ -56,6 +56,10 @@ struct AppInfo {
 // Starts it, with these arguments, as a new session of its own. EINVAL for no program.
 ErrorOr<pid_t> launch(AppInfo const&, Span<StringView const> arguments);
 ErrorOr<pid_t> launch(AppInfo const&);
+// Given to it instead, if it's already running: this says whether it was, and then nothing started.
+[[nodiscard]] bool tell_running_application(AppInfo const&, Span<StringView const> arguments);
+// `message`, to do to `text`, in that application, started if need be: what a choice in the Services menu comes to.
+void perform_service(AppInfo const&, StringView message, StringView text);
 // As launch, but not as a child of this process: by way of the desktop, for what is sandboxed.
 ErrorOr<pid_t> open_application(AppInfo const&);
 // Opens a file or a folder with what handles it, or an application bundle.

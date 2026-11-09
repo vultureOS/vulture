@@ -86,6 +86,7 @@ public:
     {
         prepare_home();
         StringView const programs[] = {
+            "/usr/libexec/indexd"_sv,
             "/System/Library/CoreServices/DesktopShell"_sv,
             "/System/Library/CoreServices/Dock"_sv,
             "/System/Library/CoreServices/Files.app/Contents/MacOS/Files"_sv,

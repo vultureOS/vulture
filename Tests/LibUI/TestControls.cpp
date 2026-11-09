@@ -877,7 +877,7 @@ TEST_CASE(a_file_panel_walks_the_tree_and_answers)
     FilePanel::run(*test.window, FilePanel::Kind::Open, "/"_sv, {}, [&](StringView path) { chosen = MUST(String::from_view(path)); });
     test.settle();
     auto tree = Accessibility::tree_of(*test.window);
-    auto const* table = Accessibility::find(tree, Accessibility::Role::Table, {});
+    auto const* table = Accessibility::find(tree, Accessibility::Role::Table, "Files"_sv);
     EXPECT(table != nullptr);
     auto rect = table->frame;
     float row = Appearance::the().metric("table.rowHeight"_sv);

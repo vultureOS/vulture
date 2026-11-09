@@ -1,0 +1,9 @@
+# Reads what people keep, to say what's in it, and writes down what it found. Nothing else.
+include system
+read /Applications
+read /System/Applications
+read /Users
+read /Volumes
+read /dev/fsevents
+read ${HOME}
+write ${HOME}/Library/Metadata

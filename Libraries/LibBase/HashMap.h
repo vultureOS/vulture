@@ -84,6 +84,15 @@ public:
     {
     }
 
+    HashMap& operator=(HashMap&& other)
+    {
+        if (this != &other) {
+            this->~HashMap();
+            new (this) HashMap(move(other));
+        }
+        return *this;
+    }
+
     ~HashMap() { clear(); }
 
     [[nodiscard]] size_t size() const { return m_size; }

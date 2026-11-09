@@ -1,0 +1,4 @@
+# Pictures one file, which it's been handed already open. Plugins and fonts, and nothing of anyone's.
+include system
+read /Library/QuickView
+read /usr/tests/quickview

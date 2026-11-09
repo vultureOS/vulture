@@ -1,0 +1,15 @@
+# Search, over a hundred thousand files: what it takes to answer each letter, once they've all been noticed.
+timeout 900
+expect loginwindow: ready
+pause 0.5
+type vulture\r
+expect files: ready
+pause 3
+key meta_l-w
+pause 0.5
+click button "Terminal"
+expect terminal: ready
+pause 1
+type clear; /usr/tests/search-budget\r
+ax-expect textarea "Terminal" ~ search-budget: done
+screenshot look-search-budget.png

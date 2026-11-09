@@ -123,6 +123,8 @@ function(vulture_add_test_plugin name)
         VERBATIM)
     install(PROGRAMS ${installed} DESTINATION usr/tests)
 endfunction()
+# A Quick View plugin that does what a bad one would.
+vulture_add_quickview_plugin(Crash DESTINATION usr/tests/quickview SOURCES quickview-crash.cpp)
 vulture_add_test_plugin(plugin-helper)
 vulture_add_test_plugin(plugin-main plugin-helper)
 vulture_add_test_plugin(plugin-unload)

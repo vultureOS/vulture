@@ -1222,6 +1222,9 @@ private:
             // Files, with nothing open, opens something.
             if (tile.identifier.view() == "com.vulture.Files"_sv && !m_files_has_windows)
                 (void)Desktop::open_path(Desktop::home_directory().view());
+            // Anything else is asked: a program with no windows may have something to do about that.
+            else if (auto application = Desktop::application_with_identifier(tile.identifier.view()); application.has_value())
+                (void)Desktop::tell_running_application(application.value(), {});
             return;
         }
         if (tile.path.is_empty())

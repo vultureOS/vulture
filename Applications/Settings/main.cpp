@@ -509,6 +509,15 @@ void build_dock(Page& page)
     style.on_change = [widgets_saved](int index) { widgets_saved("style"_sv, MUST(JSON::Value::string(styles[index]))); };
 
     auto& windows_group = page.add_group("Windows"_sv);
+    auto add_document_switch = [&](StringView title, StringView key, bool fallback) {
+        auto& row = windows_group.rows().add<Row>(title);
+        auto& toggle = row.add<Switch>(dock.boolean(key).value_or(fallback));
+        toggle.set_accessibility_label(title);
+        auto const key_string = MUST(String::from_view(key));
+        toggle.on_action = [dock_saved, key_string, &toggle] { dock_saved(key_string.view(), JSON::Value(toggle.is_on())); };
+    };
+    add_document_switch("Ask to keep changes when closing documents"_sv, "askToKeepChanges"_sv, false);
+    add_document_switch("Close windows when quitting an application"_sv, "closeWindowsWhenQuitting"_sv, true);
     struct Tiling {
         bool by_edges;
         bool to_menu_bar;
@@ -2388,6 +2397,19 @@ private:
         push_page(title.view(), move(build));
     }
 
+public:
+    void show_pane_named(StringView name)
+    {
+        for (size_t i = 0; i < m_names.size(); ++i) {
+            if (m_names[i].view() == name) {
+                m_sidebar->select_row(i);
+                show_page(i);
+                return;
+            }
+        }
+    }
+
+private:
     void show_page(size_t index)
     {
         m_current = index;
@@ -2443,5 +2465,9 @@ int main(int argc, char** argv)
         set_motion_enabled(false);
     application->set_main_menu(application->standard_menus());
     Settings settings(first_pane);
+    application->on_open_arguments = [&settings](Span<StringView const> arguments) {
+        if (!arguments.is_empty())
+            settings.show_pane_named(arguments[0]);
+    };
     return application->exec();
 }

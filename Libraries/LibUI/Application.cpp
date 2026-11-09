@@ -5,8 +5,12 @@
  */
 
 #include <LibUI/InputMethod.h>
+#include <AppInstanceEndpoint.h>
 #include <AudioEndpoint.h>
 #include <LibIPC/Bootstrap.h>
+#include <LibIPC/Listener.h>
+#include <WorkspaceEndpoint.h>
+#include <sandbox.h>
 #include <LibJSON/JSON.h>
 #include <LibUI/Accessibility.h>
 #include <LibUI/Appearance.h>
@@ -170,6 +174,50 @@ private:
 
 }
 
+// What finds this application when something would have started it.
+class InstanceService final : public AppInstanceStub {
+public:
+    explicit InstanceService(Application& application)
+        : m_application(application)
+    {
+    }
+
+    void open_arguments(IPC::Sender const& sender, Vector<String> arguments, Vector<String> tokens) override
+    {
+        if (sender.uid != getuid())
+            return;
+        for (auto const& token : tokens) {
+            if (!token.is_empty())
+                (void)sandbox_extension_consume(token.characters());
+        }
+        Vector<StringView> views;
+        for (auto const& argument : arguments)
+            views.append(argument.view());
+        if (m_application.on_open_arguments)
+            m_application.on_open_arguments(views.span());
+        reopen(sender);
+    }
+
+    void perform_service(IPC::Sender const& sender, String message, String text) override
+    {
+        if (sender.uid == getuid() && m_application.on_perform_service)
+            m_application.on_perform_service(message.view(), text.view());
+        reopen(sender);
+    }
+
+    void reopen(IPC::Sender const& sender) override
+    {
+        if (sender.uid != getuid())
+            return;
+        if (m_application.on_reopen)
+            m_application.on_reopen();
+        (void)m_application.connection().server().activate_application(static_cast<i32>(getpid()));
+    }
+
+private:
+    Application& m_application;
+};
+
 Application::Application() = default;
 
 ErrorOr<NonnullOwnPtr<Application>> Application::create(StringView name, StringView identifier)
@@ -207,6 +255,8 @@ ErrorOr<NonnullOwnPtr<Application>> Application::create(StringView name, StringV
         if (!held_still())
             set_motion_enabled(!reduced);
     };
+    if (!identifier.is_empty())
+        application->register_instance(identifier);
     return application;
 }
 
@@ -405,6 +455,92 @@ void Application::request_quit()
         quit();
 }
 
+void Application::register_instance(StringView identifier)
+{
+    auto pair = IPC::create_port();
+    if (pair.is_error())
+        return;
+    auto ports = pair.release_value();
+    StringBuilder name;
+    name.append("com.vulture.app."_sv);
+    name.append(identifier);
+    // Someone started a second one by its program, which is allowed: it's the first that goes on being found.
+    if (IPC::register_service(name.view(), move(ports.send)).is_error())
+        return;
+    m_instance = adopt_own(*new InstanceService(*this));
+    m_instance_listener = adopt_own(*new IPC::Listener(m_loop, move(ports.receive), [this](IPC::ReceivedMessage& message) { (void)m_instance->handle(message); }));
+}
+
+String Application::home_directory() const
+{
+    char const* home = getenv("HOME");
+    return MUST(String::from_view(home ? StringView(home, strlen(home)) : StringView {}));
+}
+
+ErrorOr<void> Application::make_directory(StringView path)
+{
+    if (mkdir(TRY(String::from_view(path)).characters(), 0755) != 0)
+        return Error::from_errno(errno);
+    return {};
+}
+
+// What the Services menu offers: what applications say they can do with text (NSServices, in their Info.plist).
+void Application::add_services_to(Menu& menu)
+{
+    auto scan = [&](StringView directory) {
+        auto listed = list_directory(directory);
+        if (listed.is_error())
+            return;
+        for (auto const& entry : listed.value()) {
+            if (!entry.name.view().ends_with(".app"_sv))
+                continue;
+            StringBuilder bundle;
+            bundle.appendff("{}/{}", directory, entry.name.view());
+            StringBuilder plist;
+            plist.appendff("{}/Contents/Info.plist", bundle.view());
+            auto bytes = read_file(plist.view());
+            if (bytes.is_error())
+                continue;
+            auto parsed = JSON::parse({ reinterpret_cast<char const*>(bytes.value().data()), bytes.value().size() });
+            if (parsed.is_error())
+                continue;
+            auto const* services = parsed.value().get_array("NSServices"_sv);
+            if (!services)
+                continue;
+            for (size_t i = 0; i < services->size(); ++i) {
+                auto title = services->at(i).get_string("NSMenuItem"_sv);
+                auto message = services->at(i).get_string("NSMessage"_sv);
+                if (!title.has_value() || !message.has_value())
+                    continue;
+                auto bundle_path = MUST(bundle.to_string());
+                auto message_copy = MUST(String::from_view(message.value()));
+                menu.add(title.value(), [this, bundle_path = move(bundle_path), message_copy = move(message_copy)] { perform_service(bundle_path.view(), message_copy.view()); });
+            }
+        }
+    };
+    scan("/Applications"_sv);
+    scan("/System/Applications"_sv);
+    if (menu.items().is_empty())
+        menu.add("No Services Apply"_sv).enabled = false;
+}
+
+void Application::perform_service(StringView bundle, StringView message)
+{
+    auto* window = key_window();
+    auto* responder = window ? window->first_responder() : nullptr;
+    auto* view = responder ? responder->as_view() : nullptr;
+    auto selection = view ? view->selected_text_for_services() : StringView {};
+    if (selection.is_empty()) {
+        play_sound("error"_sv);
+        return;
+    }
+    auto port = IPC::look_up("com.vulture.workspace"_sv);
+    if (port.is_error())
+        return;
+    WorkspaceProxy workspace(port.release_value());
+    (void)workspace.perform_service(bundle, message, selection);
+}
+
 NonnullOwnPtr<Menu> Application::standard_menus(Function<void()> on_about, bool can_quit)
 {
     auto menus = adopt_own(*new Menu);
@@ -435,6 +571,8 @@ NonnullOwnPtr<Menu> Application::standard_menus(Function<void()> on_about, bool 
     }();
     auto& application_menu = menus->add_submenu(m_name.view());
     application_menu.add(about_title.view(), move(on_about));
+    application_menu.add_separator();
+    add_services_to(application_menu.add_submenu("Services"_sv));
     application_menu.add_separator();
     application_menu.add_with_shortcut(hide_title.view(), KeyH, shown("H"_sv).view(), [this] {
         (void)m_connection->server().hide_application(static_cast<i32>(getpid()), true);
@@ -566,10 +704,7 @@ bool Application::perform_main_menu_shortcut(KeyEvent const& event)
 void Application::keep_window(NonnullOwnPtr<Window> window)
 {
     auto* raw = window.ptr();
-    auto previous = move(raw->on_closed);
-    raw->on_closed = [this, raw, previous = move(previous)] {
-        if (previous)
-            previous();
+    raw->on_discard = [this, raw] {
         // Not now: it is telling us this from inside itself.
         m_loop.deferred_invoke([this, raw] {
             for (size_t i = 0; i < m_windows.size(); ++i) {

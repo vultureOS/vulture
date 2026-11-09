@@ -472,6 +472,8 @@ namespace {
 struct FileEntry {
     String name;
     bool is_directory;
+    // Where it is, when it isn't in the folder being shown: something searched for.
+    String full_path {};
 };
 
 String joined(StringView directory, StringView name)
@@ -482,6 +484,23 @@ String joined(StringView directory, StringView name)
         builder.append("/"_sv);
     builder.append(name);
     return MUST(builder.to_string());
+}
+
+char lowered(char c)
+{
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c;
+}
+
+bool contains_ignoring_case(StringView text, StringView wanted)
+{
+    for (size_t i = 0; i + wanted.length() <= text.length(); ++i) {
+        size_t j = 0;
+        while (j < wanted.length() && lowered(text[i + j]) == lowered(wanted[j]))
+            ++j;
+        if (j == wanted.length())
+            return true;
+    }
+    return false;
 }
 
 class FileList final : public TableModel {
@@ -495,6 +514,51 @@ public:
             return;
         for (auto const& entry : listed.value())
             m_entries.append(FileEntry { MUST(String::from_view(entry.name.view())), entry.is_directory });
+        sort();
+    }
+
+    // Whichever things have been found, by the paths of them.
+    void show_found(Span<String const> paths)
+    {
+        m_entries.clear();
+        for (auto const& path : paths) {
+            auto slash = path.view().find_last('/');
+            auto name = slash.has_value() ? path.view().substring_view(slash.value() + 1) : path.view();
+            bool const is_directory = !name.contains('.') && Platform::the().list_directory(path.view()).is_error() == false;
+            m_entries.append(FileEntry { MUST(String::from_view(name)), is_directory, path });
+        }
+        sort();
+    }
+
+    // With no index to ask: this folder's, by name.
+    void keep_matching(StringView wanted)
+    {
+        auto listed = Platform::the().list_directory(m_directory.view());
+        m_entries.clear();
+        if (listed.is_error())
+            return;
+        for (auto const& entry : listed.value()) {
+            if (contains_ignoring_case(entry.name.view(), wanted))
+                m_entries.append(FileEntry { MUST(String::from_view(entry.name.view())), entry.is_directory });
+        }
+        sort();
+    }
+
+    [[nodiscard]] size_t row_count() const override { return m_entries.size(); }
+    [[nodiscard]] String text_at(size_t row, size_t) const override { return MUST(String::from_view(m_entries[row].name.view())); }
+    [[nodiscard]] bool has_symbol_at(size_t) const override { return true; }
+    [[nodiscard]] Symbol symbol_at(size_t row) const override { return m_entries[row].is_directory ? Symbol::Folder : Symbol::File; }
+    [[nodiscard]] FileEntry const& entry(size_t row) const { return m_entries[row]; }
+    [[nodiscard]] StringView directory() const { return m_directory.view(); }
+    [[nodiscard]] String path_of(size_t row) const
+    {
+        auto const& found = m_entries[row];
+        return found.full_path.is_empty() ? joined(m_directory.view(), found.name.view()) : found.full_path;
+    }
+
+private:
+    void sort()
+    {
         // Folders and files together, by name, as Files lists them.
         for (size_t i = 1; i < m_entries.size(); ++i) {
             for (size_t j = i; j > 0 && compare(m_entries[j - 1].name.view(), m_entries[j].name.view()) > 0; --j) {
@@ -505,19 +569,10 @@ public:
         }
     }
 
-    [[nodiscard]] size_t row_count() const override { return m_entries.size(); }
-    [[nodiscard]] String text_at(size_t row, size_t) const override { return MUST(String::from_view(m_entries[row].name.view())); }
-    [[nodiscard]] bool has_symbol_at(size_t) const override { return true; }
-    [[nodiscard]] Symbol symbol_at(size_t row) const override { return m_entries[row].is_directory ? Symbol::Folder : Symbol::File; }
-    [[nodiscard]] FileEntry const& entry(size_t row) const { return m_entries[row]; }
-    [[nodiscard]] StringView directory() const { return m_directory.view(); }
-
-private:
     static int compare(StringView a, StringView b)
     {
         for (size_t i = 0; i < a.length() && i < b.length(); ++i) {
-            auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c; };
-            char x = lower(a[i]), y = lower(b[i]);
+            char x = lowered(a[i]), y = lowered(b[i]);
             if (x != y)
                 return x < y ? -1 : 1;
         }
@@ -528,39 +583,64 @@ private:
     Vector<FileEntry> m_entries;
 };
 
+Function<Optional<Vector<String>>(StringView)> s_panel_search;
+
 class FilePanelView final : public StackView {
 public:
-    FilePanelView(Window& window, FilePanel::Kind kind, StringView directory, StringView suggested, Function<void(StringView)> then)
+    FilePanelView(Window& window, float panel_width, FilePanel::Kind kind, StringView directory, StringView suggested, Function<void()> dismiss, Function<void(StringView)> then)
         : StackView(Axis::Vertical, 8, Alignment::Fill, Insets::all(tokens().metric("alert.padding"_sv)))
-        , m_window(window)
         , m_kind(kind)
+        , m_dismiss(move(dismiss))
         , m_then(move(then))
     {
-        auto* path_row = &add<StackView>(Axis::Horizontal, 8, Alignment::Center);
-        m_up = &path_row->add<Button>(StringView {}, ButtonStyle::Borderless);
-        m_up->set_symbol(Symbol::ChevronLeft);
-        m_up->set_fixed_size({ 24, 24 });
-        m_up->on_action = [this] { go_up(); };
-        m_path = &path_row->add<Label>(directory);
-        m_path->set_stretch(1, 0);
-        path_row->set_fixed_height(24);
-
         if (kind == FilePanel::Kind::Save) {
             auto* name_row = &add<StackView>(Axis::Horizontal, 8, Alignment::Center);
             (void)name_row->add<Label>("Save As:"_sv);
             m_name = &name_row->add<TextField>(suggested);
+            m_name->set_accessibility_label("Save As"_sv);
             m_name->set_stretch(1, 0);
             name_row->set_fixed_height(22);
         }
 
-        m_table = &add<TableView>(&m_files);
+        auto* path_row = &add<StackView>(Axis::Horizontal, 8, Alignment::Center);
+        m_up = &path_row->add<Button>(StringView {}, ButtonStyle::Borderless);
+        m_up->set_symbol(Symbol::ChevronLeft);
+        m_up->set_accessibility_label("Back"_sv);
+        m_up->set_fixed_size({ 24, 24 });
+        m_up->on_action = [this] { go_up(); };
+        m_path = &path_row->add<Label>(directory);
+        m_path->set_stretch(1, 0);
+        m_search = &path_row->add<TextField>(StringView {});
+        m_search->set_placeholder("Search"_sv);
+        m_search->set_accessibility_label("Search"_sv);
+        m_search->set_fixed_size({ 170, 22 });
+        m_search->on_change = [this] { search_changed(); };
+        path_row->set_fixed_height(24);
+
+        auto const sidebar_width = tokens().metric("panel.sidebarWidth"_sv);
+        auto* columns = &add<StackView>(Axis::Horizontal, 8, Alignment::Fill);
+        columns->set_stretch(0, 1);
+        m_sidebar = &columns->add<Sidebar>();
+        m_sidebar->set_fixed_width(sidebar_width);
+        add_places();
+        m_sidebar->on_select = [this](size_t row) {
+            if (row < m_places.size())
+                go_to(m_places[row].view());
+        };
+
+        m_table = &columns->add<TableView>(&m_files);
         m_table->set_headers_visible(false);
-        m_table->add_column("Name"_sv, tokens().metric("panel.width"_sv) - tokens().metric("alert.padding"_sv) * 2 - tokens().metric("table.selectionInset"_sv) * 2);
-        m_table->set_stretch(0, 1);
+        m_table->set_accessibility_label("Files"_sv);
+        m_table->add_column("Name"_sv, panel_width - sidebar_width - 8 - tokens().metric("alert.padding"_sv) * 2 - tokens().metric("table.selectionInset"_sv) * 2);
+        m_table->set_stretch(1, 1);
         m_table->on_activate = [this](size_t row) { activate(row); };
         m_table->on_selection_change = [this] { selection_changed(); };
 
         auto* buttons = &add<StackView>(Axis::Horizontal, 8, Alignment::Center);
+        if (kind == FilePanel::Kind::Save) {
+            auto& new_folder = buttons->add<Button>("New Folder"_sv);
+            new_folder.on_action = [this] { make_folder(); };
+        }
         auto& filler = buttons->add<View>();
         filler.set_stretch(1, 0);
         auto& cancel = buttons->add<Button>("Cancel"_sv);
@@ -573,7 +653,45 @@ public:
         window.set_cancel_action([this] { finish({}); });
     }
 
+    void cancel() { finish({}); }
+
+    // Where typing goes first: the name, when there's one to give, and otherwise the list.
+    [[nodiscard]] View* first_control() const
+    {
+        return m_name ? static_cast<View*>(m_name) : static_cast<View*>(m_table);
+    }
+
 private:
+    void add_place(StringView title, Symbol symbol, StringView path)
+    {
+        (void)m_sidebar->add_row(title, symbol);
+        m_places.append(MUST(String::from_view(path)));
+    }
+
+    void add_places()
+    {
+        auto const home = Platform::the().home_directory();
+        m_sidebar->add_section("Favorites"_sv);
+        add_place("Applications"_sv, Symbol::Applications, "/Applications"_sv);
+        if (!home.is_empty()) {
+            add_place("Desktop"_sv, Symbol::Desktop, joined(home.view(), "Desktop"_sv).view());
+            add_place("Documents"_sv, Symbol::File, joined(home.view(), "Documents"_sv).view());
+            add_place("Downloads"_sv, Symbol::Download, joined(home.view(), "Downloads"_sv).view());
+            auto slash = home.view().find_last('/');
+            add_place(slash.has_value() ? home.view().substring_view(slash.value() + 1) : home.view(), Symbol::Home, home.view());
+        }
+        m_sidebar->add_section("Locations"_sv);
+        add_place("Vulture HD"_sv, Symbol::Drive, "/"_sv);
+        auto volumes = Platform::the().list_directory("/Volumes"_sv);
+        if (!volumes.is_error()) {
+            for (auto const& volume : volumes.value()) {
+                // The partition a machine starts from isn't anyone's business, as on a Mac.
+                if (volume.name.view() != "EFI"_sv)
+                    add_place(volume.name.view(), Symbol::Drive, joined("/Volumes"_sv, volume.name.view()).view());
+            }
+        }
+    }
+
     void load(StringView directory)
     {
         m_files.load(directory);
@@ -582,6 +700,43 @@ private:
         m_table->reload();
         m_up->set_enabled(directory != "/"_sv);
         selection_changed();
+    }
+
+    void go_to(StringView directory)
+    {
+        if (!m_search->text().is_empty())
+            m_search->set_text({});
+        auto copy = MUST(String::from_view(directory));
+        load(copy.view());
+    }
+
+    void search_changed()
+    {
+        auto wanted = MUST(String::from_view(m_search->text()));
+        if (wanted.is_empty()) {
+            auto directory = MUST(String::from_view(m_files.directory()));
+            load(directory.view());
+            return;
+        }
+        Optional<Vector<String>> found;
+        if (s_panel_search)
+            found = s_panel_search(wanted.view());
+        if (found.has_value())
+            m_files.show_found(found->span());
+        else
+            m_files.keep_matching(wanted.view());
+        m_table->clear_selection();
+        m_table->reload();
+        selection_changed();
+    }
+
+    void make_folder()
+    {
+        StringBuilder name;
+        name.append("untitled folder"_sv);
+        (void)Platform::the().make_directory(joined(m_files.directory(), name.view()).view());
+        auto directory = MUST(String::from_view(m_files.directory()));
+        load(directory.view());
     }
 
     void selection_changed()
@@ -609,15 +764,15 @@ private:
         if (end > 1)
             --end;
         auto parent_directory = MUST(String::from_view(directory.substring_view(0, end)));
-        load(parent_directory.view());
+        go_to(parent_directory.view());
     }
 
     void activate(size_t row)
     {
-        auto const& entry = m_files.entry(row);
-        auto path = joined(m_files.directory(), entry.name.view());
-        if (entry.is_directory) {
-            load(path.view());
+        auto const is_directory = m_files.entry(row).is_directory;
+        auto path = m_files.path_of(row);
+        if (is_directory) {
+            go_to(path.view());
             return;
         }
         if (m_kind == FilePanel::Kind::Open)
@@ -638,7 +793,7 @@ private:
                 auto directory = MUST(String::from_view(m_files.directory()));
                 finish(directory.view());
             } else if (m_files.entry(static_cast<size_t>(row)).is_directory) {
-                finish(joined(m_files.directory(), m_files.entry(static_cast<size_t>(row)).name.view()).view());
+                finish(m_files.path_of(static_cast<size_t>(row)).view());
             }
             return;
         }
@@ -650,19 +805,22 @@ private:
     {
         auto copy = MUST(String::from_view(path));
         auto then = move(m_then);
-        auto& window = m_window;
-        Sheet::dismiss(window);
+        auto dismiss = move(m_dismiss);
+        dismiss();
         if (then)
             then(copy.view());
     }
 
-    Window& m_window;
     FilePanel::Kind m_kind;
+    Function<void()> m_dismiss;
     Function<void(StringView)> m_then;
     FileList m_files;
+    Vector<String> m_places;
     TableView* m_table { nullptr };
+    Sidebar* m_sidebar { nullptr };
     Label* m_path { nullptr };
     TextField* m_name { nullptr };
+    TextField* m_search { nullptr };
     Button* m_up { nullptr };
     Button* m_confirm { nullptr };
 };
@@ -671,9 +829,43 @@ private:
 
 void FilePanel::run(Window& window, Kind kind, StringView directory, StringView suggested_name, Function<void(StringView)> then)
 {
+    // One sheet to a window: asked again, the one that's there is still the answer.
+    if (Sheet::is_presented(window))
+        return;
     auto const& t = tokens();
-    auto* view = new FilePanelView(window, kind, directory, suggested_name, move(then));
-    Sheet::present(window, adopt_own(*static_cast<View*>(view)), { t.metric("panel.width"_sv), t.metric("panel.height"_sv) });
+    // A sheet's inside its window, however small that is.
+    auto const frame = window.frame();
+    float const width = min(t.metric("panel.width"_sv), static_cast<float>(frame.width) - 24);
+    float const height = min(t.metric("panel.height"_sv), static_cast<float>(frame.height) - 48);
+    auto* view = new FilePanelView(window, width, kind, directory, suggested_name, [&window] { Sheet::dismiss(window); }, move(then));
+    Sheet::present(window, adopt_own(*static_cast<View*>(view)), { width, height });
+    window.make_first_responder(view->first_control());
+}
+
+void FilePanel::run_in_own_window(Kind kind, StringView directory, StringView suggested_name, Function<void(StringView)> then)
+{
+    auto const& t = tokens();
+    auto const screen = Platform::the().screen_size();
+    int const width = static_cast<int>(t.metric("panel.width"_sv));
+    int const height = static_cast<int>(t.metric("panel.height"_sv));
+    auto* window = new Window(kind == Kind::Save ? "Save"_sv : "Open"_sv, { (screen.width - width) / 2, (screen.height - height) / 3, width, height }, WS::WindowTitled);
+    auto dismiss = [window] {
+        window->hide();
+        Platform::the().defer([window] { delete window; });
+    };
+    auto& view = window->set_content<FilePanelView>(*window, static_cast<float>(width), kind, directory, suggested_name, move(dismiss), move(then));
+    window->on_close_request = [&view] {
+        view.cancel();
+        return false;
+    };
+    window->show();
+    window->backend().activate();
+    window->make_first_responder(view.first_control());
+}
+
+void FilePanel::set_search(Function<Optional<Vector<String>>(StringView)> search)
+{
+    s_panel_search = move(search);
 }
 
 // ---- Color panel

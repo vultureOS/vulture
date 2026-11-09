@@ -25,6 +25,16 @@ class AudioProxy;
 
 namespace UI {
 
+class InstanceService;
+
+}
+
+namespace IPC {
+class Listener;
+}
+
+namespace UI {
+
 class Application final : public Platform {
 public:
     // With a name, an application, shown in the Dock and menu bar; without, a part of the
@@ -40,6 +50,13 @@ public:
     // what it objected to (a document not saved) before quitting itself.
     void request_quit();
     Function<bool()> on_quit_request;
+    // What it would have been started with, had it not been running: documents, mostly.
+    Function<void(Span<StringView const>)> on_open_arguments;
+    Function<void(StringView message, StringView text)> on_perform_service;
+    // To the front: a window, if it has any; otherwise this says what to do about that.
+    Function<void()> on_reopen;
+    // Set up after the window server's there, as being found by name is the last thing it should do.
+    void register_instance(StringView identifier);
     [[nodiscard]] Core::EventLoop& event_loop() { return m_loop; }
     [[nodiscard]] ::Window::Connection& connection() { return *m_connection; }
     [[nodiscard]] StringView name() const { return m_name.view(); }
@@ -91,6 +108,8 @@ public:
     [[nodiscard]] ErrorOr<Vector<u8>> read_file(StringView path) override;
     [[nodiscard]] StringView library_directory() const override { return "/System/Library"_sv; }
     [[nodiscard]] ErrorOr<Vector<DirectoryEntry>> list_directory(StringView path) override;
+    [[nodiscard]] String home_directory() const override;
+    ErrorOr<void> make_directory(StringView) override;
     void copy_text(StringView) override;
     [[nodiscard]] ErrorOr<String> paste_text() override;
     void play_sound(StringView) override;
@@ -106,7 +125,12 @@ private:
     OwnPtr<::Window::Connection> m_connection;
     OwnPtr<AudioProxy> m_audio;
     int m_volume_tick_timer { -1 };
+    void add_services_to(Menu&);
+    void perform_service(StringView bundle, StringView message);
+
     OwnPtr<Menu> m_main_menu;
+    OwnPtr<InstanceService> m_instance;
+    OwnPtr<IPC::Listener> m_instance_listener;
     MenuItem* m_full_screen_item { nullptr };
     Vector<MenuItem*> m_menu_items;
     Vector<NonnullOwnPtr<Window>> m_windows;

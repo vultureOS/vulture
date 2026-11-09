@@ -34,6 +34,7 @@ public:
     void set_editable(bool);
     [[nodiscard]] TextStorage& storage() { return m_storage; }
     void select_all();
+    [[nodiscard]] StringView selected_text_for_services() const override { return m_secure ? StringView {} : m_storage.selected_text(); }
 
     // After each edit; on Return or leaving, with what it holds.
     Function<void()> on_change;

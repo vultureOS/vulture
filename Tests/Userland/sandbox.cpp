@@ -357,6 +357,76 @@ void test_named_profile()
 
 }
 
+// What's chosen in an Open or Save panel, by something outside the sandbox: that, and nothing more, for as long as it runs.
+void test_grants()
+{
+    char* to_read = sandbox_extension_issue("/tmp/sandbox-test/secret", 0);
+    CHECK(to_read != nullptr);
+    char* to_write = sandbox_extension_issue("/tmp/sandbox-test/not-yet", 1);
+    CHECK(to_write != nullptr);
+    char* for_a_folder = sandbox_extension_issue("/tmp/sandbox-test/readable-too", 0);
+    CHECK(for_a_folder != nullptr);
+    char forged[8192];
+    strlcpy(forged, to_read, sizeof(forged));
+    forged[1] = forged[1] == 'a' ? 'b' : 'a';
+    char other_path[8192];
+    strlcpy(other_path, to_read, sizeof(other_path));
+    size_t const length = strlen(other_path);
+    other_path[length - 1] = 'X';
+    in_sandbox(to_run, [=] {
+        CHECK(sandbox_is_active() == 1);
+        CHECK(denied(open("/tmp/sandbox-test/secret", O_RDONLY)));
+        CHECK(sandbox_extension_issue("/tmp/sandbox-test/secret", 0) == nullptr && errno == EPERM);
+        CHECK(sandbox_extension_consume(forged) == -1 && errno == EPERM);
+        CHECK(sandbox_extension_consume(other_path) == -1 && errno == EPERM);
+        CHECK(sandbox_extension_consume("r") == -1);
+        CHECK(denied(open("/tmp/sandbox-test/secret", O_RDONLY)));
+
+        CHECK(sandbox_extension_consume(to_read) == 0);
+        int fd = open("/tmp/sandbox-test/secret", O_RDONLY);
+        CHECK(fd >= 0);
+        char buffer[16] = {};
+        CHECK(read(fd, buffer, sizeof(buffer)) == 6);
+        CHECK(strcmp(buffer, "secret") == 0);
+        close(fd);
+        // To read it is all that was asked for; and it's the only thing that was.
+        CHECK(denied(open("/tmp/sandbox-test/secret", O_WRONLY)));
+        CHECK(denied(unlink("/tmp/sandbox-test/secret")));
+        CHECK(denied(open("/tmp/sandbox-test/readable/file", O_RDONLY)));
+        CHECK(denied(open("/tmp/sandbox-test/secret-too", O_RDONLY)));
+
+        // A Save panel's: somewhere that isn't there yet.
+        CHECK(denied(open("/tmp/sandbox-test/not-yet", O_WRONLY | O_CREAT, 0644)));
+        CHECK(sandbox_extension_consume(to_write) == 0);
+        fd = open("/tmp/sandbox-test/not-yet", O_WRONLY | O_CREAT, 0644);
+        CHECK(fd >= 0);
+        CHECK(write(fd, "x", 1) == 1);
+        close(fd);
+
+        // A folder, and what's in it.
+        CHECK(sandbox_extension_consume(for_a_folder) == 0);
+        fd = open("/tmp/sandbox-test/readable-too/file", O_RDONLY);
+        CHECK(fd >= 0);
+        close(fd);
+        CHECK(denied(open("/tmp/sandbox-test/readable-too-not/file", O_RDONLY)));
+
+        // What it starts has what it had.
+        pid_t child = fork();
+        if (child == 0) {
+            int inherited = open("/tmp/sandbox-test/secret", O_RDONLY);
+            _exit(inherited >= 0 ? 0 : 1);
+        }
+        int status = 0;
+        waitpid(child, &status, 0);
+        CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    });
+    CHECK(sandbox_is_active() == 0);
+    free(to_read);
+    free(to_write);
+    free(for_a_folder);
+    printf("sandbox: a chosen file, and nothing else\n");
+}
+
 int main()
 {
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -369,6 +439,10 @@ int main()
     write_file("/tmp/sandbox-test/readable-too/file", "other");
     write_file("/tmp/sandbox-test/writable/file", "writable");
     write_file("/tmp/sandbox-test/secret", "secret");
+    // (Beside what's granted, with names that start the same way, and which it doesn't reach.)
+    write_file("/tmp/sandbox-test/secret-too", "secret");
+    CHECK(mkdir("/tmp/sandbox-test/readable-too-not", 0755) == 0);
+    write_file("/tmp/sandbox-test/readable-too-not/file", "other");
     CHECK(symlink("/tmp/sandbox-test/secret", "/tmp/sandbox-test/writable/old-link") == 0);
     CHECK(symlink("/tmp/sandbox-test/secret", "/tmp/sandbox-test/outside-link") == 0);
 
@@ -381,6 +455,7 @@ int main()
     test_children();
     test_others();
     test_named_profile();
+    test_grants();
     system("rm -rf /tmp/sandbox-test");
     return finish();
 }

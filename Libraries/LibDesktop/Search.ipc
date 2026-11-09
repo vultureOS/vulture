@@ -1,9 +1,13 @@
-// The metadata server (com.vulture.indexd): what Search searches.
+// The metadata server (com.vulture.indexd): what Search searches, mdfind and mdls.
 endpoint Search
 {
     // By name and by words in the text of files; JSON: [ { "path", "name", "kind" } ].
     query(String text, u32 limit) => (String json)
-    // Scans again, soon.
+    // Whatever's waiting to be noticed, noticed now.
     update() =|
-    status() => (u64 files, u64 words)
+    status() => (u64 files, u64 words, bool ready)
+    // mdfind: a query in Spotlight's language, within a folder if one's given. JSON: [ "path" ]; `error` says what's wrong with it.
+    find(String query, String only_in, bool name_only, u32 limit) => (String error, String json)
+    // mdls: JSON: { "kMDItem…": value }; "null" if nothing's known of it.
+    attributes(String path) => (String json)
 }

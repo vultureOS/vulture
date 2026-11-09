@@ -1,0 +1,20 @@
+// What only the desktop can do for a program, sandboxed or not (com.vulture.workspace, in DesktopShell). A sandboxed process's
+// children are as sandboxed as it is, and an application is to run by its own rules: by bundle, with no arguments, so this
+// can't be used to run anything else.
+endpoint Workspace
+{
+    open_application(String bundle) => (i32 error, i32 pid)
+    // Recent Items: the desktop's list.
+    note_recent(String path, bool is_application) =|
+    // A file chosen by someone, in a panel the desktop shows, as the program itself may not be able to see any of them. The
+    // answer comes to `replies`, and with it a token that lets the program reach what was chosen.
+    show_file_panel(u32 request, u32 kind, String directory, String suggested, Port replies) =|
+    // The Services menu: `text`, given to that application to do this with.
+    perform_service(String bundle, String message, String text) =|
+}
+
+endpoint FilePanelReplies
+{
+    // Nothing, if it was cancelled.
+    chosen(u32 request, String path, String token) =|
+}

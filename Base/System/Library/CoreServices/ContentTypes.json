@@ -1,0 +1,514 @@
+{
+    "types": [
+        {
+            "identifier": "public.item",
+            "description": "Item"
+        },
+        {
+            "identifier": "public.content",
+            "description": "Content"
+        },
+        {
+            "identifier": "public.data",
+            "description": "Document",
+            "conformsTo": [
+                "public.item"
+            ]
+        },
+        {
+            "identifier": "public.folder",
+            "description": "Folder",
+            "conformsTo": [
+                "public.item"
+            ],
+            "icon": "Folder"
+        },
+        {
+            "identifier": "public.volume",
+            "description": "Volume",
+            "conformsTo": [
+                "public.folder"
+            ],
+            "icon": "Drive"
+        },
+        {
+            "identifier": "public.symlink",
+            "description": "Alias",
+            "conformsTo": [
+                "public.item"
+            ]
+        },
+        {
+            "identifier": "com.apple.application-bundle",
+            "description": "Application",
+            "conformsTo": [
+                "public.item"
+            ]
+        },
+        {
+            "identifier": "public.executable",
+            "description": "Unix Executable File",
+            "conformsTo": [
+                "public.data"
+            ]
+        },
+        {
+            "identifier": "public.text",
+            "description": "Text",
+            "conformsTo": [
+                "public.data",
+                "public.content"
+            ]
+        },
+        {
+            "identifier": "public.plain-text",
+            "description": "Plain Text Document",
+            "conformsTo": [
+                "public.text"
+            ],
+            "extensions": [
+                "txt",
+                "text"
+            ]
+        },
+        {
+            "identifier": "net.daringfireball.markdown",
+            "description": "Markdown Document",
+            "conformsTo": [
+                "public.plain-text"
+            ],
+            "extensions": [
+                "md",
+                "markdown"
+            ]
+        },
+        {
+            "identifier": "com.apple.log",
+            "description": "Log File",
+            "conformsTo": [
+                "public.plain-text"
+            ],
+            "extensions": [
+                "log"
+            ]
+        },
+        {
+            "identifier": "public.json",
+            "description": "JSON Document",
+            "conformsTo": [
+                "public.text"
+            ],
+            "extensions": [
+                "json"
+            ]
+        },
+        {
+            "identifier": "com.apple.property-list",
+            "description": "Property List",
+            "conformsTo": [
+                "public.data"
+            ],
+            "extensions": [
+                "plist"
+            ]
+        },
+        {
+            "identifier": "public.xml",
+            "description": "XML Document",
+            "conformsTo": [
+                "public.text"
+            ],
+            "extensions": [
+                "xml"
+            ]
+        },
+        {
+            "identifier": "public.html",
+            "description": "HTML Document",
+            "conformsTo": [
+                "public.text"
+            ],
+            "extensions": [
+                "html",
+                "htm"
+            ]
+        },
+        {
+            "identifier": "public.css",
+            "description": "CSS Style Sheet",
+            "conformsTo": [
+                "public.text"
+            ],
+            "extensions": [
+                "css"
+            ]
+        },
+        {
+            "identifier": "public.source-code",
+            "description": "Source Code",
+            "conformsTo": [
+                "public.plain-text"
+            ]
+        },
+        {
+            "identifier": "public.c-source",
+            "description": "C Source File",
+            "conformsTo": [
+                "public.source-code"
+            ],
+            "extensions": [
+                "c"
+            ]
+        },
+        {
+            "identifier": "public.c-header",
+            "description": "C Header File",
+            "conformsTo": [
+                "public.source-code"
+            ],
+            "extensions": [
+                "h"
+            ]
+        },
+        {
+            "identifier": "public.c-plus-plus-source",
+            "description": "C++ Source File",
+            "conformsTo": [
+                "public.source-code"
+            ],
+            "extensions": [
+                "cpp",
+                "cc",
+                "cxx"
+            ]
+        },
+        {
+            "identifier": "public.c-plus-plus-header",
+            "description": "C++ Header File",
+            "conformsTo": [
+                "public.source-code"
+            ],
+            "extensions": [
+                "hpp",
+                "hh",
+                "hxx"
+            ]
+        },
+        {
+            "identifier": "public.objective-c-source",
+            "description": "Objective-C Source File",
+            "conformsTo": [
+                "public.source-code"
+            ],
+            "extensions": [
+                "m",
+                "mm"
+            ]
+        },
+        {
+            "identifier": "public.swift-source",
+            "description": "Swift Source File",
+            "conformsTo": [
+                "public.source-code"
+            ],
+            "extensions": [
+                "swift"
+            ]
+        },
+        {
+            "identifier": "public.shell-script",
+            "description": "Shell Script",
+            "conformsTo": [
+                "public.source-code"
+            ],
+            "extensions": [
+                "sh",
+                "bash",
+                "zsh"
+            ]
+        },
+        {
+            "identifier": "public.python-script",
+            "description": "Python Script",
+            "conformsTo": [
+                "public.source-code"
+            ],
+            "extensions": [
+                "py"
+            ]
+        },
+        {
+            "identifier": "com.netscape.javascript-source",
+            "description": "JavaScript Source File",
+            "conformsTo": [
+                "public.source-code"
+            ],
+            "extensions": [
+                "js",
+                "mjs"
+            ]
+        },
+        {
+            "identifier": "public.configuration",
+            "description": "Configuration File",
+            "conformsTo": [
+                "public.plain-text"
+            ],
+            "extensions": [
+                "conf",
+                "cfg",
+                "ini"
+            ]
+        },
+        {
+            "identifier": "public.comma-separated-values-text",
+            "description": "Comma-Separated Values",
+            "conformsTo": [
+                "public.text"
+            ],
+            "extensions": [
+                "csv"
+            ]
+        },
+        {
+            "identifier": "public.rtf",
+            "description": "Rich Text Document",
+            "conformsTo": [
+                "public.text"
+            ],
+            "extensions": [
+                "rtf"
+            ]
+        },
+        {
+            "identifier": "com.adobe.pdf",
+            "description": "PDF Document",
+            "conformsTo": [
+                "public.data",
+                "public.content"
+            ],
+            "extensions": [
+                "pdf"
+            ]
+        },
+        {
+            "identifier": "public.image",
+            "description": "Image",
+            "conformsTo": [
+                "public.data",
+                "public.content"
+            ]
+        },
+        {
+            "identifier": "public.png",
+            "description": "PNG Image",
+            "conformsTo": [
+                "public.image"
+            ],
+            "extensions": [
+                "png"
+            ]
+        },
+        {
+            "identifier": "public.jpeg",
+            "description": "JPEG Image",
+            "conformsTo": [
+                "public.image"
+            ],
+            "extensions": [
+                "jpg",
+                "jpeg"
+            ]
+        },
+        {
+            "identifier": "com.compuserve.gif",
+            "description": "GIF Image",
+            "conformsTo": [
+                "public.image"
+            ],
+            "extensions": [
+                "gif"
+            ]
+        },
+        {
+            "identifier": "com.microsoft.bmp",
+            "description": "BMP Image",
+            "conformsTo": [
+                "public.image"
+            ],
+            "extensions": [
+                "bmp"
+            ]
+        },
+        {
+            "identifier": "public.tiff",
+            "description": "TIFF Image",
+            "conformsTo": [
+                "public.image"
+            ],
+            "extensions": [
+                "tif",
+                "tiff"
+            ]
+        },
+        {
+            "identifier": "org.webmproject.webp",
+            "description": "WebP Image",
+            "conformsTo": [
+                "public.image"
+            ],
+            "extensions": [
+                "webp"
+            ]
+        },
+        {
+            "identifier": "public.svg-image",
+            "description": "SVG Image",
+            "conformsTo": [
+                "public.image",
+                "public.xml"
+            ],
+            "extensions": [
+                "svg"
+            ]
+        },
+        {
+            "identifier": "public.audio",
+            "description": "Audio",
+            "conformsTo": [
+                "public.data",
+                "public.content"
+            ]
+        },
+        {
+            "identifier": "com.microsoft.waveform-audio",
+            "description": "Waveform Audio",
+            "conformsTo": [
+                "public.audio"
+            ],
+            "extensions": [
+                "wav"
+            ]
+        },
+        {
+            "identifier": "public.mp3",
+            "description": "MP3 Audio",
+            "conformsTo": [
+                "public.audio"
+            ],
+            "extensions": [
+                "mp3"
+            ]
+        },
+        {
+            "identifier": "org.xiph.flac",
+            "description": "FLAC Audio",
+            "conformsTo": [
+                "public.audio"
+            ],
+            "extensions": [
+                "flac"
+            ]
+        },
+        {
+            "identifier": "public.aiff-audio",
+            "description": "AIFF Audio",
+            "conformsTo": [
+                "public.audio"
+            ],
+            "extensions": [
+                "aif",
+                "aiff"
+            ]
+        },
+        {
+            "identifier": "public.movie",
+            "description": "Movie",
+            "conformsTo": [
+                "public.data",
+                "public.content"
+            ]
+        },
+        {
+            "identifier": "public.mpeg-4",
+            "description": "MPEG-4 Movie",
+            "conformsTo": [
+                "public.movie"
+            ],
+            "extensions": [
+                "mp4",
+                "m4v"
+            ]
+        },
+        {
+            "identifier": "com.apple.quicktime-movie",
+            "description": "QuickTime Movie",
+            "conformsTo": [
+                "public.movie"
+            ],
+            "extensions": [
+                "mov"
+            ]
+        },
+        {
+            "identifier": "org.webmproject.webm",
+            "description": "WebM Movie",
+            "conformsTo": [
+                "public.movie"
+            ],
+            "extensions": [
+                "webm"
+            ]
+        },
+        {
+            "identifier": "public.archive",
+            "description": "Archive",
+            "conformsTo": [
+                "public.data"
+            ]
+        },
+        {
+            "identifier": "public.tar-archive",
+            "description": "tar Archive",
+            "conformsTo": [
+                "public.archive"
+            ],
+            "extensions": [
+                "tar"
+            ]
+        },
+        {
+            "identifier": "org.gnu.gnu-zip-archive",
+            "description": "gzip Archive",
+            "conformsTo": [
+                "public.archive"
+            ],
+            "extensions": [
+                "gz",
+                "tgz"
+            ]
+        },
+        {
+            "identifier": "public.zip-archive",
+            "description": "ZIP Archive",
+            "conformsTo": [
+                "public.archive"
+            ],
+            "extensions": [
+                "zip"
+            ]
+        },
+        {
+            "identifier": "com.apple.disk-image",
+            "description": "Disk Image",
+            "conformsTo": [
+                "public.data"
+            ],
+            "extensions": [
+                "img",
+                "dmg",
+                "iso"
+            ]
+        }
+    ]
+}

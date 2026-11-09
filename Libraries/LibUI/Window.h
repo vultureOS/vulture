@@ -95,6 +95,8 @@ public:
     // What happens to it.
     Function<bool()> on_close_request;
     Function<void()> on_closed;
+    // Whoever owns it, last of all: on_closed is the program's to set.
+    Function<void()> on_discard;
     Function<void(bool)> on_key_change;
     Function<void(Gfx::FloatSize)> on_resize;
 

@@ -163,7 +163,7 @@ private:
         if (!wanted)
             return false;
         // That something exists is itself something to be allowed to know.
-        if (sandbox_check(SandboxOperation::FileRead, path).is_error())
+        if (!sandbox_would_allow(SandboxOperation::FileRead, path))
             return false;
         auto const* credentials = current_credentials();
         if (!credentials || credentials->is_superuser())

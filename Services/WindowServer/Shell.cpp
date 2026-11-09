@@ -581,7 +581,8 @@ void Server::update_visibility(ServerWindow& window)
             window.chrome_is_stale = true;
             m_compositor.invalidate_window(window);
             m_active = nullptr;
-            activate_frontmost();
+            // Closed by its program, and not only out of sight: another of that program's next.
+            activate_frontmost(window.shown_by_client ? nullptr : window.client);
         }
     }
 }

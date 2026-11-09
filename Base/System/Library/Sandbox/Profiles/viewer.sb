@@ -1,6 +1,2 @@
-# Looks at pictures, wherever they are; changes nothing.
+# Looks at pictures, as it's given them: chosen in a panel, or opened from somewhere else. Nothing of anyone's otherwise.
 include application
-read ${HOME}
-read /Users/Shared
-read /Volumes
-read /private/tmp

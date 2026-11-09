@@ -1,7 +1,0 @@
-// Starting an application for something that can't have it as a child (com.vulture.workspace, in
-// DesktopShell): a sandboxed process's children are as sandboxed as it is, and an application is to
-// run by its own rules. By bundle, with no arguments, so this can't be used to run anything else.
-endpoint Workspace
-{
-    open_application(String bundle) => (i32 error, i32 pid)
-}

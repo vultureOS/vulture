@@ -1,0 +1,227 @@
+-- What LibDatabase has to answer as SQLite does.
+
+-- ---- Expressions, with no table.
+SELECT 1 + 2 * 3, (1 + 2) * 3, 7 / 2, 7 % 3, -7 / 2, 7.0 / 2;
+SELECT 1 / 0, 1 % 0, 1.5 + 1, 2 * 1.5, 'a' || 'b', 1 || 2;
+SELECT 1 = 1, 1 = 2, 1 < 2, 2 <= 2, 3 > 4, 4 >= 4, 1 != 2, 1 <> 1;
+SELECT NULL = NULL, NULL IS NULL, NULL IS NOT NULL, 1 IS NULL, 1 IS NOT NULL;
+SELECT NULL AND 0, NULL AND 1, NULL OR 0, NULL OR 1, NOT NULL, NOT 0, NOT 1;
+SELECT 5 & 3, 5 | 3, 1 << 4, 256 >> 4, ~5;
+SELECT 'abc' LIKE 'a%', 'abc' LIKE 'A_C', 'abc' NOT LIKE 'b%', 'abc' GLOB 'a*', 'abc' GLOB 'A*', 'abc' GLOB '[a-c]?c';
+SELECT 3 BETWEEN 1 AND 5, 3 NOT BETWEEN 1 AND 5, 6 BETWEEN 1 AND 5;
+SELECT 3 IN (1, 2, 3), 4 IN (1, 2, 3), 4 NOT IN (1, 2, 3), NULL IN (1), 1 IN (NULL), 1 IN (1, NULL), 2 IN (1, NULL);
+SELECT CASE WHEN 1 THEN 'one' ELSE 'other' END, CASE WHEN 0 THEN 'one' ELSE 'other' END, CASE WHEN 0 THEN 'one' END;
+SELECT CASE 2 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'many' END, CASE 5 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'many' END;
+SELECT CAST('12' AS INTEGER), CAST('12abc' AS INTEGER), CAST('x' AS INTEGER), CAST(3.9 AS INTEGER), CAST(3 AS REAL), CAST(3 AS TEXT);
+SELECT typeof(1), typeof(1.5), typeof('a'), typeof(X'00'), typeof(NULL);
+SELECT abs(-5), abs(5), abs(-1.5), abs(NULL);
+SELECT length('hello'), length(''), length(NULL), length(123), length('héllo');
+SELECT lower('ABC'), upper('abc'), lower(NULL);
+SELECT substr('hello', 2), substr('hello', 2, 3), substr('hello', -3), substr('hello', -3, 2), substr('hello', 0), substr('hello', 0, 2), substr('hello', 10);
+SELECT trim('  a  '), ltrim('  a  '), rtrim('  a  '), trim('xxaxx', 'x');
+SELECT replace('hello', 'l', 'L'), replace('hello', 'z', 'y'), replace('hello', '', 'y');
+SELECT instr('hello', 'l'), instr('hello', 'z'), instr('héllo', 'l');
+SELECT round(1.5), round(2.5), round(1.234, 2), round(-1.5), round(NULL);
+SELECT coalesce(NULL, 1, 2), coalesce(NULL, NULL), ifnull(NULL, 3), ifnull(4, 3), nullif(1, 1), nullif(1, 2);
+SELECT min(1, 2, 3), max(1, 2, 3), min(1, NULL), max('a', 1);
+SELECT hex('abc'), hex(X'00ff');
+SELECT 1.0, 1.5, 100.0, 1e3, 1.5e300, 0.1, 123456789012345.0, -0.5;
+SELECT 9223372036854775807, -9223372036854775807, 9223372036854775807 + 1, 2147483648 * 4294967296;
+SELECT 'it''s', '', 'a' < 'b', 'a' < 'B', 1 < 'a', 'a' < X'00';
+
+-- ---- A table's types.
+CREATE TABLE types(a INTEGER, b REAL, c TEXT, d BLOB, e NUMERIC, f);
+INSERT INTO types VALUES (1, 1, 1, 1, 1, 1);
+INSERT INTO types VALUES ('2', '2', '2', '2', '2', '2');
+INSERT INTO types VALUES (3.0, 3.0, 3.0, 3.0, 3.0, 3.0);
+INSERT INTO types VALUES (3.5, 3.5, 3.5, 3.5, 3.5, 3.5);
+INSERT INTO types VALUES ('x', 'x', 'x', 'x', 'x', 'x');
+INSERT INTO types VALUES (NULL, NULL, NULL, NULL, NULL, NULL);
+SELECT a, typeof(a), b, typeof(b), c, typeof(c), d, typeof(d), e, typeof(e), f, typeof(f) FROM types;
+SELECT count(*) FROM types WHERE a = 1;
+SELECT count(*) FROM types WHERE a = '1';
+SELECT count(*) FROM types WHERE c = 1;
+SELECT count(*) FROM types WHERE c = '1';
+SELECT count(*) FROM types WHERE f = 1;
+SELECT count(*) FROM types WHERE f = '1';
+DROP TABLE types;
+
+-- ---- Rows, keys and constraints.
+CREATE TABLE people(id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER DEFAULT 30, email TEXT UNIQUE);
+INSERT INTO people(name) VALUES ('Ada');
+INSERT INTO people(name, age) VALUES ('Grace', 45);
+INSERT INTO people(id, name, email) VALUES (10, 'Alan', 'alan@example.com');
+INSERT INTO people(name) VALUES ('Next');
+SELECT * FROM people;
+SELECT rowid, id, name FROM people ORDER BY id DESC;
+SELECT last_insert_rowid();
+INSERT INTO people(name) VALUES (NULL);
+INSERT INTO people(id, name) VALUES (10, 'Clash');
+INSERT INTO people(name, email) VALUES ('Clash', 'alan@example.com');
+INSERT OR IGNORE INTO people(id, name) VALUES (10, 'Ignored');
+SELECT * FROM people WHERE id = 10;
+INSERT OR REPLACE INTO people(id, name) VALUES (10, 'Replaced');
+SELECT * FROM people WHERE id = 10;
+INSERT OR REPLACE INTO people(id, name, email) VALUES (20, 'Second', 'x@example.com');
+INSERT OR REPLACE INTO people(id, name, email) VALUES (21, 'Third', 'x@example.com');
+SELECT id, name FROM people WHERE email = 'x@example.com';
+SELECT count(*) FROM people;
+UPDATE people SET age = age + 1 WHERE name = 'Ada';
+SELECT name, age FROM people WHERE name = 'Ada';
+SELECT changes();
+UPDATE people SET age = 1;
+SELECT changes();
+UPDATE people SET id = 100 WHERE id = 1;
+SELECT id, name FROM people ORDER BY id;
+DELETE FROM people WHERE id = 100;
+SELECT changes();
+SELECT count(*) FROM people;
+DELETE FROM people;
+SELECT count(*) FROM people;
+DROP TABLE people;
+
+-- ---- Selecting.
+CREATE TABLE sales(region TEXT, item TEXT, amount INTEGER, price REAL);
+INSERT INTO sales VALUES ('north', 'apple', 3, 1.5), ('north', 'pear', 2, 2.0), ('south', 'apple', 5, 1.5), ('south', 'plum', NULL, 3.0), ('east', 'apple', 1, 1.0), ('east', NULL, 7, 0.5);
+SELECT * FROM sales ORDER BY region, item;
+SELECT region, count(*), count(item), count(amount), sum(amount), avg(amount), min(amount), max(amount), total(amount) FROM sales GROUP BY region;
+SELECT count(*), sum(amount), avg(price) FROM sales;
+SELECT count(*), sum(amount), min(amount), total(amount), avg(amount) FROM sales WHERE region = 'nowhere';
+SELECT count(DISTINCT region), count(DISTINCT item), sum(DISTINCT amount) FROM sales;
+SELECT region, sum(amount) AS total_amount FROM sales GROUP BY region HAVING sum(amount) > 5 ORDER BY total_amount DESC;
+SELECT item, amount * price AS value FROM sales WHERE amount IS NOT NULL ORDER BY value DESC, item;
+SELECT DISTINCT region FROM sales ORDER BY region;
+SELECT DISTINCT item, region FROM sales WHERE region != 'east' ORDER BY 2, 1;
+SELECT region FROM sales ORDER BY region LIMIT 2;
+SELECT region FROM sales ORDER BY region LIMIT 2 OFFSET 1;
+SELECT region FROM sales ORDER BY region LIMIT 1, 2;
+SELECT region FROM sales ORDER BY region LIMIT 0;
+SELECT region FROM sales ORDER BY region LIMIT -1 OFFSET 4;
+SELECT item, amount FROM sales ORDER BY amount;
+SELECT item, amount FROM sales ORDER BY amount DESC, item ASC;
+SELECT group_concat(item) FROM sales WHERE region = 'north';
+SELECT group_concat(item, '+') FROM sales WHERE region = 'north';
+SELECT region, max(amount), item FROM sales GROUP BY region;
+SELECT s.region, s.item FROM sales AS s WHERE s.amount > 2 ORDER BY s.item, s.region;
+SELECT region r FROM sales GROUP BY r ORDER BY r;
+SELECT 1 + 1 FROM sales LIMIT 1;
+
+-- ---- Joins.
+CREATE TABLE authors(id INTEGER PRIMARY KEY, name TEXT);
+CREATE TABLE books(id INTEGER PRIMARY KEY, author INTEGER, title TEXT);
+INSERT INTO authors VALUES (1, 'Le Guin'), (2, 'Lem'), (3, 'Nobody');
+INSERT INTO books VALUES (1, 1, 'Earthsea'), (2, 1, 'Dispossessed'), (3, 2, 'Solaris'), (4, 9, 'Orphan');
+SELECT a.name, b.title FROM authors a JOIN books b ON b.author = a.id ORDER BY a.name, b.title;
+SELECT a.name, b.title FROM authors a LEFT JOIN books b ON b.author = a.id ORDER BY a.name, b.title;
+SELECT a.name, b.title FROM authors a, books b WHERE b.author = a.id ORDER BY b.title;
+SELECT a.name, count(b.id) FROM authors a LEFT JOIN books b ON b.author = a.id GROUP BY a.id ORDER BY a.name;
+SELECT a.name FROM authors a LEFT JOIN books b ON b.author = a.id WHERE b.id IS NULL;
+SELECT count(*) FROM authors CROSS JOIN books;
+SELECT * FROM authors a JOIN books b ON b.author = a.id WHERE a.id = 2;
+SELECT a.* FROM authors a WHERE a.id = 1;
+DROP TABLE authors;
+DROP TABLE books;
+
+-- ---- Indexes: the same answers with one as without, on every kind of condition.
+CREATE TABLE numbers(n INTEGER, t TEXT, r REAL);
+INSERT INTO numbers VALUES (1, 'one', 1.0), (2, 'two', 2.5), (3, 'three', NULL), (4, 'four', 4.0), (5, 'five', 5.5), (NULL, 'none', 6.0), (2, 'deux', 2.0);
+SELECT t FROM numbers WHERE n = 2 ORDER BY t;
+SELECT t FROM numbers WHERE n > 2 ORDER BY n;
+SELECT t FROM numbers WHERE n >= 2 AND n < 4 ORDER BY t;
+SELECT t FROM numbers WHERE n IN (1, 5, 9) ORDER BY n;
+SELECT t FROM numbers WHERE n IS NULL;
+SELECT t FROM numbers WHERE n = NULL;
+SELECT t FROM numbers WHERE t >= 'f' AND t < 'g' ORDER BY t;
+SELECT t FROM numbers WHERE r > 2 ORDER BY r DESC;
+SELECT n FROM numbers ORDER BY n DESC LIMIT 3;
+CREATE INDEX numbers_n ON numbers(n);
+CREATE INDEX numbers_t ON numbers(t);
+CREATE INDEX numbers_rn ON numbers(r, n);
+SELECT t FROM numbers WHERE n = 2 ORDER BY t;
+SELECT t FROM numbers WHERE n > 2 ORDER BY n;
+SELECT t FROM numbers WHERE n >= 2 AND n < 4 ORDER BY t;
+SELECT t FROM numbers WHERE n IN (1, 5, 9) ORDER BY n;
+SELECT t FROM numbers WHERE n IS NULL;
+SELECT t FROM numbers WHERE n = NULL;
+SELECT t FROM numbers WHERE t >= 'f' AND t < 'g' ORDER BY t;
+SELECT t FROM numbers WHERE r > 2 ORDER BY r DESC;
+SELECT n FROM numbers ORDER BY n DESC LIMIT 3;
+SELECT n FROM numbers ORDER BY n LIMIT 3;
+SELECT t FROM numbers WHERE n = '2' ORDER BY t;
+SELECT t FROM numbers WHERE n = 2.0 ORDER BY t;
+SELECT t FROM numbers WHERE n > 1.5 AND n < 2.5 ORDER BY t;
+SELECT t FROM numbers WHERE r = 2.5 AND n = 2;
+SELECT r, n FROM numbers WHERE r >= 2 ORDER BY r, n;
+SELECT rowid FROM numbers WHERE rowid = 3;
+SELECT rowid FROM numbers WHERE rowid > 5;
+SELECT rowid FROM numbers WHERE rowid >= 2 AND rowid <= 3;
+SELECT rowid FROM numbers WHERE rowid > 1.5 AND rowid < 3.5;
+SELECT rowid FROM numbers ORDER BY rowid DESC LIMIT 2;
+DROP INDEX numbers_t;
+SELECT t FROM numbers WHERE t = 'two';
+UPDATE numbers SET n = 7 WHERE t = 'one';
+SELECT t FROM numbers WHERE n = 7;
+SELECT t FROM numbers WHERE n = 1;
+DELETE FROM numbers WHERE n = 7;
+SELECT count(*) FROM numbers WHERE n = 7;
+CREATE UNIQUE INDEX unique_t ON numbers(t);
+INSERT INTO numbers VALUES (9, 'two', 1);
+SELECT count(*) FROM numbers;
+INSERT INTO numbers VALUES (9, NULL, 1);
+INSERT INTO numbers VALUES (9, NULL, 1);
+SELECT count(*) FROM numbers WHERE t IS NULL;
+DROP TABLE numbers;
+
+-- ---- Keys of several columns, and of text.
+CREATE TABLE pairs(a TEXT, b INTEGER, c TEXT, PRIMARY KEY(a, b));
+INSERT INTO pairs VALUES ('x', 1, 'one'), ('x', 2, 'two'), ('y', 1, 'three');
+INSERT INTO pairs VALUES ('x', 1, 'clash');
+SELECT c FROM pairs WHERE a = 'x' AND b = 2;
+SELECT c FROM pairs WHERE a = 'x' ORDER BY b DESC;
+SELECT c FROM pairs WHERE b = 1 ORDER BY c;
+DROP TABLE pairs;
+
+CREATE TABLE words(word TEXT PRIMARY KEY, n INTEGER);
+INSERT INTO words VALUES ('apple', 1), ('apply', 2), ('apt', 3), ('banana', 4), ('', 5), ('a', 6);
+SELECT word FROM words WHERE word >= 'app' AND word < 'apq' ORDER BY word;
+SELECT word FROM words ORDER BY word;
+SELECT word FROM words ORDER BY word DESC LIMIT 2;
+SELECT n FROM words WHERE word = '';
+DROP TABLE words;
+
+-- ---- Transactions.
+CREATE TABLE ledger(id INTEGER PRIMARY KEY, note TEXT);
+BEGIN;
+INSERT INTO ledger(note) VALUES ('kept');
+COMMIT;
+BEGIN;
+INSERT INTO ledger(note) VALUES ('gone');
+UPDATE ledger SET note = 'changed' WHERE id = 1;
+SELECT note FROM ledger ORDER BY id;
+ROLLBACK;
+SELECT note FROM ledger ORDER BY id;
+BEGIN;
+CREATE TABLE temporary_one(x);
+INSERT INTO temporary_one VALUES (1);
+SELECT x FROM temporary_one;
+ROLLBACK;
+SELECT x FROM temporary_one;
+SELECT note FROM ledger;
+DROP TABLE ledger;
+
+-- ---- Changing what a table is.
+CREATE TABLE growing(a INTEGER);
+INSERT INTO growing VALUES (1), (2);
+ALTER TABLE growing ADD COLUMN b TEXT DEFAULT 'hello';
+ALTER TABLE growing ADD COLUMN c INTEGER;
+SELECT a, b, c FROM growing;
+INSERT INTO growing VALUES (3, 'new', 9);
+SELECT a, b, c FROM growing WHERE b = 'hello' ORDER BY a;
+SELECT * FROM growing WHERE c = 9;
+DROP TABLE growing;
+
+CREATE TABLE IF NOT EXISTS once(x);
+CREATE TABLE IF NOT EXISTS once(x);
+DROP TABLE IF EXISTS once;
+DROP TABLE IF EXISTS once;
+SELECT 'still here';

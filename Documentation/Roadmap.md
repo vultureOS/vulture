@@ -105,7 +105,7 @@ Sizes are rough estimates of new lines, scaled from the reference figures above.
 | **2 Mac feel** | M23 | [Windows and Spaces](#m23-windows-and-spaces) | Done, but for timing against the VM (waiting on a decision) | Tile, go full screen, use App Exposé and Stage | 10k |
 | | M24 | [The desktop](#m24-the-desktop) | Done, but for sizes, colours and timings against the VM (waiting on a decision) | Use the full Dock, menu bar, Control Center, widgets and screenshots | 12k |
 | | M25 | [Sessions](#m25-sessions) | Done, but for sizes, colours and timings against the VM (waiting on a decision) | Set up a new machine, lock it, switch between users | 8k |
-| | M26 | [Documents and Search](#m26-documents-and-search) | | Have autosave, default apps, Quick View, and fast Search that lasts across reboots | 20k |
+| | M26 | [Documents and Search](#m26-documents-and-search) | Done | Have autosave, default apps, Quick View, and fast Search that lasts across reboots | 20k |
 | | M27 | [Files](#m27-files) | | Use a real Finder: columns, gallery, tabs, tags, Empty Trash | 12k |
 | | M28 | [The look, measured](#m28-the-look-measured) | | Put it next to a Sequoia Mac with no estimated value left | 8k |
 | **3 Your work** | M29 | [Debug and profile](#m29-debug-and-profile) | | Debug and profile on the machine itself; read crash reports and man pages | 15k |
@@ -557,8 +557,8 @@ Measured on QEMU + HVF with 8 vCPUs, tracked by `ninja bench` from M3 on. M15 me
 | Window drag at 2560×1600 | 60 fps | 111 fps (M21: 10 windows, 5 with blur; about 4 ms of composing and 0.7 ms of flushing per frame; 120 fps is the most it asks for). With all of the screen drawn for every frame, 12 windows and blur: 119 fps. At M23, at a load of 5: 101 fps and 112 to 115 fps, with a frame's work the same (3.9 ms composing, 0.8 ms flushing) |
 | Input to photon | ≤ 1 frame | 12.5 ms at the 99th percentile from the event to the flush, worst 14.2 ms; 9.5 ms with all of the screen drawn for every frame (M21, on a machine with little else going on). Measured at M22 with a game taking 3 of this Mac's 10 cores, on the same binary: 13 to 21 ms, and 18 to 26 ms, going up with the load average from 7 to 10, though a frame's work hadn't changed (4.4 ms composing, 0.8 ms flushing). It was 23.5 ms at M19, measured from when the event was read rather than when it happened. At M23, at a load of 5 to 6: 14.0 to 14.5 ms, and 13.5 to 18.5 ms with all of the screen drawn. QEMU shows no photon, so this is as far as it can be measured |
 | Text Editor cold launch | < 300 ms | 33 ms, 32 to 37 ms warm (M23) |
-| Cmd-Tab appears | ≤ 1 frame | 9.7 to 20.8 ms from the key to the flush that shows the panel, usually 10 to 12 ms (M23, five in a row, with macOS's own background work keeping this Mac's load at 5 to 6); on a quieter run all five were under 16.4 ms. At M24, at a load of 2: 8.6 to 24.5 ms, the slowest of five 19.5 to 24.5 ms, after taking away a cause of a 55.8 ms one (see M24's findings). The shell draws the panel, so it's a round trip to another process and back |
-| Search, per keystroke | ≤ 50 ms | |
+| Cmd-Tab appears | ≤ 1 frame | 9.7 to 20.8 ms from the key to the flush that shows the panel, usually 10 to 12 ms (M23, five in a row, with macOS's own background work keeping this Mac's load at 5 to 6); on a quieter run all five were under 16.4 ms. At M24, at a load of 2: 8.6 to 24.5 ms, the slowest of five 19.5 to 24.5 ms, after taking away a cause of a 55.8 ms one (see M24's findings). The shell draws the panel, so it's a round trip to another process and back **M26: 12.0 to 20.8 ms, usually about 15, so some are over a frame: open.** |
+| Search, per keystroke | ≤ 50 ms | 8.2 to 18 ms at worst, 0.8 ms on average, over 100,000 files with a word of their own in each (M26, the slowest of 67 keystrokes) |
 | Application launch | < 300 ms | 24 ms (M19, Calculator, cold) |
 | Clone of a 1 GiB file | < 50 ms | Under 1 ms (M19): it takes the same for any size |
 | 1080p30 VP9 | no dropped frames | |
@@ -599,6 +599,20 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **Testing inside a copy of the system.** With a `dd` of its own at last, a test that changes to a copy of the system and runs `dd` ran that one, for the wrong processor, if `PATH` had a relative entry in it. The seal tests then found nothing to catch, and said so as if the kernel had let a tampered file by.
 - **Tests that click by position go stale.** One new row in Settings moved everything under it, and each walkthrough that clicked one of those by coordinates went wrong, as M15 said it would. They go by name now.
 - **What a Mac does that's wrong.** Nine of POSIX's checks and seven of the commands are different on purpose. Each is written down in `Tests/Parity`, with why.
+
+### M26
+
+- **A closed window never left.** `Application::keep_window` kept a program's windows, and took them back by wrapping the window's `on_closed`; `TextEditor` and `Viewer` then set `on_closed` themselves, over it. So a closed window stayed alive and, the server having nothing more to say to it, stayed key: the next menu command went to a window nobody could see. The toolkit has a hook of its own now, and a closed window isn't key. Both programs now stay running with no windows, as they had been by accident and as a Mac's do.
+- **Closing a window gave the keyboard to someone else.** The server gave it to whatever was frontmost. Now it's the same program's next window if it has one, as on a Mac, and only then whatever's in front.
+- **The index was root's, for everyone.** `indexd` was a launch daemon, as root, so anyone's search found anyone's files. It's started with each session now, as that person, in a sandbox it puts itself into once its folder exists.
+- **The NVMe hang.** One boot in ten stopped before the disk. The admin queue raises its interrupt pin whatever it's asked; its line can already be enabled for another device; and set-up polls with no handler in place, so the processor polling could only ever take that interrupt. The pin stays off until the handler's there: 18 boots in 20 became 40 in 40.
+- **`test-panic` only knew AArch64's words.** On a PC the same fault is rightly a page fault. It says what it should on each now.
+- **Not quite a frame for Cmd-Tab.** It was usually 10 to 12 ms from the key to the flush; with M26 it's usually about 15, and some are over the 16.7 ms it should be. Not looked into yet beyond taking out a second reading of the shell's state.
+- **A starved Mac looks like a broken system.** With its own services taking the load average to 17, walkthroughs failed two times in three, at random steps, and one boot never left the firmware. With the load under 5, six in a row passed. A suite that fails like that should be run again on a quiet machine before anything's made of it.
+- **Limit: a panel shown for a sandboxed program is its own window,** not a sheet on the program's, as the program isn't what's drawing it.
+- **Limit: the Services menu** offers everything there is, as a menu published to the server can't ask what's selected when it's opened; choosing one with nothing selected only beeps. Text Editor's is the only service so far.
+- **Limit: Text Editor** is the only program that brings its own documents back, with the rest being started again as they were at logout. There's no "Reopen windows when logging back in" box at Log Out yet, only the preference (`reopenWindows`).
+- **Limit: importers** read the text of what's text and the size of PNG and JPEG pictures. Quick View has plugins for those too. PDF comes with M30, and sound and video with M34 and M35. Tags in panels wait for M27.
 
 ### M25
 

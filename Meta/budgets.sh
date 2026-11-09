@@ -39,6 +39,9 @@ VULTURE_GPU_WIDTH=2560 VULTURE_GPU_HEIGHT=1600 "$source_dir/Meta/run.sh" --build
 # Cmd-Tab, on the whole desktop: the shell draws its panel.
 VULTURE_GPU_WIDTH=2560 VULTURE_GPU_HEIGHT=1600 "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --fresh-disk --boot-args uidesktop \
     --chat "$source_dir/Tests/UI/switcher-budget.chat" --timeout 120 > "$out/switcher.log" 2>&1 || status=1
+# Search, over a hundred thousand files, each letter as it's typed.
+VULTURE_GPU_WIDTH=2560 VULTURE_GPU_HEIGHT=1600 "$source_dir/Meta/run.sh" --build-dir "$build_dir" --headless --fresh-disk --boot-args uidesktop \
+    --chat "$source_dir/Tests/UI/search-budget.chat" --timeout 900 > "$out/search.log" 2>&1 || status=1
 value_of() {
     { grep -a "budget: $1: " "$out/budgets.log" || true; } | head -n 1 | tr -d '\r' | sed "s/.*budget: $1: //"
 }
@@ -74,6 +77,8 @@ row "input to flush, whole screen, 99th percentile" "at most 16.7 ms" 16.7 "$(va
 # The slowest of five, the first included.
 switcher="$({ grep -a "budget: Cmd-Tab appears: " "$out/switcher.log" || true; } | tr -d '\r' | sed 's/.*budget: Cmd-Tab appears: //; s/ ms.*//' | sort -n | tail -n 1)"
 row "Cmd-Tab appears, the slowest of five" "at most a frame, 16.7 ms" 16.7 "${switcher:+$switcher ms}"
+search="$({ grep -a "budget: search per keystroke over" "$out/search.log" || true; } | tail -n 1 | tr -d '\r' | sed 's/.*budget: search per keystroke over [0-9]* files: //; s/ ms.*//')"
+row "Search, the slowest keystroke over 100,000 files" "at most 50 ms" 50 "${search:+$search ms}"
 if [ "$status" -eq 0 ]; then
     echo "budgets: PASS"
 else

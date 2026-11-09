@@ -26,4 +26,12 @@ void sandbox_free_error(char*);
 // Whether that process's sandbox lets it look up that service: 0, or -1 and errno.
 int sandbox_check_service(pid_t, char const* service);
 
+// Outside a sandbox: a token that lets whoever redeems it reach this path, as an Open panel's choice does. malloc()ed, or null
+// and errno.
+char* sandbox_extension_issue(char const* path, int writable);
+// Inside one: from now on, that path can be reached. 0, or -1 and errno.
+int sandbox_extension_consume(char const* token);
+// Whether this process is in a sandbox at all: 1 or 0.
+int sandbox_is_active(void);
+
 __END_DECLS

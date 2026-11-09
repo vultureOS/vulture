@@ -7,6 +7,9 @@
 #include <WorkspaceEndpoint.h>
 #include <os/log.h>
 #include "Desktop.h"
+#include "ContentTypes.h"
+#include "Documents.h"
+#include <AppInstanceEndpoint.h>
 #include <LibIPC/Bootstrap.h>
 #include <LibIPC/Listener.h>
 #include <LibGfx/Gradient.h>
@@ -67,17 +70,6 @@ String joined(StringView a, StringView b)
 String copy(StringView text)
 {
     return MUST(String::from_view(text));
-}
-
-StringView extension_of(StringView path)
-{
-    for (size_t i = path.length(); i > 0; --i) {
-        if (path[i - 1] == '.')
-            return path.substring_view(i, path.length() - i);
-        if (path[i - 1] == '/')
-            break;
-    }
-    return {};
 }
 
 bool is_directory(StringView path)
@@ -192,8 +184,73 @@ ErrorOr<pid_t> launch(AppInfo const& application)
     return launch(application, Span<StringView const> {});
 }
 
+static bool is_a_path(StringView argument)
+{
+    return argument.starts_with('/');
+}
+
+static String token_for(StringView path)
+{
+    auto terminated = copy(path);
+    char* token = sandbox_extension_issue(terminated.characters(), 1);
+    if (!token)
+        return {};
+    auto result = copy(StringView(token, strlen(token)));
+    free(token);
+    return result;
+}
+
+bool tell_running_application(AppInfo const& application, Span<StringView const> arguments)
+{
+    StringBuilder name;
+    name.append("com.vulture.app."_sv);
+    name.append(application.identifier.view());
+    auto port = IPC::look_up(name.view());
+    if (port.is_error())
+        return false;
+    AppInstanceProxy instance(port.release_value());
+    Vector<String> given;
+    Vector<String> tokens;
+    for (auto argument : arguments) {
+        given.append(copy(argument));
+        tokens.append(is_a_path(argument) ? token_for(argument) : String {});
+    }
+    if (given.is_empty())
+        return !instance.reopen().is_error();
+    return !instance.open_arguments(given, tokens).is_error();
+}
+
+void perform_service(AppInfo const& application, StringView message, StringView text)
+{
+    StringBuilder name;
+    name.append("com.vulture.app."_sv);
+    name.append(application.identifier.view());
+    auto port = IPC::look_up(name.view());
+    if (!port.is_error()) {
+        AppInstanceProxy instance(port.release_value());
+        if (!instance.perform_service(message, text).is_error())
+            return;
+    }
+    StringView arguments[3] = { "--service"_sv, message, text };
+    (void)launch(application, Span<StringView const>(arguments, 3));
+}
+
 ErrorOr<pid_t> launch(AppInfo const& application, Span<StringView const> arguments)
 {
+    // An application only runs once.
+    if (tell_running_application(application, arguments))
+        return 0;
+    note_recent_application(application.bundle_path.view());
+
+    // What it's being given to open, it's let at, whatever its sandbox says otherwise.
+    Vector<String> tokens;
+    if (!application.sandbox.is_empty()) {
+        for (auto argument : arguments) {
+            if (is_a_path(argument))
+                tokens.append(token_for(argument));
+        }
+    }
+
     Vector<String> owned;
     owned.append(copy(application.executable_path.view()));
     for (auto argument : arguments)
@@ -223,6 +280,10 @@ ErrorOr<pid_t> launch(AppInfo const& application, Span<StringView const> argumen
             close(answer[1]);
             if (!application.sandbox.is_empty() && sandbox_init_for_program(application.sandbox.characters(), SANDBOX_NAMED, argv[0], nullptr) != 0)
                 _exit(126);
+            for (auto const& token : tokens) {
+                if (!token.is_empty())
+                    (void)sandbox_extension_consume(token.characters());
+            }
             execv(argv[0], argv.data());
             _exit(127);
         }
@@ -293,17 +354,13 @@ ErrorOr<void> open_path(StringView path)
         (void)TRY(launch(files.value(), Span<StringView const>(arguments, 1)));
         return {};
     }
-    auto extension = extension_of(path);
-    for (auto const& application : installed_applications()) {
-        for (auto const& handled : application.document_extensions) {
-            if (handled.view() == extension) {
-                StringView arguments[1] = { path };
-                (void)TRY(launch(application, Span<StringView const>(arguments, 1)));
-                return {};
-            }
-        }
-    }
-    return Error::from_errno(ENOENT);
+    auto application = default_application_for_path(path);
+    if (!application.has_value())
+        return Error::from_errno(ENOENT);
+    note_recent_document(path);
+    StringView arguments[1] = { path };
+    (void)TRY(launch(application.value(), Span<StringView const>(arguments, 1)));
+    return {};
 }
 
 RefPtr<Bitmap> icon_named(StringView name, int points, int scale)

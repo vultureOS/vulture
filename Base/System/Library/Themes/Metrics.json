@@ -158,7 +158,7 @@
     "sheet" : { "radius" : 12, "topMargin" : 0 },
     "alert" : { "width" : 260, "height" : 202, "padding" : 20, "iconSize" : 64, "buttonHeight" : 28, "buttonSpacing" : 8, "radius" : 12, "spacing" : 10 },
     "popover" : { "radius" : 10, "arrow" : 7, "padding" : 12, "shadow" : 16 },
-    "panel" : { "width" : 560, "height" : 380, "rowHeight" : 24, "sidebarWidth" : 150 },
+    "panel" : { "width" : 720, "height" : 440, "rowHeight" : 24, "sidebarWidth" : 150 },
     "colorPanel" : { "width" : 240, "height" : 320, "wheel" : 180 },
     "fontPanel" : { "width" : 420, "height" : 300 },
     "menubar" : { "height" : 24, "leftPadding" : 8, "itemPadding" : 9, "logoSize" : 16, "statusGap" : 14, "rightPadding" : 12, "highlightRadius" : 4, "highlightInset" : 3 },

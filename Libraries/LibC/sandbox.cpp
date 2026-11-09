@@ -190,6 +190,39 @@ void sandbox_free_error(char* error)
     free(error);
 }
 
+char* sandbox_extension_issue(char const* path, int writable)
+{
+    static constexpr size_t most = 8192;
+    auto* token = static_cast<char*>(malloc(most));
+    if (!token)
+        return nullptr;
+    long const result = System::syscall(System::Syscall::sandbox_extension_issue, reinterpret_cast<unsigned long>(path), writable ? 1ul : 0ul, reinterpret_cast<unsigned long>(token), most);
+    if (result < 0) {
+        errno = static_cast<int>(-result);
+        free(token);
+        return nullptr;
+    }
+    return token;
+}
+
+int sandbox_extension_consume(char const* token)
+{
+    long const result = System::syscall(System::Syscall::sandbox_extension_consume, reinterpret_cast<unsigned long>(token), strlen(token));
+    if (result < 0) {
+        errno = static_cast<int>(-result);
+        return -1;
+    }
+    return 0;
+}
+
+int sandbox_is_active(void)
+{
+    // Only something outside one may issue a token, and asking for one of nothing is the cheapest way to find out.
+    char token[1];
+    long const result = System::syscall(System::Syscall::sandbox_extension_issue, reinterpret_cast<unsigned long>("/"), 0ul, reinterpret_cast<unsigned long>(token), sizeof(token));
+    return result == -EPERM ? 1 : 0;
+}
+
 int sandbox_check_service(pid_t pid, char const* service)
 {
     long const result = System::syscall(System::Syscall::sandbox_check, static_cast<unsigned long>(pid), reinterpret_cast<unsigned long>(service), strlen(service));

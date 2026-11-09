@@ -5,6 +5,7 @@
  */
 
 #include <Desktop.h>
+#include <Documents.h>
 #include <LibImage/Image.h>
 #include <LibUI/Application.h>
 #include <LibUI/Containers.h>
@@ -242,6 +243,11 @@ void open_picture(StringView path)
         s_windows.remove_all_matching([&](ViewerWindow* other) { return other == &window; });
     };
     window.show();
+    if (problem.is_empty()) {
+        auto name = last_component(path);
+        printf("viewer: opened %.*s\n", static_cast<int>(name.length()), name.characters_without_null_termination());
+        fflush(stdout);
+    }
 }
 
 ViewerWindow* key_viewer()
@@ -268,7 +274,7 @@ void choose_picture()
         owner = &empty;
     }
     auto home = Desktop::home_directory();
-    FilePanel::run(*owner, FilePanel::Kind::Open, home.view(), {}, [](StringView chosen) {
+    Desktop::run_file_panel(*owner, FilePanel::Kind::Open, home.view(), {}, [](StringView chosen) {
         if (!chosen.is_empty())
             open_picture(chosen);
     });
@@ -286,6 +292,7 @@ int main(int argc, char** argv)
     }
     auto application = application_or_error.release_value();
 
+    application->set_quits_with_last_window(false);
     auto menus = application->standard_menus();
     auto& file = *new Menu("File"_sv);
     file.add_with_shortcut("Open\xE2\x80\xA6"_sv, KeyO, "\xE2\x8C\x98O"_sv, [] { choose_picture(); });
@@ -324,6 +331,12 @@ int main(int argc, char** argv)
     }
     if (opened == 0)
         choose_picture();
+    application->on_open_arguments = [](Span<StringView const> arguments) {
+        for (auto argument : arguments) {
+            if (!argument.starts_with('-'))
+                open_picture(argument);
+        }
+    };
     printf("viewer: ready\n");
     fflush(stdout);
     return application->exec();

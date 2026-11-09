@@ -13,4 +13,5 @@ vulture_add_application(TextEditor
     KIND "Plain Text and Notes"
     CATEGORY productivity
     EXTENSIONS txt text md log json cpp h conf plist
+    SERVICES "New Text Editor Window Containing Selection|newWindowContainingSelection"
     LIBRARIES LibDesktop)

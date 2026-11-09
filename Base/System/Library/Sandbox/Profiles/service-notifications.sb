@@ -4,3 +4,5 @@ include system
 read /Users
 write /Library/Preferences/com.vulture.notificationd.json
 write /Library/Preferences/com.vulture.notificationd.json.new
+write /Library/Preferences/com.vulture.notifications.json
+write /Library/Preferences/com.vulture.notifications.json.new

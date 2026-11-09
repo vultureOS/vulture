@@ -18,6 +18,9 @@
 #include <LibUI/ScrollView.h>
 #include <LibUI/TableView.h>
 #include <LibUI/TextField.h>
+#include <ContentTypes.h>
+#include <LibBase/HashMap.h>
+#include <QuickView.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -81,6 +84,8 @@ struct FileItem {
     u64 size { 0 };
     i64 modified { 0 };
     bool selected { false };
+    // What it looks like, rather than an icon: pictures, and text, as Finder's are.
+    bool has_thumbnail { false };
 };
 
 char lower(char c)
@@ -124,6 +129,10 @@ Vector<FileItem> list_folder(StringView path, bool show_hidden = false)
                 item.modified = static_cast<i64>(info.st_mtime);
             }
             item.icon = Desktop::icon_name_for_path(item.path.view());
+            if (!item.is_directory && item.size > 0 && item.size <= 16 * MiB) {
+                auto type = Desktop::content_type_of_path(item.path.view());
+                item.has_thumbnail = Desktop::content_type_conforms(type, "public.image"_sv) || Desktop::content_type_conforms(type, "public.text"_sv);
+            }
             items.append(move(item));
         }
         closedir(directory);
@@ -140,6 +149,247 @@ Vector<FileItem> list_folder(StringView path, bool show_hidden = false)
         }
     }
     return items;
+}
+
+// ---- Thumbnails: a few at a time, as each is a process of its own.
+
+class Thumbnails {
+public:
+    static Thumbnails& the()
+    {
+        static Thumbnails thumbnails;
+        return thumbnails;
+    }
+
+    // What's known of it: nothing (yet, or ever) is a null.
+    [[nodiscard]] Gfx::Bitmap const* get(FileItem const& item, int pixels)
+    {
+        auto key = key_for(item);
+        if (auto const* found = m_done.get(key.view()))
+            return found->ptr();
+        if (!m_asked.contains(key.view())) {
+            m_asked.set(key, true);
+            m_waiting.append(Waiting { key, MUST(String::from_view(item.path.view())), pixels });
+            pump();
+        }
+        return nullptr;
+    }
+
+    Function<void()> on_new;
+
+private:
+    static constexpr int most_at_once = 2;
+
+    struct Waiting {
+        String key;
+        String path;
+        int pixels;
+    };
+
+    static String key_for(FileItem const& item)
+    {
+        StringBuilder key;
+        key.appendff("{}|{}", item.path.view(), item.modified);
+        return MUST(key.to_string());
+    }
+
+    void pump()
+    {
+        while (m_running < most_at_once && !m_waiting.is_empty()) {
+            auto next = move(m_waiting.last());
+            m_waiting.remove(m_waiting.size() - 1);
+            ++m_running;
+            auto key = move(next.key);
+            Desktop::request_thumbnail(next.path.view(), next.pixels, [this, key = move(key)](RefPtr<Gfx::Bitmap> bitmap) {
+                --m_running;
+                m_done.set(key, move(bitmap));
+                if (on_new)
+                    on_new();
+                pump();
+            });
+        }
+    }
+
+    HashMap<String, RefPtr<Gfx::Bitmap>> m_done;
+    HashMap<String, bool> m_asked;
+    Vector<Waiting> m_waiting;
+    int m_running { 0 };
+};
+
+class PreviewView;
+
+// Quick View: one window, for whatever's selected.
+class QuickViewPanel {
+public:
+    static QuickViewPanel& the()
+    {
+        static QuickViewPanel panel;
+        return panel;
+    }
+
+    [[nodiscard]] bool is_open() const { return m_window && m_open; }
+    void show(StringView path);
+    void close();
+
+    Function<bool(KeyEvent const&)> on_key;
+
+private:
+    void ensure_window();
+    void picture_arrived(RefPtr<Gfx::Bitmap>);
+
+    OwnPtr<UI::Window> m_window;
+    PreviewView* m_view { nullptr };
+    Toolbar* m_toolbar { nullptr };
+    Button* m_open_button { nullptr };
+    String m_path;
+    u32 m_generation { 0 };
+    bool m_open { false };
+};
+
+class PreviewView final : public View {
+public:
+    void set_contents(RefPtr<Gfx::Bitmap> bitmap, StringView icon, StringView name, StringView description, StringView size)
+    {
+        m_bitmap = move(bitmap);
+        m_icon = MUST(String::from_view(icon));
+        m_name = MUST(String::from_view(name));
+        m_description = MUST(String::from_view(description));
+        m_size = MUST(String::from_view(size));
+        set_needs_display();
+    }
+
+    void draw(Graphics& graphics) override
+    {
+        auto const& t = tokens();
+        graphics.fill({ 0, 0, width(), height() }, t.color("viewer.background"_sv));
+        if (m_bitmap) {
+            float const scale = min(1.f, min(width() / bitmap_width(), height() / bitmap_height()));
+            float const shown_width = bitmap_width() * scale;
+            float const shown_height = bitmap_height() * scale;
+            graphics.painter().draw_bitmap(*m_bitmap, graphics.snapped({ (width() - shown_width) / 2, (height() - shown_height) / 2, shown_width, shown_height }));
+            return;
+        }
+        // Nothing can picture it: what it is, instead.
+        float const icon_size = 128;
+        auto icon = Desktop::icon_named(m_icon.view(), static_cast<int>(icon_size), static_cast<int>(graphics.scale()));
+        float const top = (height() - icon_size - 60) / 2;
+        if (icon)
+            graphics.painter().draw_bitmap(*icon, FloatRect { (width() - icon_size) / 2, top, icon_size, icon_size });
+        auto title = t.named_font("title3"_sv);
+        auto body = t.named_font("body"_sv);
+        graphics.draw_text_centered(m_name.view(), title, { 0, top + icon_size + 8, width(), 24 }, t.color("label"_sv));
+        StringBuilder detail;
+        detail.appendff("{} \xE2\x80\x94 {}", m_description.view(), m_size.view());
+        graphics.draw_text_centered(detail.view(), body, { 0, top + icon_size + 36, width(), 20 }, t.color("secondaryLabel"_sv));
+    }
+
+    [[nodiscard]] bool accepts_first_responder() const override { return true; }
+    [[nodiscard]] bool shows_focus_ring() const override { return false; }
+    bool key_down(KeyEvent const& event) override
+    {
+        if (event.code == KeySpace || event.code == KeyEscape) {
+            QuickViewPanel::the().close();
+            return true;
+        }
+        auto& handler = QuickViewPanel::the().on_key;
+        return handler && handler(event);
+    }
+
+    [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::Image; }
+
+private:
+    [[nodiscard]] float bitmap_width() const { return static_cast<float>(m_bitmap->width()) / 2; }
+    [[nodiscard]] float bitmap_height() const { return static_cast<float>(m_bitmap->height()) / 2; }
+
+    RefPtr<Gfx::Bitmap> m_bitmap;
+    String m_icon;
+    String m_name;
+    String m_description;
+    String m_size;
+};
+
+void QuickViewPanel::ensure_window()
+{
+    if (m_window)
+        return;
+    auto screen = Platform::the().screen_size();
+    int const width = 760;
+    int const height = 560;
+    m_window = adopt_own(*new UI::Window("Quick View"_sv, { (screen.width - width) / 2, (screen.height - height) / 3, width, height }, WS::WindowTitled | WS::WindowResizable | WS::WindowUnifiedTitle));
+    m_window->backend().set_level(WS::LevelPopup);
+    auto& stack = m_window->set_content<StackView>(Axis::Vertical);
+    m_toolbar = &stack.add<Toolbar>();
+    m_toolbar->add_flexible_space();
+    m_open_button = &m_toolbar->add_item<Button>("Open"_sv);
+    m_open_button->on_action = [this] {
+        auto path = m_path;
+        close();
+        (void)Desktop::open_path(path.view());
+    };
+    m_view = &stack.add<PreviewView>();
+    m_view->set_accessibility_label("Quick View"_sv);
+    m_view->set_stretch(1, 1);
+    m_window->on_close_request = [this] {
+        close();
+        return false;
+    };
+}
+
+void QuickViewPanel::show(StringView path)
+{
+    ensure_window();
+    m_path = MUST(String::from_view(path));
+    auto name = last_component(path);
+    m_toolbar->set_title(name);
+    m_window->set_title(name);
+    StringBuilder open_title;
+    if (auto application = Desktop::default_application_for_path(path); application.has_value())
+        open_title.appendff("Open with {}", application->name.view());
+    else
+        open_title.append("Open"_sv);
+    m_open_button->set_title(open_title.view());
+    if (!m_open) {
+        m_window->show();
+        m_open = true;
+    }
+    m_window->make_first_responder(m_view);
+    auto const generation = ++m_generation;
+    m_view->set_contents(nullptr, Desktop::icon_name_for_path(path).view(), name, Desktop::content_description_of_path(path), {});
+    Desktop::request_preview(path, 1520, 1120, [this, generation](RefPtr<Gfx::Bitmap> bitmap) {
+        if (generation == m_generation)
+            picture_arrived(move(bitmap));
+    });
+}
+
+void QuickViewPanel::picture_arrived(RefPtr<Gfx::Bitmap> bitmap)
+{
+    auto name = last_component(m_path.view());
+    printf("files: quick view: %s %.*s\n", bitmap ? "picture of" : "no picture of", static_cast<int>(name.length()), name.characters_without_null_termination());
+    fflush(stdout);
+    if (bitmap) {
+        // The window, the shape of what's in it, around the same middle.
+        auto const frame = m_window->frame();
+        int const toolbar = frame.height - static_cast<int>(m_view->height());
+        int const width = max(bitmap->width() / 2, 320);
+        int const height = max(bitmap->height() / 2, 200) + toolbar;
+        m_window->set_frame({ frame.x + (frame.width - width) / 2, frame.y + (frame.height - height) / 2, width, height });
+        m_view->set_contents(move(bitmap), {}, {}, {}, {});
+        return;
+    }
+    struct stat information {};
+    (void)stat(m_path.characters(), &information);
+    StringBuilder size;
+    size.appendff("{} bytes", static_cast<i64>(information.st_size));
+    m_view->set_contents(nullptr, Desktop::icon_name_for_path(m_path.view()).view(), name, Desktop::content_description_of_path(m_path.view()), size.view());
+}
+
+void QuickViewPanel::close()
+{
+    if (!m_open)
+        return;
+    m_open = false;
+    ++m_generation;
+    m_window->hide();
 }
 
 // ---- What can be done to files
@@ -268,6 +518,14 @@ public:
     explicit FolderView(bool on_desktop)
         : m_on_desktop(on_desktop)
     {
+        s_folder_views.append(this);
+        Thumbnails::the().on_new = [] { redraw_all(); };
+    }
+
+    static void redraw_all()
+    {
+        for (auto* view : s_folder_views)
+            view->set_needs_display();
     }
 
     Function<void(StringView)> on_open_folder;
@@ -275,6 +533,9 @@ public:
 
     ~FolderView() override
     {
+        s_folder_views.remove_all_matching([this](FolderView* other) { return other == this; });
+        if (m_quick_view_owner == this)
+            m_quick_view_owner = nullptr;
         if (m_watch_timer >= 0)
             Application::the().cancel_timer(m_watch_timer);
     }
@@ -434,9 +695,17 @@ public:
             float icon_x = rect.x + (rect.width - icon_size) / 2;
             if (item.selected)
                 graphics.fill_rounded({ icon_x - 4, rect.y - 3, icon_size + 8, icon_size + 6 }, 5, t.color("files.selection"_sv));
-            auto icon = Desktop::icon_named(item.icon.view(), static_cast<int>(icon_size), scale);
-            if (icon)
+            Gfx::Bitmap const* thumbnail = item.has_thumbnail ? Thumbnails::the().get(item, static_cast<int>(icon_size) * scale) : nullptr;
+            if (thumbnail) {
+                float const fit = min(icon_size / static_cast<float>(thumbnail->width()), icon_size / static_cast<float>(thumbnail->height()));
+                float const shown_width = static_cast<float>(thumbnail->width()) * fit;
+                float const shown_height = static_cast<float>(thumbnail->height()) * fit;
+                FloatRect const shape = graphics.snapped({ icon_x + (icon_size - shown_width) / 2, rect.y + icon_size - shown_height, shown_width, shown_height });
+                graphics.painter().draw_bitmap(*thumbnail, shape);
+                graphics.stroke_rounded(shape, 0, graphics.pixel(), t.color("separator"_sv));
+            } else if (auto icon = Desktop::icon_named(item.icon.view(), static_cast<int>(icon_size), scale)) {
                 graphics.painter().draw_bitmap(*icon, FloatRect { icon_x, rect.y, icon_size, icon_size });
+            }
             if (static_cast<int>(i) == m_rename_index)
                 continue;
             StringView shown = item.name.view();
@@ -552,6 +821,10 @@ public:
         }
         if (event.code == KeyEnter) {
             begin_renaming();
+            return true;
+        }
+        if (event.code == KeySpace) {
+            toggle_quick_view();
             return true;
         }
         int across = columns();
@@ -685,6 +958,62 @@ private:
             window()->make_first_responder(this);
     }
 
+    void toggle_quick_view()
+    {
+        auto& panel = QuickViewPanel::the();
+        if (panel.is_open()) {
+            panel.close();
+            return;
+        }
+        auto const paths = selected_paths();
+        if (paths.is_empty())
+            return;
+        m_quick_view_owner = this;
+        // Arrow keys go on moving through what's here, with the panel following.
+        panel.on_key = [](KeyEvent const& event) {
+            auto* owner = m_quick_view_owner;
+            if (!owner || !owner->key_down(event))
+                return false;
+            auto const moved = owner->selected_paths();
+            if (!moved.is_empty())
+                QuickViewPanel::the().show(moved[0].view());
+            return true;
+        };
+        panel.show(paths[0].view());
+    }
+
+    void add_open_with(Menu& menu, StringView path)
+    {
+        auto applications = Desktop::applications_for_path(path);
+        auto& open_with = menu.add_submenu("Open With"_sv);
+        if (applications.is_empty()) {
+            open_with.add("No Applications"_sv).enabled = false;
+            return;
+        }
+        auto file = MUST(String::from_view(path));
+        auto content_type = MUST(String::from_view(Desktop::content_type_of_path(path)));
+        for (size_t i = 0; i < applications.size(); ++i) {
+            StringBuilder title;
+            title.append(applications[i].name.view());
+            if (i == 0)
+                title.append(" (default)"_sv);
+            auto application = applications[i];
+            auto& item = open_with.add(title.view(), [file, application] {
+                StringView arguments[1] = { file.view() };
+                (void)Desktop::launch(application, Span<StringView const>(arguments, 1));
+            });
+            // With Option held, it's from now on, as Finder's Always Open With is.
+            StringBuilder always;
+            always.appendff("Always Open With {}", applications[i].name.view());
+            auto identifier = applications[i].identifier;
+            Menu::add_alternate(item, always.view(), [file, application, content_type, identifier] {
+                Desktop::set_default_application(content_type.view(), identifier.view());
+                StringView arguments[1] = { file.view() };
+                (void)Desktop::launch(application, Span<StringView const>(arguments, 1));
+            });
+        }
+    }
+
     void show_context_menu(MouseEvent const& event, int hit)
     {
         m_menu = adopt_own(*new Menu);
@@ -695,6 +1024,8 @@ private:
                 item.selected = true;
             }
             m_menu->add("Open"_sv, [this] { open_selection(); });
+            if (!item.is_directory)
+                add_open_with(*m_menu, item.path.view());
             m_menu->add_separator();
             m_menu->add("Move to Trash"_sv, [this] { move_selection_to_trash(); });
             m_menu->add_separator();
@@ -719,6 +1050,9 @@ private:
         auto origin = window()->frame().origin();
         m_menu->open(*window(), { origin.x + static_cast<int>(event.window_position.x), origin.y + static_cast<int>(event.window_position.y) });
     }
+
+    static inline Vector<FolderView*> s_folder_views;
+    static inline FolderView* m_quick_view_owner { nullptr };
 
     bool m_on_desktop;
     // When the folder last changed, as far as it's been seen: when its entries did.

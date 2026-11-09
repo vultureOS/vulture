@@ -6,9 +6,13 @@
 
 #include <Kernel/API/POSIX/errno.h>
 #include <Kernel/Debug/KernelLog.h>
+#include <Kernel/Locking/SpinLock.h>
+#include <Kernel/Security/Random.h>
 #include <Kernel/Security/Sandbox.h>
 #include <Kernel/Tasks/Process.h>
 #include <LibBase/New.h>
+#include <LibCrypto/HMAC.h>
+#include <LibCrypto/SHA2.h>
 
 namespace Kernel {
 
@@ -155,13 +159,142 @@ bool SandboxProfile::allows(SandboxOperation operation, StringView what) const
     return true;
 }
 
+namespace {
+
+constexpr size_t grant_key_size = 32;
+
+// Made the first time it's needed. Nothing outside the kernel ever sees it.
+u8 const* grant_key()
+{
+    static u8 s_key[grant_key_size];
+    static bool s_made = false;
+    static SpinLock s_lock;
+    SpinLockGuard guard(s_lock);
+    if (!s_made) {
+        get_random_bytes({ s_key, grant_key_size });
+        s_made = true;
+    }
+    return s_key;
+}
+
+using GrantDigest = Crypto::HMAC<Crypto::SHA256>::Digest;
+
+GrantDigest grant_signature(bool writable, StringView path)
+{
+    Crypto::HMAC<Crypto::SHA256> hmac({ grant_key(), grant_key_size });
+    u8 const kind = writable ? 'w' : 'r';
+    hmac.update({ &kind, 1 });
+    hmac.update(path.bytes());
+    return hmac.digest();
+}
+
+char hex_digit(u8 value)
+{
+    return static_cast<char>(value < 10 ? '0' + value : 'a' + value - 10);
+}
+
+int value_of_hex(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    return -1;
+}
+
+bool is_plain_absolute_path(StringView path)
+{
+    if (path.is_empty() || path[0] != '/' || (path.length() > 1 && path.ends_with('/')))
+        return false;
+    bool plain = true;
+    path.for_each_split_view('/', SplitBehavior::SkipEmpty, [&](StringView part) {
+        if (part == "."_sv || part == ".."_sv)
+            plain = false;
+    });
+    return plain;
+}
+
+}
+
+// w or r, the signature in hexadecimal, and the path.
+ErrorOr<String> sandbox_issue_grant(StringView path, bool writable)
+{
+    if (!is_plain_absolute_path(path))
+        return Error::from_errno(EINVAL);
+    auto const signature = grant_signature(writable, path);
+    StringBuilder token;
+    token.append(writable ? 'w' : 'r');
+    for (size_t i = 0; i < signature.size(); ++i) {
+        token.append(hex_digit(signature[i] >> 4));
+        token.append(hex_digit(signature[i] & 15));
+    }
+    token.append(path);
+    return token.to_string();
+}
+
+ErrorOr<SandboxGrant> sandbox_redeem_grant(StringView token)
+{
+    size_t const digits = GrantDigest {}.size() * 2;
+    if (token.length() <= 1 + digits || (token[0] != 'w' && token[0] != 'r'))
+        return Error::from_errno(EINVAL);
+    bool const writable = token[0] == 'w';
+    auto path = token.substring_view(1 + digits);
+    if (!is_plain_absolute_path(path))
+        return Error::from_errno(EINVAL);
+    auto const signature = grant_signature(writable, path);
+    u8 difference = 0;
+    for (size_t i = 0; i < signature.size(); ++i) {
+        int const high = value_of_hex(token[1 + i * 2]);
+        int const low = value_of_hex(token[2 + i * 2]);
+        if (high < 0 || low < 0)
+            return Error::from_errno(EINVAL);
+        difference |= static_cast<u8>((high << 4 | low) ^ signature[i]);
+    }
+    if (difference != 0)
+        return Error::from_errno(EPERM);
+    return SandboxGrant { TRY(String::from_view(path)), writable };
+}
+
+bool sandbox_grants_allow(Span<SandboxGrant const> grants, SandboxOperation operation, StringView what)
+{
+    for (auto const& grant : grants) {
+        switch (operation) {
+        case SandboxOperation::FileRead:
+            if (is_at_or_under(what, grant.path.view()))
+                return true;
+            break;
+        case SandboxOperation::FileWrite:
+            if (grant.writable && is_at_or_under(what, grant.path.view()))
+                return true;
+            break;
+        case SandboxOperation::FileMetadata:
+            // And the folders on the way to it.
+            if (is_at_or_under(what, grant.path.view()) || is_at_or_under(grant.path.view(), what))
+                return true;
+            break;
+        default:
+            break;
+        }
+    }
+    return false;
+}
+
+bool sandbox_would_allow(SandboxOperation operation, StringView what)
+{
+    auto* process = Process::current();
+    if (!process)
+        return true;
+    auto const* sandbox = process->sandbox();
+    return !sandbox || sandbox->allows(operation, what) || process->sandbox_grants_allow(operation, what);
+}
+
 ErrorOr<void> sandbox_check(SandboxOperation operation, StringView what)
 {
     auto* process = Process::current();
     if (!process)
         return {};
     auto const* sandbox = process->sandbox();
-    if (!sandbox || sandbox->allows(operation, what))
+    if (!sandbox || sandbox->allows(operation, what) || process->sandbox_grants_allow(operation, what))
         return {};
     StringView description;
     switch (operation) {

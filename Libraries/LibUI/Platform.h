@@ -115,6 +115,9 @@ public:
         bool is_directory;
     };
     [[nodiscard]] virtual ErrorOr<Vector<DirectoryEntry>> list_directory(StringView path) = 0;
+    // Whoever's using this: nothing, in a test.
+    [[nodiscard]] virtual String home_directory() const { return {}; }
+    virtual ErrorOr<void> make_directory(StringView) { return Error::from_string_literal("there's nowhere to make it"); }
 
     // The general pasteboard, as text.
     virtual void copy_text(StringView) = 0;

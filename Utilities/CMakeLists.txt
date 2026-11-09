@@ -23,6 +23,8 @@ vulture_add_program(logger SOURCES bin/logger.cpp DESTINATION usr/bin LIBRARIES 
 vulture_add_program(notifyutil SOURCES bin/notifyutil.cpp DESTINATION usr/bin LIBRARIES LibServices)
 vulture_add_program(scutil SOURCES bin/scutil.cpp DESTINATION usr/sbin LIBRARIES LibServices)
 vulture_add_program(open SOURCES bin/open.cpp DESTINATION usr/bin LIBRARIES LibDesktop)
+vulture_add_program(mdfind SOURCES bin/mdfind.cpp DESTINATION usr/bin LIBRARIES LibDesktop)
+vulture_add_program(mdls SOURCES bin/mdls.cpp DESTINATION usr/bin LIBRARIES LibDesktop)
 vulture_add_program(notification SOURCES bin/notification.cpp DESTINATION usr/bin LIBRARIES LibDesktop)
 vulture_add_program(sysadminctl SOURCES bin/sysadminctl.cpp DESTINATION usr/sbin LIBRARIES LibDesktop LibCore)
 vulture_add_program(ax SOURCES bin/ax.cpp DESTINATION usr/bin LIBRARIES LibWindow LibJSON LibCore)

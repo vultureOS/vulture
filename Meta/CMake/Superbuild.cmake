@@ -141,10 +141,16 @@ add_custom_target(test-boot
     VERBATIM)
 
 # A deliberate fault must produce a symbolized, demangled backtrace.
+# The same fault, in each processor's own words.
+if(VULTURE_ARCH STREQUAL "x86_64")
+    set(deliberate_fault_report "KERNEL PANIC: Page fault (write) at 0x0000000000000010: not mapped")
+else()
+    set(deliberate_fault_report "KERNEL PANIC: Data abort (write) at 0x0000000000000010: translation fault, level 0")
+endif()
 add_custom_target(test-panic
     COMMAND ${CMAKE_SOURCE_DIR}/Meta/record-test.sh ${CMAKE_BINARY_DIR} test-panic ${CMAKE_SOURCE_DIR}/Meta/run.sh --build-dir ${CMAKE_BINARY_DIR} --headless
         --boot-args "fault=data-abort"
-        --expect "KERNEL PANIC: Data abort (write) at 0x0000000000000010: translation fault, level 0"
+        --expect "${deliberate_fault_report}"
         --expect "Kernel::trigger_deliberate_fault"
         --expect "System halted."
     DEPENDS host uefi target boot-archive test-boot
