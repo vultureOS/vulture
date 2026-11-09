@@ -373,6 +373,9 @@ ErrorOr<NonnullRefPtr<BlockDevice>> NVMeDevice::create(PCI::Device const& pci, S
     if (!bar.is_memory || bar.size < 0x2000)
         return Error::from_string_literal("NVMe controller without its register BAR");
     pci.enable_memory_and_bus_mastering();
+    // Setting up is polled, but the admin queue always raises the pin, whatever's asked of it, and there's no handler
+    // yet. If its line is enabled for another device, the processor doing the polling could only ever take the interrupt.
+    pci.set_pin_interrupt_enabled(false);
     FlatPtr registers = TRY(memory_manager().map_mmio(PhysicalAddress(bar.address), min<u64>(bar.size, 0x4000)));
     u64 capabilities = mmio_read64(registers + register_capabilities);
     u32 doorbell_stride = 4u << ((capabilities >> 32) & 0xf);
@@ -424,6 +427,7 @@ ErrorOr<NonnullRefPtr<BlockDevice>> NVMeDevice::create(PCI::Device const& pci, S
     TRY(device->create_io_queues(interrupt.has_value()));
     if (interrupt.has_value()) {
         register_interrupt_handler(interrupt.value(), [](void* context) { static_cast<NVMeDevice*>(context)->handle_interrupt(); }, raw);
+        pci.set_pin_interrupt_enabled(true);
         Arch::enable_interrupt(interrupt.value());
         device->m_interrupts = true;
     }

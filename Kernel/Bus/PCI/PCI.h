@@ -50,6 +50,9 @@ public:
     // Decodes (and sizes) a base address register.
     [[nodiscard]] Bar bar(u8 index) const;
     void enable_memory_and_bus_mastering() const;
+    // Whether the device may raise its INTx pin at all. A pin's line can be another device's too, and enabled
+    // already, so a device that raises it before its handler is in place holds the line up with nothing to answer it.
+    void set_pin_interrupt_enabled(bool) const;
 
     // Vendor-specific capabilities (ID 0x09), by their offset.
     template<typename Callback>

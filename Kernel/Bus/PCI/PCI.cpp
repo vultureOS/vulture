@@ -80,6 +80,12 @@ void Device::enable_memory_and_bus_mastering() const
     write16(0x04, (read16(0x04) | 0x2 | 0x4) & ~(1 << 10));
 }
 
+void Device::set_pin_interrupt_enabled(bool enabled) const
+{
+    u16 const command = read16(0x04);
+    write16(0x04, enabled ? (command & ~(1 << 10)) : (command | (1 << 10)));
+}
+
 // Goes through every function of every device on these buses.
 template<typename Callback>
 static ErrorOr<void> scan_buses(FlatPtr base, u32 first_bus, u32 last_bus, Callback callback)
