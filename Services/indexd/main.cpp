@@ -324,7 +324,8 @@ private:
             (void)m_store->forget_path(path);
             return;
         }
-        (void)m_store->put_path(path, generation);
+        // (Told of it, so something's different, even if it's only its tags.)
+        (void)m_store->put_path(path, generation, true);
         // A folder that arrives whole hasn't said anything of what's inside it.
         if (S_ISDIR(information.st_mode) && !path.ends_with(".app"_sv))
             put_tree(path, generation, 0);

@@ -242,6 +242,8 @@ public:
     SegmentedControl() = default;
 
     void add_segment(StringView title);
+    // A picture, and what it's called for those who can't see it.
+    void add_segment(Symbol, StringView label);
     void set_mode(Mode mode) { m_mode = mode; }
     void set_selected(size_t index, bool selected = true);
     [[nodiscard]] bool is_selected(size_t index) const;
@@ -269,6 +271,8 @@ private:
     struct Segment {
         String title;
         bool selected { false };
+        bool has_symbol { false };
+        Symbol symbol { Symbol::Checkmark };
     };
     [[nodiscard]] Gfx::FloatRect segment_rect(size_t) const;
     [[nodiscard]] int segment_at(Gfx::FloatPoint) const;

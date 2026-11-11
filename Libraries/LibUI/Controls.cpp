@@ -750,6 +750,14 @@ void SegmentedControl::add_segment(StringView title)
     set_needs_display();
 }
 
+void SegmentedControl::add_segment(Symbol symbol, StringView label)
+{
+    m_segments.append(Segment { MUST(String::from_view(label)), false, true, symbol });
+    if (parent())
+        parent()->set_needs_layout();
+    set_needs_display();
+}
+
 void SegmentedControl::set_selected(size_t index, bool selected)
 {
     if (index >= m_segments.size())
@@ -776,6 +784,8 @@ int SegmentedControl::selected_index() const
     return -1;
 }
 
+static constexpr float symbol_segment_content = 18;
+
 FloatSize SegmentedControl::intrinsic_size() const
 {
     auto const& t = tokens();
@@ -784,7 +794,7 @@ FloatSize SegmentedControl::intrinsic_size() const
     float padding = t.metric("segmented"_sv, size, "padding"_sv);
     float total = 0;
     for (auto const& segment : m_segments)
-        total += Appearance::text_width(font, segment.title.view()) + padding * 2;
+        total += (segment.has_symbol ? symbol_segment_content : Appearance::text_width(font, segment.title.view())) + padding * 2;
     return { ceiling(total), t.metric("segmented"_sv, size, "height"_sv) };
 }
 
@@ -853,6 +863,11 @@ void SegmentedControl::draw(Graphics& graphics)
             graphics.draw_bezel(thumb, radius - inset, BezelPaint::from_tokens(pressed_here ? "bezelPressed"_sv : "bezel"_sv));
         } else if (static_cast<int>(i) == m_pressed_segment) {
             graphics.fill_rounded(rect, radius, t.color("segmented.track"_sv));
+        }
+        if (segment.has_symbol) {
+            float const side = min(rect.height - 6, 16.f);
+            graphics.draw_symbol(segment.symbol, { rect.x + (rect.width - side) / 2, rect.y + (rect.height - side) / 2, side, side }, t.color(enabled ? "controlText"_sv : "controlTextDisabled"_sv));
+            continue;
         }
         float text_width = Appearance::text_width(font, segment.title.view());
         graphics.draw_text(segment.title.view(), font, { rect.x + (rect.width - text_width) / 2, baseline_y }, t.color(enabled ? "controlText"_sv : "controlTextDisabled"_sv));

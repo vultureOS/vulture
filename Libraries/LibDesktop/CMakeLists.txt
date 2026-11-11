@@ -11,6 +11,7 @@ add_library(LibDesktop STATIC
     Desktop.cpp
     Documents.cpp
     QuickView.cpp
+    Tags.cpp
     ScreenSaver.cpp)
 vulture_compile_ipc(LibDesktop Directory.ipc Files.ipc Notifications.ipc Search.ipc Session.ipc)
 target_link_libraries(LibDesktop PUBLIC LibUI LibImage LibJSON LibIPC LibCore LibServices LibLocale)

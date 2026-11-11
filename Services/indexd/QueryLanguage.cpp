@@ -25,6 +25,7 @@ constexpr Attribute attributes[] = {
     { "kMDItemPath"_sv, "path"_sv, false },
     { "kMDItemPixelHeight"_sv, "pixel_height"_sv, false },
     { "kMDItemPixelWidth"_sv, "pixel_width"_sv, false },
+    { "kMDItemUserTags"_sv, "tags"_sv, false },
     { "kMDItemVersion"_sv, "version"_sv, false },
 };
 
@@ -158,6 +159,16 @@ private:
             ++m_position;
         }
         auto pattern = value.view();
+        // One of several, by name.
+        if (attribute.column == "tags"_sv) {
+            if (op != "=="_sv && op != "!="_sv)
+                return fail("a tag can only be equal or not"_sv);
+            out.append(op == "=="_sv ? "(',' || tags || ',') GLOB ?"_sv : "(',' || coalesce(tags, '') || ',') NOT GLOB ?"_sv);
+            StringBuilder glob;
+            glob.appendff("*,{},*", pattern);
+            m_query.parameters.append(Database::Value::text(glob.view()));
+            return {};
+        }
         bool const wildcard = pattern.contains('*');
         if (wildcard && op != "=="_sv && op != "!="_sv)
             return fail("a wildcard can only be equal or not"_sv);

@@ -172,7 +172,11 @@ public:
     void clear();
     // A small button at the end of a row, as a volume has to eject it.
     void set_row_accessory(size_t row, Symbol, StringView label, Function<void()> action);
+    // Its symbol in a colour of its own, as a tag's is.
+    void set_row_tint(size_t row, Gfx::Color);
     void select_row(size_t);
+    // None of them, as when what's showing isn't one of its places.
+    void clear_selection();
     [[nodiscard]] int selected_row() const { return m_selected; }
     [[nodiscard]] StringView row_title(size_t row) const;
 
@@ -205,6 +209,8 @@ private:
         Symbol accessory { Symbol::Eject };
         String accessory_label {};
         Function<void()> accessory_action {};
+        bool tinted { false };
+        Gfx::Color tint {};
     };
 
     [[nodiscard]] float y_of(size_t entry) const;

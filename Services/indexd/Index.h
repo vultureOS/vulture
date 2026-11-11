@@ -27,7 +27,7 @@ public:
 
     // What's at the path now, if it's changed since it was last looked at, or nothing if there's nothing there.
     // `generation` is which pass over the disk has seen it.
-    ErrorOr<void> put_path(StringView path, i64 generation);
+    ErrorOr<void> put_path(StringView path, i64 generation, bool even_if_unchanged = false);
     // It, and everything under it.
     ErrorOr<void> forget_path(StringView path);
     // What a whole pass over the disk didn't come across.

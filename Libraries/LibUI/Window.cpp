@@ -328,6 +328,23 @@ void Window::merge_all_windows()
         window->tabs_changed();
 }
 
+void Window::add_tab(Window& other)
+{
+    if (&other == this || other.m_tab_group || !(m_flags & WS::WindowTitled) || !(other.flags() & WS::WindowTitled))
+        return;
+    if (!m_tab_group) {
+        m_tab_group = new TabGroup;
+        m_tab_group->windows.append(this);
+    }
+    m_tab_group->windows.append(&other);
+    other.m_tab_group = m_tab_group;
+    // It's what's in front now: over this, and this goes.
+    other.m_backend->take_place_of(*m_backend);
+    hide();
+    for (auto* window : m_tab_group->windows)
+        window->tabs_changed();
+}
+
 void Window::select_tab(int index)
 {
     if (!m_tab_group || index < 0 || index >= tab_count() || index == selected_tab())

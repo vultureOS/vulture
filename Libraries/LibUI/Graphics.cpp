@@ -623,6 +623,69 @@ void Graphics::draw_symbol(Symbol symbol, FloatRect const& rect, Color color, fl
         m_painter.fill_path(shape, color, FillRule::EvenOdd);
         return;
     }
+    case Symbol::ViewIcons: {
+        Path shape;
+        float const places[] = { 2.5f, 9.0f };
+        for (float y : places) {
+            for (float x : places) {
+                auto const corner = at(x, y);
+                shape.add_rounded_rect({ corner.x, corner.y, 4.5f * unit, 4.5f * unit }, unit);
+            }
+        }
+        m_painter.fill_path(shape, color, FillRule::NonZero);
+        return;
+    }
+    case Symbol::ViewList: {
+        Path shape;
+        float const rows[] = { 3.0f, 7.25f, 11.5f };
+        for (float y : rows) {
+            auto const dot = at(2, y);
+            shape.add_ellipse({ dot.x, dot.y, 1.5f * unit, 1.5f * unit });
+            auto const bar = at(5, y + 0.1f);
+            shape.add_rounded_rect({ bar.x, bar.y, 9 * unit, 1.3f * unit }, 0.6f * unit);
+        }
+        m_painter.fill_path(shape, color, FillRule::NonZero);
+        return;
+    }
+    case Symbol::ViewColumns: {
+        Path shape;
+        float const columns[] = { 1.8f, 6.3f, 10.8f };
+        for (float x : columns) {
+            auto const top = at(x, 3);
+            shape.add_rounded_rect({ top.x, top.y, 3.4f * unit, 10 * unit }, 0.8f * unit);
+        }
+        m_painter.fill_path(shape, color, FillRule::NonZero);
+        return;
+    }
+    case Symbol::ViewGallery: {
+        Path shape;
+        auto const big = at(2, 2.5f);
+        shape.add_rounded_rect({ big.x, big.y, 12 * unit, 7.5f * unit }, unit);
+        float const strip[] = { 2.0f, 6.2f, 10.4f };
+        for (float x : strip) {
+            auto const small = at(x, 11.5f);
+            shape.add_rounded_rect({ small.x, small.y, 3.6f * unit, 2.4f * unit }, 0.6f * unit);
+        }
+        m_painter.fill_path(shape, color, FillRule::NonZero);
+        return;
+    }
+    case Symbol::TagDot: {
+        Path shape;
+        auto const corner = at(3.5f, 3.5f);
+        shape.add_ellipse({ corner.x, corner.y, 9 * unit, 9 * unit });
+        m_painter.fill_path(shape, color, FillRule::NonZero);
+        return;
+    }
+    case Symbol::Clock: {
+        Path face;
+        auto const corner = at(2, 2);
+        face.add_ellipse({ corner.x, corner.y, 12 * unit, 12 * unit });
+        m_painter.stroke_path(face, style, color);
+        path.move_to(at(8, 4.8f));
+        path.line_to(at(8, 8));
+        path.line_to(at(10.4f, 9.4f));
+        break;
+    }
     case Symbol::Toggles: {
         // Two capsules, the knob at the right of one and the left of the other.
         Path shape;

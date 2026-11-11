@@ -8,6 +8,7 @@
 #include "Importers.h"
 #include "QueryLanguage.h"
 #include <Desktop.h>
+#include <Tags.h>
 #include <LibBase/Function.h>
 #include <LibBase/HashMap.h>
 #include <LibBase/QuickSort.h>
@@ -108,6 +109,8 @@ ErrorOr<NonnullOwnPtr<Store>> Store::open(StringView path)
     if (!raw)
         return Error::from_errno(12);
     auto store = adopt_own(*raw);
+    // (An index from before there were tags.)
+    (void)store->m_database->execute("ALTER TABLE items ADD COLUMN tags TEXT"_sv);
     TRY(store->prepare_statements());
     auto files = TRY(store->m_database->query("SELECT count(*) FROM items"_sv));
     store->m_file_count = static_cast<u64>(files[0][0].to_integer());
@@ -120,8 +123,8 @@ ErrorOr<void> Store::prepare_statements()
     auto& d = *m_database;
     m_find_by_path = TRY(d.prepare("SELECT id, size, modified FROM items WHERE path = ?"_sv));
     m_touch = TRY(d.prepare("UPDATE items SET generation = ? WHERE id = ?"_sv));
-    m_insert_item = TRY(d.prepare("INSERT INTO items(path, name, lowered_name, kind, content_type, kind_description, size, created, modified, pixel_width, pixel_height, version, generation) "
-                                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"_sv));
+    m_insert_item = TRY(d.prepare("INSERT INTO items(path, name, lowered_name, kind, content_type, kind_description, size, created, modified, pixel_width, pixel_height, version, generation, tags) "
+                                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"_sv));
     m_remove_item = TRY(d.prepare("DELETE FROM items WHERE id = ?"_sv));
     m_insert_name_word = TRY(d.prepare("INSERT OR IGNORE INTO name_words(word, item) VALUES (?, ?)"_sv));
     m_insert_content_word = TRY(d.prepare("INSERT OR IGNORE INTO content_words(word, item) VALUES (?, ?)"_sv));
@@ -190,7 +193,7 @@ ErrorOr<void> Store::remove_item(i64 id)
     return {};
 }
 
-ErrorOr<void> Store::put_path(StringView path, i64 generation)
+ErrorOr<void> Store::put_path(StringView path, i64 generation, bool even_if_unchanged)
 {
     auto terminated = TRY(String::from_view(path));
     struct stat information;
@@ -203,7 +206,7 @@ ErrorOr<void> Store::put_path(StringView path, i64 generation)
     TRY(bind_all(*m_find_by_path, Value::text(path)));
     if (TRY(m_find_by_path->step())) {
         i64 const id = m_find_by_path->column(0).to_integer();
-        if (m_find_by_path->column(1).to_integer() == size && m_find_by_path->column(2).to_integer() == modified) {
+        if (!even_if_unchanged && m_find_by_path->column(1).to_integer() == size && m_find_by_path->column(2).to_integer() == modified) {
             TRY(bind_all(*m_touch, Value::integer(generation), Value::integer(id)));
             (void)TRY(m_touch->step());
             return {};
@@ -227,6 +230,13 @@ ErrorOr<void> Store::put_path(StringView path, i64 generation)
         }
     }
 
+    StringBuilder tags_builder;
+    for (auto const& tag : Desktop::tags_of(path)) {
+        if (tags_builder.length())
+            tags_builder.append(',');
+        tags_builder.append(tag.view());
+    }
+    auto tags_text = MUST(tags_builder.to_string());
     auto optional_integer = [](Optional<i64> const& number) { return number.has_value() ? Value::integer(number.value()) : Value {}; };
     TRY(bind_all(*m_insert_item,
         Value::text(path), Value::text(name), Value::text(fold(name).view()),
@@ -235,7 +245,7 @@ ErrorOr<void> Store::put_path(StringView path, i64 generation)
         Value::integer(size), Value::integer(static_cast<i64>(information.st_ctime)), Value::integer(modified),
         optional_integer(metadata.pixel_width), optional_integer(metadata.pixel_height),
         metadata.version.is_empty() ? Value {} : Value::text(metadata.version.view()),
-        Value::integer(generation)));
+        Value::integer(generation), tags_text.is_empty() ? Value {} : Value::text(tags_text.view())));
     (void)TRY(m_insert_item->step());
     i64 const id = m_database->last_insert_rowid();
     ++m_file_count;

@@ -82,6 +82,8 @@ public:
 
     // Tabs: this application's windows, sharing a frame, one showing at a time, with a bar under the title to go between them.
     void merge_all_windows();
+    // Another of this application's windows, as the next tab of this one.
+    void add_tab(Window&);
     // By this many along, going round.
     void show_adjacent_tab(int by);
     void move_tab_to_new_window();

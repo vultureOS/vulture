@@ -67,6 +67,14 @@ enum class Symbol : u8 {
     Toggles,
     // A crescent: Focus, and Do Not Disturb.
     Moon,
+    // How a folder's shown.
+    ViewIcons,
+    ViewList,
+    ViewColumns,
+    ViewGallery,
+    // A colour of its own, for a tag.
+    TagDot,
+    Clock,
 };
 
 // A control's face: a shape with shadows outside it, a fill, shading inside it.

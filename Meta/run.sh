@@ -77,7 +77,8 @@
 #                       "at X Y WIDTH HEIGHT" (where it is, in points on the screen), or by
 #                       "enabled", "disabled", "focused", "= VALUE" or "~ PART OF VALUE", and
 #                       'ax-gone ROLE "Label"' waits until it's gone,
-#                       'grab ROLE "Label"' presses it and holds on, and 'drop ROLE "Label"'
+#                       'grab ROLE "Label"' presses it and holds on, 'hover ROLE "Label"'
+#                       carries what's held over to it and stays there, and 'drop ROLE "Label"'
 #                       carries what's held over to it and lets go.
 #
 #                       Everything else a test might need to do to the machine:
@@ -531,7 +532,7 @@ if [ -n "$chat_file" ]; then
         case "$line" in
             "" | "#"*) ;;
             "expect "* | "send "* | "pause "* | "type "* | "key "* | "pointer "* | "nudge "* | "button "* | "wheel "* | "screenshot "* | \
-                "click "* | "grab "* | "drop "* | "ax-expect "* | "ax-gone "* | "timeout "* | "forbid "* | "reboot" | "plug "* | "hold "* | "unplug "* | "qmp "* | "qmp-result "* | \
+                "click "* | "grab "* | "hover "* | "drop "* | "ax-expect "* | "ax-gone "* | "timeout "* | "forbid "* | "reboot" | "plug "* | "hold "* | "unplug "* | "qmp "* | "qmp-result "* | \
                 "touch "* | "fingers "* | "display "* | "host "* | "host-start "* | "host-stop "*) chat_steps+=("$line") ;;
             *) echo "run.sh: $chat_file: not a step: $line" >&2; exit 2 ;;
         esac
@@ -934,6 +935,14 @@ ax_step() {
             sleep 0.2
             return 0
             ;;
+        hover)
+            # Over it, and staying there, with whatever's held still held.
+            move_pointer $(((x + width / 2 - 12) * 32768 / screen_width)) $(((y + height / 2 - 12) * 32768 / screen_height))
+            sleep 0.2
+            move_pointer $(((x + width / 2) * 32768 / screen_width)) $(((y + height / 2) * 32768 / screen_height))
+            sleep 0.3
+            return 0
+            ;;
         drop)
             # Most of the way, then onto it: what's under the pointer sees it arrive.
             move_pointer $(((x + width / 2 - 12) * 32768 / screen_width)) $(((y + height / 2 - 12) * 32768 / screen_height))
@@ -1027,6 +1036,11 @@ advance_chat() {
                 ;;
             "grab "*)
                 ax_step grab "${step#grab }" || return 0
+                [ -n "$chat_failure" ] && return 0
+                chat_index=$((chat_index + 1))
+                ;;
+            "hover "*)
+                ax_step hover "${step#hover }" || return 0
                 [ -n "$chat_failure" ] && return 0
                 chat_index=$((chat_index + 1))
                 ;;
