@@ -670,13 +670,17 @@ void Screenshots::toolbar_capture()
     m_from_toolbar = true;
     start_after_timer([this, mode, area] {
         m_from_toolbar = false;
-        if (mode == Mode::Screen) {
-            take_screen();
-        } else if (mode == Mode::Portion && !area.is_empty()) {
-            auto png = Application::the().connection().capture_screen(area);
-            if (!png.is_error())
-                deliver(png.release_value());
-        }
+        // Taken once the toolbar has gone from the screen, as what chose an area or a window waits for: at once, it
+        // was sometimes in the picture.
+        (void)Application::the().add_timer(60, false, [this, mode, area] {
+            if (mode == Mode::Screen) {
+                take_screen();
+            } else if (mode == Mode::Portion && !area.is_empty()) {
+                auto png = Application::the().connection().capture_screen(area);
+                if (!png.is_error())
+                    deliver(png.release_value());
+            }
+        });
     });
     if (m_options.timer_seconds == 0)
         m_from_toolbar = false;

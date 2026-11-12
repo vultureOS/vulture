@@ -608,6 +608,14 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **macOS 26 changed the system colours.** Its AppKit gives `#ff4245` for red and `#0091ff` for blue in the dark, where Sequoia's
   are `#ff453a` and `#0a84ff`, whatever SDK a program's linked against. So this Mac can't measure them, and they're Apple's
   published values. The label, selection, link and focus colours are the same as ours, and count as measured.
+- **System Settings' sidebar has its tiles.** Each pane's symbol is white on a small tile of its colour, as Sequoia's are,
+  where they'd been blue symbols on nothing. The colours are estimates, from memory of Sequoia, until the VM.
+- **Icons on Apple's grid.** Every application icon's body is now what Apple's published template says: 824 of 1024, in the
+  middle, with corners of 185.4. They'd been a corner of 0.185 of the whole, about 4 of 1024 too round.
+- **Screenshot sometimes took a picture of itself.** Capture on its toolbar put the toolbar away and took the picture at once,
+  before the screen had been drawn again without it, so now and then the toolbar was in the picture: `m24-screenshots` came out
+  one of two ways, a few hundred pixels apart, in a thumbnail on the desktop. It waits for the screen, as choosing an area or a
+  window always had.
 - **The window background isn't `windowBackgroundColor`.** AppKit says `#ececec` in the light, but the window it draws is
   `#f6f6f6` down the middle, which is what ours is: the chrome it drew is what's checked.
 

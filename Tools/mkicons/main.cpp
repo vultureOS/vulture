@@ -88,9 +88,11 @@ public:
     // continuous corners, lit from above.
     void app_base(Color top, Color bottom)
     {
-        constexpr float margin = 0.098f;
-        constexpr float side = 1 - margin * 2;
-        constexpr float radius = 0.185f;
+        // Apple's published grid for a Mac's application icons (its template, since Big Sur): on a canvas of 1024, a body
+        // of 824 in the middle, with corners of 185.4 (22.5% of its side).
+        constexpr float margin = 100.0f / 1024;
+        constexpr float side = 824.0f / 1024;
+        constexpr float radius = 185.4f / 1024;
         for (int i = 0; i < 8; ++i) {
             float grown = static_cast<float>(8 - i) * 0.004f;
             m_painter.fill_continuous_rounded_rect(rect(margin - grown, margin - grown + 0.012f, side + grown * 2, side + grown * 2), (radius + grown) * m_size, Color { 0, 0, 0, 10 });

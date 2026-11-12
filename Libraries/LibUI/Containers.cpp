@@ -431,6 +431,17 @@ void Sidebar::set_row_tint(size_t row, Gfx::Color color)
     }
 }
 
+void Sidebar::set_row_tile(size_t row, StringView color_token)
+{
+    for (auto& entry : m_entries) {
+        if (!entry.section && entry.row == static_cast<int>(row)) {
+            entry.tile = MUST(String::from_view(color_token));
+            set_needs_display();
+            return;
+        }
+    }
+}
+
 void Sidebar::set_row_accessory(size_t row, Symbol symbol, StringView label, Function<void()> action)
 {
     for (auto& entry : m_entries) {
@@ -564,9 +575,19 @@ void Sidebar::draw(Graphics& graphics)
         }
         if (entry.row == m_selected)
             graphics.fill_rounded({ inset, y, width() - inset * 2, row_height }, radius, t.color(window() && window()->is_key() ? "sidebar.selectionActive"_sv : "sidebar.selection"_sv));
-        graphics.draw_symbol(entry.symbol, { inset + left - 8, y + (row_height - icon) / 2, icon, icon }, entry.tinted ? entry.tint : t.color("sidebar.icon"_sv));
+        float const icon_center = inset + left - 8 + icon / 2;
+        float text_x = inset + left - 8 + icon + gap;
+        if (!entry.tile.is_empty()) {
+            float const tile = t.metric("sidebar.tileSize"_sv);
+            float const glyph = t.metric("sidebar.tileSymbol"_sv);
+            graphics.fill_rounded({ icon_center - tile / 2, y + (row_height - tile) / 2, tile, tile }, t.metric("sidebar.tileRadius"_sv), t.color(entry.tile.view()));
+            graphics.draw_symbol(entry.symbol, { icon_center - glyph / 2, y + (row_height - glyph) / 2, glyph, glyph }, t.color("sidebar.tileSymbol"_sv));
+            text_x = icon_center + tile / 2 + gap;
+        } else {
+            graphics.draw_symbol(entry.symbol, { inset + left - 8, y + (row_height - icon) / 2, icon, icon }, entry.tinted ? entry.tint : t.color("sidebar.icon"_sv));
+        }
         float const room_for_accessory = entry.has_accessory ? icon + 6 : 0;
-        graphics.draw_text_truncated(entry.title.view(), body, { inset + left - 8 + icon + gap, y + (row_height + Appearance::cap_height(body)) / 2 }, width() - inset * 2 - left - icon - gap - room_for_accessory, t.color("sidebar.text"_sv));
+        graphics.draw_text_truncated(entry.title.view(), body, { text_x, y + (row_height + Appearance::cap_height(body)) / 2 }, width() - inset - text_x - room_for_accessory, t.color("sidebar.text"_sv));
         if (entry.has_accessory)
             graphics.draw_symbol(entry.accessory, { width() - inset - icon - 6, y + (row_height - icon) / 2, icon, icon }, t.color("sidebar.icon"_sv));
     }

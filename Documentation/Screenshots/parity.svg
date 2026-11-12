@@ -13,5 +13,5 @@
   <text x="320" y="24" font-size="24" font-weight="600">60.3%</text>
   <rect class="track" x="0" y="36" width="640" height="12" rx="6"/>
   <rect class="fill" x="0" y="36" width="386" height="12" rx="6"/>
-  <text class="note" x="320" y="70" font-size="13">of 458 features, by the last test results</text>
+  <text class="note" x="320" y="70" font-size="13">of 459 features, by the last test results</text>
 </svg>

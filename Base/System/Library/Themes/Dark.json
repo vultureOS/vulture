@@ -250,7 +250,8 @@
             "selectionActive" : "#ffffff1a",
             "text" : "#ffffffd8",
             "section" : "#ffffff8c",
-            "icon" : "#0a84ff"
+            "icon" : "#0a84ff",
+            "tileSymbol" : "#ffffff"
         },
         "sheet" : { "fill" : "#282828", "scrim" : "#00000000", "edge" : "#ffffff26" },
         "alert" : { "fill" : "#282828e0" },
@@ -316,7 +317,7 @@
         "disks" : { "used" : "#0a84ff", "free" : "#ffffff1f" },
         "launcher" : { "text" : "#ffffff", "fill" : "#00000040", "selection" : "#00000040", "folder" : "#ffffff4d", "mergeTarget" : "#ffffff59", "dim" : "#00000059", "folderPanel" : "#ffffff26" },
         "files" : { "desktopText" : "#ffffff", "selection" : "#ffffff33", "renameFill" : "#1e1e1e" },
-        "settings" : { "group" : "#ffffff0d", "groupBorder" : "#ffffff14", "alertScreen" : "#3b4a60", "alertCard" : "#5a5a5ee6", "alertCardLine" : "#ffffff40" }
+        "settings" : { "group" : "#ffffff0d", "groupBorder" : "#ffffff14", "alertScreen" : "#3b4a60", "alertCard" : "#5a5a5ee6", "alertCardLine" : "#ffffff40", "tileBlack" : "#3a3a3c" }
     },
     "desktop" : {
         "minimizeSeconds" : 0.45,

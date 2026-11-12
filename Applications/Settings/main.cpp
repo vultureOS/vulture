@@ -2245,28 +2245,28 @@ public:
         MaterialRegion region { { 0, 0, static_cast<int>(sidebar_width), 600 }, WS::Material::Sidebar };
         m_window->set_materials(Span<MaterialRegion const>(&region, 1));
 
-        add_pane("Appearance"_sv, Symbol::Contrast, build_appearance);
-        add_pane("Accessibility"_sv, Symbol::Accessibility, build_accessibility);
-        add_pane("Control Center"_sv, Symbol::Toggles, build_control_center);
-        add_pane("Wallpaper"_sv, Symbol::Photo, build_wallpaper);
-        add_pane("Screen Saver"_sv, Symbol::Display, build_screen_saver);
-        add_pane("Desktop & Dock"_sv, Symbol::Sidebar, build_dock);
-        add_pane("Displays"_sv, Symbol::Display, build_displays);
-        add_pane("Network"_sv, Symbol::Globe, build_network);
-        add_pane("Sound"_sv, Symbol::Speaker, build_sound);
-        add_pane("Keyboard"_sv, Symbol::Keyboard, build_keyboard);
-        add_pane("Mouse"_sv, Symbol::Mouse, build_mouse);
-        add_pane("Trackpad"_sv, Symbol::Trackpad, build_trackpad);
-        add_pane("Language & Region"_sv, Symbol::Globe, build_language_region);
-        add_pane("Notifications"_sv, Symbol::Bell, build_notifications, true);
-        add_pane("Focus"_sv, Symbol::Moon, build_focus);
-        add_pane("Privacy & Security"_sv, Symbol::Lock, build_privacy);
-        add_pane("Lock Screen"_sv, Symbol::Lock, build_lock_screen);
-        add_pane("Users & Groups"_sv, Symbol::Person, build_users, true);
-        add_pane("Login Items"_sv, Symbol::Applications, build_login_items, true);
-        add_pane("Storage"_sv, Symbol::Drive, build_storage);
-        add_pane("Startup Disk"_sv, Symbol::Drive, build_startup_disk);
-        add_pane("About"_sv, Symbol::Information, build_about);
+        add_pane("Appearance"_sv, Symbol::Contrast, "settings.tileBlack"_sv, build_appearance);
+        add_pane("Accessibility"_sv, Symbol::Accessibility, "system.blue"_sv, build_accessibility);
+        add_pane("Control Center"_sv, Symbol::Toggles, "system.gray"_sv, build_control_center);
+        add_pane("Wallpaper"_sv, Symbol::Photo, "system.cyan"_sv, build_wallpaper);
+        add_pane("Screen Saver"_sv, Symbol::Display, "system.teal"_sv, build_screen_saver);
+        add_pane("Desktop & Dock"_sv, Symbol::Sidebar, "settings.tileBlack"_sv, build_dock);
+        add_pane("Displays"_sv, Symbol::Display, "system.blue"_sv, build_displays);
+        add_pane("Network"_sv, Symbol::Globe, "system.blue"_sv, build_network);
+        add_pane("Sound"_sv, Symbol::Speaker, "system.pink"_sv, build_sound);
+        add_pane("Keyboard"_sv, Symbol::Keyboard, "system.gray"_sv, build_keyboard);
+        add_pane("Mouse"_sv, Symbol::Mouse, "system.gray"_sv, build_mouse);
+        add_pane("Trackpad"_sv, Symbol::Trackpad, "system.gray"_sv, build_trackpad);
+        add_pane("Language & Region"_sv, Symbol::Globe, "system.blue"_sv, build_language_region);
+        add_pane("Notifications"_sv, Symbol::Bell, "system.red"_sv, build_notifications, true);
+        add_pane("Focus"_sv, Symbol::Moon, "system.indigo"_sv, build_focus);
+        add_pane("Privacy & Security"_sv, Symbol::Lock, "system.blue"_sv, build_privacy);
+        add_pane("Lock Screen"_sv, Symbol::Lock, "settings.tileBlack"_sv, build_lock_screen);
+        add_pane("Users & Groups"_sv, Symbol::Person, "system.blue"_sv, build_users, true);
+        add_pane("Login Items"_sv, Symbol::Applications, "system.gray"_sv, build_login_items, true);
+        add_pane("Storage"_sv, Symbol::Drive, "system.gray"_sv, build_storage);
+        add_pane("Startup Disk"_sv, Symbol::Drive, "system.gray"_sv, build_startup_disk);
+        add_pane("About"_sv, Symbol::Information, "system.gray"_sv, build_about);
         m_sidebar->on_select = [this](size_t row) {
             drop_detail();
             m_forward_title = {};
@@ -2316,12 +2316,14 @@ private:
 
     // A pane that's made again each time it's shown says what's changed since: which applications have posted, for
     // Notifications.
-    void add_pane(StringView name, Symbol symbol, void (*build)(Page&), bool made_when_shown = false)
+    // `tile`: the colour of the small tile its symbol's on in the sidebar, as Sequoia's System Settings has them.
+    void add_pane(StringView name, Symbol symbol, StringView tile, void (*build)(Page&), bool made_when_shown = false)
     {
         m_names.append(MUST(String::from_view(name)));
         m_builds.append(build);
         m_made_when_shown.append(made_when_shown);
         m_sidebar->add_row(name, symbol);
+        m_sidebar->set_row_tile(m_names.size() - 1, tile);
         // Longer than the window, some of them: they scroll, under the title.
         auto& scroll = m_pages->add<ScrollView>();
         scroll.set_scrolls_horizontally(false);

@@ -2192,7 +2192,7 @@
                 {
                     "feature": "Symbols",
                     "claim": "partial",
-                    "missing": "many are stand-ins: Settings' sidebar shows \"+\" for Keyboard and \"?\" for Notifications",
+                    "missing": "one weight each, where Sequoia's come in nine; and not as many as it has",
                     "milestone": "M28",
                     "proof": [
                         {
@@ -2204,12 +2204,26 @@
                 {
                     "feature": "Application icons",
                     "claim": "partial",
-                    "missing": "not a full set, nor checked against Sequoia's icon shape",
+                    "missing": "not a full set: their shape is Apple's published grid, but there's no icon yet for many of what a Mac has",
                     "milestone": "M28",
                     "proof": [
                         {
                             "suite": "test-ui",
                             "golden": "desktop-2x-desktop.png"
+                        }
+                    ]
+                },
+                {
+                    "feature": "System Settings' sidebar, with its coloured tiles",
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-settings.png"
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "desktop-2x-settings-dark.png"
                         }
                     ]
                 },

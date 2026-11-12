@@ -174,6 +174,8 @@ public:
     void set_row_accessory(size_t row, Symbol, StringView label, Function<void()> action);
     // Its symbol in a colour of its own, as a tag's is.
     void set_row_tint(size_t row, Gfx::Color);
+    // Its symbol in white on a small tile of this colour (a theme token, so it follows light and dark), as System Settings' are.
+    void set_row_tile(size_t row, StringView color_token);
     void select_row(size_t);
     // None of them, as when what's showing isn't one of its places.
     void clear_selection();
@@ -211,6 +213,7 @@ private:
         Function<void()> accessory_action {};
         bool tinted { false };
         Gfx::Color tint {};
+        String tile {};
     };
 
     [[nodiscard]] float y_of(size_t entry) const;
