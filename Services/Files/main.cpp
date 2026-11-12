@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "Common.h"
+#include "Operations.h"
+#include "Views.h"
+#include <Tags.h>
 #include <Desktop.h>
 #include <LibDiskManagement/Disks.h>
 #include <FilesEndpoint.h>
@@ -36,185 +40,16 @@
 
 using namespace UI;
 using namespace Gfx;
+using namespace FilesApp;
 
 namespace {
 
-bool s_still;
 constexpr StringView s_file_type = "public.file-url"_sv;
 
 Appearance const& tokens()
 {
     return Appearance::the();
 }
-
-String joined(StringView directory, StringView name)
-{
-    StringBuilder builder;
-    builder.append(directory);
-    if (!directory.ends_with('/'))
-        builder.append("/"_sv);
-    builder.append(name);
-    return MUST(builder.to_string());
-}
-
-StringView last_component(StringView path)
-{
-    for (size_t i = path.length(); i > 0; --i) {
-        if (path[i - 1] == '/' && i != path.length())
-            return path.substring_view(i, path.length() - i);
-    }
-    return path;
-}
-
-String parent_of(StringView path)
-{
-    size_t end = path.length();
-    while (end > 1 && path[end - 1] != '/')
-        --end;
-    if (end > 1)
-        --end;
-    return MUST(String::from_view(path.substring_view(0, end)));
-}
-
-struct FileItem {
-    String name;
-    String path;
-    String icon;
-    bool is_directory { false };
-    u64 size { 0 };
-    i64 modified { 0 };
-    bool selected { false };
-    // What it looks like, rather than an icon: pictures, and text, as Finder's are.
-    bool has_thumbnail { false };
-};
-
-char lower(char c)
-{
-    return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c;
-}
-
-bool sorts_before(StringView a, StringView b)
-{
-    size_t common = min(a.length(), b.length());
-    for (size_t i = 0; i < common; ++i) {
-        char x = lower(a[i]), y = lower(b[i]);
-        if (x != y)
-            return x < y;
-    }
-    return a.length() < b.length();
-}
-
-Vector<FileItem> list_folder(StringView path, bool show_hidden = false)
-{
-    Vector<FileItem> items;
-    auto terminated = MUST(String::from_view(path));
-    auto const add_from = [&](StringView folder) {
-        auto const folder_name = MUST(String::from_view(folder));
-        DIR* directory = opendir(folder_name.characters());
-        if (!directory)
-            return;
-        while (auto* entry = readdir(directory)) {
-            StringView name { entry->d_name, strlen(entry->d_name) };
-            if (name == "."_sv || name == ".."_sv)
-                continue;
-            if (!show_hidden && name.starts_with('.'))
-                continue;
-            FileItem item;
-            item.name = MUST(String::from_view(name));
-            item.path = joined(folder, name);
-            struct stat info;
-            if (stat(item.path.characters(), &info) == 0) {
-                item.is_directory = S_ISDIR(info.st_mode);
-                item.size = static_cast<u64>(info.st_size);
-                item.modified = static_cast<i64>(info.st_mtime);
-            }
-            item.icon = Desktop::icon_name_for_path(item.path.view());
-            if (!item.is_directory && item.size > 0 && item.size <= 16 * MiB) {
-                auto type = Desktop::content_type_of_path(item.path.view());
-                item.has_thumbnail = Desktop::content_type_conforms(type, "public.image"_sv) || Desktop::content_type_conforms(type, "public.text"_sv);
-            }
-            items.append(move(item));
-        }
-        closedir(directory);
-    };
-    add_from(terminated.view());
-    // As in a Mac's Finder, the applications that came with the system are among the others, wherever they really are.
-    if (path == "/Applications"_sv)
-        add_from("/System/Applications"_sv);
-    for (size_t i = 1; i < items.size(); ++i) {
-        for (size_t j = i; j > 0 && sorts_before(items[j].name.view(), items[j - 1].name.view()); --j) {
-            auto moved = move(items[j]);
-            items[j] = move(items[j - 1]);
-            items[j - 1] = move(moved);
-        }
-    }
-    return items;
-}
-
-// ---- Thumbnails: a few at a time, as each is a process of its own.
-
-class Thumbnails {
-public:
-    static Thumbnails& the()
-    {
-        static Thumbnails thumbnails;
-        return thumbnails;
-    }
-
-    // What's known of it: nothing (yet, or ever) is a null.
-    [[nodiscard]] Gfx::Bitmap const* get(FileItem const& item, int pixels)
-    {
-        auto key = key_for(item);
-        if (auto const* found = m_done.get(key.view()))
-            return found->ptr();
-        if (!m_asked.contains(key.view())) {
-            m_asked.set(key, true);
-            m_waiting.append(Waiting { key, MUST(String::from_view(item.path.view())), pixels });
-            pump();
-        }
-        return nullptr;
-    }
-
-    Function<void()> on_new;
-
-private:
-    static constexpr int most_at_once = 2;
-
-    struct Waiting {
-        String key;
-        String path;
-        int pixels;
-    };
-
-    static String key_for(FileItem const& item)
-    {
-        StringBuilder key;
-        key.appendff("{}|{}", item.path.view(), item.modified);
-        return MUST(key.to_string());
-    }
-
-    void pump()
-    {
-        while (m_running < most_at_once && !m_waiting.is_empty()) {
-            auto next = move(m_waiting.last());
-            m_waiting.remove(m_waiting.size() - 1);
-            ++m_running;
-            auto key = move(next.key);
-            Desktop::request_thumbnail(next.path.view(), next.pixels, [this, key = move(key)](RefPtr<Gfx::Bitmap> bitmap) {
-                --m_running;
-                m_done.set(key, move(bitmap));
-                if (on_new)
-                    on_new();
-                pump();
-            });
-        }
-    }
-
-    HashMap<String, RefPtr<Gfx::Bitmap>> m_done;
-    HashMap<String, bool> m_asked;
-    Vector<Waiting> m_waiting;
-    int m_running { 0 };
-};
 
 class PreviewView;
 
@@ -392,97 +227,6 @@ void QuickViewPanel::close()
     m_window->hide();
 }
 
-// ---- What can be done to files
-
-ErrorOr<void> copy_file(StringView from, StringView to)
-{
-    auto source_path = MUST(String::from_view(from));
-    auto target_path = MUST(String::from_view(to));
-    struct stat info;
-    if (lstat(source_path.characters(), &info) != 0)
-        return Error::from_errno(errno);
-    if (S_ISDIR(info.st_mode)) {
-        if (mkdir(target_path.characters(), info.st_mode & 07777) != 0 && errno != EEXIST)
-            return Error::from_errno(errno);
-        for (auto const& item : list_folder(from, true))
-            TRY(copy_file(item.path.view(), joined(to, item.name.view()).view()));
-        return {};
-    }
-    int in = open(source_path.characters(), O_RDONLY | O_CLOEXEC);
-    if (in < 0)
-        return Error::from_errno(errno);
-    int out = open(target_path.characters(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, info.st_mode & 07777);
-    if (out < 0) {
-        int saved = errno;
-        close(in);
-        return Error::from_errno(saved);
-    }
-    static char buffer[65536];
-    ssize_t got;
-    while ((got = read(in, buffer, sizeof(buffer))) > 0) {
-        if (write(out, buffer, static_cast<size_t>(got)) != got) {
-            int saved = errno;
-            close(in);
-            close(out);
-            return Error::from_errno(saved);
-        }
-    }
-    close(in);
-    close(out);
-    return {};
-}
-
-ErrorOr<void> remove_tree(StringView path)
-{
-    auto terminated = MUST(String::from_view(path));
-    struct stat info;
-    if (lstat(terminated.characters(), &info) != 0)
-        return Error::from_errno(errno);
-    if (S_ISDIR(info.st_mode)) {
-        for (auto const& item : list_folder(path, true))
-            TRY(remove_tree(item.path.view()));
-        if (rmdir(terminated.characters()) != 0)
-            return Error::from_errno(errno);
-        return {};
-    }
-    if (unlink(terminated.characters()) != 0)
-        return Error::from_errno(errno);
-    return {};
-}
-
-bool exists(StringView path)
-{
-    auto terminated = MUST(String::from_view(path));
-    struct stat info;
-    return lstat(terminated.characters(), &info) == 0;
-}
-
-// A name not yet used in the folder: "untitled folder", "untitled folder 2", ...
-String free_name(StringView directory, StringView wanted)
-{
-    if (!exists(joined(directory, wanted).view()))
-        return MUST(String::from_view(wanted));
-    for (int i = 2;; ++i) {
-        StringBuilder builder;
-        builder.append(wanted);
-        builder.appendff(" {}", i);
-        auto candidate = MUST(builder.to_string());
-        if (!exists(joined(directory, candidate.view()).view()))
-            return candidate;
-    }
-}
-
-ErrorOr<void> move_item(StringView from, StringView to)
-{
-    auto a = MUST(String::from_view(from));
-    auto b = MUST(String::from_view(to));
-    if (rename(a.characters(), b.characters()) == 0)
-        return {};
-    // Across volumes: copied, then gone.
-    TRY(copy_file(from, to));
-    return remove_tree(from);
-}
-
 // What was last copied: Files's own pasteboard, of whole files.
 Vector<String> s_copied_paths;
 
@@ -522,6 +266,12 @@ public:
         Thumbnails::the().on_new = [] { redraw_all(); };
     }
 
+    static void reload_all()
+    {
+        for (auto* view : s_folder_views)
+            view->reload();
+    }
+
     static void redraw_all()
     {
         for (auto* view : s_folder_views)
@@ -547,7 +297,7 @@ public:
         // What's put in it by anyone else (a screenshot on the desktop, a download) shows up: as its folder changes.
         if (m_watch_timer < 0)
             m_watch_timer = Application::the().add_timer(500, true, [this] {
-                if (folder_stamp() != m_stamp)
+                if (folder_stamp() != m_stamp || (m_on_desktop && external_disks_changed()))
                     reload();
             });
     }
@@ -555,10 +305,121 @@ public:
     [[nodiscard]] StringView path() const { return m_path.view(); }
     [[nodiscard]] Vector<FileItem> const& items() const { return m_items; }
 
+    // On the desktop: disks, as the settings say, and what's here gathered into Stacks if that's on.
+    void add_desktop_extras()
+    {
+        Desktop::Preferences preferences("com.vulture.Files"_sv);
+        Vector<FileItem> disks;
+        if (preferences.boolean("showHardDisks"_sv).value_or(false)) {
+            FileItem disk;
+            disk.name = MUST(String::from_view("Vulture HD"_sv));
+            disk.path = MUST(String::from_view("/"_sv));
+            disk.icon = MUST(String::from_view("Drive"_sv));
+            disk.is_directory = true;
+            disk.is_volume = true;
+            disks.append(move(disk));
+        }
+        if (preferences.boolean("showExternalDisks"_sv).value_or(true)) {
+            if (DIR* directory = opendir("/Volumes")) {
+                while (auto* entry = readdir(directory)) {
+                    StringView const name { entry->d_name, strlen(entry->d_name) };
+                    if (name == "."_sv || name == ".."_sv || name == "EFI"_sv || name.starts_with('.'))
+                        continue;
+                    FileItem disk;
+                    disk.name = MUST(String::from_view(name));
+                    disk.path = joined("/Volumes"_sv, name);
+                    disk.icon = MUST(String::from_view("Drive"_sv));
+                    disk.is_directory = true;
+                    disk.is_volume = true;
+                    disks.append(move(disk));
+                }
+                closedir(directory);
+            }
+        }
+        m_volume_count = disks.size();
+        Vector<FileItem> shown;
+        for (auto& disk : disks)
+            shown.append(move(disk));
+        if (!preferences.boolean("useStacks"_sv).value_or(false)) {
+            for (auto& item : m_items)
+                shown.append(move(item));
+            m_items = move(shown);
+            return;
+        }
+        // Folders stay as they are; what's left, by kind.
+        for (auto& item : m_items) {
+            if (item.is_directory)
+                shown.append(move(item));
+        }
+        StringView const kinds[] = { "Documents"_sv, "Images"_sv, "Screenshots"_sv, "Movies"_sv, "Music"_sv, "Other"_sv };
+        for (auto kind : kinds) {
+            int count = 0;
+            for (auto const& item : m_items) {
+                if (!item.name.is_empty() && !item.is_directory && kind_of_item(item) == kind)
+                    ++count;
+            }
+            if (count == 0)
+                continue;
+            FileItem stack;
+            stack.name = MUST(String::from_view(kind));
+            StringBuilder path;
+            path.appendff("stack:{}", kind);
+            stack.path = MUST(path.to_string());
+            stack.icon = MUST(String::from_view("GenericDocument"_sv));
+            stack.is_stack = true;
+            stack.stack_count = count;
+            for (auto const& item : m_items) {
+                if (item.name.is_empty() || item.is_directory || kind_of_item(item) != kind)
+                    continue;
+                if (stack.stack_tops.is_empty())
+                    stack.icon = item.icon;
+                stack.stack_tops.append(StackTop { item.path, item.icon, item.modified, item.has_thumbnail });
+                if (stack.stack_tops.size() == 3)
+                    break;
+            }
+            shown.append(move(stack));
+            if (m_open_stack.view() != kind)
+                continue;
+            for (auto& item : m_items) {
+                if (!item.name.is_empty() && !item.is_directory && kind_of_item(item) == kind)
+                    shown.append(move(item));
+            }
+        }
+        m_items = move(shown);
+    }
+
+    [[nodiscard]] static StringView kind_of_item(FileItem const& item)
+    {
+        auto type = Desktop::content_type_of_path(item.path.view());
+        if (Desktop::content_type_conforms(type, "public.image"_sv))
+            return item.name.view().starts_with("Screenshot"_sv) ? "Screenshots"_sv : "Images"_sv;
+        if (Desktop::content_type_conforms(type, "public.text"_sv) || Desktop::content_type_conforms(type, "com.adobe.pdf"_sv))
+            return "Documents"_sv;
+        if (Desktop::content_type_conforms(type, "public.movie"_sv))
+            return "Movies"_sv;
+        if (Desktop::content_type_conforms(type, "public.audio"_sv))
+            return "Music"_sv;
+        return "Other"_sv;
+    }
+
     void reload()
     {
+        // What was chosen still is, if it's still there: something else changing in the folder isn't a reason to lose it.
+        Vector<String> were_selected;
+        for (auto const& item : m_items) {
+            if (item.selected)
+                were_selected.append(item.path);
+        }
         m_stamp = folder_stamp();
         m_items = list_folder(m_path.view(), m_path.view().ends_with("/.Trash"_sv));
+        if (m_on_desktop)
+            add_desktop_extras();
+        for (auto& item : m_items) {
+            for (auto const& path : were_selected) {
+                if (item.path.view() == path.view())
+                    item.selected = true;
+            }
+        }
         if (parent())
             parent()->set_needs_layout();
         set_needs_layout();
@@ -569,13 +430,72 @@ public:
 
     [[nodiscard]] Vector<String> selected_paths() const
     {
+        if (m_external_selection_on)
+            return m_external_selection;
         Vector<String> paths;
         for (auto const& item : m_items) {
-            if (item.selected)
+            if (item.selected && !item.is_stack)
                 paths.append(MUST(String::from_view(item.path.view())));
         }
         return paths;
     }
+
+    // Another way of showing this folder has its own idea of what's selected: it's what the menus act on.
+    void set_external_selection(bool on, Vector<String> paths = {})
+    {
+        m_external_selection_on = on;
+        m_external_selection = move(paths);
+    }
+
+    [[nodiscard]] Vector<FileItem>& mutable_items() { return m_items; }
+
+    void show_info_for_selection()
+    {
+        for (auto const& path : selected_paths())
+            show_get_info(path.view(), [] { reload_all(); });
+    }
+
+    void duplicate_selection()
+    {
+        for (auto const& path : selected_paths())
+            (void)duplicate(path.view());
+        reload();
+    }
+
+    void alias_selection()
+    {
+        for (auto const& path : selected_paths())
+            (void)make_alias(path.view());
+        reload();
+    }
+
+    void compress_selection()
+    {
+        auto paths = selected_paths();
+        compress(move(paths), [this] {
+            printf("files: compressed\n");
+            fflush(stdout);
+            reload();
+        });
+    }
+
+    void put_back_selection()
+    {
+        for (auto const& path : selected_paths())
+            (void)put_back(path.view());
+        reload();
+    }
+
+    void toggle_tag_on_selection(StringView tag)
+    {
+        for (auto const& path : selected_paths())
+            (void)Desktop::toggle_tag(path.view(), tag);
+        reload();
+    }
+
+    void quick_look_selection() { toggle_quick_view(); }
+
+    [[nodiscard]] bool is_in_trash() const { return m_path.view().ends_with("/.Trash"_sv); }
 
     void clear_selection()
     {
@@ -607,13 +527,8 @@ public:
 
     void move_selection_to_trash()
     {
-        auto trash = joined(Desktop::home_directory().view(), ".Trash"_sv);
-        mkdir(trash.characters(), 0755);
         auto paths = selected_paths();
-        for (auto const& path : paths) {
-            auto name = free_name(trash.view(), last_component(path.view()));
-            (void)move_item(path.view(), joined(trash.view(), name.view()).view());
-        }
+        move_to_trash(paths.span());
         if (!paths.is_empty())
             Platform::the().play_sound("trash"_sv);
         reload();
@@ -626,11 +541,10 @@ public:
 
     void paste()
     {
-        for (auto const& path : s_copied_paths) {
-            auto name = free_name(m_path.view(), last_component(path.view()));
-            (void)copy_file(path.view(), joined(m_path.view(), name.view()).view());
-        }
-        reload();
+        if (s_copied_paths.is_empty() || !window())
+            return;
+        auto sources = s_copied_paths;
+        start_transfer(TransferKind::Copy, move(sources), m_path.view(), *window(), [this] { reload(); });
     }
 
     void open_selection()
@@ -695,6 +609,29 @@ public:
             float icon_x = rect.x + (rect.width - icon_size) / 2;
             if (item.selected)
                 graphics.fill_rounded({ icon_x - 4, rect.y - 3, icon_size + 8, icon_size + 6 }, 5, t.color("files.selection"_sv));
+            if (item.is_stack && !item.stack_tops.is_empty()) {
+                // A pile: what's in it, each a little further back and up than the one in front, the first on top (and the
+                // same one again, if there aren't three).
+                for (int depth = 2; depth >= 0; --depth) {
+                    auto const& top = item.stack_tops[static_cast<size_t>(depth) % item.stack_tops.size()];
+                    float const side = icon_size - 10 - static_cast<float>(depth) * 6;
+                    FloatRect const box { icon_x + (icon_size - side) / 2 + static_cast<float>(depth) * 3, rect.y + icon_size - side - static_cast<float>(depth) * 5, side, side };
+                    FileItem shown_item;
+                    shown_item.path = top.path;
+                    shown_item.modified = top.modified;
+                    Gfx::Bitmap const* picture = top.has_thumbnail ? Thumbnails::the().get(shown_item, static_cast<int>(icon_size) * scale) : nullptr;
+                    if (picture) {
+                        float const fit = min(side / static_cast<float>(picture->width()), side / static_cast<float>(picture->height()));
+                        float const shown_width = static_cast<float>(picture->width()) * fit;
+                        float const shown_height = static_cast<float>(picture->height()) * fit;
+                        FloatRect const shape = graphics.snapped({ box.x + (side - shown_width) / 2, box.bottom() - shown_height, shown_width, shown_height });
+                        graphics.painter().draw_bitmap(*picture, shape);
+                        graphics.stroke_rounded(shape, 0, graphics.pixel(), t.color("separator"_sv));
+                    } else if (auto icon = Desktop::icon_named(top.icon.view(), static_cast<int>(icon_size), scale)) {
+                        graphics.painter().draw_bitmap(*icon, box);
+                    }
+                }
+            }
             Gfx::Bitmap const* thumbnail = item.has_thumbnail ? Thumbnails::the().get(item, static_cast<int>(icon_size) * scale) : nullptr;
             if (thumbnail) {
                 float const fit = min(icon_size / static_cast<float>(thumbnail->width()), icon_size / static_cast<float>(thumbnail->height()));
@@ -703,8 +640,19 @@ public:
                 FloatRect const shape = graphics.snapped({ icon_x + (icon_size - shown_width) / 2, rect.y + icon_size - shown_height, shown_width, shown_height });
                 graphics.painter().draw_bitmap(*thumbnail, shape);
                 graphics.stroke_rounded(shape, 0, graphics.pixel(), t.color("separator"_sv));
-            } else if (auto icon = Desktop::icon_named(item.icon.view(), static_cast<int>(icon_size), scale)) {
-                graphics.painter().draw_bitmap(*icon, FloatRect { icon_x, rect.y, icon_size, icon_size });
+            } else if (!item.is_stack) {
+                if (auto icon = Desktop::icon_named(item.icon.view(), static_cast<int>(icon_size), scale))
+                    graphics.painter().draw_bitmap(*icon, FloatRect { icon_x, rect.y, icon_size, icon_size });
+            }
+            if (static_cast<int>(i) == m_spring_index)
+                graphics.fill_rounded({ icon_x - 4, rect.y - 3, icon_size + 8, icon_size + 6 }, 5, t.color("files.selection"_sv));
+            if (item.is_alias) {
+                // The arrow in the corner that says this is only a way to something else.
+                FloatRect const badge { icon_x + 1, rect.y + icon_size - 19, 18, 18 };
+                graphics.fill_rounded(badge, 4, Color { 255, 255, 255, 235 });
+                graphics.line({ badge.x + 5, badge.bottom() - 5 }, { badge.right() - 5, badge.y + 5 }, 2, Color { 30, 30, 30, 255 }, true);
+                graphics.line({ badge.x + 8, badge.y + 5 }, { badge.right() - 5, badge.y + 5 }, 2, Color { 30, 30, 30, 255 }, true);
+                graphics.line({ badge.right() - 5, badge.y + 5 }, { badge.right() - 5, badge.bottom() - 8 }, 2, Color { 30, 30, 30, 255 }, true);
             }
             if (static_cast<int>(i) == m_rename_index)
                 continue;
@@ -717,6 +665,14 @@ public:
                 graphics.fill_rounded(label, 4, t.color(window() && window()->is_key() ? "selectedContent"_sv : "selectedContentInactive"_sv));
             auto text_color = item.selected && window() && window()->is_key() ? t.color("selectedContentText"_sv) : (m_on_desktop ? t.color("files.desktopText"_sv) : t.color("label"_sv));
             graphics.draw_text_truncated(shown, font, { label.x + 4, label.y + (label.height + cap) / 2 }, label_width, text_color);
+            float dot_x = label.right() + 2;
+            for (size_t tag = item.tags.size(); tag > 0; --tag) {
+                auto color = Desktop::color_of_tag(item.tags[tag - 1].view());
+                if (!color.has_value())
+                    continue;
+                graphics.fill_circle({ dot_x + 5, label.y + label.height / 2 }, 5, color.value());
+                dot_x -= 6;
+            }
         }
     }
 
@@ -739,6 +695,12 @@ public:
             // On the desktop, that's the wallpaper.
             if (m_on_desktop && !event.modifiers)
                 (void)Application::the().connection().server().wallpaper_clicked();
+            return true;
+        }
+        if (m_items[static_cast<size_t>(hit)].is_stack) {
+            auto name = MUST(String::from_view(m_items[static_cast<size_t>(hit)].name.view()));
+            m_open_stack = m_open_stack.view() == name.view() ? String {} : move(name);
+            reload();
             return true;
         }
         auto& item = m_items[static_cast<size_t>(hit)];
@@ -789,6 +751,36 @@ public:
     [[nodiscard]] bool accepts_first_responder() const override { return true; }
     [[nodiscard]] bool shows_focus_ring() const override { return false; }
 
+    // The Edit menu's, which has Cmd-C, Cmd-V and Cmd-A before a view sees them.
+    bool perform_command(StringView command) override
+    {
+        if (command == "copy"_sv) {
+            copy_selection();
+            return true;
+        }
+        if (command == "paste"_sv) {
+            paste();
+            return true;
+        }
+        if (command == "selectAll"_sv) {
+            for (auto& item : m_items)
+                item.selected = true;
+            set_needs_display();
+            if (on_changed)
+                on_changed();
+            return true;
+        }
+        return false;
+    }
+    [[nodiscard]] bool can_perform_command(StringView command) const override
+    {
+        if (command == "copy"_sv)
+            return !selected_paths().is_empty();
+        if (command == "paste"_sv)
+            return !s_copied_paths.is_empty();
+        return command == "selectAll"_sv;
+    }
+
     bool key_down(KeyEvent const& event) override
     {
         if (event.has_command()) {
@@ -805,6 +797,15 @@ public:
                 return true;
             case KeyV:
                 paste();
+                return true;
+            case KeyI:
+                show_info_for_selection();
+                return true;
+            case KeyD:
+                duplicate_selection();
+                return true;
+            case KeyY:
+                toggle_quick_view();
                 return true;
             case KeyUp:
                 if (on_open_folder && m_path.view() != "/"_sv)
@@ -870,19 +871,54 @@ public:
     void drag_exited() override
     {
         m_drop_target = false;
+        cancel_spring();
         set_needs_display();
     }
+
+    void drag_moved(FloatPoint point) override
+    {
+        int const hit = item_at(point);
+        bool const on_folder = hit >= 0 && m_items[static_cast<size_t>(hit)].is_directory && !m_items[static_cast<size_t>(hit)].name.view().ends_with(".app"_sv);
+        int const wanted = on_folder ? hit : -1;
+        if (wanted == m_spring_index)
+            return;
+        cancel_spring();
+        m_spring_index = wanted;
+        set_needs_display();
+        if (wanted < 0)
+            return;
+        // Held over a folder for a moment, it opens, and the drag goes on inside it.
+        m_spring_timer = Application::the().add_timer(s_spring_milliseconds, false, [this] {
+            m_spring_timer = -1;
+            if (m_spring_index < 0 || static_cast<size_t>(m_spring_index) >= m_items.size())
+                return;
+            auto path = m_items[static_cast<size_t>(m_spring_index)].path;
+            m_spring_index = -1;
+            printf("files: sprang open %s\n", last_component(path.view()).characters_without_null_termination());
+            fflush(stdout);
+            if (on_open_folder)
+                on_open_folder(path.view());
+        });
+    }
+
     void perform_drop(StringView, ReadonlyBytes data) override
     {
         m_drop_target = false;
-        StringView from { reinterpret_cast<char const*>(data.data()), data.size() };
-        auto name = last_component(from);
-        auto target = joined(m_path.view(), name);
-        if (target.view() == from)
+        auto const spring = m_spring_index;
+        cancel_spring();
+        auto from = MUST(String::from_view(StringView { reinterpret_cast<char const*>(data.data()), data.size() }));
+        auto folder = MUST(String::from_view(m_path.view()));
+        if (spring >= 0 && static_cast<size_t>(spring) < m_items.size() && m_items[static_cast<size_t>(spring)].path.view() != from.view())
+            folder = m_items[static_cast<size_t>(spring)].path;
+        if (is_smart_path(folder.view()) || parent_of(from.view()).view() == folder.view() || !window())
             return;
-        auto free = free_name(m_path.view(), name);
-        (void)move_item(from, joined(m_path.view(), free.view()).view());
-        reload();
+        // Between disks, it's a copy: a Mac leaves the original where it was.
+        struct stat a {};
+        struct stat b {};
+        bool const same_disk = stat(from.characters(), &a) == 0 && stat(folder.characters(), &b) == 0 && a.st_dev == b.st_dev;
+        Vector<String> sources;
+        sources.append(from);
+        start_transfer(same_disk ? TransferKind::Move : TransferKind::Copy, move(sources), folder.view(), *window(), [this] { reload(); });
     }
 
     [[nodiscard]] Accessibility::Role accessibility_role() const override { return Accessibility::Role::Table; }
@@ -929,6 +965,20 @@ private:
 
     void open_item(StringView path)
     {
+        if (path.ends_with(saved_search_extension)) {
+            if (auto smart = smart_path_from_file(path); smart.has_value() && on_open_folder)
+                on_open_folder(smart->view());
+            return;
+        }
+        // An archive opens as what's in it, beside it.
+        if (path.ends_with(".zip"_sv)) {
+            expand(path, [this] {
+                printf("files: expanded\n");
+                fflush(stdout);
+                reload();
+            });
+            return;
+        }
         struct stat info;
         auto terminated = MUST(String::from_view(path));
         bool is_directory = stat(terminated.characters(), &info) == 0 && S_ISDIR(info.st_mode);
@@ -958,6 +1008,25 @@ private:
             window()->make_first_responder(this);
     }
 
+    void erase_selection()
+    {
+        auto paths = selected_paths();
+        for (auto const& path : paths)
+            (void)remove_tree(path.view());
+        reload();
+    }
+
+public:
+    void toggle_stacks()
+    {
+        Desktop::Preferences preferences("com.vulture.Files"_sv);
+        preferences.set("useStacks"_sv, JSON::Value(!preferences.boolean("useStacks"_sv).value_or(false)));
+        preferences.save();
+        m_open_stack = {};
+        reload();
+    }
+
+private:
     void toggle_quick_view()
     {
         auto& panel = QuickViewPanel::the();
@@ -1024,13 +1093,57 @@ private:
                 item.selected = true;
             }
             m_menu->add("Open"_sv, [this] { open_selection(); });
+            if (item.is_stack)
+                return;
             if (!item.is_directory)
                 add_open_with(*m_menu, item.path.view());
             m_menu->add_separator();
-            m_menu->add("Move to Trash"_sv, [this] { move_selection_to_trash(); });
+            if (is_in_trash()) {
+                auto& back = m_menu->add("Put Back"_sv, [this] { put_back_selection(); });
+                back.enabled = can_put_back(item.path.view());
+                m_menu->add("Delete Immediately\xE2\x80\xA6"_sv, [this] { erase_selection(); });
+                m_menu->add_separator();
+                m_menu->add("Empty Trash"_sv, [this] {
+                    empty_trash(*window(), [this] { reload(); });
+                });
+            } else if (item.is_volume) {
+                m_menu->add("Eject"_sv, [path = item.path] {
+                    StringBuilder line;
+                    line.appendff("eject {}", path.view());
+                    (void)DiskManagement::request(line.view());
+                });
+            } else {
+                m_menu->add("Move to Trash"_sv, [this] { move_selection_to_trash(); });
+            }
             m_menu->add_separator();
+            m_menu->add("Get Info"_sv, [this] { show_info_for_selection(); });
             m_menu->add("Rename"_sv, [this] { begin_renaming(); });
+            auto selected_count = selected_paths().size();
+            StringBuilder compress_title;
+            if (selected_count == 1)
+                compress_title.appendff("Compress \xE2\x80\x9C{}\xE2\x80\x9D", item.name.view());
+            else
+                compress_title.appendff("Compress {} Items", selected_count);
+            m_menu->add(compress_title.view(), [this] { compress_selection(); });
+            m_menu->add("Duplicate"_sv, [this] { duplicate_selection(); });
+            m_menu->add("Make Alias"_sv, [this] { alias_selection(); });
+            StringBuilder look;
+            look.appendff("Quick Look \xE2\x80\x9C{}\xE2\x80\x9D", item.name.view());
+            m_menu->add(look.view(), [this] { toggle_quick_view(); });
+            m_menu->add_separator();
             m_menu->add("Copy"_sv, [this] { copy_selection(); });
+            auto& tags_menu = m_menu->add_submenu("Tags"_sv);
+            for (auto const& tag : Desktop::standard_tags()) {
+                auto name = MUST(String::from_view(tag.name));
+                auto& entry = tags_menu.add(tag.name, [this, name] { toggle_tag_on_selection(name.view()); });
+                for (auto const& existing : item.tags)
+                    entry.checked = entry.checked || existing.view() == tag.name;
+            }
+            if (Desktop::content_type_of_path(item.path.view()) == "public.png"_sv) {
+                auto& actions = m_menu->add_submenu("Quick Actions"_sv);
+                actions.add("Rotate Left"_sv, [this, path = item.path] { rotate_picture(path.view(), false, [this] { reload(); }); });
+                actions.add("Rotate Right"_sv, [this, path = item.path] { rotate_picture(path.view(), true, [this] { reload(); }); });
+            }
         } else {
             m_menu->add("New Folder"_sv, [this] { new_folder(); });
             auto& paste_item = m_menu->add("Paste"_sv, [this] { paste(); });
@@ -1038,6 +1151,9 @@ private:
             // The desktop's own, as Sonoma's Finder has them: its wallpaper, and its widgets (the shell's).
             if (m_on_desktop) {
                 m_menu->add_separator();
+                Desktop::Preferences preferences("com.vulture.Files"_sv);
+                auto& stacks = m_menu->add("Use Stacks"_sv, [this] { toggle_stacks(); });
+                stacks.checked = preferences.boolean("useStacks"_sv).value_or(false);
                 m_menu->add("Change Wallpaper\xE2\x80\xA6"_sv, [] {
                     auto bundle = Desktop::read_bundle("/System/Applications/Settings.app"_sv);
                     StringView arguments[1] = { "Wallpaper"_sv };
@@ -1051,6 +1167,37 @@ private:
         m_menu->open(*window(), { origin.x + static_cast<int>(event.window_position.x), origin.y + static_cast<int>(event.window_position.y) });
     }
 
+    [[nodiscard]] bool external_disks_changed() const
+    {
+        size_t count = 0;
+        if (DIR* directory = opendir("/Volumes")) {
+            while (auto* entry = readdir(directory)) {
+                StringView const name { entry->d_name, strlen(entry->d_name) };
+                if (name != "."_sv && name != ".."_sv && name != "EFI"_sv && !name.starts_with('.'))
+                    ++count;
+            }
+            closedir(directory);
+        }
+        return count != m_seen_external_disks ? (m_seen_external_disks = count, true) : false;
+    }
+
+    mutable size_t m_seen_external_disks { 0 };
+
+    void cancel_spring()
+    {
+        if (m_spring_timer >= 0)
+            Application::the().cancel_timer(m_spring_timer);
+        m_spring_timer = -1;
+        m_spring_index = -1;
+    }
+
+    static constexpr u64 s_spring_milliseconds = 700;
+    int m_spring_index { -1 };
+    int m_spring_timer { -1 };
+    size_t m_volume_count { 0 };
+    String m_open_stack;
+    bool m_external_selection_on { false };
+    Vector<String> m_external_selection;
     static inline Vector<FolderView*> s_folder_views;
     static inline FolderView* m_quick_view_owner { nullptr };
 
@@ -1091,18 +1238,13 @@ public:
             builder.append(item.name.view());
             break;
         case 1:
-            if (item.is_directory) {
-                builder.append("--"_sv);
-            } else if (item.size < 1024) {
-                builder.appendff("{} bytes", item.size);
-            } else if (item.size < 1024 * 1024) {
-                builder.appendff("{} KB", item.size / 1024);
-            } else {
-                builder.appendff("{} MB", item.size / (1024 * 1024));
-            }
+            builder.append(date_text(item.modified).view());
+            break;
+        case 2:
+            builder.append(item.is_directory ? "--"_sv : size_text(item.size).view());
             break;
         default:
-            builder.append(item.is_directory ? "Folder"_sv : "Document"_sv);
+            builder.append(Desktop::content_description_of_path(item.path.view()));
             break;
         }
         return MUST(builder.to_string());
@@ -1119,6 +1261,7 @@ class FilesWindow;
 class FilesController {
 public:
     void open_new_window(StringView path);
+    void open_new_tab(StringView path);
     void window_closed(FilesWindow&);
     [[nodiscard]] FilesWindow* key_window();
 
@@ -1134,6 +1277,11 @@ public:
         float sidebar = t.metric("files.sidebarWidth"_sv);
         graphics.fill({ sidebar, 0, width() - sidebar, height() }, t.color("windowBackground"_sv));
     }
+
+    // What the Edit menu asks of whatever has the keyboard, if that's the sidebar or a list: it's the folder's to do.
+    FolderView* folder { nullptr };
+    bool perform_command(StringView command) override { return folder && folder->perform_command(command); }
+    [[nodiscard]] bool can_perform_command(StringView command) const override { return folder && folder->can_perform_command(command); }
 };
 
 class FilesWindow {
@@ -1166,27 +1314,75 @@ public:
         m_title = &m_toolbar->add_item<Label>(last_component(path), t.named_font("headline"_sv));
         m_toolbar->add_flexible_space();
         m_view_mode = &m_toolbar->add_segmented();
-        m_view_mode->add_segment("Icons"_sv);
-        m_view_mode->add_segment("List"_sv);
+        m_view_mode->add_segment(Symbol::ViewIcons, "Icons"_sv);
+        m_view_mode->add_segment(Symbol::ViewList, "List"_sv);
+        m_view_mode->add_segment(Symbol::ViewColumns, "Columns"_sv);
+        m_view_mode->add_segment(Symbol::ViewGallery, "Gallery"_sv);
         m_view_mode->set_selected(0);
         m_view_mode->on_change = [this](size_t) { update_view_mode(); };
         (void)m_toolbar->add_button(Symbol::Folder, [this] { m_icons->new_folder(); }, "New Folder"_sv);
-        m_scroll = &right.add<ScrollView>();
+        m_save_search = &m_toolbar->add_item<Button>("Save"_sv);
+        m_save_search->set_hidden(true);
+        m_save_search->on_action = [this] { ask_to_save_search(); };
+        m_empty_trash = &m_toolbar->add_item<Button>("Empty"_sv);
+        m_empty_trash->set_hidden(true);
+        m_empty_trash->on_action = [this] { empty_trash(*m_window, [this] { m_icons->reload(); }); };
+        m_search = &m_toolbar->add_search(150);
+        m_search->on_change = [this] { search_changed(); };
+        auto& body = right.add<StackView>(Axis::Horizontal);
+        body.set_stretch(0, 1);
+        auto& center = body.add<StackView>(Axis::Vertical);
+        center.set_stretch(1, 1);
+        m_preview = &body.add<PreviewPane>();
+        m_preview->set_fixed_width(260);
+        m_preview->set_hidden(true);
+        m_preview->on_changed = [this] { m_icons->reload(); };
+        m_scroll = &center.add<ScrollView>();
         m_scroll->set_stretch(0, 1);
         m_scroll->set_scrolls_horizontally(false);
         m_icons = &m_scroll->make_document<FolderView>(false);
+        root.folder = m_icons;
         m_icons->on_open_folder = [this](StringView folder) { navigate(folder, true); };
         m_icons->on_changed = [this] {
-            update_status();
+            selection_changed();
             m_table->reload();
+            sync_list_selection();
+            if (mode() == ViewMode::Gallery)
+                m_gallery->refresh_selection();
+            if (mode() == ViewMode::Columns)
+                m_columns->refresh();
         };
-        m_table = &right.add<TableView>(&m_list_model);
-        m_table->add_column("Name"_sv, 340);
-        m_table->add_column("Size"_sv, 100);
-        m_table->add_column("Kind"_sv, 120);
+        m_table = &center.add<TableView>(&m_list_model);
+        m_table->add_column("Name"_sv, 260);
+        m_table->add_column("Date Modified"_sv, 180);
+        m_table->add_column("Size"_sv, 70);
+        m_table->add_column("Kind"_sv, 130);
         m_table->set_stretch(0, 1);
         m_table->set_hidden(true);
         m_table->on_activate = [this](size_t row) { open_list_row(row); };
+        m_table->on_selection_change = [this] { list_selection_changed(); };
+        m_columns = &center.add<ColumnBrowser>();
+        m_columns->set_stretch(0, 1);
+        m_columns->set_hidden(true);
+        m_columns->on_open = [this](StringView path) { open_from_view(path); };
+        m_columns->on_selection_change = [this] {
+            m_icons->set_external_selection(true, m_columns->selected_paths());
+            update_status();
+        };
+        m_columns->on_quick_view = [this] { m_icons->quick_look_selection(); };
+        m_gallery = &center.add<GalleryView>();
+        m_gallery->set_stretch(0, 1);
+        m_gallery->set_hidden(true);
+        m_gallery->on_open = [this](StringView path) { open_from_view(path); };
+        m_gallery->on_selection_change = [this] { update_status(); };
+        m_gallery->on_quick_view = [this] { m_icons->quick_look_selection(); };
+        m_path_bar = &right.add<PathBar>();
+        m_path_bar->set_fixed_height(24);
+        m_path_bar->set_hidden(true);
+        m_path_bar->on_navigate = [this](StringView path) {
+            auto owned = MUST(String::from_view(path));
+            navigate(owned.view(), true);
+        };
         m_status = &right.add<Label>(StringView {}, t.named_font("small"_sv));
         m_status->set_style(LabelStyle::Secondary);
         m_status->set_alignment(TextAlignment::Center);
@@ -1194,6 +1390,7 @@ public:
 
         auto home = Desktop::home_directory();
         m_sidebar->add_section("Favorites"_sv);
+        add_place("Recents"_sv, recents_path().view(), Symbol::Clock);
         add_place("Home"_sv, home.view(), Symbol::Home);
         add_place("Desktop"_sv, joined(home.view(), "Desktop"_sv).view(), Symbol::Desktop);
         add_place("Documents"_sv, joined(home.view(), "Documents"_sv).view(), Symbol::File);
@@ -1203,6 +1400,12 @@ public:
         m_system_row = m_places.size();
         add_place("Vulture HD"_sv, "/"_sv, Symbol::Drive);
         add_place("Trash"_sv, joined(home.view(), ".Trash"_sv).view(), Symbol::Trash);
+        add_smart_folders();
+        m_sidebar->add_section("Tags"_sv);
+        for (auto const& tag : Desktop::standard_tags()) {
+            add_place(tag.name, tag_path(tag.name).view(), Symbol::TagDot);
+            m_sidebar->set_row_tint(m_places.size() - 1, tag.color);
+        }
         refresh_volumes();
         m_volumes_timer = Application::the().add_timer(500, true, [this] { refresh_volumes(); });
         m_sidebar->on_select = [this](size_t row) {
@@ -1225,6 +1428,32 @@ public:
     [[nodiscard]] UI::Window& window() { return *m_window; }
     [[nodiscard]] FolderView& icons() { return *m_icons; }
     void navigate_to(StringView path) { navigate(path, true); }
+    [[nodiscard]] StringView current_path() const { return m_icons->path(); }
+
+    void set_mode(size_t index)
+    {
+        m_view_mode->set_selected(index);
+        update_view_mode();
+    }
+
+    void toggle_path_bar()
+    {
+        m_path_bar->set_hidden(!m_path_bar->is_hidden());
+        printf("files: path bar %s\n", m_path_bar->is_hidden() ? "hidden" : "shown");
+        fflush(stdout);
+    }
+
+    void toggle_status_bar() { m_status->set_hidden(!m_status->is_hidden()); }
+
+    void toggle_preview()
+    {
+        m_preview->set_hidden(!m_preview->is_hidden());
+        update_preview();
+        printf("files: preview %s\n", m_preview->is_hidden() ? "hidden" : "shown");
+        fflush(stdout);
+    }
+
+    void focus_search() { (void)m_window->make_first_responder(m_search); }
 
     void go_back()
     {
@@ -1245,6 +1474,135 @@ public:
     }
 
 private:
+    enum class ViewMode : u8 {
+        Icons,
+        List,
+        Columns,
+        Gallery,
+    };
+
+    [[nodiscard]] ViewMode mode() const { return static_cast<ViewMode>(max(m_view_mode->selected_index(), 0)); }
+
+    void open_from_view(StringView given)
+    {
+        auto owned = MUST(String::from_view(given));
+        auto path = owned.view();
+        struct stat information {};
+        if (stat(owned.characters(), &information) == 0 && S_ISDIR(information.st_mode) && !path.ends_with(".app"_sv)) {
+            navigate(path, true);
+            return;
+        }
+        (void)Desktop::open_path(path);
+    }
+
+    void selection_changed()
+    {
+        update_status();
+        update_preview();
+    }
+
+    void update_preview()
+    {
+        if (m_preview->is_hidden())
+            return;
+        auto const paths = m_icons->selected_paths();
+        m_preview->set_path(paths.is_empty() ? StringView {} : paths[0].view());
+    }
+
+    void sync_list_selection()
+    {
+        if (m_syncing_list)
+            return;
+        m_syncing_list = true;
+        m_table->clear_selection();
+        auto const& items = m_icons->items();
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (items[i].selected)
+                m_table->select_row(i, true);
+        }
+        m_syncing_list = false;
+    }
+
+    void list_selection_changed()
+    {
+        if (m_syncing_list)
+            return;
+        m_syncing_list = true;
+        auto& items = m_icons->mutable_items();
+        int const selected = m_table->selected_row();
+        for (size_t i = 0; i < items.size(); ++i)
+            items[i].selected = static_cast<int>(i) == selected;
+        selection_changed();
+        m_syncing_list = false;
+    }
+
+    void search_changed()
+    {
+        auto text = MUST(String::from_view(m_search->text()));
+        if (text.is_empty()) {
+            m_save_search->set_hidden(true);
+            if (is_smart_path(m_icons->path()) && !m_before_search.is_empty()) {
+                auto back = move(m_before_search);
+                m_before_search = {};
+                navigate(back.view(), false);
+            }
+            return;
+        }
+        if (!is_smart_path(m_icons->path()) || m_before_search.is_empty())
+            m_before_search = MUST(String::from_view(m_icons->path()));
+        StringBuilder smart;
+        smart.appendff("smart:Searching \xE2\x80\x9C{}\xE2\x80\x9D|{}", text.view(), text.view());
+        auto path = MUST(smart.to_string());
+        m_keep_search_text = true;
+        navigate(path.view(), false);
+        m_keep_search_text = false;
+        m_save_search->set_hidden(false);
+    }
+
+    void ask_to_save_search()
+    {
+        auto const& t = tokens();
+        auto root = adopt_own(*new StackView(Axis::Vertical, 10, Alignment::Fill, Insets::all(t.metric("alert.padding"_sv))));
+        (void)root->add<Label>("Save this search as a Smart Folder:"_sv);
+        auto& field = root->add<TextField>("Smart Folder"_sv);
+        field.set_accessibility_label("Name"_sv);
+        auto& buttons = root->add<StackView>(Axis::Horizontal, 8, Alignment::Center);
+        auto& filler = buttons.add<View>();
+        filler.set_stretch(1, 0);
+        auto& cancel = buttons.add<Button>("Cancel"_sv);
+        cancel.on_action = [this] { Sheet::dismiss(*m_window); };
+        auto& save = buttons.add<Button>("Save"_sv, ButtonStyle::Default);
+        auto* field_pointer = &field;
+        auto const query = MUST(String::from_view(smart_query(m_icons->path())));
+        save.on_action = [this, field_pointer, query] {
+            auto name = MUST(String::from_view(field_pointer->text()));
+            if (name.is_empty())
+                return;
+            auto saved = save_smart_folder(name.view(), query.view());
+            Sheet::dismiss(*m_window);
+            if (saved.is_error())
+                return;
+            printf("files: saved a smart folder\n");
+            fflush(stdout);
+            if (auto smart = smart_path_from_file(saved.value().view()); smart.has_value())
+                add_place(name.view(), smart->view(), Symbol::Magnifier);
+        };
+        buttons.set_fixed_height(20);
+        Sheet::present(*m_window, adopt_own(*static_cast<View*>(root.leak_ptr())), { 340, 130 });
+    }
+
+    void add_smart_folders()
+    {
+        auto folder = joined(Desktop::home_directory().view(), "Library/Saved Searches"_sv);
+        for (auto const& item : list_folder(folder.view())) {
+            if (!item.name.view().ends_with(saved_search_extension))
+                continue;
+            auto name = item.name.view().substring_view(0, item.name.length() - saved_search_extension.length());
+            if (auto smart = smart_path_from_file(item.path.view()); smart.has_value())
+                add_place(name, smart->view(), Symbol::Magnifier);
+        }
+    }
+
     void add_place(StringView title, StringView path, Symbol symbol)
     {
         m_sidebar->add_row(title, symbol);
@@ -1319,24 +1677,45 @@ private:
             m_back_stack.append(MUST(String::from_view(m_icons->path())));
             m_forward_stack.clear();
         }
+        if (!m_keep_search_text && !m_search->text().is_empty()) {
+            m_search->set_text({});
+            m_save_search->set_hidden(true);
+            m_before_search = {};
+        }
+        m_icons->set_external_selection(false);
         m_icons->set_folder(path);
         m_list_model.set_items(&m_icons->items());
         m_table->reload();
+        if (mode() == ViewMode::Columns)
+            m_columns->set_root(path);
+        if (mode() == ViewMode::Gallery)
+            m_gallery->set_items(&m_icons->mutable_items());
+        m_path_bar->set_path(path);
+        m_empty_trash->set_hidden(!path.ends_with("/.Trash"_sv));
         StringView shown = path == "/"_sv ? "Vulture HD"_sv : last_component(path);
         if (path.ends_with("/.Trash"_sv))
             shown = "Trash"_sv;
+        if (is_smart_path(path))
+            shown = smart_name(path);
         m_window->set_title(shown);
         m_title->set_text(shown);
         m_back->set_enabled(!m_back_stack.is_empty());
         m_forward->set_enabled(!m_forward_stack.is_empty());
+        // The place it is in the sidebar, or none, as in a folder that isn't one; then any of them can be gone to.
         m_syncing_sidebar = true;
+        bool in_sidebar = false;
         for (size_t i = 0; i < m_places.size(); ++i) {
-            if (m_places[i].view() == path)
+            if (m_places[i].view() == path) {
                 m_sidebar->select_row(i);
+                in_sidebar = true;
+            }
         }
+        if (!in_sidebar)
+            m_sidebar->clear_selection();
         m_syncing_sidebar = false;
         m_scroll->scroll_to({ 0, 0 });
         update_status();
+        update_preview();
     }
 
     void update_status()
@@ -1353,9 +1732,23 @@ private:
 
     void update_view_mode()
     {
-        bool list = m_view_mode->selected_index() == 1;
-        m_scroll->set_hidden(list);
-        m_table->set_hidden(!list);
+        auto const shown = mode();
+        m_scroll->set_hidden(shown != ViewMode::Icons);
+        m_table->set_hidden(shown != ViewMode::List);
+        m_columns->set_hidden(shown != ViewMode::Columns);
+        m_gallery->set_hidden(shown != ViewMode::Gallery);
+        m_icons->set_external_selection(false);
+        if (shown == ViewMode::Columns) {
+            m_columns->set_root(m_icons->path());
+            (void)m_window->make_first_responder(m_columns);
+        } else if (shown == ViewMode::Gallery) {
+            m_gallery->set_items(&m_icons->mutable_items());
+            (void)m_window->make_first_responder(m_gallery);
+        } else if (shown == ViewMode::List) {
+            sync_list_selection();
+        }
+        printf("files: shown as %s\n", shown == ViewMode::Icons ? "icons" : shown == ViewMode::List ? "a list" : shown == ViewMode::Columns ? "columns" : "a gallery");
+        fflush(stdout);
     }
 
     void open_list_row(size_t row)
@@ -1389,6 +1782,16 @@ private:
     FolderView* m_icons { nullptr };
     TableView* m_table { nullptr };
     Label* m_status { nullptr };
+    ColumnBrowser* m_columns { nullptr };
+    GalleryView* m_gallery { nullptr };
+    PathBar* m_path_bar { nullptr };
+    PreviewPane* m_preview { nullptr };
+    SearchField* m_search { nullptr };
+    Button* m_save_search { nullptr };
+    Button* m_empty_trash { nullptr };
+    String m_before_search;
+    bool m_keep_search_text { false };
+    bool m_syncing_list { false };
     ListModel m_list_model;
     Vector<String> m_places;
     size_t m_system_row { 0 };
@@ -1404,6 +1807,22 @@ void FilesController::open_new_window(StringView path)
 {
     int offset = static_cast<int>(m_windows.size()) * 28;
     m_windows.append(adopt_own(*new FilesWindow(*this, path, { 180 + offset, 80 + offset })));
+}
+
+void FilesController::open_new_tab(StringView path)
+{
+    auto* front = key_window();
+    if (!front) {
+        open_new_window(path);
+        return;
+    }
+    auto frame = front->window().frame();
+    auto* window = new FilesWindow(*this, path, { frame.x, frame.y });
+    m_windows.append(adopt_own(*window));
+    window->window().set_frame(frame);
+    front->window().add_tab(window->window());
+    printf("files: new tab\n");
+    fflush(stdout);
 }
 
 void FilesController::window_closed(FilesWindow& window)
@@ -1426,6 +1845,38 @@ FilesWindow* FilesController::key_window()
             return window.ptr();
     }
     return nullptr;
+}
+
+// Files > Settings.
+void show_settings()
+{
+    static OwnPtr<UI::Window> s_window;
+    if (s_window) {
+        s_window->show();
+        s_window->backend().activate();
+        return;
+    }
+    auto screen = Platform::the().screen_size();
+    s_window = adopt_own(*new UI::Window("Files Settings"_sv, { (screen.width - 340) / 2, (screen.height - 180) / 3, 340, 150 }, WS::WindowTitled));
+    auto& stack = s_window->set_content<StackView>(Axis::Vertical, 8, Alignment::Leading, Insets::all(18));
+    (void)stack.add<Label>("Show these items on the desktop:"_sv);
+    Desktop::Preferences preferences("com.vulture.Files"_sv);
+    auto add = [&](StringView title, StringView key, bool fallback) {
+        auto& box = stack.add<Checkbox>(title, preferences.boolean(key).value_or(fallback) ? ToggleState::On : ToggleState::Off);
+        auto key_string = MUST(String::from_view(key));
+        auto* pointer = &box;
+        box.on_action = [pointer, key_string] {
+            Desktop::Preferences saved("com.vulture.Files"_sv);
+            saved.set(key_string.view(), JSON::Value(pointer->state() == ToggleState::On));
+            saved.save();
+            FolderView::reload_all();
+        };
+    };
+    add("Hard disks"_sv, "showHardDisks"_sv, false);
+    add("External disks"_sv, "showExternalDisks"_sv, true);
+    s_window->show();
+    printf("files: settings shown\n");
+    fflush(stdout);
 }
 
 class FilesService final : public FilesStub {
@@ -1510,6 +1961,11 @@ int main(int argc, char** argv)
     };
     auto& file = *new Menu("File"_sv);
     file.add_with_shortcut("New Files Window"_sv, KeyN, "\xE2\x8C\x98N"_sv, [&controller, &home] { controller.open_new_window(home.view()); });
+    file.add_with_shortcut("New Tab"_sv, KeyT, "\xE2\x8C\x98T"_sv, [&controller, &home] { controller.open_new_tab(home.view()); });
+    file.add("New Smart Folder"_sv, [&controller] {
+        if (auto* window = controller.key_window())
+            window->focus_search();
+    });
     file.add_with_shortcut("New Folder"_sv, KeyN, "\xE2\x87\xA7\xE2\x8C\x98N"_sv, [selected_view] {
         if (auto* view = selected_view())
             view->new_folder();
@@ -1526,12 +1982,52 @@ int main(int argc, char** argv)
             window->close();
     });
     file.add_separator();
+    file.add_with_shortcut("Get Info"_sv, KeyI, "\xE2\x8C\x98I"_sv, [selected_view] {
+        if (auto* view = selected_view())
+            view->show_info_for_selection();
+    });
+    file.add("Compress"_sv, [selected_view] {
+        if (auto* view = selected_view())
+            view->compress_selection();
+    });
+    file.add_with_shortcut("Duplicate"_sv, KeyD, "\xE2\x8C\x98" "D"_sv, [selected_view] {
+        if (auto* view = selected_view())
+            view->duplicate_selection();
+    });
+    file.add("Make Alias"_sv, [selected_view] {
+        if (auto* view = selected_view())
+            view->alias_selection();
+    });
+    file.add_with_shortcut("Quick Look"_sv, KeyY, "\xE2\x8C\x98Y"_sv, [selected_view] {
+        if (auto* view = selected_view())
+            view->quick_look_selection();
+    });
+    file.add_separator();
     file.add_with_shortcut("Move to Trash"_sv, KeyBackspace, "\xE2\x8C\x98\xE2\x8C\xAB"_sv, [selected_view] {
         if (auto* view = selected_view())
             view->move_selection_to_trash();
     });
     auto& file_item = menus->items().insert_returning(1, "File"_sv);
     file_item.submenu = adopt_own(file);
+    auto& view_menu = *new Menu("View"_sv);
+    auto with_window = [&controller](auto action) {
+        return [&controller, action] {
+            if (auto* window = controller.key_window())
+                action(*window);
+        };
+    };
+    view_menu.add_with_shortcut("as Icons"_sv, Key1, "\xE2\x8C\x98" "1"_sv, with_window([](FilesWindow& window) { window.set_mode(0); }));
+    view_menu.add_with_shortcut("as List"_sv, Key1 + 1, "\xE2\x8C\x98" "2"_sv, with_window([](FilesWindow& window) { window.set_mode(1); }));
+    view_menu.add_with_shortcut("as Columns"_sv, Key1 + 2, "\xE2\x8C\x98" "3"_sv, with_window([](FilesWindow& window) { window.set_mode(2); }));
+    view_menu.add_with_shortcut("as Gallery"_sv, Key1 + 3, "\xE2\x8C\x98" "4"_sv, with_window([](FilesWindow& window) { window.set_mode(3); }));
+    view_menu.add_separator();
+    view_menu.add("Use Stacks"_sv, [&desktop] { desktop.toggle_stacks(); });
+    view_menu.add_separator();
+    view_menu.add("Show Path Bar"_sv, with_window([](FilesWindow& window) { window.toggle_path_bar(); }));
+    view_menu.add("Show Status Bar"_sv, with_window([](FilesWindow& window) { window.toggle_status_bar(); }));
+    view_menu.add("Show Preview"_sv, with_window([](FilesWindow& window) { window.toggle_preview(); }));
+    auto& view_item = menus->items().insert_returning(3, "View"_sv);
+    view_item.submenu = adopt_own(view_menu);
     auto& go = *new Menu("Go"_sv);
     auto go_to = [&controller](String path) {
         return [&controller, path = move(path)] {
@@ -1541,13 +2037,22 @@ int main(int argc, char** argv)
                 controller.open_new_window(path.view());
         };
     };
+    go.add("Recents"_sv, go_to(recents_path()));
     go.add("Home"_sv, go_to(MUST(String::from_view(home.view()))));
     go.add("Desktop"_sv, go_to(joined(home.view(), "Desktop"_sv)));
     go.add("Documents"_sv, go_to(joined(home.view(), "Documents"_sv)));
     go.add("Downloads"_sv, go_to(joined(home.view(), "Downloads"_sv)));
     go.add("Applications"_sv, go_to(MUST(String::from_view("/Applications"_sv))));
-    auto& go_item = menus->items().insert_returning(3, "Go"_sv);
+    auto& go_item = menus->items().insert_returning(4, "Go"_sv);
     go_item.submenu = adopt_own(go);
+    // Under its own name: its settings, and the Trash.
+    if (auto& own = menus->items()[0]; own.submenu) {
+        auto& settings_item = own.submenu->items().insert_returning(2, "Settings\xE2\x80\xA6"_sv);
+        settings_item.action = [] { show_settings(); };
+        settings_item.shortcut_text = MUST(String::from_view("\xE2\x8C\x98,"_sv));
+        auto& empty_item = own.submenu->items().insert_returning(3, "Empty Trash\xE2\x80\xA6"_sv);
+        empty_item.action = [&desktop_window, &desktop] { empty_trash(*desktop_window, [&desktop] { desktop.reload(); }); };
+    }
     application->set_main_menu(move(menus));
 
     printf("files: ready\n");

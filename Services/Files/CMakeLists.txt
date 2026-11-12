@@ -5,7 +5,7 @@
 #
 
 vulture_add_application(Files
-    SOURCES main.cpp
+    SOURCES main.cpp Common.cpp Operations.cpp Views.cpp
     NAME "Files"
     IDENTIFIER com.vulture.Files
     ICON Files
@@ -13,3 +13,6 @@ vulture_add_application(Files
     CATEGORY utilities
     DESTINATION System/Library/CoreServices
     LIBRARIES LibDesktop LibDiskManagement)
+
+# What Files does with things that could be anything: compressing, expanding, turning pictures.
+vulture_add_program(FilesHelper SOURCES Helper.cpp DESTINATION usr/libexec LIBRARIES LibArchive LibCompress LibImage LibGfx)

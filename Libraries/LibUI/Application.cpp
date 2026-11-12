@@ -605,12 +605,13 @@ NonnullOwnPtr<Menu> Application::standard_menus(Function<void()> on_about, bool 
     edit.add("Emoji & Symbols"_sv, [this] { (void)send_command("emojiAndSymbols"_sv); });
 
     auto& window_menu = menus->add_submenu("Window"_sv);
+    // Only what has a title bar to have those buttons in: never a desktop, or a panel of the shell's.
     window_menu.add_with_shortcut("Minimize"_sv, KeyM, shown("M"_sv).view(), [this] {
-        if (auto* window = key_window())
+        if (auto* window = key_window(); window && (window->flags() & WS::WindowTitled))
             window->backend().minimize();
     });
     window_menu.add("Zoom"_sv, [this] {
-        if (auto* window = key_window())
+        if (auto* window = key_window(); window && (window->flags() & WS::WindowTitled))
             window->backend().zoom();
     });
     auto arranging = [this](WS::WindowArrangement arrangement) {
@@ -769,6 +770,9 @@ ErrorOr<Vector<Platform::DirectoryEntry>> Application::list_directory(StringView
         full.append(name);
         auto full_path = TRY(full.to_string());
         struct stat info;
+        // And what's flagged as hidden, as most of what's at the top of the disk is.
+        if (lstat(full_path.characters(), &info) == 0 && (info.st_flags & UF_HIDDEN))
+            continue;
         bool is_directory = stat(full_path.characters(), &info) == 0 && S_ISDIR(info.st_mode);
         TRY(entries.try_append(DirectoryEntry { TRY(String::from_view(name)), is_directory }));
     }

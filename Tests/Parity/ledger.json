@@ -1446,97 +1446,374 @@
                 },
                 {
                     "feature": "Drag files about",
-                    "claim": "partial",
-                    "missing": "moving between windows and to the Trash is unit-tested only",
-                    "milestone": "M27",
+                    "claim": "present",
                     "proof": [
                         {
-                            "suite": "test-host"
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "drop cell \"inner.txt\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "ax-expect cell \"a copy.txt\""
+                            ]
                         }
                     ]
                 },
                 {
                     "feature": "The Trash",
-                    "claim": "partial",
-                    "missing": "Put Back, and Empty Trash",
-                    "milestone": "M27",
+                    "claim": "present",
                     "proof": [
                         {
-                            "suite": "test-ui"
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "click menuitem \"Put Back\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: trash emptied"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m27-files-empty-trash.png"
                         }
                     ]
                 },
                 {
                     "feature": "Column view",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: shown as columns"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m27-files-columns.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Gallery view",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: shown as a gallery"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m27-files-gallery.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Tabs",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: new tab"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m27-files-tabs.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Path bar",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: path bar shown"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "ax-expect group \"Path\""
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Status bar",
-                    "milestone": "M27"
+                    "claim": "partial",
+                    "missing": "the space left on the disk, as there's no statfs yet",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "ax-expect text \"5 items\""
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Preview pane",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: preview shown"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m27-files-path-and-preview.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Get Info",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: info for a.txt"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "ax-expect text \"Kind:\" = Plain Text Document"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m27-files-get-info.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Colour tags",
-                    "milestone": "M27"
+                    "claim": "partial",
+                    "missing": "the row of colours in the context menu (a submenu here)",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: tags of a.txt changed"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "click row \"Red\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m27-files-tag-in-sidebar.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Copy progress and conflict dialogs",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "ax-expect progress \"Progress\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "ax-expect button \"Keep Both\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m27-files-replace-question.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Compress and Expand",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: compressed"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: expanded"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Aliases",
-                    "milestone": "M27"
+                    "claim": "partial",
+                    "missing": "an alias is a symbolic link, so it loses its original when that moves",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "ax-expect cell \"a.txt alias\""
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Instant duplicates through clones",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "ax-expect cell \"a copy.txt\""
+                            ]
+                        },
+                        {
+                            "suite": "test-volume",
+                            "output": "and it shares its blocks"
+                        }
+                    ]
                 },
                 {
                     "feature": "Quick Actions",
-                    "milestone": "M27"
+                    "claim": "partial",
+                    "missing": "only turning a picture: no Markup, Create PDF or Trim",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: rotated"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Smart Folders",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: saved a smart folder"
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "ax-expect row \"Smart Folder\""
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Recents",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "ax-expect window \"Recents\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m27-files-recents.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Spring-loaded folders",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: sprang open sub"
+                            ]
+                        }
+                    ]
                 },
                 {
                     "feature": "Stacks on the desktop",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "click cell \"Images\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "golden": "m27-files-stacks.png"
+                        }
+                    ]
                 },
                 {
                     "feature": "Volumes on the Desktop",
-                    "milestone": "M27"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "ax-expect cell \"STICK\""
+                            ]
+                        },
+                        {
+                            "suite": "test-ui",
+                            "chat": [
+                                "Milestones/m27-files.chat",
+                                "expect files: settings shown"
+                            ]
+                        }
+                    ]
                 }
             ]
         },
@@ -1546,7 +1823,7 @@
                 {
                     "feature": "Open and Save panels",
                     "claim": "partial",
-                    "missing": "tags in them (M27); a sandboxed program's is a window of its own, not a sheet",
+                    "missing": "tags in them; a sandboxed program's is a window of its own, not a sheet",
                     "proof": [
                         {
                             "suite": "test-ui",

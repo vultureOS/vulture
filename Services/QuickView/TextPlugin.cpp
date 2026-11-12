@@ -72,14 +72,28 @@ extern "C" int vulture_quickview_render(int document, char const*, unsigned most
             break;
         length += static_cast<size_t>(got);
     }
-    int const width = static_cast<int>(most_width);
+    // Asked for a square, it's a thumbnail: a page standing up, with an edge, as a Mac draws a document's.
+    bool const as_page = most_width == most_height;
+    int width = static_cast<int>(most_width);
     // A page, as tall as it is wide and a third again, if that fits.
-    int const height = min(static_cast<int>(most_height), width * 4 / 3);
+    int height = min(static_cast<int>(most_height), width * 4 / 3);
+    if (as_page) {
+        height = static_cast<int>(most_height);
+        width = max(1, height * 3 / 4);
+    }
     auto page = Gfx::Bitmap::create({ width, height });
     if (page.is_error())
         return ENOMEM;
     Gfx::Painter painter(*page.value());
     painter.fill_rect(Gfx::FloatRect { 0, 0, static_cast<float>(width), static_cast<float>(height) }, Gfx::Color { 255, 255, 255, 255 });
+    if (as_page) {
+        float const edge = max(1.f, static_cast<float>(height) / 160);
+        Gfx::Color const grey { 0, 0, 0, 46 };
+        painter.fill_rect(Gfx::FloatRect { 0, 0, static_cast<float>(width), edge }, grey);
+        painter.fill_rect(Gfx::FloatRect { 0, static_cast<float>(height) - edge, static_cast<float>(width), edge }, grey);
+        painter.fill_rect(Gfx::FloatRect { 0, edge, edge, static_cast<float>(height) - edge * 2 }, grey);
+        painter.fill_rect(Gfx::FloatRect { static_cast<float>(width) - edge, edge, edge, static_cast<float>(height) - edge * 2 }, grey);
+    }
 
     auto typeface = load_typeface();
     if (typeface.is_error())

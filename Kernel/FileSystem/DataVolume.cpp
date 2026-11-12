@@ -195,6 +195,13 @@ ErrorOr<size_t> make_firmlinks(FileSystem& volume)
             result = directory.error();
             return;
         }
+        // Hidden, if what it stands in for on the System volume is (as /private and /Volumes are): what's seen is this one.
+        if (auto const placeholder = VirtualFileSystem::resolve(where, "/"_sv); !placeholder.is_error()) {
+            u32 const hidden = placeholder.value().inode->metadata().flags & UF_HIDDEN;
+            auto& target = *directory.value().inode;
+            if (hidden && !(target.metadata().flags & UF_HIDDEN))
+                (void)target.set_flags((target.metadata().flags & ~UF_COMPRESSED) | UF_HIDDEN);
+        }
         result = VirtualFileSystem::firmlink(where, volume, directory.value().inode);
         ++count;
     });

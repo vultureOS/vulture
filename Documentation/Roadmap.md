@@ -106,7 +106,7 @@ Sizes are rough estimates of new lines, scaled from the reference figures above.
 | | M24 | [The desktop](#m24-the-desktop) | Done, but for sizes, colours and timings against the VM (waiting on a decision) | Use the full Dock, menu bar, Control Center, widgets and screenshots | 12k |
 | | M25 | [Sessions](#m25-sessions) | Done, but for sizes, colours and timings against the VM (waiting on a decision) | Set up a new machine, lock it, switch between users | 8k |
 | | M26 | [Documents and Search](#m26-documents-and-search) | Done | Have autosave, default apps, Quick View, and fast Search that lasts across reboots | 20k |
-| | M27 | [Files](#m27-files) | | Use a real Finder: columns, gallery, tabs, tags, Empty Trash | 12k |
+| | M27 | [Files](#m27-files) | Done | Use a real Finder: columns, gallery, tabs, tags, Empty Trash | 12k |
 | | M28 | [The look, measured](#m28-the-look-measured) | | Put it next to a Sequoia Mac with no estimated value left | 8k |
 | **3 Your work** | M29 | [Debug and profile](#m29-debug-and-profile) | | Debug and profile on the machine itself; read crash reports and man pages | 15k |
 | | M30 | [Documents and printing](#m30-documents-and-printing) | | Read and mark up PDFs, Save as PDF, open zip and modern image files | 60k |
@@ -600,6 +600,28 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **Tests that click by position go stale.** One new row in Settings moved everything under it, and each walkthrough that clicked one of those by coordinates went wrong, as M15 said it would. They go by name now.
 - **What a Mac does that's wrong.** Nine of POSIX's checks and seven of the commands are different on purpose. Each is written down in `Tests/Parity`, with why.
 
+### M27
+
+- **A path that was a view of itself.** After a tag was changed, its dots read the file's tags again from a view of the path they were about to replace, so they read memory already given back and showed no tags at all, though the file had them. `navigate` had been written knowing that; this hadn't.
+- **Cmd-C never reached the files.** Files copied and pasted when a folder saw Cmd-C and Cmd-V, but the Edit menu has them first, as a Mac's does, and asks whatever has the keyboard to copy: a folder didn't know how. It does now, and Select All too.
+- **Cmd-M put the desktop away.** With no Files window open, the desktop is Files' key window, and the Window menu's Minimize minimized it: every icon on it went. Minimize and Zoom are only for windows with a title bar now, as on a Mac, where Cmd-M then does nothing.
+- **Cmd-V from the sidebar.** Having clicked a place in the sidebar, the sidebar had the keyboard, and the Edit menu asks only it and what it's in. The window passes copy and paste on to the folder it's showing, as Finder does.
+- **The sidebar stayed where it had been.** Gone into a folder inside Documents, the sidebar still had Documents chosen, so choosing it again did nothing. Finder chooses nothing there when what's showing isn't one of its places, and so does Files now.
+- **A change anywhere lost the selection.** A folder is read again whenever something in it changes, and that chose nothing, so a file turning up, or a tag being set in Get Info, unchose whatever was chosen. What was chosen stays chosen now. And the folders weren't told when Get Info changed a tag, so they didn't show it until they were next opened.
+- **Hidden, but not where it's seen.** Flagging `/private`, `/opt`, `/cores` and `/Volumes` hidden when the image is made did nothing, as what's seen there is a folder of the Data volume, through a firmlink. The kernel gives that folder its stand-in's flag when it makes the firmlink. `/dev` is devfs's own, and says so itself.
+- **A disk with no picture.** There was no icon for a disk on its own, so the desktop's disks and the path bar's "Vulture HD" fell back to the one for an application. There's one of our own now.
+- **A preview that hid its own name.** In columns, the preview is as wide as what's left of the window, and the picture was as tall as it was wide, which pushed what's said about it out of sight. And its tags and Rotate buttons were made when it was first laid out, after the first file had been shown, so they stayed hidden until the next.
+- **A thumbnail of text is a page.** Asked for a square, the text plugin made a square; it makes a page standing up now, with an edge, as a Mac's are.
+- **`~` after `=` is just a character.** The walkthrough's `dd of=~/…` wrote nothing: `vsh`, as POSIX's shell and zsh do, takes `~` as the home folder only at the start of a word (bash also does after `=`). It says `$HOME` now.
+- **Plugging in too early.** With the stick plugged in as a walkthrough's first step, before the machine was up, two runs waited with no machine running and nothing said. It's plugged in once the login window's up, as M20's walkthrough does. Why it hung wasn't looked into.
+- **Limit: the status bar has no space left on the disk** in it, as there's no `statfs` yet.
+- **Limit: an alias is a symbolic link,** so it's lost when what it points at moves, where a Mac's follows it.
+- **Limit: tags in the context menu are a submenu,** where Sequoia has a row of colours in the menu itself. The Open and Save panels don't show tags yet.
+- **Limit: Quick Actions** only turn pictures. There's no Markup, Create PDF or Trim until M30 and M35.
+- **Limit: dragging several things** carries only the one under the pointer.
+- **Limit: how a folder's shown isn't remembered,** as icons, a list, columns or a gallery: each new window starts as icons.
+- **Limit: tabs are over the toolbar,** as the toolkit's are (M23), where Files' on a Mac are under it.
+
 ### M26
 
 - **A closed window never left.** `Application::keep_window` kept a program's windows, and took them back by wrapping the window's `on_closed`; `TextEditor` and `Viewer` then set `on_closed` themselves, over it. So a closed window stayed alive and, the server having nothing more to say to it, stayed key: the next menu command went to a window nobody could see. The toolkit has a hook of its own now, and a closed window isn't key. Both programs now stay running with no windows, as they had been by accident and as a Mac's do.
@@ -795,7 +817,7 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **Some programs are copies.** Twenty tools share a binary, so flipping a bit in "`logname`" flipped it in whichever of them was first on the disk, and `logname` carried on working. The hash tree was right, and the test wasn't.
 - **Blocks that are hashed cost something at boot.** Each block read off the System volume is hashed, with no help from the processor yet. Reading what's needed to start takes a few more milliseconds; it hasn't troubled any budget so far.
 - **Limit: the hash list is in memory, and it's flat.** A signature, a hash of the list, and a hash of each block: two levels, where a real tree would have more, read as it's needed. For an image of 83 MiB, it's 650 KiB, which is fine for now. It should become a tree if the image grows by much.
-- **Limit: the Open and Save panels show all of `/`.** On a Mac, most of what's at the top is hidden, by a flag it has now: M27 is where that's looked at.
+- **Limit: the Open and Save panels showed all of `/`.** On a Mac, most of what's at the top is hidden, by a flag it has now. Since M27, it's hidden here too.
 
 ### M18
 

@@ -5,6 +5,7 @@
  */
 
 #include <Kernel/API/POSIX/errno.h>
+#include <Kernel/API/POSIX/files.h>
 #include <Kernel/Debug/KernelLog.h>
 #include <Kernel/FileSystem/DevFS.h>
 #include <Kernel/Security/Random.h>
@@ -31,6 +32,8 @@ public:
         metadata.type = InodeType::Directory;
         metadata.permissions = 0755;
         metadata.link_count = 2;
+        // Not for people to look at, as on a Mac: Files and the panels leave it out.
+        metadata.flags = UF_HIDDEN;
         return metadata;
     }
 

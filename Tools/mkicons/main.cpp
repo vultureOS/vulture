@@ -276,6 +276,18 @@ void draw_disk(Canvas& c)
     c.circle(0.70f, 0.36f, 0.026f, rgb(0x0a84ff));
 }
 
+// A disk on its own, as the desktop and the sidebar show one: a flat box seen from the front, its face a shade darker.
+void draw_drive(Canvas& c)
+{
+    for (int i = 0; i < 4; ++i)
+        c.rounded(0.08f - 0.004f * static_cast<float>(i), 0.31f + 0.006f * static_cast<float>(i), 0.84f + 0.008f * static_cast<float>(i), 0.42f, 0.06f, rgb(0x000000, 12));
+    c.rounded_gradient(0.08f, 0.28f, 0.84f, 0.42f, 0.06f, rgb(0xfafafa), rgb(0xd1d1d6));
+    c.rounded_gradient(0.08f, 0.50f, 0.84f, 0.20f, 0.06f, rgb(0xc7c7cc), rgb(0x9a9aa0));
+    c.fill_rect(0.10f, 0.50f, 0.80f, 0.006f, rgb(0xffffff, 150));
+    c.rounded(0.18f, 0.585f, 0.40f, 0.024f, 0.012f, rgb(0x7c7c80));
+    c.circle(0.80f, 0.597f, 0.018f, rgb(0x30d158));
+}
+
 void draw_archive(Canvas& c)
 {
     c.app_base(rgb(0xd7b98e), rgb(0x9c7a4d));
@@ -412,6 +424,7 @@ IconDefinition const s_icons[] = {
     { "Monitor", draw_activity },
     { "Console", draw_console },
     { "Disks", draw_disk },
+    { "Drive", draw_drive },
     { "Archiver", draw_archive },
     { "Software", draw_software },
     { "Installer", draw_installer },

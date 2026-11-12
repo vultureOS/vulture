@@ -1,0 +1,275 @@
+# M27: Files. A folder as icons, a list, columns and a gallery; tabs, the path and status bars and the preview pane; Get Info
+# and colour tags; the Trash that puts things back; copies with progress and questions; Compress and Expand, aliases and
+# instant duplicates; Quick Actions, Smart Folders and Recents; a folder that opens when something's held over it; and
+# Stacks and disks on the desktop.
+timeout 60
+expect loginwindow: ready
+plug stick usb-storage bus=usb0.0,drive=stick
+type vulture\r
+expect files: ready
+pause 2
+click button "Terminal"
+expect terminal: ready
+pause 1
+type mkdir -p ~/Documents/sub && echo alpha one > ~/Documents/a.txt && echo beta two > ~/Documents/b.txt && echo inner > ~/Documents/sub/inner.txt && echo older > ~/Documents/sub/a.txt\r
+pause 1
+type cp /System/Library/Pictures/Dunes.png ~/Documents/picture.png && cp /System/Library/Pictures/Dunes.png ~/Desktop/photo.png && echo note > ~/Desktop/note.txt\r
+pause 1
+type dd if=/dev/zero of=$HOME/Documents/big.bin bs=1048576 count=48 && clear && open ~/Documents\r
+ax-expect cell "picture.png"
+ax-expect cell "big.bin"
+pause 3
+pointer 31500 25000
+pause 0.5
+ax-expect text "5 items"
+screenshot icons.png
+# ---- Four ways of looking at it.
+click radio "List"
+expect files: shown as a list
+ax-expect radio "List" = on
+pause 0.5
+screenshot list.png
+click radio "Columns"
+expect files: shown as columns
+click cell "sub"
+ax-expect cell "inner.txt"
+pause 0.5
+screenshot columns.png
+click cell "picture.png"
+ax-expect group "Preview" = picture.png
+pause 1.5
+screenshot columns-picture.png
+click radio "Gallery"
+expect files: shown as a gallery
+ax-expect group "Gallery"
+pause 1
+key right
+pause 1.5
+screenshot gallery.png
+click radio "Icons"
+expect files: shown as icons
+pause 0.5
+# ---- Where it is, and what's selected.
+click menuitem "View"
+click menuitem "Show Path Bar"
+expect files: path bar shown
+ax-expect group "Path"
+ax-expect button "Documents"
+click cell "picture.png"
+pause 0.3
+click menuitem "View"
+click menuitem "Show Preview"
+expect files: preview shown
+ax-expect group "Preview" = picture.png
+pause 1.5
+screenshot path-and-preview.png
+click menuitem "View"
+click menuitem "Show Preview"
+expect files: preview hidden
+click button "vulture"
+ax-expect window "vulture"
+click button "Back"
+ax-expect window "Documents"
+click menuitem "View"
+click menuitem "Show Path Bar"
+expect files: path bar hidden
+# ---- Tabs.
+key meta_l-t
+expect files: new tab
+ax-expect tab "vulture"
+ax-expect tab "Documents"
+pause 0.5
+screenshot tabs.png
+key meta_l-w
+ax-gone tab "vulture"
+pause 0.5
+# ---- Get Info, and a tag.
+click cell "a.txt"
+pause 0.3
+key meta_l-i
+expect files: info for a.txt
+ax-expect text "Kind:" = Plain Text Document
+ax-expect checkbox "Red" = off
+click checkbox "Red"
+expect files: tags of a.txt changed
+ax-expect checkbox "Red" = on
+pause 0.5
+screenshot get-info.png
+key meta_l-w
+pause 1
+pointer 31500 25000
+pause 0.5
+screenshot tagged.png
+click row "Red"
+ax-expect cell "a.txt"
+ax-gone cell "b.txt"
+pause 0.5
+screenshot tag-in-sidebar.png
+click row "Documents"
+ax-expect cell "b.txt"
+# ---- The Trash: back where it came from, and then gone for good.
+click cell "b.txt"
+pause 0.3
+key meta_l-backspace
+ax-gone cell "b.txt"
+click row "Trash"
+ax-expect cell "b.txt"
+ax-expect button "Empty"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click cell "b.txt"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"ctrl"}}}]}}
+ax-expect menuitem "Put Back" enabled
+pause 0.5
+screenshot trash-menu.png
+click menuitem "Put Back"
+ax-gone cell "b.txt"
+click row "Documents"
+ax-expect cell "b.txt"
+click cell "b.txt"
+pause 0.3
+key meta_l-backspace
+ax-gone cell "b.txt"
+click row "Trash"
+ax-expect cell "b.txt"
+click button "Empty"
+ax-expect button "Empty Trash"
+pause 0.5
+screenshot empty-trash.png
+click button "Empty Trash"
+expect files: trash emptied
+ax-gone cell "b.txt"
+# ---- What's there already.
+click row "Documents"
+ax-expect cell "a.txt"
+click cell "a.txt"
+pause 0.3
+key meta_l-c
+pause 0.3
+click cell "sub"
+pause 0.3
+key meta_l-down
+ax-expect window "sub"
+ax-expect cell "inner.txt"
+pause 0.5
+key meta_l-v
+expect files: asking about a.txt
+ax-expect button "Keep Both"
+ax-expect button "Replace"
+pause 0.5
+screenshot replace-question.png
+click button "Keep Both"
+expect files: transfer done
+ax-expect cell "a 2.txt"
+click row "Documents"
+ax-expect cell "big.bin"
+# ---- A copy that takes a while, onto another disk.
+click cell "big.bin"
+pause 0.3
+key meta_l-c
+click row "STICK"
+ax-expect window "STICK"
+key meta_l-v
+expect files: copying 1
+ax-expect window "Copy"
+ax-expect progress "Progress"
+pointer 31500 25000
+pause 0.3
+screenshot look-copy-progress.png
+expect files: transfer done
+ax-expect cell "big.bin"
+click row "Documents"
+ax-expect cell "sub"
+# ---- Compress and Expand, an alias, a duplicate, and a picture turned around.
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click cell "sub"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"ctrl"}}}]}}
+ax-expect menuitem "Get Info"
+ax-expect menuitem "Tags"
+pause 0.5
+screenshot context-menu.png
+click menuitem "Compress “sub”"
+expect files: compressed
+ax-expect cell "sub.zip"
+click cell "sub.zip"
+pause 0.3
+key meta_l-down
+expect files: expanded
+ax-expect cell "sub 2"
+click cell "a.txt"
+pause 0.3
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click cell "a.txt"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click menuitem "Make Alias"
+ax-expect cell "a.txt alias"
+click cell "a.txt"
+pause 0.3
+key meta_l-d
+ax-expect cell "a copy.txt"
+pause 2
+pointer 31500 25000
+pause 0.5
+screenshot alias-and-duplicate.png
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":true,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click cell "picture.png"
+qmp {"execute":"input-send-event","arguments":{"events":[{"type":"key","data":{"down":false,"key":{"type":"qcode","data":"ctrl"}}}]}}
+click menuitem "Quick Actions"
+ax-expect menuitem "Rotate Left"
+click menuitem "Rotate Left"
+expect files: rotated
+pause 1
+# ---- Held over a folder, it opens, and it's dropped inside.
+grab cell "a copy.txt"
+hover cell "sub"
+expect files: sprang open sub
+ax-expect window "sub"
+drop cell "inner.txt"
+expect files: transfer done
+ax-expect cell "a copy.txt"
+key meta_l-up
+pause 1
+# ---- Searching, kept as a Smart Folder; and what's been touched lately.
+click textfield "Search"
+type inner
+ax-expect window "Searching “inner”"
+ax-expect cell "inner.txt"
+click button "Save"
+ax-expect textfield "Name"
+pause 0.5
+screenshot smart-folder-saving.png
+click button "Save"
+expect files: saved a smart folder
+ax-expect row "Smart Folder"
+click row "Recents"
+ax-expect window "Recents"
+ax-expect cell "a.txt"
+pause 0.5
+screenshot recents.png
+click row "Smart Folder"
+ax-expect cell "inner.txt"
+# ---- Disks on the desktop, Stacks, and the settings for them.
+click menuitem "Files"
+click menuitem "Settings…"
+expect files: settings shown
+ax-expect checkbox "External disks" = on
+pause 0.5
+screenshot settings.png
+key meta_l-w
+pause 0.5
+click menuitem "View"
+click menuitem "Use Stacks"
+pause 2
+ax-expect cell "STICK"
+ax-expect cell "Images"
+ax-expect cell "Documents"
+key meta_l-w
+pause 0.5
+key meta_l-w
+pause 0.5
+key meta_l-m
+pause 1
+click cell "Images"
+ax-expect cell "photo.png"
+pointer 16000 25000
+pause 1.5
+screenshot stacks.png

@@ -209,6 +209,16 @@ ErrorOr<void> make_system_volume(Volume& volume, ReadonlyBytes archive, Populate
     }));
     TRY(result);
 
+    // What's at the top for programs and not for people is hidden, as on a Mac: Files and the panels show Applications,
+    // Library, System and Users. (UF_HIDDEN, with the number a Mac gives it.)
+    constexpr u32 hidden = 0x8000;
+    StringView const hidden_names[] = { "bin"_sv, "sbin"_sv, "usr"_sv, "cores"_sv, "dev"_sv, "opt"_sv, "private"_sv, "etc"_sv, "tmp"_sv, "var"_sv, "Volumes"_sv };
+    for (auto name : hidden_names) {
+        auto entry = volume.lookup(root_directory, name);
+        if (!entry.is_error())
+            TRY(volume.set_bsd_flags(entry.value().inode, hidden));
+    }
+
     // Whoever looks in the usual place for the certificates finds the sealed ones.
     StringBuilder ssl;
     ssl.append(data_template);
