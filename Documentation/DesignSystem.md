@@ -58,6 +58,24 @@ So it reads as Sequoia and lines up to the pixel on the metrics that are tested,
 but it has not been compared with a real Sequoia install. Doing so, with the same tool,
 is what remains.
 
+## Where each token came from
+
+`Tests/UI/Measured/sources.json` says, for every token in the theme files, which of these it is,
+and `Meta/token-sources.py` (run with the host tests) fails if one isn't named, or if a number
+said to be measured is no longer what AppKit gave:
+
+| Kind | What it means | Tokens |
+|---|---|---|
+| measured | what AppKit gave, read by `measure.m`: 124 of them checked number for number against `Tests/UI/Measured/appkit.json`, and the controls' sizes held by `TestMetrics` | 366 |
+| published | Apple's published values: macOS 15's system colours (macOS 26 changed several, so this Mac's AppKit can't be asked), and documented font sizes | 32 |
+| fitted | chosen to reproduce what was measured: the controls' faces and shading | 280 |
+| original | ours, with nothing to match: the wallpaper | 2 |
+| estimated | from memory of Sequoia: shadows, materials, menus' rows, and the whole desktop | 860 |
+
+`Meta/token-sources.py --list estimated` names the estimates; they're what the virtual machine is for.
+AppKit's colours here were read on macOS 26: where they're the same as Sequoia's, as the label, selection
+and link colours are, they count as measured, and where macOS 26 changed them, they don't.
+
 ## Tokens, as measured
 
 Units are points; 2x displays double them.

@@ -107,7 +107,7 @@ Sizes are rough estimates of new lines, scaled from the reference figures above.
 | | M25 | [Sessions](#m25-sessions) | Done, but for sizes, colours and timings against the VM (waiting on a decision) | Set up a new machine, lock it, switch between users | 8k |
 | | M26 | [Documents and Search](#m26-documents-and-search) | Done | Have autosave, default apps, Quick View, and fast Search that lasts across reboots | 20k |
 | | M27 | [Files](#m27-files) | Done | Use a real Finder: columns, gallery, tabs, tags, Empty Trash | 12k |
-| | M28 | [The look, measured](#m28-the-look-measured) | | Put it next to a Sequoia Mac with no estimated value left | 8k |
+| | M28 | [The look, measured](#m28-the-look-measured) | Under way: every token says where it came from; measuring waits on a decision | Put it next to a Sequoia Mac with no estimated value left | 8k |
 | **3 Your work** | M29 | [Debug and profile](#m29-debug-and-profile) | | Debug and profile on the machine itself; read crash reports and man pages | 15k |
 | | M30 | [Documents and printing](#m30-documents-and-printing) | | Read and mark up PDFs, Save as PDF, open zip and modern image files | 60k |
 | | M31 | [Everyday apps](#m31-everyday-apps) | | Use Notes, Calendar, Reminders, Contacts, Passwords and rich text | 25k |
@@ -599,6 +599,17 @@ Added as each milestone finishes. The first roadmap's are in [Roadmap 1](Roadmap
 - **Testing inside a copy of the system.** With a `dd` of its own at last, a test that changes to a copy of the system and runs `dd` ran that one, for the wrong processor, if `PATH` had a relative entry in it. The seal tests then found nothing to catch, and said so as if the kernel had let a tampered file by.
 - **Tests that click by position go stale.** One new row in Settings moved everything under it, and each walkthrough that clicked one of those by coordinates went wrong, as M15 said it would. They go by name now.
 - **What a Mac does that's wrong.** Nine of POSIX's checks and seven of the commands are different on purpose. Each is written down in `Tests/Parity`, with why.
+
+### M28 (so far)
+
+- **Every token says where it came from.** Of 1,540: 366 measured (124 checked number for number against what AppKit gave, the
+  controls' sizes by `TestMetrics`), 32 published, 280 fitted, 2 original and 860 estimated. `Meta/token-sources.py` fails the
+  host tests if a token isn't named or a measured one drifts.
+- **macOS 26 changed the system colours.** Its AppKit gives `#ff4245` for red and `#0091ff` for blue in the dark, where Sequoia's
+  are `#ff453a` and `#0a84ff`, whatever SDK a program's linked against. So this Mac can't measure them, and they're Apple's
+  published values. The label, selection, link and focus colours are the same as ours, and count as measured.
+- **The window background isn't `windowBackgroundColor`.** AppKit says `#ececec` in the light, but the window it draws is
+  `#f6f6f6` down the middle, which is what ours is: the chrome it drew is what's checked.
 
 ### M27
 

@@ -1,0 +1,987 @@
+{
+ "about": "Where each of the look's tokens came from: the first rule that names a token is what it is. Meta/token-sources.py checks this, and that every number said to be measured still is what AppKit gave.",
+ "rules": [
+  {
+   "source": "measured",
+   "how": "What AppKit gave, linked against the macOS 15 SDK, read by Meta/Calibration/measure.m: each is checked below against Tests/UI/Measured/appkit.json.",
+   "tokens": [
+    "Dark:ui.accent",
+    "Dark:ui.alternatingRow",
+    "Dark:ui.controlBackground",
+    "Dark:ui.focus",
+    "Dark:ui.grid",
+    "Dark:ui.label",
+    "Dark:ui.link",
+    "Dark:ui.placeholder",
+    "Dark:ui.quaternaryLabel",
+    "Dark:ui.secondaryLabel",
+    "Dark:ui.selectedContent",
+    "Dark:ui.selectedContentInactive",
+    "Dark:ui.selectedContentText",
+    "Dark:ui.selectedText",
+    "Dark:ui.selectedTextInactive",
+    "Dark:ui.separator",
+    "Dark:ui.tertiaryLabel",
+    "Dark:ui.text",
+    "Dark:ui.textBackground",
+    "Dark:ui.underPageBackground",
+    "Dark:ui.windowBackground",
+    "Dark:window.background",
+    "Dark:window.cornerRadius",
+    "Dark:window.titleBar.background",
+    "Dark:window.titleBar.backgroundInactive",
+    "Dark:window.titleBar.height",
+    "Dark:window.titleBar.highlight",
+    "Dark:window.titleBar.highlightInactive",
+    "Dark:window.titleBar.separator",
+    "Dark:window.trafficLights.close",
+    "Dark:window.trafficLights.inactive",
+    "Dark:window.trafficLights.minimize",
+    "Dark:window.trafficLights.zoom",
+    "Light:ui.accent",
+    "Light:ui.alternatingRow",
+    "Light:ui.controlBackground",
+    "Light:ui.focus",
+    "Light:ui.grid",
+    "Light:ui.label",
+    "Light:ui.link",
+    "Light:ui.placeholder",
+    "Light:ui.quaternaryLabel",
+    "Light:ui.secondaryLabel",
+    "Light:ui.selectedContent",
+    "Light:ui.selectedContentInactive",
+    "Light:ui.selectedContentText",
+    "Light:ui.selectedText",
+    "Light:ui.selectedTextInactive",
+    "Light:ui.separator",
+    "Light:ui.tertiaryLabel",
+    "Light:ui.text",
+    "Light:ui.textBackground",
+    "Light:ui.underPageBackground",
+    "Light:ui.windowBackground",
+    "Light:window.background",
+    "Light:window.cornerRadius",
+    "Light:window.titleBar.background",
+    "Light:window.titleBar.backgroundInactive",
+    "Light:window.titleBar.height",
+    "Light:window.titleBar.highlight",
+    "Light:window.titleBar.highlightInactive",
+    "Light:window.titleBar.separator",
+    "Light:window.trafficLights.close",
+    "Light:window.trafficLights.inactive",
+    "Light:window.trafficLights.minimize",
+    "Light:window.trafficLights.zoom",
+    "Metrics:alert.height",
+    "Metrics:alert.width",
+    "Metrics:animation.standard",
+    "Metrics:animation.windowResize",
+    "Metrics:fonts.body.size",
+    "Metrics:fonts.body.weight",
+    "Metrics:fonts.callout.size",
+    "Metrics:fonts.callout.weight",
+    "Metrics:fonts.caption.size",
+    "Metrics:fonts.caption.weight",
+    "Metrics:fonts.controlContent.size",
+    "Metrics:fonts.controlContent.weight",
+    "Metrics:fonts.footnote.size",
+    "Metrics:fonts.footnote.weight",
+    "Metrics:fonts.headline.size",
+    "Metrics:fonts.headline.weight",
+    "Metrics:fonts.label.size",
+    "Metrics:fonts.label.weight",
+    "Metrics:fonts.largeTitle.size",
+    "Metrics:fonts.largeTitle.weight",
+    "Metrics:fonts.menu.size",
+    "Metrics:fonts.menu.weight",
+    "Metrics:fonts.mini.size",
+    "Metrics:fonts.mini.weight",
+    "Metrics:fonts.small.size",
+    "Metrics:fonts.small.weight",
+    "Metrics:fonts.subheadline.size",
+    "Metrics:fonts.subheadline.weight",
+    "Metrics:fonts.title1.size",
+    "Metrics:fonts.title1.weight",
+    "Metrics:fonts.title2.size",
+    "Metrics:fonts.title2.weight",
+    "Metrics:fonts.title3.size",
+    "Metrics:fonts.title3.weight",
+    "Metrics:fonts.toolTips.size",
+    "Metrics:fonts.toolTips.weight",
+    "Metrics:menu.minimumWidth",
+    "Metrics:menu.separatorHeight",
+    "Metrics:scroller.legacy",
+    "Metrics:scroller.overlay",
+    "Metrics:scroller.overlaySmall",
+    "Metrics:split.pane",
+    "Metrics:split.thick",
+    "Metrics:split.thin",
+    "Metrics:table.headerHeight",
+    "Metrics:table.outlineIndent",
+    "Metrics:table.rowHeight",
+    "Metrics:tabs.insetBottom",
+    "Metrics:tabs.insetLeft",
+    "Metrics:tabs.insetRight",
+    "Metrics:tabs.insetTop",
+    "Metrics:tabs.minimumHeight",
+    "Metrics:tabs.minimumWidth",
+    "Metrics:window.cornerRadius",
+    "Metrics:window.titleBarHeight",
+    "Metrics:window.toolbarCompact",
+    "Metrics:window.toolbarExpanded",
+    "Metrics:window.toolbarUnified"
+   ]
+  },
+  {
+   "source": "estimated",
+   "how": "Timings of controls: not something AppKit says, nor measured yet.",
+   "tokens": [
+    "Metrics:stepper.repeat*",
+    "Metrics:progress.spinnerStepMilliseconds",
+    "Metrics:scroller.fade*"
+   ]
+  },
+  {
+   "source": "measured",
+   "how": "Controls' sizes, as AppKit draws them: TestMetrics holds each control's visible box to AppKit's (Tests/UI/Measured/controls.json) within a pixel, light and dark, at 1x and 2x.",
+   "tokens": [
+    "Metrics:control.*",
+    "Metrics:button.*",
+    "Metrics:checkbox.*",
+    "Metrics:radio.*",
+    "Metrics:switch.*",
+    "Metrics:segmented.*",
+    "Metrics:popup.*",
+    "Metrics:stepper.*",
+    "Metrics:slider.*",
+    "Metrics:field.*",
+    "Metrics:search.*",
+    "Metrics:combo.*",
+    "Metrics:progress.*",
+    "Metrics:separator.*",
+    "Metrics:colorWell.*",
+    "Metrics:box.*",
+    "Metrics:level.*",
+    "Metrics:table.headerFontSize"
+   ]
+  },
+  {
+   "source": "fitted",
+   "how": "Controls' faces and the text on them: shading and colours chosen to reproduce AppKit's pixels, which TestMetrics and the control goldens hold.",
+   "tokens": [
+    "Light:ui.comboFace",
+    "Light:ui.comboFaceDisabled",
+    "Light:ui.segmentedTrack",
+    "Light:ui.bezel",
+    "Light:ui.bezelPressed",
+    "Light:ui.bezelDisabled",
+    "Light:ui.bezelAccent",
+    "Light:ui.bezelAccentPressed",
+    "Light:ui.texturedBorder",
+    "Light:ui.texturedFill",
+    "Light:ui.texturedPressed",
+    "Light:ui.disclosureSymbol",
+    "Light:ui.controlSymbol",
+    "Light:ui.checkbox",
+    "Light:ui.checkboxDisabled",
+    "Light:ui.checkboxMark",
+    "Light:ui.checkboxMarkInactive",
+    "Light:ui.checkboxMini",
+    "Light:ui.radio",
+    "Light:ui.radioMini",
+    "Light:ui.switch",
+    "Light:ui.knob",
+    "Light:ui.segmented",
+    "Light:ui.slider",
+    "Light:ui.sliderKnob",
+    "Light:ui.fieldBorder",
+    "Light:ui.fieldFace",
+    "Light:ui.fieldFaceDisabled",
+    "Light:ui.search",
+    "Light:ui.progress",
+    "Light:ui.colorWell",
+    "Light:ui.box",
+    "Light:ui.level",
+    "Light:ui.scroller",
+    "Light:ui.tableHeader",
+    "Light:ui.popupArrow",
+    "Light:ui.controlText",
+    "Light:ui.controlTextDisabled",
+    "Light:ui.controlTextDefault",
+    "Light:ui.fieldText",
+    "Dark:ui.comboFace",
+    "Dark:ui.comboFaceDisabled",
+    "Dark:ui.segmentedTrack",
+    "Dark:ui.bezel",
+    "Dark:ui.bezelPressed",
+    "Dark:ui.bezelDisabled",
+    "Dark:ui.bezelAccent",
+    "Dark:ui.bezelAccentPressed",
+    "Dark:ui.texturedBorder",
+    "Dark:ui.texturedFill",
+    "Dark:ui.texturedPressed",
+    "Dark:ui.disclosureSymbol",
+    "Dark:ui.controlSymbol",
+    "Dark:ui.checkbox",
+    "Dark:ui.checkboxDisabled",
+    "Dark:ui.checkboxMark",
+    "Dark:ui.checkboxMarkInactive",
+    "Dark:ui.checkboxMini",
+    "Dark:ui.radio",
+    "Dark:ui.radioMini",
+    "Dark:ui.switch",
+    "Dark:ui.knob",
+    "Dark:ui.segmented",
+    "Dark:ui.slider",
+    "Dark:ui.sliderKnob",
+    "Dark:ui.fieldBorder",
+    "Dark:ui.fieldFace",
+    "Dark:ui.fieldFaceDisabled",
+    "Dark:ui.search",
+    "Dark:ui.progress",
+    "Dark:ui.colorWell",
+    "Dark:ui.box",
+    "Dark:ui.level",
+    "Dark:ui.scroller",
+    "Dark:ui.tableHeader",
+    "Dark:ui.popupArrow",
+    "Dark:ui.controlText",
+    "Dark:ui.controlTextDisabled",
+    "Dark:ui.controlTextDefault",
+    "Dark:ui.fieldText",
+    "Light:ui.comboFace.*",
+    "Light:ui.comboFaceDisabled.*",
+    "Light:ui.segmentedTrack.*",
+    "Light:ui.bezel.*",
+    "Light:ui.bezelPressed.*",
+    "Light:ui.bezelDisabled.*",
+    "Light:ui.bezelAccent.*",
+    "Light:ui.bezelAccentPressed.*",
+    "Light:ui.texturedBorder.*",
+    "Light:ui.texturedFill.*",
+    "Light:ui.texturedPressed.*",
+    "Light:ui.disclosureSymbol.*",
+    "Light:ui.controlSymbol.*",
+    "Light:ui.checkbox.*",
+    "Light:ui.checkboxDisabled.*",
+    "Light:ui.checkboxMark.*",
+    "Light:ui.checkboxMarkInactive.*",
+    "Light:ui.checkboxMini.*",
+    "Light:ui.radio.*",
+    "Light:ui.radioMini.*",
+    "Light:ui.switch.*",
+    "Light:ui.knob.*",
+    "Light:ui.segmented.*",
+    "Light:ui.slider.*",
+    "Light:ui.sliderKnob.*",
+    "Light:ui.fieldBorder.*",
+    "Light:ui.fieldFace.*",
+    "Light:ui.fieldFaceDisabled.*",
+    "Light:ui.search.*",
+    "Light:ui.progress.*",
+    "Light:ui.colorWell.*",
+    "Light:ui.box.*",
+    "Light:ui.level.*",
+    "Light:ui.scroller.*",
+    "Light:ui.tableHeader.*",
+    "Light:ui.popupArrow.*",
+    "Light:ui.controlText.*",
+    "Light:ui.controlTextDisabled.*",
+    "Light:ui.controlTextDefault.*",
+    "Light:ui.fieldText.*",
+    "Dark:ui.comboFace.*",
+    "Dark:ui.comboFaceDisabled.*",
+    "Dark:ui.segmentedTrack.*",
+    "Dark:ui.bezel.*",
+    "Dark:ui.bezelPressed.*",
+    "Dark:ui.bezelDisabled.*",
+    "Dark:ui.bezelAccent.*",
+    "Dark:ui.bezelAccentPressed.*",
+    "Dark:ui.texturedBorder.*",
+    "Dark:ui.texturedFill.*",
+    "Dark:ui.texturedPressed.*",
+    "Dark:ui.disclosureSymbol.*",
+    "Dark:ui.controlSymbol.*",
+    "Dark:ui.checkbox.*",
+    "Dark:ui.checkboxDisabled.*",
+    "Dark:ui.checkboxMark.*",
+    "Dark:ui.checkboxMarkInactive.*",
+    "Dark:ui.checkboxMini.*",
+    "Dark:ui.radio.*",
+    "Dark:ui.radioMini.*",
+    "Dark:ui.switch.*",
+    "Dark:ui.knob.*",
+    "Dark:ui.segmented.*",
+    "Dark:ui.slider.*",
+    "Dark:ui.sliderKnob.*",
+    "Dark:ui.fieldBorder.*",
+    "Dark:ui.fieldFace.*",
+    "Dark:ui.fieldFaceDisabled.*",
+    "Dark:ui.search.*",
+    "Dark:ui.progress.*",
+    "Dark:ui.colorWell.*",
+    "Dark:ui.box.*",
+    "Dark:ui.level.*",
+    "Dark:ui.scroller.*",
+    "Dark:ui.tableHeader.*",
+    "Dark:ui.popupArrow.*",
+    "Dark:ui.controlText.*",
+    "Dark:ui.controlTextDisabled.*",
+    "Dark:ui.controlTextDefault.*",
+    "Dark:ui.fieldText.*",
+    "Light:window.trafficLights.*Border",
+    "Dark:window.trafficLights.*Border",
+    "Light:window.trafficLights.glyph",
+    "Dark:window.trafficLights.glyph",
+    "Light:window.titleBar.text*",
+    "Dark:window.titleBar.text*"
+   ]
+  },
+  {
+   "source": "measured",
+   "how": "The traffic lights' size and place, from AppKit's close, minimize and zoom buttons' frames (14 by 16 at x 7, 27, 47: a 12-point circle, 8 apart, 8 in).",
+   "tokens": [
+    "Light:window.trafficLights.diameter",
+    "Light:window.trafficLights.spacing",
+    "Light:window.trafficLights.inset",
+    "Dark:window.trafficLights.diameter",
+    "Dark:window.trafficLights.spacing",
+    "Dark:window.trafficLights.inset"
+   ]
+  },
+  {
+   "source": "published",
+   "how": "Apple's system colours for macOS 15, as the Human Interface Guidelines give them (macOS 26 changed several, so this Mac's AppKit can't be asked).",
+   "tokens": [
+    "Light:ui.system.*",
+    "Dark:ui.system.*",
+    "Light:ui.systemRed",
+    "Dark:ui.systemRed",
+    "Light:ui.systemOrange",
+    "Dark:ui.systemOrange"
+   ]
+  },
+  {
+   "source": "published",
+   "how": "The system font's size in a title bar, which AppKit documents (NSFont.titleBarFont, 13 points).",
+   "tokens": [
+    "Light:window.titleBar.fontSize",
+    "Dark:window.titleBar.fontSize"
+   ]
+  },
+  {
+   "source": "original",
+   "how": "Our own wallpaper: there's nothing of Apple's to match.",
+   "tokens": [
+    "Light:wallpaper",
+    "Dark:wallpaper"
+   ]
+  },
+  {
+   "source": "estimated",
+   "how": "Window shadows and outlines, materials, and the desktop: AppKit draws none of them for a program off screen, so these are from memory of Sequoia, to be measured in the virtual machine.",
+   "tokens": [
+    "Light:window.outline",
+    "Dark:window.outline",
+    "Light:window.shadow.*",
+    "Dark:window.shadow.*",
+    "Light:materials.*",
+    "Dark:materials.*",
+    "Light:desktop.*",
+    "Dark:desktop.*",
+    "Light:ui.*",
+    "Dark:ui.*"
+   ]
+  },
+  {
+   "source": "estimated",
+   "how": "Everything else of the look's sizes and timings, from the menu's rows (AppKit says 24 on macOS 26 under either SDK, so it can't say what Sequoia's are) to the Dock: from memory of Sequoia, to be measured.",
+   "tokens": [
+    "Metrics:*"
+   ]
+  }
+ ],
+ "checks": [
+  {
+   "token": "Light:ui.label",
+   "measured": "colors.light.label"
+  },
+  {
+   "token": "Light:ui.secondaryLabel",
+   "measured": "colors.light.secondaryLabel"
+  },
+  {
+   "token": "Light:ui.tertiaryLabel",
+   "measured": "colors.light.tertiaryLabel"
+  },
+  {
+   "token": "Light:ui.quaternaryLabel",
+   "measured": "colors.light.quaternaryLabel"
+  },
+  {
+   "token": "Light:ui.placeholder",
+   "measured": "colors.light.placeholderText"
+  },
+  {
+   "token": "Light:ui.separator",
+   "measured": "colors.light.separator"
+  },
+  {
+   "token": "Light:ui.focus",
+   "measured": "colors.light.keyboardFocusIndicator"
+  },
+  {
+   "token": "Light:ui.textBackground",
+   "measured": "colors.light.textBackground"
+  },
+  {
+   "token": "Light:ui.controlBackground",
+   "measured": "colors.light.controlBackground"
+  },
+  {
+   "token": "Light:ui.text",
+   "measured": "colors.light.text"
+  },
+  {
+   "token": "Light:ui.selectedText",
+   "measured": "colors.light.selectedTextBackground"
+  },
+  {
+   "token": "Light:ui.selectedTextInactive",
+   "measured": "colors.light.unemphasizedSelectedTextBackground"
+  },
+  {
+   "token": "Light:ui.selectedContent",
+   "measured": "colors.light.selectedContentBackground"
+  },
+  {
+   "token": "Light:ui.selectedContentInactive",
+   "measured": "colors.light.unemphasizedSelectedContentBackground"
+  },
+  {
+   "token": "Light:ui.selectedContentText",
+   "measured": "colors.light.alternateSelectedControlText"
+  },
+  {
+   "token": "Light:ui.alternatingRow",
+   "measured": "colors.light.alternatingContentBackground1"
+  },
+  {
+   "token": "Light:ui.grid",
+   "measured": "colors.light.grid"
+  },
+  {
+   "token": "Light:ui.link",
+   "measured": "colors.light.link"
+  },
+  {
+   "token": "Light:ui.underPageBackground",
+   "measured": "colors.light.underPageBackground"
+  },
+  {
+   "token": "Light:ui.accent",
+   "measured": "colors.light.controlAccent"
+  },
+  {
+   "token": "Light:window.background",
+   "measured": "chrome.light-key-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Light:ui.windowBackground",
+   "measured": "chrome.light-key-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Light:window.titleBar.background",
+   "measured": "chrome.light-key-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Light:window.titleBar.backgroundInactive",
+   "measured": "chrome.light-inactive-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Light:window.titleBar.highlight",
+   "measured": "chrome.light-key-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Light:window.titleBar.highlightInactive",
+   "measured": "chrome.light-inactive-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Light:window.titleBar.separator",
+   "measured": "chrome.light-key-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Light:window.trafficLights.close",
+   "measured": "chrome.light-key-1x.acrossLights",
+   "among": true
+  },
+  {
+   "token": "Light:window.trafficLights.minimize",
+   "measured": "chrome.light-key-1x.acrossLights",
+   "among": true
+  },
+  {
+   "token": "Light:window.trafficLights.zoom",
+   "measured": "chrome.light-key-1x.acrossLights",
+   "among": true
+  },
+  {
+   "token": "Light:window.trafficLights.inactive",
+   "measured": "chrome.light-inactive-1x.acrossLights",
+   "among": true
+  },
+  {
+   "token": "Light:window.cornerRadius",
+   "measured": "metrics.window.cornerRadius"
+  },
+  {
+   "token": "Light:window.titleBar.height",
+   "measured": "metrics.window.titleBarHeight"
+  },
+  {
+   "token": "Dark:ui.label",
+   "measured": "colors.dark.label"
+  },
+  {
+   "token": "Dark:ui.secondaryLabel",
+   "measured": "colors.dark.secondaryLabel"
+  },
+  {
+   "token": "Dark:ui.tertiaryLabel",
+   "measured": "colors.dark.tertiaryLabel"
+  },
+  {
+   "token": "Dark:ui.quaternaryLabel",
+   "measured": "colors.dark.quaternaryLabel"
+  },
+  {
+   "token": "Dark:ui.placeholder",
+   "measured": "colors.dark.placeholderText"
+  },
+  {
+   "token": "Dark:ui.separator",
+   "measured": "colors.dark.separator"
+  },
+  {
+   "token": "Dark:ui.focus",
+   "measured": "colors.dark.keyboardFocusIndicator"
+  },
+  {
+   "token": "Dark:ui.textBackground",
+   "measured": "colors.dark.textBackground"
+  },
+  {
+   "token": "Dark:ui.controlBackground",
+   "measured": "colors.dark.controlBackground"
+  },
+  {
+   "token": "Dark:ui.text",
+   "measured": "colors.dark.text"
+  },
+  {
+   "token": "Dark:ui.selectedText",
+   "measured": "colors.dark.selectedTextBackground"
+  },
+  {
+   "token": "Dark:ui.selectedTextInactive",
+   "measured": "colors.dark.unemphasizedSelectedTextBackground"
+  },
+  {
+   "token": "Dark:ui.selectedContent",
+   "measured": "colors.dark.selectedContentBackground"
+  },
+  {
+   "token": "Dark:ui.selectedContentInactive",
+   "measured": "colors.dark.unemphasizedSelectedContentBackground"
+  },
+  {
+   "token": "Dark:ui.selectedContentText",
+   "measured": "colors.dark.alternateSelectedControlText"
+  },
+  {
+   "token": "Dark:ui.alternatingRow",
+   "measured": "colors.dark.alternatingContentBackground1"
+  },
+  {
+   "token": "Dark:ui.grid",
+   "measured": "colors.dark.grid"
+  },
+  {
+   "token": "Dark:ui.link",
+   "measured": "colors.dark.link"
+  },
+  {
+   "token": "Dark:ui.underPageBackground",
+   "measured": "colors.dark.underPageBackground"
+  },
+  {
+   "token": "Dark:ui.accent",
+   "measured": "colors.dark.controlAccent"
+  },
+  {
+   "token": "Dark:window.background",
+   "measured": "chrome.dark-key-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Dark:ui.windowBackground",
+   "measured": "chrome.dark-key-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Dark:window.titleBar.background",
+   "measured": "chrome.dark-key-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Dark:window.titleBar.backgroundInactive",
+   "measured": "chrome.dark-inactive-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Dark:window.titleBar.highlight",
+   "measured": "chrome.dark-key-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Dark:window.titleBar.highlightInactive",
+   "measured": "chrome.dark-inactive-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Dark:window.titleBar.separator",
+   "measured": "chrome.dark-key-1x.downMiddle",
+   "among": true
+  },
+  {
+   "token": "Dark:window.trafficLights.close",
+   "measured": "chrome.dark-key-1x.acrossLights",
+   "among": true
+  },
+  {
+   "token": "Dark:window.trafficLights.minimize",
+   "measured": "chrome.dark-key-1x.acrossLights",
+   "among": true
+  },
+  {
+   "token": "Dark:window.trafficLights.zoom",
+   "measured": "chrome.dark-key-1x.acrossLights",
+   "among": true
+  },
+  {
+   "token": "Dark:window.trafficLights.inactive",
+   "measured": "chrome.dark-inactive-1x.acrossLights",
+   "among": true
+  },
+  {
+   "token": "Dark:window.cornerRadius",
+   "measured": "metrics.window.cornerRadius"
+  },
+  {
+   "token": "Dark:window.titleBar.height",
+   "measured": "metrics.window.titleBarHeight"
+  },
+  {
+   "token": "Metrics:window.titleBarHeight",
+   "measured": "metrics.window.titleBarHeight"
+  },
+  {
+   "token": "Metrics:window.toolbarExpanded",
+   "measured": "metrics.window.toolbarExpanded"
+  },
+  {
+   "token": "Metrics:window.toolbarUnified",
+   "measured": "metrics.window.toolbarUnified"
+  },
+  {
+   "token": "Metrics:window.toolbarCompact",
+   "measured": "metrics.window.toolbarUnifiedCompact"
+  },
+  {
+   "token": "Metrics:window.cornerRadius",
+   "measured": "metrics.window.cornerRadius"
+  },
+  {
+   "token": "Metrics:animation.standard",
+   "measured": "metrics.animation.contextDefaultDuration"
+  },
+  {
+   "token": "Metrics:animation.windowResize",
+   "measured": "metrics.animation.windowResizeTime"
+  },
+  {
+   "token": "Metrics:alert.width",
+   "measured": "metrics.alert.width"
+  },
+  {
+   "token": "Metrics:alert.height",
+   "measured": "metrics.alert.height"
+  },
+  {
+   "token": "Metrics:table.rowHeight",
+   "measured": "metrics.table.rowHeight"
+  },
+  {
+   "token": "Metrics:table.headerHeight",
+   "measured": "metrics.table.headerHeight"
+  },
+  {
+   "token": "Metrics:table.outlineIndent",
+   "measured": "metrics.table.outlineIndent"
+  },
+  {
+   "token": "Metrics:tabs.insetLeft",
+   "measured": "metrics.tabs.contentInsetLeft"
+  },
+  {
+   "token": "Metrics:tabs.insetTop",
+   "measured": "metrics.tabs.contentInsetTop"
+  },
+  {
+   "token": "Metrics:tabs.insetRight",
+   "measured": "metrics.tabs.contentInsetRight"
+  },
+  {
+   "token": "Metrics:tabs.insetBottom",
+   "measured": "metrics.tabs.contentInsetBottom"
+  },
+  {
+   "token": "Metrics:tabs.minimumWidth",
+   "measured": "metrics.tabs.minimumWidth"
+  },
+  {
+   "token": "Metrics:tabs.minimumHeight",
+   "measured": "metrics.tabs.minimumHeight"
+  },
+  {
+   "token": "Metrics:split.thin",
+   "measured": "metrics.split.thin"
+  },
+  {
+   "token": "Metrics:split.thick",
+   "measured": "metrics.split.thick"
+  },
+  {
+   "token": "Metrics:split.pane",
+   "measured": "metrics.split.pane"
+  },
+  {
+   "token": "Metrics:scroller.overlay",
+   "measured": "metrics.scroller.overlay"
+  },
+  {
+   "token": "Metrics:scroller.legacy",
+   "measured": "metrics.scroller.legacy"
+  },
+  {
+   "token": "Metrics:scroller.overlaySmall",
+   "measured": "metrics.scroller.overlaySmall"
+  },
+  {
+   "token": "Metrics:menu.separatorHeight",
+   "measured": "metrics.menu.separatorHeight"
+  },
+  {
+   "token": "Metrics:menu.minimumWidth",
+   "measured": "metrics.menu.widthOneShortRow"
+  },
+  {
+   "token": "Metrics:fonts.body.size",
+   "measured": "metrics.fonts.body.size"
+  },
+  {
+   "token": "Metrics:fonts.body.weight",
+   "measured": "metrics.fonts.body.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.small.size",
+   "measured": "metrics.fonts.small.size"
+  },
+  {
+   "token": "Metrics:fonts.small.weight",
+   "measured": "metrics.fonts.small.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.mini.size",
+   "measured": "metrics.fonts.mini.size"
+  },
+  {
+   "token": "Metrics:fonts.mini.weight",
+   "measured": "metrics.fonts.mini.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.label.size",
+   "measured": "metrics.fonts.label.size"
+  },
+  {
+   "token": "Metrics:fonts.label.weight",
+   "measured": "metrics.fonts.label.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.menu.size",
+   "measured": "metrics.fonts.menu.size"
+  },
+  {
+   "token": "Metrics:fonts.menu.weight",
+   "measured": "metrics.fonts.menu.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.toolTips.size",
+   "measured": "metrics.fonts.toolTips.size"
+  },
+  {
+   "token": "Metrics:fonts.toolTips.weight",
+   "measured": "metrics.fonts.toolTips.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.controlContent.size",
+   "measured": "metrics.fonts.controlContent.size"
+  },
+  {
+   "token": "Metrics:fonts.controlContent.weight",
+   "measured": "metrics.fonts.controlContent.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.largeTitle.size",
+   "measured": "metrics.fonts.largeTitle.size"
+  },
+  {
+   "token": "Metrics:fonts.largeTitle.weight",
+   "measured": "metrics.fonts.largeTitle.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.title1.size",
+   "measured": "metrics.fonts.title1.size"
+  },
+  {
+   "token": "Metrics:fonts.title1.weight",
+   "measured": "metrics.fonts.title1.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.title2.size",
+   "measured": "metrics.fonts.title2.size"
+  },
+  {
+   "token": "Metrics:fonts.title2.weight",
+   "measured": "metrics.fonts.title2.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.title3.size",
+   "measured": "metrics.fonts.title3.size"
+  },
+  {
+   "token": "Metrics:fonts.title3.weight",
+   "measured": "metrics.fonts.title3.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.headline.size",
+   "measured": "metrics.fonts.headline.size"
+  },
+  {
+   "token": "Metrics:fonts.headline.weight",
+   "measured": "metrics.fonts.headline.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.subheadline.size",
+   "measured": "metrics.fonts.subheadline.size"
+  },
+  {
+   "token": "Metrics:fonts.subheadline.weight",
+   "measured": "metrics.fonts.subheadline.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.callout.size",
+   "measured": "metrics.fonts.callout.size"
+  },
+  {
+   "token": "Metrics:fonts.callout.weight",
+   "measured": "metrics.fonts.callout.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.footnote.size",
+   "measured": "metrics.fonts.footnote.size"
+  },
+  {
+   "token": "Metrics:fonts.footnote.weight",
+   "measured": "metrics.fonts.footnote.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  },
+  {
+   "token": "Metrics:fonts.caption.size",
+   "measured": "metrics.fonts.caption1.size"
+  },
+  {
+   "token": "Metrics:fonts.caption.weight",
+   "measured": "metrics.fonts.caption1.weight",
+   "weights": {
+    "0": 0,
+    "3": 0.4
+   }
+  }
+ ]
+}

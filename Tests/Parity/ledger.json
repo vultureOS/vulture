@@ -2243,7 +2243,13 @@
                 },
                 {
                     "feature": "Every token says where it came from",
-                    "milestone": "M28"
+                    "claim": "present",
+                    "proof": [
+                        {
+                            "suite": "test-host",
+                            "output": "TokenSources"
+                        }
+                    ]
                 },
                 {
                     "feature": "Emoji",

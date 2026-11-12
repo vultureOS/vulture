@@ -6,6 +6,8 @@ How the look gets measured, without anything of Apple's going into this reposito
   linked against, so this draws Sequoia's look for what AppKit decides that way, whatever macOS this is. The rest of what it
   draws, and everything that isn't drawn by AppKit, is whatever this Mac runs. See `Documentation/DesignSystem.md`.
 - To go further takes a real Sequoia: a virtual machine, below. `measure-in-vm.sh` runs the same program there.
+- What a run gives, but for the controls (kept by `summarize.py` in `controls.json`), goes in `Tests/UI/Measured/appkit.json`:
+  `Meta/token-sources.py --take measured.json`. The theme's tokens that are said to be measured are checked against it.
 
 ## A macOS 15 virtual machine
 

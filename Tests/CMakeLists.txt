@@ -37,4 +37,6 @@ add_subdirectory(WindowServer)
 find_program(VULTURE_PYTHON python3)
 if(VULTURE_PYTHON)
     add_test(NAME Parity COMMAND ${VULTURE_PYTHON} -I ${VULTURE_SOURCE_ROOT}/Tests/Parity/test_parity.py)
+    # Where each of the look's tokens came from, and that what was measured still is (M28).
+    add_test(NAME TokenSources COMMAND ${VULTURE_PYTHON} -I ${VULTURE_SOURCE_ROOT}/Meta/token-sources.py)
 endif()
